@@ -6,6 +6,7 @@
   "description": "Headless InnerTube sidecar: session, tolerant renderer parser, NDJSON RPC.",
   "scripts": {
     "capture": "bun run src/capture.ts",
+    "probe": "bun run src/probe-playback.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."

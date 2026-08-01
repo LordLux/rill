@@ -154,6 +154,35 @@ function countKey(raw: unknown, rendererKey: string): number {
   return count;
 }
 
+/**
+ * An ad tile wearing a real renderer's name.
+ *
+ * An in-feed ad nests a genuine `lockupViewModel` inside `adSlotRenderer`, and
+ * the parser prunes that whole subtree — so in a real feed the mapper never sees
+ * one. `isolate` lifts every lockup out of its wrapper, ad shells included, and
+ * those carry `feedAdMetadataViewModel` where a real tile carries
+ * `lockupMetadataViewModel`: no title, correctly dropped.
+ *
+ * Counting them as expected output would assert that ads must ship. This
+ * capture is the first to put in-feed ads in the home fixture; the previous one
+ * had none, which is why the distinction had not come up.
+ */
+function isAdShell(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const metadata = (payload as JsonObject)['metadata'];
+  return Boolean(metadata && typeof metadata === 'object' && 'feedAdMetadataViewModel' in metadata);
+}
+
+/** Nodes of `rendererKey` the parser is expected to emit an item for. */
+function countMappable(raw: unknown, rendererKey: string): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    if (Object.hasOwn(node, rendererKey) && !isAdShell(node[rendererKey])) count += 1;
+    return true;
+  });
+  return count;
+}
+
 function idsOf(raw: unknown, rendererKey: string, idKey: string): Set<string> {
   const ids = new Set<string>();
   walk(raw, (node: JsonObject) => {
@@ -279,7 +308,7 @@ describe('renderer generations', () => {
   test('no tile of either generation is silently dropped', () => {
     for (const key of ['videoRenderer', 'playlistVideoRenderer', 'lockupViewModel'] as const) {
       for (const { name, feed } of corpusIsolate(key)) {
-        const nodes = countKey(feed, key);
+        const nodes = countMappable(feed, key);
         const { items } = parseFeed(feed, key);
 
         // Every node becomes an item. Fewer means tiles are going missing, which

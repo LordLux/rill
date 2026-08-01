@@ -25,6 +25,7 @@ the spike; do not assume they still hold six months from now.
 | F7 | Cookie sessions degrade **silently** — auth endpoints return empty shells while the client still reports `logged_in: true` | Home + history both returned 0 items with no error, after browser-side cookie rotation |
 | F8 | No moving-thumbnail media in the feed. Storyboards are present | 0 mp4/webm URLs; `PlayerStoryboardSpec` with a resolved template URL |
 | F9 | A SABR-only `WEB` response still carries a working itag 18 progressive stream | 40/40 adaptive formats have neither URL nor cipher; itag 18 present with a working URL. Confirms ladder tier 4 is reachable on both clients |
+| F10 | **`MWEB` stream URLs refuse open-ended range requests; `ANDROID_VR` URLs accept them.** ffmpeg opens every HTTP stream with `Range: bytes=0-`, so a deciphered `MWEB` URL cannot be handed to libmpv directly | `c=MWEB` itag 315: HTTP 403 on `bytes=0-` at offsets 0, 100 MB and 1000 MB; HTTP 206 on `bytes=0-1048575`. `c=ANDROID_VR` itag 401 (via yt-dlp): 206 on both. mpv plays the `ANDROID_VR` URL and 403s on the `MWEB` one. Both URLs carry `rqh=1`, so the client — not that parameter — is the discriminator |
 
 ---
 
@@ -98,6 +99,14 @@ two independent calls. This removes the cross-client CPN problem entirely.
 media_kit (libmpv) receives two deciphered URLs — video and audio — and merges
 them via `--audio-file`. No local media proxy in Phase 1.
 
+**F10 leaves the last step of this open.** libmpv cannot consume an `MWEB` URL
+directly: ffmpeg's initial open is an open-ended range request, and `c=MWEB`
+answers those with 403. Deciphering is not the problem — the same URL streams at
+4.0 MB/s under a bounded range. Closing this needs a decision that has not been
+made: a different playback client, yt-dlp promoted from ladder tier 3 to the
+primary path, or a chunking proxy — which is adjacent to rejected alternative A6
+and must not be revived without re-opening it deliberately.
+
 Report watch events on a real cadence, not once at completion. A single
 end-of-video ping is a weak training signal, and homepage fidelity is the
 product requirement.
@@ -156,6 +165,7 @@ identical across both so the swap touches only the transport.
 | New renderer type | Items silently missing | Tolerant parser skips; log unknown types |
 | Undeciphered `n` | ~50 KB/s, constant buffering | Never let a raw URL cross the RPC boundary |
 | Age-restricted / Vevo | `playback.open` fails | Fall through to yt-dlp with PO token provider |
+| ffmpeg opens with `Range: bytes=0-` | HTTP 403 on an `MWEB` URL that fetches fine under a bounded range | Undecided — see F10 and §2.4 |
 
 The `n` case deserves a type-level guard: a branded `SignedUrl` type in the
 sidecar that only the decipher path can construct.

@@ -109,13 +109,17 @@ export interface VideoDetail {
 /**
  * Hard invariant 2: never let an undeciphered URL cross the RPC boundary.
  *
- * A `SignedUrl` is constructible only by the decipher path (`markSigned`, which
- * lives in the decipher module and is deliberately not exported from here). The
- * parser cannot produce one — it only ever sees what YouTube sent, so its output
- * carries `rawUrl` / `signatureCipher`, both explicitly *un*signed. An unsigned
- * `n` throttles to ~50 KB/s and presents as a bad network connection.
+ * The brand and its constructor live in `innertube/signed-url.ts`, which is the
+ * only module allowed to mint one; it is re-exported here because
+ * `PlaybackSource` below is part of the Flutter contract and should read as a
+ * whole. The parser cannot produce one — it only ever sees what YouTube sent, so
+ * its output carries `rawUrl` / `signatureCipher`, both explicitly *un*signed.
+ * An unsigned `n` throttles to ~50 KB/s and presents as a bad network
+ * connection.
  */
-export type SignedUrl = string & { readonly __signed: unique symbol };
+import type { SignedUrl } from './innertube/signed-url.ts';
+
+export type { SignedUrl };
 
 export interface PlayerFormat {
   itag: number;
@@ -127,6 +131,13 @@ export interface PlayerFormat {
   fps: number | null;
   audioQuality: string | null;
   audioSampleRate: number | null;
+  audioChannels: number | null;
+  /**
+   * A dynamic-range-compressed duplicate of another itag. YouTube ships these
+   * alongside the originals under the same itag number; picking one by accident
+   * changes the mix the user hears with no other symptom.
+   */
+  isDrc: boolean;
   contentLength: number | null;
   approxDurationMs: number | null;
   hasVideo: boolean;
@@ -163,9 +174,47 @@ export interface PlayerResult {
   playabilityReason: string | null;
   durationSeconds: number | null;
   isLive: boolean;
-  /** True when every format lacks both a URL and a cipher — the SABR-only case. */
+  /**
+   * True when the *adaptive* ladder lacks both a URL and a cipher — the
+   * SABR-only case. Defined over adaptive formats only; see
+   * `playback/sabr-detect.ts` for why that distinction is load-bearing.
+   */
   sabrOnly: boolean;
   serverAbrStreamingUrl: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Playback
+// ---------------------------------------------------------------------------
+
+/**
+ * Which rung of the resolution ladder served this source.
+ *
+ * Telemetry only. Flutter must not be able to tell the tiers apart — a video
+ * that arrived over `ytdlp` opens exactly like one that arrived over `plain`.
+ */
+export type PlaybackTransport = 'plain' | 'sabr-dash' | 'ytdlp';
+
+/**
+ * What `playback.open` returns. Identical in Phase 1 and Phase 2, so the SABR
+ * bridge lands as a transport swap and not a protocol revision.
+ */
+export interface PlaybackSource {
+  sessionId: string;
+  /** Phase 2: `http://127.0.0.1:PORT/s/…/manifest.mpd`. */
+  videoUrl: SignedUrl;
+  /** null for a progressive (muxed) stream, and in Phase 2 for DASH. */
+  audioUrl: SignedUrl | null;
+  /** null when live — a live stream has no final duration. */
+  durationMs: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  height: number | null;
+  /** Sprite-sheet template for hover previews (F8). */
+  storyboardTemplate: string | null;
+  /** Drives a badge in the UI, never a dead end. */
+  qualityDegraded: boolean;
+  transport: PlaybackTransport;
 }
 
 // ---------------------------------------------------------------------------

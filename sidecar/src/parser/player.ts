@@ -9,6 +9,7 @@
  * stops it, not a code review.
  */
 
+import { isSabrOnlyAdaptive } from '../playback/sabr-detect.ts';
 import type { PlayerFormat, PlayerResult, Storyboard } from '../types.ts';
 import { asArray, deepFind, get, isObject, num, str, type Json } from './tree.ts';
 
@@ -42,6 +43,8 @@ function mapFormat(entry: Json, isAdaptive: boolean): PlayerFormat | null {
     fps: num(entry['fps']),
     audioQuality: str(entry['audioQuality']),
     audioSampleRate: num(entry['audioSampleRate']),
+    audioChannels: num(entry['audioChannels']),
+    isDrc: entry['isDrc'] === true,
     contentLength: num(entry['contentLength']),
     approxDurationMs: num(entry['approxDurationMs']),
     hasVideo,
@@ -150,18 +153,10 @@ export function parsePlayer(raw: Json): PlayerResult {
       str(get(body, 'playabilityStatus', 'messages', '0')),
     durationSeconds: isLive ? null : lengthSeconds,
     isLive,
-    // F3: WEB is SABR-only. Measured on a real WEB response: all 40 adaptive
-    // formats arrive with neither a URL nor a cipher, while itag 18 — muxed,
-    // progressive, 360p — still carries a plain URL.
-    //
-    // So this is deliberately about the *adaptive* ladder, not about every
-    // format. Defining it as "no format has a URL" would have called that
-    // response non-SABR on the strength of one 360p stream, and the resolution
-    // ladder would have skipped its SABR branch and quietly served 360p as if
-    // it were the best available.
-    sabrOnly:
-      adaptive.length > 0 &&
-      adaptive.every((f) => f.rawUrl === null && f.signatureCipher === null),
+    // Deliberately about the *adaptive* ladder, not about every format — a
+    // SABR-only WEB response still carries a working itag 18. The rule lives in
+    // playback/sabr-detect.ts so there is exactly one copy of it.
+    sabrOnly: isSabrOnlyAdaptive(adaptive),
     serverAbrStreamingUrl:
       str(get(streaming, 'serverAbrStreamingUrl')) ?? str(get(streaming, 'server_abr_streaming_url')),
   };
