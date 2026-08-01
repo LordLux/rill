@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnp.*
+
+# Personal data (regenerate with `cd sidecar && bun run capture`)
+fixtures/
+raw/
+nodes/
+sidecar/fixtures/
+
+# Session state
+.cache/
+*.cookies
+cookies.txt
+.env
+.env.*
+
+# Flutter / Dart
+app/build/
+app/.dart_tool/
+app/.flutter-plugins*
+*.g.dart
+*.freezed.dart
+
+# Build output
+dist/
+build/
+*.exe
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.md

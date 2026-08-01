@@ -1,0 +1,26 @@
+{
+  "name": "nativeyoutube-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless InnerTube sidecar: session, tolerant renderer parser, NDJSON RPC.",
+  "scripts": {
+    "capture": "bun run src/capture.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "youtubei.js": "^17.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.14.0",
+    "@types/bun": "^1.1.0",
+    "eslint": "^9.14.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.13.0"
+  },
+  "engines": {
+    "bun": ">=1.1"
+  }
+}

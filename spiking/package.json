@@ -1,0 +1,16 @@
+{
+  "name": "yt-client-spike",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Feasibility spike for a native Windows YouTube client. Answers 4 architecture-blocking questions.",
+  "scripts": {
+    "spike": "node spike.mjs"
+  },
+  "dependencies": {
+    "youtubei.js": "^17.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
