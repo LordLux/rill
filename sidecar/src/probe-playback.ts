@@ -14,8 +14,10 @@
  * Everything goes to stderr. Hard invariant 3: stdout is protocol.
  */
 
+import { announceCapabilities } from './capabilities.ts';
 import { logger } from './log.ts';
 import { createSession } from './innertube/session.ts';
+import { mpvCommand } from './playback/mpv-options.ts';
 import { openPlayback } from './playback/resolve.ts';
 
 const log = logger('probe');
@@ -25,8 +27,16 @@ const SAMPLE_BYTES = 12 * 1024 * 1024;
 
 const videoId = process.argv[2] ?? process.env['YT_VIDEO_STANDARD'] ?? 'aqz-KE-bpKQ';
 
-// Streams resolve through an anonymous MWEB session (§2.3). No cookie, on
-// purpose — the browse session is a separate concern and a separate call.
+// Startup, such as it is. The RPC entrypoint does not exist yet; when it does,
+// this call moves there and its result goes into `event.ready` (protocol.md §2).
+// Until then this is the one place a missing tier 4 gets said out loud.
+announceCapabilities();
+
+// Streams resolve through an anonymous session (§2.3). No cookie, on purpose —
+// the browse session is a separate concern and a separate call. The client is
+// chosen per `/player` call (tier 1 asks as `ANDROID_VR`), so `clientType` only
+// sets the base context; what the ladder needs from this session is the
+// server-issued visitor id `createSession` fetches by default (F5).
 const session = await createSession({ clientType: 'MWEB' });
 const source = await openPlayback({ session }, { videoId });
 
@@ -57,8 +67,6 @@ if (response.ok || response.status === 206) {
 
 log.info('');
 log.info('play it:');
-log.info(
-  source.audioUrl
-    ? `mpv "${source.videoUrl}" --audio-file="${source.audioUrl}"`
-    : `mpv "${source.videoUrl}"`,
-);
+// Carries `--stream-lavf-o=request_size=…`, same as the app will. The shipped
+// libmpv ignores it (F13); a newer one needs it to seek. See `mpv-options.ts`.
+log.info(mpvCommand(source.videoUrl, source.audioUrl));

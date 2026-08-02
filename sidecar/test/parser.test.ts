@@ -809,7 +809,7 @@ describe('parsePlayer', () => {
     expect(adaptive.length).toBeGreaterThan(0);
     expect(adaptive.every((f) => f.rawUrl === null && f.signatureCipher === null)).toBe(true);
 
-    // …but itag 18 still carries a plain URL. That is ladder tier 4, the
+    // …but itag 18 still carries a plain URL. That is ladder tier 5, the
     // always-works 360p fallback — and the reason `sabrOnly` is defined over
     // adaptive formats rather than over all of them.
     const progressive = result.formats.filter(

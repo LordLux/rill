@@ -9,29 +9,111 @@
  *     declined. It is the only stream error the UI is meant to render.
  */
 
-export type ErrorCode =
+/**
+ * Codes that can reach Flutter in a failure envelope. Each one has a `retry`.
+ */
+export type EnvelopeErrorCode =
   | 'AUTH_DEGRADED'
   | 'AUTH_REQUIRED'
   | 'STREAM_UNAVAILABLE'
-  | 'STREAM_REQUIRES_SABR'
   | 'RATE_LIMITED'
-  | 'PARSE_FAILED'
   | 'UPSTREAM_ERROR';
+
+/**
+ * Codes that are control flow inside the sidecar and never cross the wire.
+ *
+ * They are deliberately *not* given a `retry` value. Marking them `no` would put
+ * them in the same column as `AUTH_DEGRADED` and quietly claim something about
+ * what the app should do with an error the app never receives — and a value that
+ * is inert today is exactly the kind that gets read as meaningful later, by
+ * whoever builds the RPC layer and sees three codes marked alike.
+ */
+export type InternalSignalCode =
+  /** A tier telling the ladder "not my case, keep going". Never surfaced. */
+  | 'STREAM_REQUIRES_SABR'
+  /** One unrecognised renderer, skipped. Never fails a whole response. */
+  | 'PARSE_FAILED';
+
+export type ErrorCode = EnvelopeErrorCode | InternalSignalCode;
+
+/**
+ * Who, if anyone, should try again.
+ *
+ * Three values rather than a boolean, because `retryable: true` answered two
+ * different questions with one bit — *should the sidecar retry* and *should the
+ * user be offered a retry* — and the UI contract turns on the difference.
+ */
+export type RetryMode =
+  /** The sidecar retries with backoff. The app shows loading, not an error. */
+  | 'auto'
+  /** Show the error with a retry affordance. Never loop silently. */
+  | 'user'
+  /** Retrying changes nothing until a login, a cookie or a policy changes. */
+  | 'no';
+
+/**
+ * Retry behaviour is a property of the code, not of the throw site.
+ *
+ * Deriving it here rather than passing a flag per `throw` means two
+ * `STREAM_UNAVAILABLE`s cannot disagree about whether the user may retry — which
+ * is the sort of drift nobody notices until the UI behaves differently depending
+ * on which line threw.
+ */
+const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.freeze({
+  AUTH_DEGRADED: 'no',
+  AUTH_REQUIRED: 'no',
+  // The ladder's floor is a very good bet, not a promise (F9, `protocol.md`
+  // §3.5): every rung can decline for a video that is fine. So the user gets an
+  // affordance — but not a silent loop, which on a genuinely deleted video would
+  // spend requests to keep showing a spinner instead of the honest answer.
+  STREAM_UNAVAILABLE: 'user',
+  RATE_LIMITED: 'auto',
+  UPSTREAM_ERROR: 'auto',
+});
+
+/** The two codes that never reach an envelope. Kept next to the table above. */
+const INTERNAL_SIGNALS: ReadonlySet<string> = new Set<InternalSignalCode>([
+  'STREAM_REQUIRES_SABR',
+  'PARSE_FAILED',
+]);
+
+export function isInternalSignal(code: ErrorCode): code is InternalSignalCode {
+  return INTERNAL_SIGNALS.has(code);
+}
 
 export class RpcError extends Error {
   readonly code: ErrorCode;
-  readonly retryable: boolean;
+  /**
+   * What the app should do — or `null` for an internal signal, which the app
+   * never sees and therefore has no instruction about.
+   */
+  readonly retry: RetryMode | null;
 
-  constructor(code: ErrorCode, message: string, retryable = false) {
+  constructor(code: ErrorCode, message: string) {
     super(message);
     this.name = 'RpcError';
     this.code = code;
-    this.retryable = retryable;
+    this.retry = isInternalSignal(code) ? null : RETRY_BY_CODE[code];
   }
 
-  /** The `error` member of a JSON-RPC failure envelope. */
-  toEnvelope(): { code: ErrorCode; message: string; retryable: boolean } {
-    return { code: this.code, message: this.message, retryable: this.retryable };
+  /**
+   * The `error` member of a JSON-RPC failure envelope.
+   *
+   * Throws on an internal signal rather than inventing a `retry` for it. That is
+   * not defensive noise: `protocol.md` §4 says `STREAM_REQUIRES_SABR` reaching
+   * Flutter is a bug, and this is the one place that can still notice. A thrown
+   * error costs one request; a `STREAM_REQUIRES_SABR` envelope would have the UI
+   * rendering an error code that means "keep going" and nobody able to explain
+   * where it came from.
+   */
+  toEnvelope(): { code: EnvelopeErrorCode; message: string; retry: RetryMode } {
+    if (isInternalSignal(this.code)) {
+      throw new Error(
+        `${this.code} is an internal signal and must never cross the RPC boundary ` +
+          `(protocol.md §4). Message was: ${this.message}`,
+      );
+    }
+    return { code: this.code, message: this.message, retry: RETRY_BY_CODE[this.code] };
   }
 }
 
@@ -42,4 +124,9 @@ export function isRpcError(error: unknown): error is RpcError {
 /** True when `error` is an `RpcError` carrying `code`. */
 export function hasCode(error: unknown, code: ErrorCode): boolean {
   return isRpcError(error) && error.code === code;
+}
+
+/** The retry mode for an envelope code, for anything that needs it without an instance. */
+export function retryModeFor(code: EnvelopeErrorCode): RetryMode {
+  return RETRY_BY_CODE[code];
 }

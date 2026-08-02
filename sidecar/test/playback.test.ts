@@ -10,17 +10,23 @@
  * task.
  */
 
-import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { probeCapabilities, resolveYtDlp, ytDlpBinary } from '../src/capabilities.ts';
 import { hasCode, isRpcError, RpcError } from '../src/errors.ts';
-import type { Player } from '../src/innertube/player.ts';
+import { resetPlayerCache, type Player } from '../src/innertube/player.ts';
+import { forgetPlayerResponse } from '../src/innertube/player-response.ts';
+import type { PlayerClient, Session } from '../src/innertube/session.ts';
 import { adoptExternallyDeciphered, sign } from '../src/innertube/signed-url.ts';
 import { parsePlayer } from '../src/parser/index.ts';
 import {
   descendLadder,
+  fetchWithVisitorRetry,
+  openPlayback,
   sourceFromYtDlpDump,
   tierYtDlp,
   type Tier,
@@ -315,6 +321,347 @@ describe('resolution ladder', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The ladder, end to end and offline
+//
+// `descendLadder` above proves the loop; this proves the wiring — which client
+// tier 1 asks as, that a declining tier really does reach the next one, and that
+// the `MWEB` response is not fetched at all when tier 1 serves. All of it runs
+// against a stub session, so it is the ordering that is under test and not
+// YouTube's mood.
+// ---------------------------------------------------------------------------
+
+/** A `/player` body shaped like the real one, minus everything nothing reads. */
+function rawPlayerBody(options: {
+  client: PlayerClient;
+  status?: string;
+  reason?: string;
+  /** `MWEB` URLs carry an `n` challenge; `ANDROID_VR` URLs do not (F5, F11). */
+  withN?: boolean;
+  /** Drop every adaptive URL — the SABR-only shape (F3). */
+  sabrOnly?: boolean;
+  /** Drop the adaptive ladder entirely — the original F5 refusal shape. */
+  noAdaptive?: boolean;
+}): unknown {
+  const { client, status = 'OK', reason, withN = false, sabrOnly = false, noAdaptive = false } =
+    options;
+
+  const address = (itag: number, n: string): Record<string, string> =>
+    sabrOnly
+      ? {}
+      : {
+          url:
+            `https://r1.googlevideo.com/videoplayback?expire=1&itag=${itag}&c=${client}` +
+            (withN ? `&n=${n}` : ''),
+        };
+
+  return {
+    playabilityStatus: { status, ...(reason ? { reason } : {}) },
+    streamingData: {
+      adaptiveFormats: noAdaptive ? [] : [
+        {
+          itag: 315,
+          mimeType: 'video/webm; codecs="vp9"',
+          width: 3840,
+          height: 2160,
+          fps: 60,
+          bitrate: 20_000_000,
+          ...address(315, 'RAWN315'),
+        },
+        {
+          itag: 251,
+          mimeType: 'audio/webm; codecs="opus"',
+          audioQuality: 'AUDIO_QUALITY_MEDIUM',
+          audioSampleRate: 48_000,
+          audioChannels: 2,
+          bitrate: 130_000,
+          ...address(251, 'RAWN251'),
+        },
+      ],
+      // Progressive survives a SABR-only response (F9), so it is never dropped.
+      formats: [
+        {
+          itag: 18,
+          mimeType: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+          width: 640,
+          height: 360,
+          url:
+            `https://r1.googlevideo.com/videoplayback?expire=1&itag=18&c=${client}` +
+            (withN ? '&n=RAWN18' : ''),
+        },
+      ],
+    },
+    videoDetails: { videoId: 'aqz-KE-bpKQ', lengthSeconds: '634' },
+    storyboards: {
+      playerStoryboardSpecRenderer: {
+        spec: 'https://i.ytimg.com/sb/aqz-KE-bpKQ/storyboard3_L$L/$N.jpg|48#27#100#10#10#1000#M$M#rs$AOn4',
+      },
+    },
+  };
+}
+
+/**
+ * The JS player youtubei.js would have downloaded, with the two transforms
+ * stubbed. Not the identity — `sign` refuses that, correctly.
+ */
+const fakeJsPlayer = {
+  player_id: 'testplayer',
+  signature_timestamp: 20662,
+  decipher(url?: string, cipher?: string): string {
+    if (cipher) {
+      const args = new URLSearchParams(cipher);
+      const out = new URL(args.get('url')!);
+      out.searchParams.set(args.get('sp') ?? 'signature', `sig(${args.get('s')})`);
+      return out.toString();
+    }
+    const out = new URL(url!);
+    const n = out.searchParams.get('n');
+    if (n) out.searchParams.set('n', `n(${n})`);
+    return out.toString();
+  },
+};
+
+interface FakeSession extends Session {
+  /** Which client each `/player` call named, in order. */
+  readonly calls: PlayerClient[];
+}
+
+function fakeSession(bodies: Partial<Record<PlayerClient, unknown>>): FakeSession {
+  const calls: PlayerClient[] = [];
+  return {
+    calls,
+    hasCookie: false,
+    // Length is what distinguishes a server-issued id from a fabricated one (F5).
+    visitorId: 'v'.repeat(558),
+    innertube: {
+      session: { player: fakeJsPlayer, context: { client: { visitorData: 'v'.repeat(558) } } },
+    } as unknown as Session['innertube'],
+    async execute(_endpoint, params = {}) {
+      const client = (params['client'] ?? 'WEB') as PlayerClient;
+      calls.push(client);
+      const body = bodies[client];
+      if (!body) throw new Error(`${client}: stub session has no response for this client`);
+      return body;
+    },
+  };
+}
+
+describe('the ladder as openPlayback wires it', () => {
+  beforeEach(() => {
+    // Both caches are module-level and keyed by things these tests reuse.
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  /** Tier 4 must never actually shell out during an offline test. */
+  const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
+
+  test('tier 1 is ANDROID_VR, and it carries no n', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      MWEB: rawPlayerBody({ client: 'MWEB', withN: true }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    const video = new URL(source.videoUrl);
+    const audio = new URL(source.audioUrl!);
+    expect(video.searchParams.get('c')).toBe('ANDROID_VR');
+    expect(audio.searchParams.get('c')).toBe('ANDROID_VR');
+
+    // The point of the reorder: the primary path has nothing to decipher, so
+    // the whole class of silent-throttle failures cannot arise on it.
+    expect(video.searchParams.has('n')).toBe(false);
+    expect(audio.searchParams.has('n')).toBe(false);
+
+    expect(source.height).toBe(2160);
+    expect(source.transport).toBe('plain');
+    expect(source.qualityDegraded).toBe(false);
+    expect(source.storyboardTemplate).toStartWith('http');
+
+    // And the MWEB response was never fetched. A pre-fetch would put a second
+    // /player round trip on every successful open, for a body nothing reads.
+    expect(session.calls).toEqual(['ANDROID_VR']);
+  });
+
+  test('a SABR-only ANDROID_VR response falls through to MWEB, which deciphers', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
+      MWEB: rawPlayerBody({ client: 'MWEB', withN: true }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    const video = new URL(source.videoUrl);
+    expect(video.searchParams.get('c')).toBe('MWEB');
+    // Deciphered, not merely present — the raw value would throttle to ~50 KB/s.
+    expect(video.searchParams.get('n')).toBe('n(RAWN315)');
+    expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
+  });
+
+  test('both plain tiers declining lands on the progressive floor, on one MWEB call', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
+      MWEB: rawPlayerBody({ client: 'MWEB', withN: true, sabrOnly: true }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    expect(source.height).toBe(360);
+    expect(source.audioUrl).toBeNull();
+    expect(source.qualityDegraded).toBe(true);
+    expect(source.videoCodec).toStartWith('avc1');
+    expect(source.audioCodec).toStartWith('mp4a');
+
+    // Tiers 2, 4 and 5 all want the MWEB response; between them they cost one
+    // call, not three.
+    expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
+  });
+
+  test('a SABR-only tier 1 does not mint a visitor id on its way past', async () => {
+    // The one case that must *not* trip the identity retry, and the reason the
+    // trigger is "not OK, or no adaptive formats" rather than "no usable URLs":
+    // a SABR-only response is `OK` with a full adaptive ladder, and re-minting
+    // would spend a round trip on a Phase 2 trigger that has nothing to do with
+    // who is asking.
+    //
+    // It is also what keeps this test offline. A retry here would call the real
+    // `refreshVisitorId`, which fetches from YouTube.
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
+      MWEB: rawPlayerBody({ client: 'MWEB', withN: true }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    expect(new URL(source.videoUrl).searchParams.get('c')).toBe('MWEB');
+    // One ANDROID_VR call, not two: no retry happened.
+    expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LOGIN_REQUIRED and the visitor id
+// ---------------------------------------------------------------------------
+
+describe('fetchWithVisitorRetry', () => {
+  const ok = parsePlayer(rawPlayerBody({ client: 'ANDROID_VR' }));
+  const refused = parsePlayer(
+    rawPlayerBody({
+      client: 'ANDROID_VR',
+      status: 'LOGIN_REQUIRED',
+      reason: "Sign in to confirm you're not a bot",
+      sabrOnly: true,
+    }),
+  );
+  /**
+   * The shapes an *expired* visitor id might arrive as. Nobody has seen one —
+   * F14 watched an id survive 28 uses across 38 minutes and never expire — so
+   * the retry cannot be gated on the one error string we happen to have seen.
+   */
+  const unplayable = parsePlayer(
+    rawPlayerBody({
+      client: 'ANDROID_VR',
+      status: 'UNPLAYABLE',
+      reason: 'This video is not available',
+    }),
+  );
+  const emptyLadder = parsePlayer(rawPlayerBody({ client: 'ANDROID_VR', noAdaptive: true }));
+  /** `OK`, full adaptive ladder, no URLs. A Phase 2 trigger, not an identity one. */
+  const sabrOnly = parsePlayer(rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }));
+
+  /** Records what each call was asked for, so "exactly one retry" is observable. */
+  function trace(responses: PlayerResult[]) {
+    const refreshes: boolean[] = [];
+    let mints = 0;
+    return {
+      refreshes,
+      mintCount: () => mints,
+      fetch: async (refresh: boolean): Promise<PlayerResult> => {
+        refreshes.push(refresh);
+        return responses[refreshes.length - 1] ?? responses.at(-1)!;
+      },
+      mint: async (): Promise<string> => {
+        mints += 1;
+        return 'fresh-visitor-id';
+      },
+    };
+  }
+
+  test('an OK response costs no mint and no second call', async () => {
+    const t = trace([ok]);
+    await expect(fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, t.mint)).resolves.toBe(ok);
+    expect(t.refreshes).toEqual([false]);
+    expect(t.mintCount()).toBe(0);
+  });
+
+  test('a failure that is not LOGIN_REQUIRED still retries', async () => {
+    // The point of the broadened trigger. If an expired visitor id turns out to
+    // produce UNPLAYABLE — or a 400, or anything else — a LOGIN_REQUIRED-only
+    // gate would never fire, and stream resolution would stop working silently
+    // after some number of hours on a session that still looks healthy.
+    const t = trace([unplayable, ok]);
+    const result = await fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, t.mint);
+
+    expect(result).toBe(ok);
+    expect(t.mintCount()).toBe(1);
+    expect(t.refreshes).toEqual([false, true]);
+  });
+
+  test('OK with an empty adaptive ladder retries too — the original F5 shape', async () => {
+    // F5's first reading was "0 formats on 3 of 4 runs": a refusal that arrived
+    // as a shape rather than as a status. Nothing in the response says no.
+    const t = trace([emptyLadder, ok]);
+    const result = await fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, t.mint);
+
+    expect(result).toBe(ok);
+    expect(t.mintCount()).toBe(1);
+  });
+
+  test('a SABR-only response is not an identity refusal', async () => {
+    // `OK` with a full adaptive ladder and no URLs. That is the Phase 2 trigger
+    // and has nothing to do with who is asking — retrying it would spend a mint
+    // and a round trip to be told the same thing.
+    const t = trace([sabrOnly]);
+    await expect(fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, t.mint)).resolves.toBe(sabrOnly);
+    expect(t.mintCount()).toBe(0);
+    expect(t.refreshes).toEqual([false]);
+  });
+
+  test('LOGIN_REQUIRED mints once and re-asks once, bypassing the cache', async () => {
+    const t = trace([refused, ok]);
+    const result = await fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, t.mint);
+
+    expect(result).toBe(ok);
+    expect(t.mintCount()).toBe(1);
+    // The second call must not be served the cached refusal — it was made under
+    // the old visitor id, which is the thing that just changed.
+    expect(t.refreshes).toEqual([false, true]);
+  });
+
+  test('a second refusal declines rather than looping', async () => {
+    const t = trace([refused, refused]);
+    const result = await fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, t.mint);
+
+    // Handed back as-is: the tier turns it into a decline and the ladder moves
+    // on. F5 makes this a bot score, not a rule, so a retry loop would only
+    // spend round trips learning that YouTube has made up its mind.
+    expect(result).toBe(refused);
+    expect(t.mintCount()).toBe(1);
+    expect(t.refreshes).toEqual([false, true]);
+  });
+
+  test('a mint that fails declines on YouTube’s refusal, not on ours', async () => {
+    const t = trace([refused, ok]);
+    const result = await fetchWithVisitorRetry('aqz-KE-bpKQ', t.fetch, async () => {
+      throw new Error('offline');
+    });
+
+    expect(result).toBe(refused);
+    // No second /player call: there is no new identity to make it with.
+    expect(t.refreshes).toEqual([false]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PlaybackSource shape — the Flutter contract
 // ---------------------------------------------------------------------------
 
@@ -420,6 +767,27 @@ describe('format selection', () => {
     }
   });
 
+  test.if(hasFixture('player-vr'))('every ANDROID_VR adaptive URL is plain — no cipher, no n', () => {
+    // Tier 1's premise, on a captured response rather than on the recommendation
+    // that produced the reorder. A `LOGIN_REQUIRED` here is not a broken video:
+    // it means the capture session carried a fabricated visitor id (F5).
+    const response = parsePlayer(fixture('player-vr'));
+    expect(response.playabilityStatus).toBe('OK');
+
+    const adaptive = response.formats.filter((f) => f.isAdaptive);
+    expect(adaptive.length).toBeGreaterThan(0);
+
+    for (const format of adaptive) {
+      expect(format.signatureCipher).toBeNull();
+      const url = new URL(format.rawUrl!);
+      expect(url.searchParams.get('c')).toBe('ANDROID_VR');
+      // The whole reason this client leads the ladder: nothing to get wrong.
+      expect(url.searchParams.has('n')).toBe(false);
+    }
+
+    expect(Math.max(...adaptive.map((f) => f.height ?? 0))).toBeGreaterThanOrEqual(1080);
+  });
+
   test.if(hasFixture('player-mweb'))('the storyboard template comes through (F8)', () => {
     const response = parsePlayer(fixture('player-mweb'));
     expect(response.storyboards.length).toBeGreaterThan(0);
@@ -440,6 +808,48 @@ describe('format selection', () => {
 // two halves that break without anybody noticing — the dump mapping, and the
 // decline when the binary is absent.
 // ---------------------------------------------------------------------------
+
+/**
+ * A stand-in for `yt-dlp` that writes `STUB_STDERR_MB` megabytes to stderr and
+ * then a valid dump to stdout.
+ *
+ * It has to be a real executable rather than a fake `spawn`, because the thing
+ * under test is what happens to two OS pipes — a stubbed spawn would prove
+ * nothing about either. Written at test time so the repository does not carry a
+ * platform-specific script, and a `.cmd` on Windows because `Bun.spawn` needs
+ * something the shell can start.
+ */
+const stubDir = mkdtempSync(join(tmpdir(), 'ytdlp-stub-'));
+const stub = join(stubDir, process.platform === 'win32' ? 'stub.cmd' : 'stub.sh');
+
+{
+  const script = join(stubDir, 'stub.mjs');
+  writeFileSync(
+    script,
+    [
+      "import { writeSync } from 'node:fs';",
+      'const megabytes = Number(process.env.STUB_STDERR_MB ?? 8);',
+      "const chunk = Buffer.from('x'.repeat(64 * 1024) + '\\n');",
+      'for (let i = 0; i < megabytes * 16; i++) writeSync(2, chunk);',
+      'writeSync(1, JSON.stringify({',
+      "  duration: 634, url: 'https://r1.googlevideo.com/videoplayback?itag=18&c=MWEB&n=DECIPHERED',",
+      "  vcodec: 'avc1.42001E', acodec: 'mp4a.40.2', height: 360,",
+      '}));',
+    ].join('\n'),
+    'utf8',
+  );
+
+  if (process.platform === 'win32') {
+    writeFileSync(stub, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`, 'utf8');
+  } else {
+    writeFileSync(stub, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, 'utf8');
+    chmodSync(stub, 0o755);
+  }
+}
+
+afterAll(() => {
+  rmSync(stubDir, { recursive: true, force: true });
+});
 
 describe('yt-dlp tier', () => {
   const adaptiveDump: YtDlpDump = {
@@ -497,6 +907,52 @@ describe('yt-dlp tier', () => {
     expect(() => sourceFromYtDlpDump({ duration: 10 }, 'yt-dlp', null)).toThrow(/no stream URL/);
   });
 
+  test(
+    'the stub really does overflow the pipe buffer',
+    async () => {
+      // Guards the test below from becoming vacuous. If the stub ever stops
+      // writing — a broken shebang, a `.cmd` quoting mistake — the deadlock test
+      // would still pass while exercising nothing at all.
+      const child = Bun.spawn([stub], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
+      const [out, err] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      await child.exited;
+
+      expect(err.length).toBeGreaterThan(64 * 1024);
+      expect(JSON.parse(out).height).toBe(360);
+    },
+    60_000,
+  );
+
+  test(
+    'a child that floods stderr still resolves, and promptly',
+    async () => {
+      // Task 04 item 2. The old shape drained stdout to completion and only
+      // touched stderr on a non-zero exit: a child that writes past the OS pipe
+      // buffer (~64 KB) blocks in `write`, never finishes stdout and never
+      // exits, so tier 4 burns its whole 45 s timeout before declining — on
+      // exactly the videos tier 4 exists to serve.
+      //
+      // 8 MB is two orders of magnitude past the buffer, so this exercises the
+      // overflow rather than asserting that stderr shows up in a message.
+      //
+      // Honest limit: measured 2026-08-02, this passes against the old shape
+      // too, because `Bun.spawn` drains both pipes into memory eagerly and the
+      // deadlock is unreachable on this runtime. What the test pins is the
+      // requirement — a runtime or a rewrite that stops draining eagerly fails
+      // here instead of in the field.
+      const started = Date.now();
+      const source = await tierYtDlp({ session: null as never, ytDlpPath: stub }, 'aqz-KE-bpKQ', null, null);
+
+      expect(source.height).toBe(360);
+      expect(source.transport).toBe('ytdlp');
+      expect(Date.now() - started).toBeLessThan(15_000);
+    },
+    60_000,
+  );
+
   test('a missing binary declines cleanly', async () => {
     // The ordinary case on a machine that never installed it. This must be a
     // decline the ladder can walk past, not an unhandled spawn failure.
@@ -510,6 +966,37 @@ describe('yt-dlp tier', () => {
     expect(isRpcError(failure)).toBe(true);
     expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
     expect((failure as RpcError).message).toContain('yt-dlp-does-not-exist');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capabilities
+// ---------------------------------------------------------------------------
+
+describe('capabilities', () => {
+  test('a missing yt-dlp is reported, not assumed', () => {
+    // The failure this exists to stop being silent: without tier 4 the ladder is
+    // four rungs, and the videos that need the fifth fail as "Unavailable" with
+    // nothing saying a binary is missing.
+    expect(probeCapabilities('yt-dlp-does-not-exist')).toEqual({ ytDlp: false });
+    expect(resolveYtDlp('yt-dlp-does-not-exist')).toBeNull();
+  });
+
+  test('a configured path is checked on disk, a bare name goes through PATH', () => {
+    // The stub is a real file at an absolute path — the `YT_DLP_PATH` shape.
+    expect(resolveYtDlp(stub)).toBe(stub);
+    expect(probeCapabilities(stub)).toEqual({ ytDlp: true });
+
+    // And whatever this machine has (or does not have) on PATH is a boolean,
+    // never a throw.
+    expect(typeof probeCapabilities().ytDlp).toBe('boolean');
+  });
+
+  test('the binary tier 4 spawns is the one the probe looked for', () => {
+    // If these two ever diverge, the startup warning describes one binary and
+    // the tier spawns another — the worst possible pair of half-truths.
+    expect(ytDlpBinary('explicit')).toBe('explicit');
+    expect(ytDlpBinary()).toBe(process.env['YT_DLP_PATH'] ?? 'yt-dlp');
   });
 });
 

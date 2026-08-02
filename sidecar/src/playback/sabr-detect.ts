@@ -3,9 +3,10 @@
  *
  * Phase 1 exists because `MWEB` still hands out plain adaptive URLs while `WEB`
  * has gone SABR-only (F3). That is a dated observation about YouTube's policy,
- * not a property of the protocol — the day `MWEB` follows `WEB`, tier 1 of the
+ * not a property of the protocol — the day `MWEB` follows `WEB`, tier 2 of the
  * resolution ladder stops working and the SABR → DASH bridge stops being
- * deferrable.
+ * deferrable. Tier 1 resolves as `ANDROID_VR` and is a separate bet with a
+ * separate expiry date; this one is about `MWEB`.
  *
  * This function is how we find that out from a failing test rather than from a
  * user reporting that everything is 360p.
@@ -16,7 +17,7 @@
  * `WEB` response carries 40 adaptive formats with neither a URL nor a cipher —
  * *and* a working itag 18 progressive stream at 360p. Define "SABR-only" over
  * every format and that one 360p URL makes the answer `false`: the ladder skips
- * its SABR branch, tier 1 finds a playable format, and the client serves 360p
+ * its SABR branch, a plain tier finds a playable format, and the client serves 360p
  * forever while every check reports healthy.
  */
 

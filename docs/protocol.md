@@ -36,7 +36,7 @@ JSON-RPC 2.0 in shape, without batching.
 {"id": 42, "result": {"chips": [], "items": [], "continuation": "..."}}
 
 // failure
-{"id": 42, "error": {"code": "AUTH_DEGRADED", "message": "...", "retryable": true}}
+{"id": 42, "error": {"code": "AUTH_DEGRADED", "message": "...", "retry": "no"}}
 
 // unsolicited
 {"method": "event.authChanged", "params": {"state": "degraded"}}
@@ -48,8 +48,23 @@ JSON-RPC 2.0 in shape, without batching.
 `AbortController`. Without it, fast scrolling stacks up dead continuation
 requests.
 
-**Handshake.** The sidecar emits `event.ready` with `protocolVersion` before
-accepting requests. Mismatched versions fail fast rather than misbehaving.
+**Handshake.** The sidecar emits `event.ready` before accepting requests.
+Mismatched versions fail fast rather than misbehaving.
+
+```jsonc
+{"method": "event.ready", "params": {
+  "protocolVersion": 1,
+  "capabilities": {"ytDlp": false}     // yt-dlp on PATH or at YT_DLP_PATH
+}}
+```
+
+`capabilities` reports optional pieces of the machine the app cannot discover on
+its own. `ytDlp: false` means ladder tier 4 is gone: the ladder is four rungs,
+and age-restricted or Vevo videos fail with `STREAM_UNAVAILABLE` and no way for
+the UI to say why. The sidecar also warns about it at startup — a missing
+fallback that removes a capability without removing anything visible is exactly
+the kind of degradation this protocol makes explicit rather than leaving to be
+inferred from a video that will not play.
 
 ---
 
@@ -142,10 +157,20 @@ Flutter never learns which tier served the request. `transport` is telemetry;
 
 **Resolution ladder**, tried in order inside `playback.open`:
 
-1. `MWEB` plain adaptive URLs — the Phase 1 path
-2. SABR → local DASH bridge — Phase 2
-3. `yt-dlp` subprocess with PO token provider — age-restricted, Vevo, edge cases
-4. itag 18 progressive, 360p — always works, sets `qualityDegraded`
+1. `ANDROID_VR` plain adaptive URLs — the primary path; no `n`, and libmpv can
+   consume them directly (F5, F11, F13)
+2. `MWEB` plain adaptive URLs — the decipher path, kept as a fallback
+3. SABR → local DASH bridge — Phase 2
+4. `yt-dlp` subprocess with PO token provider — age-restricted, Vevo, edge cases
+5. itag 18 progressive, 360p — the floor: usually present, **not guaranteed**
+   (F9); sets `qualityDegraded`
+
+The floor is a very good bet, not a promise. On 2026-08-02 an `MWEB` response
+came back carrying no progressive format at all, so every rung can decline and
+`playback.open` can answer `STREAM_UNAVAILABLE` for a video that is perfectly
+fine. The UI obligation follows from that: **"Unavailable" is a state the user
+can retry out of, not a verdict on the video.** That is what `retry: "user"`
+means in §4 — show the error, offer the retry, and do not loop silently.
 
 **`playback.report` is load-bearing.** Watch events must land or the recommender
 stops training and the homepage drifts from the real one — which defeats the
@@ -165,17 +190,45 @@ Use for the next queue item so transitions are instant.
 
 ## 4. Errors
 
-| Code | Retryable | UI response |
-|---|---|---|
-| `AUTH_DEGRADED` | no | Re-authentication prompt |
-| `AUTH_REQUIRED` | no | Login flow |
-| `STREAM_UNAVAILABLE` | no | "Unavailable" state on the video |
-| `STREAM_REQUIRES_SABR` | internal | Ladder falls through; never surfaced |
-| `RATE_LIMITED` | yes | Backoff, retry silently |
-| `PARSE_FAILED` | — | Skip the item, log the renderer type |
-| `UPSTREAM_ERROR` | yes | Retry with backoff |
+`retry` is a three-valued field, not a boolean. "Retryable" collapsed two
+different instructions — *the sidecar should try again* and *the user should be
+allowed to try again* — and the difference is the whole UI contract.
 
-`PARSE_FAILED` never fails a whole request. One unknown renderer drops one item.
+| Value | Meaning |
+|---|---|
+| `auto` | The sidecar retries with backoff. The app shows a loading state, not an error |
+| `user` | Do **not** retry silently. Show the error with a retry affordance and let the user decide |
+| `no` | Retrying changes nothing until something external changes — a login, a cookie, a policy |
+
+**Envelope errors.** These are what a failure envelope carries, and every one of
+them has a `retry` value:
+
+| Code | `retry` | UI response |
+|---|---|---|
+| `AUTH_DEGRADED` | `no` | Re-authentication prompt |
+| `AUTH_REQUIRED` | `no` | Login flow |
+| `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
+| `RATE_LIMITED` | `auto` | Backoff, retry silently |
+| `UPSTREAM_ERROR` | `auto` | Retry with backoff |
+
+`STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
+very good bet and not a promise (§3.5, F9): every rung can decline for a video
+that is perfectly fine, and on 2026-08-02 that was observed. It is not `auto`
+either — a silent retry loop on a video that really is deleted spends requests
+to keep showing a spinner, and hides the honest answer.
+
+**Internal signals.** These are control flow inside the sidecar. They never reach
+a failure envelope, so they have no `retry` value — not `no`, which would be a
+claim about what the app should do with something the app never sees:
+
+| Code | What it is |
+|---|---|
+| `STREAM_REQUIRES_SABR` | A resolution tier telling the ladder "not my case, keep going". The ladder converts a full set of declines into `STREAM_UNAVAILABLE`; this code reaching Flutter is a bug |
+| `PARSE_FAILED` | One unrecognised renderer, skipped. The request still succeeds with the remaining items — it never fails a whole response |
+
+The split is in the types too (`EnvelopeErrorCode` vs `InternalSignalCode`), and
+building an envelope from an internal signal throws rather than inventing a
+`retry` for it.
 
 ---
 
@@ -192,7 +245,7 @@ session and no PO token.
 
 ## 6. Supervision
 
-- Sidecar dies → restart with backoff, fail in-flight with `retryable: true`,
+- Sidecar dies → restart with backoff, fail in-flight with `retry: "auto"`,
   replay auth
 - Sidecar watches the parent PID and self-exits, so no orphans on Windows
 - Version mismatch at handshake → fail fast

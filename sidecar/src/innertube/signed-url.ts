@@ -15,7 +15,7 @@
  * ## Two doors, not one
  *
  * `sign` is the only function that *runs the cipher*. There is one other
- * constructor, `adoptExternallyDeciphered`, because ladder tier 3 delegates
+ * constructor, `adoptExternallyDeciphered`, because ladder tier 4 delegates
  * extraction to `yt-dlp`, which deciphers with its own implementation and hands
  * back a finished URL — there is nothing left for us to transform. It is a
  * separate, deliberately awkward name so it cannot be reached for by accident,
@@ -45,10 +45,12 @@ export type SignedUrl = string & { readonly [brand]: 'SignedUrl' };
  * Clients whose stream URLs carry an `n` challenge.
  *
  * `ANDROID_VR` and `TV` hand out unthrottled URLs with no `n` at all, so
- * asserting one there rejects a perfectly good URL (F5 notwithstanding — those
- * clients are being refused for other reasons). The `c=` parameter on a
- * `videoplayback` URL names the client that requested it, so the gate reads
- * itself off the URL rather than needing to be plumbed through.
+ * asserting one there rejects a perfectly good URL. That is not a theoretical
+ * allowance any more: `ANDROID_VR` is ladder tier 1, so the ordinary path
+ * through here now has nothing to decipher, and this gate is what keeps `sign`
+ * from refusing it. The `c=` parameter on a `videoplayback` URL names the client
+ * that requested it, so the gate reads itself off the URL rather than needing to
+ * be plumbed through.
  */
 const CLIENTS_WITH_N_PARAM = new Set(['WEB', 'MWEB', 'WEB_REMIX', 'WEB_EMBEDDED_PLAYER']);
 
@@ -181,7 +183,7 @@ export async function sign(
 /**
  * Accept a URL that was deciphered by an external extractor.
  *
- * Ladder tier 3 shells out to `yt-dlp`, which runs its own `n` transform and
+ * Ladder tier 4 shells out to `yt-dlp`, which runs its own `n` transform and
  * returns a finished URL. There is no cipher left to apply, so `sign` cannot be
  * the door — but the invariant still has to hold at the boundary, so the same
  * `n`-presence gate applies. What cannot be checked here is whether the value is

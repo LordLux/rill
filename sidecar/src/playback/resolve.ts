@@ -1,17 +1,31 @@
 /**
  * `playback.open` — the resolution ladder from `protocol.md` §3.5.
  *
- * Four tiers, tried in order, each of which either returns a `PlaybackSource` or
+ * Five tiers, tried in order, each of which either returns a `PlaybackSource` or
  * throws to decline:
  *
- *   1. `MWEB` plain adaptive  — the Phase 1 path (F3/F4)
- *   2. SABR → local DASH      — Phase 2, deliberately unbuilt; throws
- *   3. `yt-dlp` subprocess    — age-restricted, Vevo, whatever else 1 refuses
- *   4. itag 18 progressive    — 360p, always there, sets `qualityDegraded`
+ *   1. `ANDROID_VR` plain adaptive — the primary path (F5, F11, F13)
+ *   2. `MWEB` plain adaptive       — the only proven decipher path (F3/F4)
+ *   3. SABR → local DASH           — Phase 2, deliberately unbuilt; throws
+ *   4. `yt-dlp` subprocess         — age-restricted, Vevo, whatever else refuses
+ *   5. itag 18 progressive         — 360p, nearly always there, `qualityDegraded`
+ *
+ * `ANDROID_VR` leads because it is the only client measured that satisfies every
+ * constraint at once: plain URLs, no `n` to decipher, open-ended ranges accepted
+ * (F10 is an `MWEB` property, not a YouTube one), bare GETs accepted, throughput
+ * above the bar, hardware decode, and seeks on the libmpv media_kit ships with no
+ * options set (F13). Its one condition is a server-issued visitor id — see
+ * `tierAndroidVr`.
+ *
+ * `MWEB` stays a tier rather than being deleted. It is the only client with a
+ * proven decipher path, and F10 constrains how its URLs can be *consumed*, not
+ * whether they resolve — so as a fallback that reaches a lower tier's floor it
+ * still earns its place, and deleting it would throw away the decipher coverage
+ * the network suite depends on.
  *
  * The ladder is the error-handling strategy, not a fallback bolted onto one. A
  * tier that cannot serve a video throws; the ladder logs it and moves down. Only
- * when all four decline does the caller see `STREAM_UNAVAILABLE`.
+ * when every tier declines does the caller see `STREAM_UNAVAILABLE`.
  *
  * **Flutter must not be able to tell which tier served it.** `transport` is
  * telemetry and `qualityDegraded` drives a badge; neither changes how the client
@@ -19,11 +33,12 @@
  * rather than a protocol revision.
  */
 
+import { ytDlpBinary } from '../capabilities.ts';
 import { RpcError, hasCode } from '../errors.ts';
 import { logger } from '../log.ts';
 import { getPlayer, type Player } from '../innertube/player.ts';
 import { getPlayerResponse } from '../innertube/player-response.ts';
-import type { Session } from '../innertube/session.ts';
+import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlayerFormat, PlayerResult } from '../types.ts';
 import { isSabrOnly } from './sabr-detect.ts';
@@ -39,13 +54,17 @@ const PROGRESSIVE_FALLBACK_ITAG = 18;
 
 export interface PlaybackDeps {
   /**
-   * The anonymous `MWEB` session streams are resolved through (§2.3). Browsing
-   * and reporting use the authenticated `WEB` session; they are separate calls
-   * on purpose, and no CPN is bridged between them.
+   * The anonymous session streams are resolved through (§2.3). Browsing and
+   * reporting use the authenticated `WEB` session; they are separate calls on
+   * purpose, and no CPN is bridged between them.
+   *
+   * One session serves every tier — the client is chosen per `/player` call, not
+   * per session — but it must carry a server-issued visitor id, which is
+   * `createSession`'s default. See F5.
    */
   session: Session;
   poTokens?: PoTokenProvider;
-  /** Override the `yt-dlp` binary for tier 3. Defaults to `YT_DLP_PATH` or PATH. */
+  /** Override the `yt-dlp` binary for tier 4. Defaults to `YT_DLP_PATH` or PATH. */
   ytDlpPath?: string;
 }
 
@@ -194,8 +213,8 @@ function assemble(parts: SourceParts): PlaybackSource {
     audioCodec: parts.audioCodec ?? parts.audio?.codecs ?? null,
     height,
     storyboardTemplate: parts.response ? storyboardTemplate(parts.response) : null,
-    // A uniform rule rather than a tier-4 special case: tier 4 is 360p so it is
-    // always degraded, and a tier-1 resolution that could only find 360p is
+    // A uniform rule rather than a bottom-rung special case: tier 5 is 360p so
+    // it is always degraded, and a tier-1 resolution that could only find 360p is
     // degraded too, which the user deserves to be told either way.
     qualityDegraded: height === null || height < DEGRADED_BELOW_HEIGHT,
     transport: parts.transport,
@@ -223,7 +242,6 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
       'UPSTREAM_ERROR',
       `${videoId}: UNPLAYABLE — "${reason}". That is a missing or stale ` +
         'signatureTimestamp on the /player call, not a broken video.',
-      true,
     );
   }
 
@@ -231,26 +249,42 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Tier 1 — MWEB plain adaptive
+// Tiers 1 and 2 — plain adaptive, from whichever client
 // ---------------------------------------------------------------------------
 
-async function tierMwebAdaptive(
+/**
+ * Video + audio from a response's adaptive ladder.
+ *
+ * Shared by both plain tiers because the difference between them is which client
+ * the `/player` call named, and nothing after that: the same ranking, the same
+ * `SignedUrl` door, the same assembly. `ANDROID_VR` formats carry no cipher and
+ * no `n`, so `sign` passes them through untouched and its client gate does not
+ * fire (`CLIENTS_WITH_N_PARAM` in `signed-url.ts`); `MWEB` formats go through the
+ * full decipher. Routing both through `sign` rather than short-circuiting the
+ * one that "does not need it" means a day when `ANDROID_VR` starts shipping a
+ * cipher is a non-event instead of a silent throttle.
+ */
+export async function tierPlainAdaptive(
   deps: PlaybackDeps,
   videoId: string,
+  client: PlayerClient,
   poToken: string | null,
   response: PlayerResult | null,
 ): Promise<PlaybackSource> {
   if (!response) {
-    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the MWEB /player call did not return`, true);
+    throw new RpcError(
+      'UPSTREAM_ERROR',
+      `${videoId}: the ${client} /player call did not return`,
+    );
   }
   assertPlayable(response, videoId);
 
   if (isSabrOnly(response)) {
-    // The Phase 2 trigger fired on MWEB. Decline so the ladder continues; the
-    // suite is what is supposed to tell us about this, not a user.
+    // The Phase 2 trigger fired on this client. Decline so the ladder continues;
+    // the suite is what is supposed to tell us about this, not a user.
     throw new RpcError(
       'STREAM_REQUIRES_SABR',
-      `${videoId}: MWEB adaptive formats are SABR-only`,
+      `${videoId}: ${client} adaptive formats are SABR-only`,
     );
   }
 
@@ -270,15 +304,128 @@ async function tierMwebAdaptive(
   ]);
 
   log.debug(
-    `${videoId}: MWEB itag ${video.itag} (${video.height}p ${video.codecs}) + ` +
+    `${videoId}: ${client} itag ${video.itag} (${video.height}p ${video.codecs}) + ` +
       `itag ${audio.itag} (${audio.codecs})`,
   );
 
   return assemble({ videoUrl, audioUrl, video, audio, response, transport: 'plain' });
 }
 
+/**
+ * Anything that is not a clean answer about the video, described for the log.
+ *
+ * Deliberately wider than `LOGIN_REQUIRED`, and the reason is what F14 does
+ * *not* say. F14 measured a server-issued visitor id surviving 28 resolutions
+ * across 38 minutes — and never saw one expire, so nobody knows what an expired
+ * one produces. If it is a different playability status, or an `OK` with an
+ * empty format list, a `LOGIN_REQUIRED`-only gate never fires and stream
+ * resolution simply stops working after some number of hours, silently, on a
+ * session that looks healthy. That is the same shape as `logged_in: true` on a
+ * dead cookie (F7), and this codebase has now been bitten by that pattern
+ * enough times to stop paying for it.
+ *
+ * The empty-format case is not hypothetical either: the original F5 reading was
+ * "0 formats on 3 of 4 runs" — a refusal that arrived as a shape rather than as
+ * a status.
+ *
+ * The cost of being wrong in this direction is one mint (~170 ms) and one
+ * `/player` call on a video that really is private, deleted or region-locked,
+ * before tier 1 declines exactly as it would have. The cost of being wrong in
+ * the other direction is a client that stops resolving streams and says nothing.
+ */
+function identityRefusal(response: PlayerResult): string | null {
+  const status = response.playabilityStatus;
+  if (status !== null && status !== 'OK') {
+    return `${status} — "${response.playabilityReason ?? 'no reason given'}"`;
+  }
+  if (!response.formats.some((format) => format.isAdaptive)) {
+    return `${status ?? 'no status'} with zero adaptive formats`;
+  }
+  return null;
+}
+
+/**
+ * Fetch a `/player` response, and if it is not a usable answer, mint a new
+ * identity and ask exactly once more.
+ *
+ * Separated from the tier so the retry rule can be tested against the real
+ * implementation with stubs, rather than against a second copy of it written in
+ * the test file. Same reasoning as `descendLadder`. Its messages name
+ * `ANDROID_VR` because that is the only client whose refusals are plausibly
+ * about the visitor id rather than about the video.
+ *
+ * **The trigger is deliberately broad** — see `identityRefusal`. It is not
+ * "LOGIN_REQUIRED", it is "anything that is not `OK` with adaptive formats",
+ * because the failure this guards against is an expired visitor id whose error
+ * shape nobody has observed.
+ *
+ * **Exactly one retry.** F5 puts a fabricated visitor id at 2/28 rather than
+ * 0/28: the refusal is probabilistic, so a fresh server-issued id raises the odds
+ * rather than satisfying a requirement. One retry converts the residual failure
+ * rate into a much smaller one; a loop would only spend round trips discovering
+ * that YouTube has decided about this caller, and the ladder has four more rungs
+ * for that case.
+ */
+export async function fetchWithVisitorRetry(
+  videoId: string,
+  fetchResponse: (refresh: boolean) => Promise<PlayerResult>,
+  mintVisitor: () => Promise<unknown>,
+): Promise<PlayerResult> {
+  const first = await fetchResponse(false);
+  const refusal = identityRefusal(first);
+  if (refusal === null) return first;
+
+  log.info(
+    `${videoId}: ANDROID_VR returned ${refusal} — retrying with a fresh visitor id`,
+  );
+
+  try {
+    await mintVisitor();
+  } catch (error) {
+    // Declining on YouTube's refusal is more useful than declining on ours, so
+    // the original response is what goes back — but a mint that cannot reach
+    // YouTube is worth seeing on its own.
+    log.warn(
+      `${videoId}: could not mint a fresh visitor id (${(error as Error).message}); ` +
+        'declining tier 1 on the original response',
+    );
+    return first;
+  }
+
+  const second = await fetchResponse(true);
+  const stillRefused = identityRefusal(second);
+  if (stillRefused !== null) {
+    log.warn(`${videoId}: ANDROID_VR still returning ${stillRefused} after a fresh visitor id`);
+  }
+  return second;
+}
+
+/**
+ * Tier 1 — `ANDROID_VR`, anonymous, server-issued visitor id.
+ *
+ * The whole tier is the ordinary plain-adaptive path plus one condition: the
+ * request has to carry a visitor id YouTube issued. F5 measured that at 13/13
+ * `OK` for a server-issued id against 2/28 for a locally fabricated one, with
+ * headers, cookies and client version making no difference either way.
+ * `createSession` fetches one by default; this only has to handle the case where
+ * the one in hand stopped convincing YouTube.
+ */
+export async function tierAndroidVr(
+  deps: PlaybackDeps,
+  videoId: string,
+  poToken: string | null,
+): Promise<PlaybackSource> {
+  const response = await fetchWithVisitorRetry(
+    videoId,
+    (refresh) => getPlayerResponse(deps.session, videoId, 'ANDROID_VR', { refresh }),
+    () => refreshVisitorId(deps.session),
+  );
+
+  return tierPlainAdaptive(deps, videoId, 'ANDROID_VR', poToken, response);
+}
+
 // ---------------------------------------------------------------------------
-// Tier 2 — SABR → local DASH bridge
+// Tier 3 — SABR → local DASH bridge
 // ---------------------------------------------------------------------------
 
 /**
@@ -297,7 +444,7 @@ async function tierSabrDash(videoId: string): Promise<PlaybackSource> {
 }
 
 // ---------------------------------------------------------------------------
-// Tier 3 — yt-dlp subprocess
+// Tier 4 — yt-dlp subprocess
 // ---------------------------------------------------------------------------
 
 interface YtDlpFormat {
@@ -340,7 +487,7 @@ export function sourceFromYtDlpDump(
 
   const videoAddress = video?.url ?? dump.url ?? null;
   if (!videoAddress) {
-    throw new RpcError('UPSTREAM_ERROR', `${tool} returned no stream URL`, true);
+    throw new RpcError('UPSTREAM_ERROR', `${tool} returned no stream URL`);
   }
 
   const height = video?.height ?? dump.height ?? null;
@@ -378,7 +525,9 @@ export async function tierYtDlp(
   poToken: string | null,
   response: PlayerResult | null,
 ): Promise<PlaybackSource> {
-  const binary = deps.ytDlpPath ?? process.env['YT_DLP_PATH'] ?? 'yt-dlp';
+  // One place decides which binary this is, so the startup warning and the
+  // spawn cannot disagree about what "yt-dlp" means on this machine.
+  const binary = ytDlpBinary(deps.ytDlpPath);
 
   const args = [
     '--dump-single-json',
@@ -399,24 +548,33 @@ export async function tierYtDlp(
       // yt-dlp can sit on a slow extractor indefinitely; the ladder has to move on.
       timeout: YT_DLP_TIMEOUT_MS,
     });
-    stdout = await new Response(child.stdout).text();
+
+    // Both pipes, concurrently, before waiting on the exit. Draining stdout to
+    // completion while nothing reads stderr is the classic subprocess deadlock:
+    // a child that writes past the OS pipe buffer (~64 KB) blocks in `write`,
+    // never finishes stdout and never exits, and the caller waits out the
+    // timeout instead of getting an answer. Measured on Bun 1.3, `Bun.spawn`
+    // drains both pipes into memory eagerly, so the deadlock does not currently
+    // reproduce here — that is a property of this runtime's implementation, not
+    // of the code, and it is not something to depend on.
+    const [stdoutText, stderrText] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    stdout = stdoutText;
+
     const exitCode = await child.exited;
     if (exitCode !== 0) {
-      const stderr = (await new Response(child.stderr).text())
-        .trim()
-        .split('\n')
-        .slice(-2)
-        .join(' ');
+      const stderr = stderrText.trim().split('\n').slice(-2).join(' ');
       throw new Error(`exit ${exitCode}: ${stderr || '(no output)'}`);
     }
   } catch (error) {
     // Not installed is the ordinary case on a machine that has never needed it,
-    // and declining is the right response — but name the binary, so "tier 3
+    // and declining is the right response — but name the binary, so "tier 4
     // never works" does not turn into a debugging session.
     throw new RpcError(
       'UPSTREAM_ERROR',
       `${videoId}: ${binary} failed (${(error as Error).message})`,
-      true,
     );
   }
 
@@ -424,7 +582,7 @@ export async function tierYtDlp(
   try {
     dump = JSON.parse(stdout) as YtDlpDump;
   } catch {
-    throw new RpcError('UPSTREAM_ERROR', `${videoId}: ${binary} returned unparseable JSON`, true);
+    throw new RpcError('UPSTREAM_ERROR', `${videoId}: ${binary} returned unparseable JSON`);
   }
 
   const source = sourceFromYtDlpDump(dump, binary, response);
@@ -433,16 +591,22 @@ export async function tierYtDlp(
 }
 
 // ---------------------------------------------------------------------------
-// Tier 4 — itag 18 progressive
+// Tier 5 — itag 18 progressive
 // ---------------------------------------------------------------------------
 
 /**
- * The rung that always works.
+ * The rung almost nothing falls past.
  *
  * itag 18 is muxed H.264/AAC at 360p and survives even a SABR-only response
  * (F9), which is what makes it a real floor rather than a hopeful one. It sets
  * `qualityDegraded`, so the UI can say so instead of the user wondering why
  * their 4K monitor is showing a soft picture.
+ *
+ * **Not a guarantee, though**, and the difference matters to the caller: on
+ * 2026-08-02 an `MWEB` response arrived carrying no progressive format at all
+ * and this tier threw (F9, amended). So `playback.open` can decline every rung
+ * for a video that is fine, and `STREAM_UNAVAILABLE` has to be a state the user
+ * can retry out of rather than a verdict on the video.
  */
 export async function tierProgressive(
   deps: PlaybackDeps,
@@ -451,7 +615,7 @@ export async function tierProgressive(
   response: PlayerResult | null,
 ): Promise<PlaybackSource> {
   if (!response) {
-    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the MWEB /player call did not return`, true);
+    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the MWEB /player call did not return`);
   }
   assertPlayable(response, videoId);
 
@@ -558,24 +722,43 @@ export async function openPlayback(
   const { videoId, preload = false } = params;
   const poToken = await (deps.poTokens ?? nullPoTokenProvider).mint(videoId);
 
-  // One `/player` call for the whole ladder. Tiers 1 and 4 read their formats
-  // from it, and tier 3 still wants its storyboards and duration even though
-  // yt-dlp finds its own streams. If the call itself fails we carry on with
-  // null: yt-dlp does not need us to have reached InnerTube at all.
-  let response: PlayerResult | null = null;
-  try {
-    response = await getPlayerResponse(deps.session, videoId, 'MWEB');
-  } catch (error) {
-    log.warn(`${videoId}: MWEB /player failed (${(error as Error).message}); tier 3 may still serve it`);
-  }
+  // The `MWEB` response, fetched at most once and only if something below tier 1
+  // asks for it. Tiers 2 and 5 read their formats from it, and tier 4 wants its
+  // storyboards and duration even though yt-dlp finds its own streams.
+  //
+  // Lazy because tier 1 is expected to serve: pre-fetching would put a second
+  // `/player` round trip on every successful open, for a response nothing reads.
+  // A failure resolves to null rather than throwing — yt-dlp does not need us to
+  // have reached InnerTube at all, and the tiers that do need it decline.
+  let mwebRequest: Promise<PlayerResult | null> | null = null;
+  const mwebResponse = (): Promise<PlayerResult | null> =>
+    (mwebRequest ??= getPlayerResponse(deps.session, videoId, 'MWEB').catch(
+      (error: unknown): null => {
+        log.warn(
+          `${videoId}: MWEB /player failed (${(error as Error).message}); ` +
+            'lower tiers may still serve it',
+        );
+        return null;
+      },
+    ));
 
   return descendLadder(
     videoId,
     [
-      { name: 'MWEB plain adaptive', run: () => tierMwebAdaptive(deps, videoId, poToken, response) },
+      {
+        name: 'ANDROID_VR plain adaptive',
+        run: () => tierAndroidVr(deps, videoId, poToken),
+      },
+      {
+        name: 'MWEB plain adaptive',
+        run: async () => tierPlainAdaptive(deps, videoId, 'MWEB', poToken, await mwebResponse()),
+      },
       { name: 'SABR → DASH', run: () => tierSabrDash(videoId) },
-      { name: 'yt-dlp', run: () => tierYtDlp(deps, videoId, poToken, response) },
-      { name: 'itag 18 progressive', run: () => tierProgressive(deps, videoId, poToken, response) },
+      { name: 'yt-dlp', run: async () => tierYtDlp(deps, videoId, poToken, await mwebResponse()) },
+      {
+        name: 'itag 18 progressive',
+        run: async () => tierProgressive(deps, videoId, poToken, await mwebResponse()),
+      },
     ],
     preload,
   );

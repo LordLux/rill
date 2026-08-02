@@ -218,6 +218,29 @@ export interface PlaybackSource {
 }
 
 // ---------------------------------------------------------------------------
+// Capabilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional pieces of the machine, reported in the `event.ready` handshake
+ * (`protocol.md` §2).
+ *
+ * These are not preferences — they are things that are installed or are not, and
+ * the app has no way to find out on its own. A capability that is missing
+ * removes a rung from the resolution ladder without removing anything the user
+ * can see, which is the kind of degradation this project keeps having to make
+ * loud on purpose.
+ */
+export interface Capabilities {
+  /**
+   * `yt-dlp` is on PATH or at `YT_DLP_PATH`. False means ladder tier 4 is gone
+   * and age-restricted, Vevo and similar videos resolve to "Unavailable" with
+   * nothing in the UI explaining why.
+   */
+  ytDlp: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
 

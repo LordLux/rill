@@ -21,7 +21,7 @@
 import { logger } from '../log.ts';
 import { parsePlayer } from '../parser/player.ts';
 import type { PlayerResult } from '../types.ts';
-import { playerPayload, type Session } from './session.ts';
+import { PLAYER_CLIENTS, playerPayload, type PlayerClient, type Session } from './session.ts';
 
 const log = logger('player-response');
 
@@ -29,7 +29,7 @@ const TTL_MS = Number(process.env['SIDECAR_PLAYER_RESPONSE_TTL_MS'] ?? 5 * 60_00
 /** Roughly a queue's worth of preloads plus what the user has open. */
 const MAX_ENTRIES = 64;
 
-export type PlayerClient = 'WEB' | 'MWEB';
+export type { PlayerClient };
 
 interface Entry {
   result: PlayerResult;
@@ -72,6 +72,17 @@ async function fetchPlayer(
   return { result, raw, fetchedAt: Date.now() };
 }
 
+export interface PlayerRequestOptions {
+  /**
+   * Ignore any cached or in-flight answer and ask YouTube again.
+   *
+   * For ladder tier 1's `LOGIN_REQUIRED` retry: the point of the retry is that
+   * the session now carries a different visitor id, and both the cached refusal
+   * and a request already on the wire were made under the old one.
+   */
+  refresh?: boolean;
+}
+
 /**
  * The parsed `/player` response for this video and client, from cache when
  * fresh.
@@ -84,8 +95,9 @@ export async function getPlayerResponse(
   session: Session,
   videoId: string,
   client: PlayerClient,
+  options: PlayerRequestOptions = {},
 ): Promise<PlayerResult> {
-  return (await getPlayerEntry(session, videoId, client)).result;
+  return (await getPlayerEntry(session, videoId, client, options)).result;
 }
 
 /** As `getPlayerResponse`, but also exposes the raw body for fixture capture. */
@@ -93,14 +105,19 @@ export async function getPlayerEntry(
   session: Session,
   videoId: string,
   client: PlayerClient,
+  options: PlayerRequestOptions = {},
 ): Promise<{ result: PlayerResult; raw: unknown }> {
   const key = keyFor(videoId, client);
 
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < TTL_MS) return cached;
+  if (options.refresh) {
+    cache.delete(key);
+  } else {
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.fetchedAt < TTL_MS) return cached;
 
-  const pending = inFlight.get(key);
-  if (pending) return pending;
+    const pending = inFlight.get(key);
+    if (pending) return pending;
+  }
 
   const request = fetchPlayer(session, videoId, client)
     .then((entry) => {
@@ -109,7 +126,11 @@ export async function getPlayerEntry(
       return entry;
     })
     .finally(() => {
-      inFlight.delete(key);
+      // Only if it is still ours. A `refresh` call replaces the entry for a key
+      // that may already have a request on the wire, and the older one settling
+      // must not clear the newer one's slot — that would leave the next caller
+      // starting a third request instead of joining the second.
+      if (inFlight.get(key) === request) inFlight.delete(key);
     });
 
   inFlight.set(key, request);
@@ -122,5 +143,5 @@ export function forgetPlayerResponse(videoId?: string): void {
     cache.clear();
     return;
   }
-  for (const client of ['WEB', 'MWEB'] as const) cache.delete(keyFor(videoId, client));
+  for (const client of PLAYER_CLIENTS) cache.delete(keyFor(videoId, client));
 }

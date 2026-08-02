@@ -15,34 +15,128 @@
  *      region-locked video and is not (hard invariant 7). Pinning both halves
  *      means nobody has to re-learn it from a confusing bug report.
  *
- * No cookie required: streams resolve through an anonymous `MWEB` session
- * (§2.3). Set `SIDECAR_SKIP_NETWORK=1` to skip, but understand what is being
- * skipped — with these off, a completely broken decipher path is a green suite.
+ * No cookie required: streams resolve through an anonymous session (§2.3),
+ * asking as `ANDROID_VR` at tier 1 and `MWEB` at tier 2. What that session does
+ * need is a server-issued visitor id, which is `createSession`'s default and the
+ * first thing to check if tier 1 starts declining (F5). Set
+ * `SIDECAR_SKIP_NETWORK=1` to skip, but understand what is being skipped — with
+ * these off, a completely broken decipher path is a green suite.
  */
 
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+import { resolveYtDlp } from '../src/capabilities.ts';
+import { logger } from '../src/log.ts';
 import { createSession, type Session } from '../src/innertube/session.ts';
 import { getPlayer, rebuildPlayer } from '../src/innertube/player.ts';
 import { sign } from '../src/innertube/signed-url.ts';
 import { parsePlayer } from '../src/parser/index.ts';
-import { openPlayback, tierProgressive, tierYtDlp } from '../src/playback/resolve.ts';
-import { getPlayerResponse } from '../src/innertube/player-response.ts';
+import {
+  openPlayback,
+  tierPlainAdaptive,
+  tierProgressive,
+  tierYtDlp,
+} from '../src/playback/resolve.ts';
+import { forgetPlayerResponse, getPlayerResponse } from '../src/innertube/player-response.ts';
 import { isSabrOnly } from '../src/playback/sabr-detect.ts';
 
 const ONLINE = process.env['SIDECAR_SKIP_NETWORK'] !== '1';
 
+/** stderr, like everything else — hard invariant 3 applies to the suite too. */
+const log = logger('network-test');
+
 /**
- * Tier 3's binary, if this machine has one.
+ * Where the Phase 2 tripwire writes what it saw.
+ *
+ * A rollout is a rate, and a rate is invisible from one run: the 2026-08-02
+ * sighting was one response in ~17, which is indistinguishable from noise until
+ * you have the denominator. So **every** execution is appended, not just the
+ * ones that saw SABR — a file containing only sightings can say "it happened
+ * four times" and never "four times out of how many".
+ *
+ * Machine-local and gitignored: it is an accumulating observation about what
+ * YouTube served this machine, not a fact about the repository.
+ */
+const TRIPWIRE_LOG = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'tripwire-mweb-sabr.ndjson',
+);
+
+interface TripwireEntry {
+  at: string;
+  video: string;
+  samples: boolean[];
+  sabrCount: number;
+}
+
+/**
+ * Append this run and return the rate so far, or `null` if the file cannot be
+ * used.
+ *
+ * Never throws. This is a diagnostic; a read-only checkout or a locked file must
+ * not turn into a failing suite, which would invert the whole point of it.
+ */
+function recordTripwire(samples: boolean[], sabrCount: number): string | null {
+  const entry: TripwireEntry = {
+    at: new Date().toISOString(),
+    video: VIDEO,
+    samples,
+    sabrCount,
+  };
+
+  try {
+    appendFileSync(TRIPWIRE_LOG, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (error) {
+    log.warn(`could not record the tripwire result: ${(error as Error).message}`);
+    return null;
+  }
+
+  try {
+    const entries = readFileSync(TRIPWIRE_LOG, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      // A malformed line is skipped rather than fatal — same rule as the parser.
+      .flatMap((line): TripwireEntry[] => {
+        try {
+          return [JSON.parse(line) as TripwireEntry];
+        } catch {
+          return [];
+        }
+      });
+
+    const runs = entries.length;
+    const runsWithSabr = entries.filter((e) => e.sabrCount > 0).length;
+    const totalSamples = entries.reduce((sum, e) => sum + e.samples.length, 0);
+    const sabrSamples = entries.reduce((sum, e) => sum + e.sabrCount, 0);
+    const since = entries[0]?.at ?? entry.at;
+
+    return (
+      `${runsWithSabr}/${runs} runs and ${sabrSamples}/${totalSamples} samples SABR-only ` +
+      `since ${since} — ${TRIPWIRE_LOG}`
+    );
+  } catch (error) {
+    log.warn(`could not read back the tripwire history: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Tier 4's binary, if this machine has one.
  *
  * yt-dlp is an optional fallback, not a dependency, so its absence skips rather
  * than fails — with the usual caveat about skipped tests: on a machine without
- * it, tier 3 is entirely unproven and the ladder is effectively three rungs.
+ * it, tier 4 is entirely unproven and the ladder is effectively four rungs.
+ *
+ * Resolved through `capabilities.ts`, the same lookup the startup warning and
+ * `tierYtDlp` use. A private copy here could decide the binary exists while the
+ * sidecar decides it does not, and the test would then skip or fail for reasons
+ * that have nothing to do with YouTube.
  */
-const configured = process.env['YT_DLP_PATH'];
-const YT_DLP: string | null =
-  configured && existsSync(configured) ? configured : Bun.which('yt-dlp');
+const YT_DLP: string | null = resolveYtDlp();
 
 /** Long, public, not age-restricted, and 4K — so a quality regression shows. */
 const VIDEO = process.env['YT_VIDEO_STANDARD'] ?? 'aqz-KE-bpKQ';
@@ -88,23 +182,41 @@ async function measure(url: string): Promise<Throughput> {
 
 // ---------------------------------------------------------------------------
 
-describe.if(ONLINE)('decipher, end to end', () => {
+describe.if(ONLINE)('the resolution session', () => {
+  test('carries a server-issued visitor id, not a fabricated one', () => {
+    // F5: a fabricated id is 32 characters and gets ANDROID_VR refused on ~93%
+    // of attempts; a server-issued one is ~558 and passed 13/13. youtubei.js
+    // falls back to fabricating one when `/sw.js_data` fails and does not raise,
+    // so this is the assertion that says which one we actually got.
+    expect(session.visitorId).toBeString();
+    expect(session.visitorId!.length).toBeGreaterThan(64);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
   test(
-    'a real video resolves to two signed URLs',
+    'a real video resolves to two plain URLs, with no n on either',
     async () => {
       const source = await openPlayback({ session }, { videoId: VIDEO });
 
-      // Tier 1. Anything else means MWEB stopped serving plain adaptive URLs
-      // and Phase 2 just became relevant — which is worth failing over.
       expect(source.transport).toBe('plain');
       expect(source.videoUrl).toStartWith('https://');
       expect(source.audioUrl).toStartWith('https://');
       expect(source.qualityDegraded).toBe(false);
       expect(source.height).toBeGreaterThanOrEqual(1080);
 
-      // Both carry a deciphered `n`. That it is *correct* is the next test's job.
+      // Which tier served is not on the DTO — `transport` is 'plain' for tiers 1
+      // and 2 alike — but YouTube stamps the requesting client into the URL, so
+      // `c=` is the honest way to ask. Anything else here means tier 1 declined
+      // and something below it served, which the ladder does silently by design.
       for (const url of [source.videoUrl, source.audioUrl!]) {
-        expect(new URL(url).searchParams.get('n')).toBeString();
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get('c')).toBe('ANDROID_VR');
+        // The point of the reorder: no `n` on the primary path, so the silent
+        // ~50 KB/s throttle cannot happen there at all.
+        expect(parsed.searchParams.has('n')).toBe(false);
       }
 
       expect(source.durationMs).toBeGreaterThan(0);
@@ -114,7 +226,7 @@ describe.if(ONLINE)('decipher, end to end', () => {
   );
 
   test(
-    'sustained throughput is unthrottled',
+    'sustained throughput is above the bar',
     async () => {
       const source = await openPlayback({ session }, { videoId: VIDEO });
       const result = await measure(source.videoUrl);
@@ -130,14 +242,77 @@ describe.if(ONLINE)('decipher, end to end', () => {
         ok: true,
       });
       expect(result.received).toBeGreaterThanOrEqual(SAMPLE_BYTES);
-
-      // The assertion the whole task exists for. If this lands near 0.05 MB/s
-      // the `n` transform is wrong, not the network: check that the player cache
-      // is keyed by playerId and that the node:vm shim is executing the current
-      // player JS, before suspecting anything else.
       expect({ detail, healthy: result.mbps > HEALTHY_MBPS }).toEqual({ detail, healthy: true });
     },
     5 * MINUTE,
+  );
+
+  test(
+    'an open-ended range is answered — the F10 property that made this tier 1',
+    async () => {
+      // ffmpeg opens every HTTP stream with `Range: bytes=0-`. An `MWEB` URL
+      // answers that with 403 at every offset (F10); an `ANDROID_VR` URL answers
+      // 206 (F11), and that single difference is why the ladder was reordered.
+      // If it ever regresses, playback breaks in libmpv while every other test
+      // here stays green, because a bounded range keeps working.
+      //
+      // Two attempts, five seconds apart, each on a freshly resolved URL — not
+      // to make a red test green, but because the claim is about this *class* of
+      // URL and a single refusal is not evidence the class changed. A real
+      // regression 403s every attempt and still fails here.
+      //
+      // The history, because the numbers matter more than the conclusion: on
+      // 2026-08-02 this failed 2 live runs in ~20, and the one captured in full
+      // 403'd both attempts ~200 ms apart — a window, not a coin flip. It never
+      // reproduced deliberately: 28/28 open-ended requests answered 206 across
+      // fresh URLs, URLs that had already served 12 MB, and back-to-back /
+      // 1 s / 4 s spacings. The cause was never identified. What changed after
+      // that was this probe: it now aborts as soon as the status line arrives
+      // instead of cancelling a 712 MB body, and 12 consecutive live runs have
+      // been clean. Suggestive, not conclusive — at the old ~10% rate, 12 clean
+      // runs happen by chance about a quarter of the time.
+      // Only the status line is wanted, and the response behind it is the whole
+      // 712 MB file. Abort as soon as the headers land rather than cancelling
+      // the body afterwards: `body.cancel()` on a response that size left Bun
+      // 1.3.14 buffering it — two probe scripts here died with
+      // `panic: Out of memory while copying request body` — and a client
+      // half-abandoning a multi-hundred-megabyte stream repeatedly is also the
+      // most plausible thing we were doing to earn a refusal.
+      const statuses: number[] = [];
+
+      for (let attempt = 0; attempt < 2 && !statuses.includes(206); attempt++) {
+        // A fresh URL per attempt: the cached /player response is shared with
+        // the throughput test above, and a retry on the same URL would be a
+        // weaker question than the one being asked.
+        forgetPlayerResponse(VIDEO);
+        const source = await openPlayback({ session }, { videoId: VIDEO });
+
+        const abort = new AbortController();
+        try {
+          const response = await fetch(source.videoUrl, {
+            headers: { range: 'bytes=0-' },
+            signal: abort.signal,
+          });
+          statuses.push(response.status);
+        } finally {
+          abort.abort();
+        }
+
+        if (!statuses.includes(206) && attempt === 0) await Bun.sleep(5_000);
+      }
+
+      if (statuses[0] !== 206) {
+        log.warn(
+          `an ANDROID_VR URL answered HTTP ${statuses[0]} to an open-ended range; ` +
+            `retry gave ${statuses[1] ?? '(not attempted)'}. One-off refusals are known ` +
+            '(2026-08-02); a persistent one means F11 no longer holds and the ladder ' +
+            'is serving URLs libmpv cannot open.',
+        );
+      }
+
+      expect({ statuses, accepted: statuses.includes(206) }).toEqual({ statuses, accepted: true });
+    },
+    3 * MINUTE,
   );
 
   test(
@@ -154,6 +329,64 @@ describe.if(ONLINE)('decipher, end to end', () => {
 
 // ---------------------------------------------------------------------------
 
+describe.if(ONLINE)('tier 2 — MWEB, and the decipher path', () => {
+  test(
+    'a deciphered n streams unthrottled',
+    async () => {
+      // With `ANDROID_VR` leading, nothing on the default path deciphers
+      // anything — so this is the only test that proves the `n` transform
+      // lands, and hard invariant 2 has no other live evidence. It is called
+      // directly rather than through `openPlayback`, because the ladder is
+      // supposed to never reach it.
+      //
+      // The adaptive ladder is the preferred subject, but on 2026-08-02 one
+      // response in ~17 came back SABR-only (see the tripwire below). That must
+      // not cost us the decipher evidence: a SABR-only response still carries a
+      // working itag 18 (F9), and that URL still carries an `n`. So fall back to
+      // the progressive format rather than skipping — the transform under test
+      // is the same one, and a wrong `n` throttles it identically.
+      forgetPlayerResponse(VIDEO);
+      const response = await getPlayerResponse(session, VIDEO, 'MWEB');
+
+      let source;
+      if (isSabrOnly(response)) {
+        log.warn(
+          'MWEB came back SABR-only; proving the decipher path on the itag 18 ' +
+            'progressive URL instead (F9). The tripwire test is the one to read.',
+        );
+        source = await tierProgressive({ session }, VIDEO, null, response);
+      } else {
+        source = await tierPlainAdaptive({ session }, VIDEO, 'MWEB', null, response);
+      }
+
+      const url = new URL(source.videoUrl);
+      expect(url.searchParams.get('c')).toBe('MWEB');
+      expect(url.searchParams.get('n')).toBeString();
+
+      // A bounded range, because F10: `MWEB` refuses the open-ended kind. That
+      // refusal is about request shape and does not touch throughput — a wrong
+      // `n` is served, at ~50 KB/s, and only pulling bytes can tell them apart.
+      const result = await measure(source.videoUrl);
+      const detail =
+        `HTTP ${result.status}, ${(result.received / 1024 / 1024).toFixed(1)} MB in ` +
+        `${result.seconds.toFixed(1)}s = ${result.mbps.toFixed(2)} MB/s`;
+
+      expect({ detail, ok: result.status === 206 || result.status === 200 }).toEqual({
+        detail,
+        ok: true,
+      });
+      // If this lands near 0.05 MB/s the `n` transform is wrong, not the
+      // network: check that the player cache is keyed by playerId and that the
+      // node:vm shim is executing the current player JS before suspecting
+      // anything else.
+      expect({ detail, healthy: result.mbps > HEALTHY_MBPS }).toEqual({ detail, healthy: true });
+    },
+    5 * MINUTE,
+  );
+});
+
+// ---------------------------------------------------------------------------
+
 describe.if(ONLINE)('signatureTimestamp (hard invariant 7)', () => {
   test(
     'omitting it returns UNPLAYABLE; including it returns streaming data',
@@ -162,11 +395,40 @@ describe.if(ONLINE)('signatureTimestamp (hard invariant 7)', () => {
       // request everyone writes first.
       const without = parsePlayer(await session.execute('/player', { videoId: VIDEO }));
 
+      // The invariant: a malformed request comes back as an unplayable video
+      // with nothing to stream. Both halves are YouTube's contract with us and
+      // are asserted hard.
       expect(without.playabilityStatus).toBe('UNPLAYABLE');
-      // The reason is the trap: it reads like a broken video, not a malformed
-      // request. Pinning the wording is the whole point of the test.
-      expect(without.playabilityReason).toMatch(/reload/i);
       expect(without.formats).toEqual([]);
+
+      // The reason is the trap — "The page needs to be reloaded." reads like a
+      // broken video rather than a missing `signatureTimestamp`, which is the
+      // whole hazard hard invariant 7 exists to name. But the wording is
+      // YouTube's, not a contract, and it is not stable: on 2026-08-02 one live
+      // run answered `UNPLAYABLE — "Video unavailable"` to this same request.
+      //
+      // That was not reproducible: 8 attempts on a fresh server-visitor session,
+      // 8 on a fabricated-visitor one in the same minute, and 25 more after five
+      // `openPlayback` calls all returned the reload wording — 0/41. The run it
+      // did appear in was the first with `yt-dlp` hitting the same video from
+      // the same IP in the same seconds, so the working hypothesis is a
+      // transient soft-block of the anonymous caller on the most bot-like
+      // request in the suite. Unproven, and one observation.
+      //
+      // So: warn, do not fail. A wording change is worth knowing about — it
+      // would mean the trap now reads differently and the docs describing it
+      // have drifted — but it is not evidence that the sidecar broke, and
+      // failing on it costs a red suite roughly one live run in six.
+      if (!/reload/i.test(without.playabilityReason ?? '')) {
+        log.warn(
+          'the sts-less /player reason has changed wording: expected ' +
+            '"The page needs to be reloaded." (or "Video unavailable", seen once on ' +
+            `2026-08-02), got "${without.playabilityReason ?? '(none)'}". ` +
+            'Hard invariant 7 still holds — status and formats asserted above — but ' +
+            'if this becomes the usual answer, the wording in CLAUDE.md, ' +
+            'architecture.md and resolve.ts is now stale.',
+        );
+      }
 
       const player = await getPlayer(session);
       const withSts = parsePlayer(
@@ -194,14 +456,31 @@ describe.if(ONLINE)('signatureTimestamp (hard invariant 7)', () => {
 
 // ---------------------------------------------------------------------------
 
-describe.if(ONLINE)('ladder tier 4 — itag 18 progressive', () => {
+describe.if(ONLINE)('ladder tier 5 — itag 18 progressive', () => {
   test(
     'the floor signs and streams',
     async () => {
       // The rung nothing falls past. In normal operation it never runs, so a
       // break here would only ever show up on a video the tiers above already
       // refused — the worst possible time to discover it.
-      const response = await getPlayerResponse(session, VIDEO, 'MWEB');
+      //
+      // One retry on a fresh response, because on 2026-08-02 one run in ~5 got
+      // an MWEB response carrying no progressive format at all and tier 5 threw
+      // "no progressive format either". That did not reproduce: 14/14 controlled
+      // MWEB fetches in the same hour carried itag 18 with an address. It is the
+      // third shape of intermittently-degraded MWEB response seen that day — see
+      // F3 and F9 — and the floor genuinely being gone is what this test has to
+      // keep catching, so a second empty response still fails.
+      let response = await getPlayerResponse(session, VIDEO, 'MWEB');
+      if (!response.formats.some((format) => !format.isAdaptive)) {
+        log.warn(
+          'the MWEB response carried no progressive format — F9 says itag 18 survives ' +
+            'even a SABR-only response. Re-fetching once before calling the floor gone.',
+        );
+        forgetPlayerResponse(VIDEO);
+        response = await getPlayerResponse(session, VIDEO, 'MWEB');
+      }
+
       const source = await tierProgressive({ session }, VIDEO, null, response);
 
       expect(source.height).toBe(360);
@@ -222,11 +501,12 @@ describe.if(ONLINE)('ladder tier 4 — itag 18 progressive', () => {
 
 // ---------------------------------------------------------------------------
 
-describe.if(ONLINE && YT_DLP !== null)('ladder tier 3 — yt-dlp', () => {
+describe.if(ONLINE && YT_DLP !== null)('ladder tier 4 — yt-dlp', () => {
   test(
     'resolves a real video to streamable URLs',
     async () => {
-      // Tier 3 exists for the videos tier 1 refuses — age-restricted, Vevo — and
+      // Tier 4 exists for the videos the plain tiers refuse — age-restricted,
+      // Vevo — and
       // those cannot be used as a fixture. So this proves the mechanism on an
       // ordinary video instead: that the subprocess runs, that the dump maps to
       // a `PlaybackSource`, and that URLs deciphered by someone else's
@@ -286,24 +566,58 @@ describe.if(ONLINE)('the Phase 2 tripwire, live', () => {
     'MWEB still serves plain adaptive URLs',
     async () => {
       // The fixture assertion in playback.test.ts says this was true when the
-      // corpus was captured. This one says it is true now. When it starts
-      // failing, the SABR → DASH bridge has stopped being deferrable — and this
-      // is how we find out, rather than from a user watching 360p.
-      const response = parsePlayer(
-        await session.execute('/player', {
-          videoId: VIDEO,
-          contentCheckOk: true,
-          racyCheckOk: true,
-          playbackContext: {
-            contentPlaybackContext: {
-              signatureTimestamp: (await getPlayer(session)).signatureTimestamp,
-            },
-          },
-        }),
-      );
+      // corpus was captured. This one says it is true now. When it stops being
+      // true, the SABR → DASH bridge has stopped being deferrable — and this is
+      // how we find out, rather than from a user watching 360p.
+      //
+      // Three samples rather than one, because on 2026-08-02 this started coming
+      // back mixed: one response in ~17 live runs was SABR-only while 12/12
+      // controlled calls in the same hour were plain. That is what a bucketed
+      // rollout looks like from the outside, and it is the leading edge of the
+      // thing this test exists to catch.
+      //
+      // So the two signals are separated. **One** SABR-only sample warns and is
+      // recorded — that is the rollout widening, and failing the suite on it
+      // would train everyone to re-run, which is how a real flip gets missed.
+      // **Two of three** fails: at that point most requests are SABR-only, tier 2
+      // is effectively gone whatever the remaining third does, and Phase 2 has
+      // stopped being deferrable. Waiting for 3/3 would let a two-thirds rollout
+      // sit green.
+      const sts = (await getPlayer(session)).signatureTimestamp;
+      const samples: boolean[] = [];
 
-      expect(response.playabilityStatus).toBe('OK');
-      expect(isSabrOnly(response)).toBe(false);
+      for (let i = 0; i < 3; i++) {
+        const response = parsePlayer(
+          await session.execute('/player', {
+            videoId: VIDEO,
+            contentCheckOk: true,
+            racyCheckOk: true,
+            playbackContext: { contentPlaybackContext: { signatureTimestamp: sts } },
+          }),
+        );
+        expect(response.playabilityStatus).toBe('OK');
+        samples.push(isSabrOnly(response));
+      }
+
+      const sabrCount = samples.filter(Boolean).length;
+      const history = recordTripwire(samples, sabrCount);
+
+      if (sabrCount > 0) {
+        log.warn(
+          `MWEB returned SABR-only on ${sabrCount}/${samples.length} samples. F3 says ` +
+            'MWEB still serves plain adaptive URLs; that is now partly untrue. Phase 2 ' +
+            '(SABR → DASH) is becoming relevant — ladder tier 2 is what degrades, and ' +
+            'tier 1 (ANDROID_VR) is unaffected. Re-read F3 before trusting it.',
+        );
+      }
+      if (history !== null) log.info(`tripwire history: ${history}`);
+
+      // Two of three is the flip. One is the rollout, and it warned above.
+      expect({ samples, sabrCount, flipped: sabrCount >= 2 }).toEqual({
+        samples,
+        sabrCount,
+        flipped: false,
+      });
     },
     2 * MINUTE,
   );

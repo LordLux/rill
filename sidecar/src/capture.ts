@@ -248,6 +248,18 @@ async function main(): Promise<void> {
     'MWEB',
   );
 
+  // Ladder tier 1. Same anonymous session, different client on the call — what
+  // makes this one work is the server-issued visitor id `createSession` fetches
+  // by default (F5), so a capture run that produces an empty `player-vr` is
+  // saying something about the visitor id and not about the video.
+  await capture(
+    'player-vr',
+    '/player',
+    { videoId: PLAYER_VIDEO, client: 'ANDROID_VR' },
+    () => anonymous.execute('/player', playerPayload(anonymous, PLAYER_VIDEO, 'ANDROID_VR')),
+    'ANDROID_VR',
+  );
+
   // --- Manifest ------------------------------------------------------------
   const summary = {
     capturedAt: new Date().toISOString(),

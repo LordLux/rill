@@ -4,3 +4,7 @@ node_modules/
 fixtures.partial/
 raw/
 nodes/
+
+# Phase 2 tripwire history
+# One line per live suite run, so the SABR-only rate is visible over time.
+tripwire-mweb-sabr.ndjson
