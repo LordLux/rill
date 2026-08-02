@@ -1,0 +1,6 @@
+raw/
+node_modules/
+.cache/
+*-out/
+*-out*.json
+*.err
