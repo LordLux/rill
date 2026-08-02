@@ -49,6 +49,13 @@ they are listed first.
    runtime is reading a false positive. Only the artefact's own string table is
    evidence, and it has to be the artefact the build actually downloads.
 
+9. **Never poll `NativePlayer.getProperty` from the UI isolate.** It is a
+      blocking FFI call that can sit on mpv's core lock and stall the Flutter
+      frame loop for seconds during a seek (F15). Use media_kit's event
+      streams — `player.stream.position`, `.duration`, `.buffering` — for
+      anything the UI renders. Direct property reads are for diagnostics
+      only, off the UI isolate.
+
 ---
 
 ## The flat DTO contract

@@ -73,7 +73,7 @@ inferred from a video that will not play.
 ### 3.1 Auth
 
 | Method | Params | Result |
-|---|---|---|
+| --- | --- | --- |
 | `auth.status` | — | `{state, accountName?}` |
 | `auth.verify` | — | `{state, tileCount}` |
 | `auth.setCookie` | `{cookie}` | `{state}` |
@@ -89,7 +89,7 @@ flag derived from cookie presence.
 ### 3.2 Feeds
 
 | Method | Params | Result |
-|---|---|---|
+| --- | --- | --- |
 | `feed.home` | `{chipToken?, continuation?}` | `{chips[], items[], continuation?}` |
 | `feed.subscriptions` | `{continuation?}` | `{items[], continuation?}` |
 | `feed.watchLater` | `{continuation?}` | `{items[], continuation?}` |
@@ -105,7 +105,7 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected}`.
 ### 3.3 Video and playlists
 
 | Method | Params | Result |
-|---|---|---|
+| --- | --- | --- |
 | `video.info` | `{videoId}` | `VideoDetail` |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
@@ -120,7 +120,7 @@ user nears the end. Same code path as queue autoplay.
 ### 3.4 Actions
 
 | Method | Params |
-|---|---|
+| --- | --- |
 | `action.addToWatchLater` | `{videoId}` |
 | `action.addToPlaylist` | `{videoId, playlistId}` |
 | `action.like` / `action.dislike` | `{videoId}` |
@@ -131,7 +131,7 @@ All execute against the authenticated `WEB` session.
 ### 3.5 Playback
 
 | Method | Params | Result |
-|---|---|---|
+| --- | --- | --- |
 | `playback.open` | `{videoId, preload?}` | `PlaybackSource` |
 | `playback.report` | `{sessionId, positionMs, state}` | `{}` |
 | `playback.close` | `{sessionId}` | `{}` |
@@ -140,17 +140,42 @@ All execute against the authenticated `WEB` session.
 // PlaybackSource — identical in Phase 1 and Phase 2
 {
   "sessionId": "…",
-  "videoUrl": "https://…",       // Phase 2: http://127.0.0.1:PORT/s/…/manifest.mpd
-  "audioUrl": "https://…",       // Phase 2: null (multiplexed in the manifest)
   "durationMs": 634000,
-  "videoCodec": "vp9",
-  "audioCodec": "mp4a.40.2",
-  "height": 2160,
   "storyboardTemplate": "https://…",
   "qualityDegraded": false,
-  "transport": "plain"           // "plain" | "sabr-dash" | "ytdlp"
+  "transport": "plain",            // "plain" | "sabr-dash" | "ytdlp"
+  // Ranked best-first. The client picks one and may switch without
+  // reopening — all variants come from a single /player response.
+  "variants": [
+    {
+      "videoUrl": "https://…", // Phase 2: http://127.0.0.1:PORT/…manifest.mpd
+      "audioUrl": "https://…", // Phase 2: null (multiplexed in the manifest)
+      "itag": 401,
+      "height": 2160,
+      "fps": 60,
+      "videoCodec": "av01",
+      "audioCodec": "opus"
+    },
+    {
+      "videoUrl": "https://…", // Phase 2: http://127.0.0.1:PORT/…manifest.mpd
+      "audioUrl": "https://…", // Phase 2: null (multiplexed in the manifest)
+      "itag": 399,
+      "height": 1080,
+      "fps": 60,
+      "videoCodec": "av01",
+      "audioCodec": "opus"
+    }
+  ]
 }
 ```
+
+Quality selection is client-side. The sidecar ranks; it does not choose.
+`variants` is ordered best-first and every entry is playable — all are signed
+from one `/player` response, so switching costs no round trip. The client
+starts at its preferred variant and steps down when sustained frame drops
+warrant it (F16: 2160p60 dropped 16–29% of frames on an Intel iGPU while
+1080p60 dropped none, so "tallest available" is not "best"). A cap chosen by
+the sidecar would be wrong differently on every machine.
 
 Flutter never learns which tier served the request. `transport` is telemetry;
 `qualityDegraded` drives a badge, never a dead end.
@@ -195,7 +220,7 @@ different instructions — *the sidecar should try again* and *the user should b
 allowed to try again* — and the difference is the whole UI contract.
 
 | Value | Meaning |
-|---|---|
+| --- | --- |
 | `auto` | The sidecar retries with backoff. The app shows a loading state, not an error |
 | `user` | Do **not** retry silently. Show the error with a retry affordance and let the user decide |
 | `no` | Retrying changes nothing until something external changes — a login, a cookie, a policy |
@@ -204,7 +229,7 @@ allowed to try again* — and the difference is the whole UI contract.
 them has a `retry` value:
 
 | Code | `retry` | UI response |
-|---|---|---|
+| --- | --- | --- |
 | `AUTH_DEGRADED` | `no` | Re-authentication prompt |
 | `AUTH_REQUIRED` | `no` | Login flow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
@@ -222,7 +247,7 @@ a failure envelope, so they have no `retry` value — not `no`, which would be a
 claim about what the app should do with something the app never sees:
 
 | Code | What it is |
-|---|---|
+| --- | --- |
 | `STREAM_REQUIRES_SABR` | A resolution tier telling the ladder "not my case, keep going". The ladder converts a full set of declines into `STREAM_UNAVAILABLE`; this code reaching Flutter is a bug |
 | `PARSE_FAILED` | One unrecognised renderer, skipped. The request still succeeds with the remaining items — it never fails a whole response |
 
