@@ -40,7 +40,7 @@ import { getPlayer, type Player } from '../innertube/player.ts';
 import { getPlayerResponse } from '../innertube/player-response.ts';
 import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
-import type { PlaybackSource, PlaybackTransport, PlayerFormat, PlayerResult } from '../types.ts';
+import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
 import { isSabrOnly } from './sabr-detect.ts';
 import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
 
@@ -187,38 +187,33 @@ function newSessionId(): string {
 }
 
 interface SourceParts {
-  videoUrl: SignedUrl;
-  audioUrl: SignedUrl | null;
-  video: PlayerFormat | null;
-  audio: PlayerFormat | null;
+  variants: PlaybackVariant[];
   response: PlayerResult | null;
   transport: PlaybackTransport;
-  /** Set when the tier knows better than the format list — yt-dlp, say. */
-  height?: number | null;
-  videoCodec?: string | null;
-  audioCodec?: string | null;
   durationMs?: number | null;
 }
 
 function assemble(parts: SourceParts): PlaybackSource {
-  const height = parts.height ?? parts.video?.height ?? null;
+  const top = parts.variants[0];
+  const topHeight = top?.height ?? null;
   const durationSeconds = parts.response?.durationSeconds ?? null;
 
   return {
     sessionId: newSessionId(),
-    videoUrl: parts.videoUrl,
-    audioUrl: parts.audioUrl,
     durationMs: parts.durationMs ?? (durationSeconds === null ? null : durationSeconds * 1000),
-    videoCodec: parts.videoCodec ?? parts.video?.codecs ?? null,
-    audioCodec: parts.audioCodec ?? parts.audio?.codecs ?? null,
-    height,
     storyboardTemplate: parts.response ? storyboardTemplate(parts.response) : null,
     // A uniform rule rather than a bottom-rung special case: tier 5 is 360p so
     // it is always degraded, and a tier-1 resolution that could only find 360p is
     // degraded too, which the user deserves to be told either way.
-    qualityDegraded: height === null || height < DEGRADED_BELOW_HEIGHT,
+    qualityDegraded: topHeight === null || topHeight < DEGRADED_BELOW_HEIGHT,
     transport: parts.transport,
+    variants: parts.variants,
   };
+}
+
+/** Convenience: the best variant's height, for logging. */
+function topHeight(source: PlaybackSource): number | null {
+  return source.variants[0]?.height ?? null;
 }
 
 /**
@@ -288,27 +283,59 @@ export async function tierPlainAdaptive(
     );
   }
 
-  const video = rankVideo(response.formats)[0];
-  const audio = rankAudio(response.formats)[0];
-  if (!video || !audio) {
+  const rankedVideos = rankVideo(response.formats);
+  const rankedAudios = rankAudio(response.formats);
+  if (rankedVideos.length === 0 || rankedAudios.length === 0) {
     throw new RpcError(
       'STREAM_REQUIRES_SABR',
-      `${videoId}: no usable adaptive pair (video=${Boolean(video)} audio=${Boolean(audio)})`,
+      `${videoId}: no usable adaptive pair (video=${rankedVideos.length > 0} audio=${rankedAudios.length > 0})`,
     );
   }
 
   const player = await getPlayer(deps.session);
-  const [videoUrl, audioUrl] = await Promise.all([
-    signFormat(video, player, poToken),
-    signFormat(audio, player, poToken),
-  ]);
+  const bestAudio = rankedAudios[0]!;
 
+  // Sign the best audio once — it serves every video variant (§3.5 rule 5).
+  const audioUrl = await signFormat(bestAudio, player, poToken);
+  const audioCodec = bestAudio.codecs ?? 'unknown';
+
+  // Sign every video format that can be signed. A format that fails to sign is
+  // silently omitted, not emitted with a null URL (task brief rule 3).
+  const variants: PlaybackVariant[] = [];
+  for (const video of rankedVideos) {
+    let videoUrl: SignedUrl;
+    try {
+      videoUrl = await signFormat(video, player, poToken);
+    } catch {
+      log.debug(`${videoId}: ${client} itag ${video.itag} could not be signed — omitted`);
+      continue;
+    }
+    variants.push({
+      videoUrl,
+      audioUrl,
+      itag: video.itag,
+      height: video.height ?? 0,
+      fps: video.fps ?? 0,
+      videoCodec: video.codecs ?? 'unknown',
+      audioCodec,
+    });
+  }
+
+  if (variants.length === 0) {
+    throw new RpcError(
+      'STREAM_UNAVAILABLE',
+      `${videoId}: ${client} every video format failed to sign`,
+    );
+  }
+
+  const bestVariant = variants[0]!;
   log.debug(
-    `${videoId}: ${client} itag ${video.itag} (${video.height}p ${video.codecs}) + ` +
-      `itag ${audio.itag} (${audio.codecs})`,
+    `${videoId}: ${client} ${variants.length} variants, best itag ${bestVariant.itag} ` +
+      `(${bestVariant.height}p${bestVariant.fps} ${bestVariant.videoCodec}) + ` +
+      `audio itag ${bestAudio.itag} (${audioCodec})`,
   );
 
-  return assemble({ videoUrl, audioUrl, video, audio, response, transport: 'plain' });
+  return assemble({ variants, response, transport: 'plain' });
 }
 
 /**
@@ -492,18 +519,21 @@ export function sourceFromYtDlpDump(
 
   const height = video?.height ?? dump.height ?? null;
 
-  return assemble({
+  const variant: PlaybackVariant = {
     videoUrl: adoptExternallyDeciphered(videoAddress, tool),
     audioUrl: audio?.url ? adoptExternallyDeciphered(audio.url, tool) : null,
-    // The formats are yt-dlp's, not InnerTube's, so the codec and height fields
-    // are read off the dump rather than inferred from a PlayerFormat.
-    video: null,
-    audio: null,
+    // yt-dlp does not give us an itag reliably; 0 signals "unknown".
+    itag: 0,
+    height: height ?? 0,
+    fps: 0,
+    videoCodec: video?.vcodec ?? dump.vcodec ?? 'unknown',
+    audioCodec: audio?.acodec ?? dump.acodec ?? 'unknown',
+  };
+
+  return assemble({
+    variants: [variant],
     response,
     transport: 'ytdlp',
-    height,
-    videoCodec: video?.vcodec ?? dump.vcodec ?? null,
-    audioCodec: audio?.acodec ?? dump.acodec ?? null,
     durationMs: dump.duration ? Math.round(dump.duration * 1000) : null,
   });
 }
@@ -586,7 +616,7 @@ export async function tierYtDlp(
   }
 
   const source = sourceFromYtDlpDump(dump, binary, response);
-  log.debug(`${videoId}: yt-dlp resolved ${source.height ?? '?'}p`);
+  log.debug(`${videoId}: yt-dlp resolved ${topHeight(source) ?? '?'}p`);
   return source;
 }
 
@@ -639,21 +669,26 @@ export async function tierProgressive(
 
   // A muxed format reports both codecs in one `codecs="avc1.42001E, mp4a.40.2"`
   // list; split it so the DTO's two fields mean what they say.
-  const [videoCodec = null, audioCodec = null] = (progressive.codecs ?? '')
+  const [videoCodec = 'unknown', audioCodec = 'unknown'] = (progressive.codecs ?? '')
     .split(',')
     .map((codec) => codec.trim())
     .filter(Boolean);
 
-  return assemble({
+  const variant: PlaybackVariant = {
     videoUrl,
     // Muxed: mpv gets one URL and no --audio-file.
     audioUrl: null,
-    video: progressive,
-    audio: null,
-    response,
-    transport: 'plain',
+    itag: progressive.itag,
+    height: progressive.height ?? 0,
+    fps: progressive.fps ?? 0,
     videoCodec,
     audioCodec,
+  };
+
+  return assemble({
+    variants: [variant],
+    response,
+    transport: 'plain',
   });
 }
 
@@ -685,7 +720,7 @@ export async function descendLadder(
       const source = await tier.run();
       log.info(
         `${preload ? 'preload' : 'open'} ${videoId}: tier ${index + 1} (${tier.name}) ` +
-          `→ ${source.height ?? '?'}p transport=${source.transport}` +
+          `→ ${topHeight(source) ?? '?'}p (${source.variants.length} variant${source.variants.length === 1 ? '' : 's'}) transport=${source.transport}` +
           `${source.qualityDegraded ? ' DEGRADED' : ''}`,
       );
       return source;

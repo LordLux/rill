@@ -14,7 +14,7 @@
  * Everything goes to stderr. Hard invariant 3: stdout is protocol.
  */
 
-import { announceCapabilities } from './capabilities.ts';
+
 import { logger } from './log.ts';
 import { createSession } from './innertube/session.ts';
 import { mpvCommand } from './playback/mpv-options.ts';
@@ -30,7 +30,7 @@ const videoId = process.argv[2] ?? process.env['YT_VIDEO_STANDARD'] ?? 'aqz-KE-b
 // Startup, such as it is. The RPC entrypoint does not exist yet; when it does,
 // this call moves there and its result goes into `event.ready` (protocol.md §2).
 // Until then this is the one place a missing tier 4 gets said out loud.
-announceCapabilities();
+
 
 // Streams resolve through an anonymous session (§2.3). No cookie, on purpose —
 // the browse session is a separate concern and a separate call. The client is
@@ -39,16 +39,21 @@ announceCapabilities();
 // server-issued visitor id `createSession` fetches by default (F5).
 const session = await createSession({ clientType: 'MWEB' });
 const source = await openPlayback({ session }, { videoId });
+const best = source.variants[0]!;
 
 log.info(`video    ${videoId}`);
 log.info(`transport ${source.transport}${source.qualityDegraded ? '  (DEGRADED)' : ''}`);
-log.info(`quality  ${source.height ?? '?'}p  ${source.videoCodec ?? '?'} / ${source.audioCodec ?? '?'}`);
+log.info(`quality  ${best.height ?? '?'}p  ${best.videoCodec ?? '?'} / ${best.audioCodec ?? '?'}`);
+log.info(`variants ${source.variants.length}`);
+for (const v of source.variants) {
+  log.info(`  itag ${v.itag}: ${v.height}p${v.fps} ${v.videoCodec}`);
+}
 log.info(`duration ${source.durationMs === null ? 'live' : `${Math.round(source.durationMs / 1000)}s`}`);
 log.info(`storyboard ${source.storyboardTemplate ? 'present' : 'absent'}`);
 
 const started = Date.now();
 let received = 0;
-const response = await fetch(source.videoUrl, { headers: { range: `bytes=0-${SAMPLE_BYTES - 1}` } });
+const response = await fetch(best.videoUrl, { headers: { range: `bytes=0-${SAMPLE_BYTES - 1}` } });
 if (response.ok || response.status === 206) {
   for await (const chunk of response.body!) {
     received += chunk.length;
@@ -69,4 +74,4 @@ log.info('');
 log.info('play it:');
 // Carries `--stream-lavf-o=request_size=…`, same as the app will. The shipped
 // libmpv ignores it (F13); a newer one needs it to seek. See `mpv-options.ts`.
-log.info(mpvCommand(source.videoUrl, source.audioUrl));
+log.info(mpvCommand(best.videoUrl, best.audioUrl));

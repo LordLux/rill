@@ -196,25 +196,46 @@ export interface PlayerResult {
 export type PlaybackTransport = 'plain' | 'sabr-dash' | 'ytdlp';
 
 /**
- * What `playback.open` returns. Identical in Phase 1 and Phase 2, so the SABR
- * bridge lands as a transport swap and not a protocol revision.
+ * One playable video + audio pair within a `PlaybackSource`.
+ *
+ * Ranked best-first by the sidecar (height → fps → codec preference). The
+ * client picks one and may step down on sustained frame drops (F16). Every
+ * entry is playable — a format that cannot be signed is silently omitted.
  */
-export interface PlaybackSource {
-  sessionId: string;
-  /** Phase 2: `http://127.0.0.1:PORT/s/…/manifest.mpd`. */
+export interface PlaybackVariant {
   videoUrl: SignedUrl;
   /** null for a progressive (muxed) stream, and in Phase 2 for DASH. */
   audioUrl: SignedUrl | null;
+  itag: number;
+  /** From the format itself, never from an itag→height lookup table. */
+  height: number;
+  /** From the format itself. */
+  fps: number;
+  videoCodec: string;
+  audioCodec: string;
+}
+
+/**
+ * What `playback.open` returns. Identical in Phase 1 and Phase 2, so the SABR
+ * bridge lands as a transport swap and not a protocol revision.
+ *
+ * `variants` is ranked best-first. The client picks one and may switch without
+ * reopening — all variants come from a single `/player` response (§3.5).
+ */
+export interface PlaybackSource {
+  sessionId: string;
   /** null when live — a live stream has no final duration. */
   durationMs: number | null;
-  videoCodec: string | null;
-  audioCodec: string | null;
-  height: number | null;
   /** Sprite-sheet template for hover previews (F8). */
   storyboardTemplate: string | null;
   /** Drives a badge in the UI, never a dead end. */
   qualityDegraded: boolean;
   transport: PlaybackTransport;
+  /**
+   * Ranked best-first: highest height → highest fps → codec preference.
+   * Every entry is a playable pair. Tiers 3–5 may return a single-entry array.
+   */
+  variants: PlaybackVariant[];
 }
 
 // ---------------------------------------------------------------------------

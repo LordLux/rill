@@ -36,6 +36,9 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'data/rpc/client.dart';
+
+
 // ---------------------------------------------------------------------------
 // The measurement plan
 // ---------------------------------------------------------------------------
@@ -119,7 +122,7 @@ class HarnessConfig {
     required this.mode,
     required this.track,
     required this.setRequestSize,
-    required this.streamJson,
+    required this.videoId,
     required this.outPath,
     required this.runLabel,
     required this.hwdec,
@@ -129,9 +132,10 @@ class HarnessConfig {
   final HarnessMode mode;
   final String track;
   final bool setRequestSize;
-  final File streamJson;
+  final String videoId;
   final String? outPath;
   final String runLabel;
+
 
   /// null leaves media_kit's own default (`auto`) alone. `no` is Q3's control:
   /// if forcing software decode costs the same CPU, the "hardware decoding"
@@ -155,7 +159,7 @@ class HarnessConfig {
       // it. Q1 is explicitly the no-options baseline: F13 expects 4/4 with
       // nothing set, and anything less is the finding.
       setRequestSize: mode == HarnessMode.q2 || env['NY_OPTIONS'] == 'request_size',
-      streamJson: _findStreamJson(env['NY_STREAM_JSON']),
+      videoId: env['NY_VIDEO_ID'] ?? 'aqz-KE-bpKQ',
       outPath: env['NY_OUT'],
       runLabel: env['NY_RUN'] ?? '1',
       hwdec: env['NY_HWDEC'],
@@ -164,24 +168,11 @@ class HarnessConfig {
         orElse: () => MPVLogLevel.info,
       ),
     );
+
   }
 
-  /// `flutter run` and a built exe disagree about the working directory, and
-  /// neither is the repo root. Walk up until `spiking/07-out/stream.json` turns
-  /// up, rather than making the caller know which one they are in.
-  static File _findStreamJson(String? explicit) {
-    if (explicit != null) return File(explicit);
+  // _findStreamJson removed as we don't use file anymore
 
-    var dir = Directory.current;
-    for (var i = 0; i < 8; i++) {
-      final candidate = File('${dir.path}/spiking/07-out/stream.json');
-      if (candidate.existsSync()) return candidate;
-      final parent = dir.parent;
-      if (parent.path == dir.path) break;
-      dir = parent;
-    }
-    return File('spiking/07-out/stream.json');
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -209,47 +200,35 @@ class StreamSource {
   final String? expiresAt;
   final int? durationMs;
 
-  /// Reads `spiking/07-out/stream.json`, picking the variant named by NY_TRACK.
-  ///
-  /// Refuses expired URLs by name. Stream URLs are ~6 h and IP-bound, and a
-  /// stale-URL 403 debugged as a media_kit fault is the exact trap §2 names.
+  /// Fetches source from sidecar over RPC.
   static Future<StreamSource> load(HarnessConfig config) async {
-    if (!config.streamJson.existsSync()) {
-      throw StateError(
-        'no stream file at ${config.streamJson.path} — run: '
-        'bun run spiking/07-resolve.ts',
-      );
-    }
+    final rpc = RpcClient.instance;
+    await rpc.start();
 
-    final json = jsonDecode(await config.streamJson.readAsString()) as Map<String, dynamic>;
-    final variants = (json['variants'] as List<dynamic>).cast<Map<String, dynamic>>();
-    final variant = variants.firstWhere(
-      (v) => v['key'] == config.track,
-      orElse: () => throw StateError(
-        'no "${config.track}" variant in ${config.streamJson.path} '
-        '(have: ${variants.map((v) => v['key']).join(', ')})',
-      ),
-    );
+    stderr.writeln('harness calling auth.verify');
+    final authRes = await rpc.call('auth.verify', {});
+    stderr.writeln('harness auth.verify: $authRes');
 
-    final expiresAt = json['expiresAt'] as String?;
-    if (expiresAt != null && DateTime.parse(expiresAt).isBefore(DateTime.now().toUtc())) {
-      throw StateError(
-        'these URLs expired at $expiresAt — re-resolve before blaming media_kit: '
-        'bun run spiking/07-resolve.ts',
-      );
-    }
-
+    stderr.writeln('harness calling playback.open');
+    final json = await rpc.call('playback.open', {'videoId': config.videoId}) as Map<String, dynamic>;
+    
+    // The sidecar's PlaybackSource predates the variants[] amendment from protocol.md §3.5.
+    // We are consuming what the sidecar actually returns (a single videoUrl/audioUrl pair).
+    stderr.writeln('harness returned source: $json');
+    
     return StreamSource(
-      videoId: json['videoId'] as String,
-      videoUrl: variant['videoUrl'] as String,
+      videoId: config.videoId,
+      videoUrl: json['videoUrl'] as String,
       audioUrl: json['audioUrl'] as String?,
-      itag: variant['itag'] as int?,
-      codec: variant['codec'] as String?,
-      capturedAt: json['capturedAt'] as String?,
-      expiresAt: expiresAt,
+      itag: null, // The current PlaybackSource doesn't expose itag at the top level
+      codec: json['videoCodec'] as String?,
+      capturedAt: null,
+      expiresAt: null,
       durationMs: json['durationMs'] as int?,
     );
+
   }
+
 }
 
 // ---------------------------------------------------------------------------

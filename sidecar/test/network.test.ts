@@ -200,18 +200,19 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
     'a real video resolves to two plain URLs, with no n on either',
     async () => {
       const source = await openPlayback({ session }, { videoId: VIDEO });
+      const best = source.variants[0]!;
 
       expect(source.transport).toBe('plain');
-      expect(source.videoUrl).toStartWith('https://');
-      expect(source.audioUrl).toStartWith('https://');
+      expect(best.videoUrl).toStartWith('https://');
+      expect(best.audioUrl).toStartWith('https://');
       expect(source.qualityDegraded).toBe(false);
-      expect(source.height).toBeGreaterThanOrEqual(1080);
+      expect(best.height).toBeGreaterThanOrEqual(1080);
 
       // Which tier served is not on the DTO — `transport` is 'plain' for tiers 1
       // and 2 alike — but YouTube stamps the requesting client into the URL, so
       // `c=` is the honest way to ask. Anything else here means tier 1 declined
       // and something below it served, which the ladder does silently by design.
-      for (const url of [source.videoUrl, source.audioUrl!]) {
+      for (const url of [best.videoUrl, best.audioUrl!]) {
         const parsed = new URL(url);
         expect(parsed.searchParams.get('c')).toBe('ANDROID_VR');
         // The point of the reorder: no `n` on the primary path, so the silent
@@ -229,7 +230,7 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
     'sustained throughput is above the bar',
     async () => {
       const source = await openPlayback({ session }, { videoId: VIDEO });
-      const result = await measure(source.videoUrl);
+      const result = await measure(source.variants[0]!.videoUrl);
 
       // Say what happened before asserting — a bare `expect(mbps).toBeGreaterThan`
       // failure tells you nothing about whether it was slow or refused.
@@ -289,7 +290,7 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
 
         const abort = new AbortController();
         try {
-          const response = await fetch(source.videoUrl, {
+          const response = await fetch(source.variants[0]!.videoUrl, {
             headers: { range: 'bytes=0-' },
             signal: abort.signal,
           });
@@ -319,7 +320,7 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
     'the audio track streams too — mpv gets two working URLs',
     async () => {
       const source = await openPlayback({ session }, { videoId: VIDEO });
-      const response = await fetch(source.audioUrl!, { headers: { range: 'bytes=0-262143' } });
+      const response = await fetch(source.variants[0]!.audioUrl!, { headers: { range: 'bytes=0-262143' } });
       expect([200, 206]).toContain(response.status);
       expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
     },
@@ -359,14 +360,14 @@ describe.if(ONLINE)('tier 2 — MWEB, and the decipher path', () => {
         source = await tierPlainAdaptive({ session }, VIDEO, 'MWEB', null, response);
       }
 
-      const url = new URL(source.videoUrl);
+      const url = new URL(source.variants[0]!.videoUrl);
       expect(url.searchParams.get('c')).toBe('MWEB');
       expect(url.searchParams.get('n')).toBeString();
 
       // A bounded range, because F10: `MWEB` refuses the open-ended kind. That
       // refusal is about request shape and does not touch throughput — a wrong
       // `n` is served, at ~50 KB/s, and only pulling bytes can tell them apart.
-      const result = await measure(source.videoUrl);
+      const result = await measure(source.variants[0]!.videoUrl);
       const detail =
         `HTTP ${result.status}, ${(result.received / 1024 / 1024).toFixed(1)} MB in ` +
         `${result.seconds.toFixed(1)}s = ${result.mbps.toFixed(2)} MB/s`;
@@ -482,16 +483,17 @@ describe.if(ONLINE)('ladder tier 5 — itag 18 progressive', () => {
       }
 
       const source = await tierProgressive({ session }, VIDEO, null, response);
+      const best = source.variants[0]!;
 
-      expect(source.height).toBe(360);
-      expect(source.audioUrl).toBeNull(); // muxed: one URL, no --audio-file
+      expect(best.height).toBe(360);
+      expect(best.audioUrl).toBeNull(); // muxed: one URL, no --audio-file
       expect(source.qualityDegraded).toBe(true);
       // A muxed format lists both codecs in one string; they must land in the
       // right two fields, not both in one.
-      expect(source.videoCodec).toStartWith('avc1');
-      expect(source.audioCodec).toStartWith('mp4a');
+      expect(best.videoCodec).toStartWith('avc1');
+      expect(best.audioCodec).toStartWith('mp4a');
 
-      const fetched = await fetch(source.videoUrl, { headers: { range: 'bytes=0-1048575' } });
+      const fetched = await fetch(best.videoUrl, { headers: { range: 'bytes=0-1048575' } });
       expect([200, 206]).toContain(fetched.status);
       expect((await fetched.arrayBuffer()).byteLength).toBeGreaterThan(0);
     },
@@ -512,13 +514,14 @@ describe.if(ONLINE && YT_DLP !== null)('ladder tier 4 — yt-dlp', () => {
       // a `PlaybackSource`, and that URLs deciphered by someone else's
       // implementation actually stream.
       const source = await tierYtDlp({ session, ytDlpPath: YT_DLP! }, VIDEO, null, null);
+      const best = source.variants[0]!;
 
       expect(source.transport).toBe('ytdlp');
-      expect(source.height).toBeGreaterThanOrEqual(1080);
+      expect(best.height).toBeGreaterThanOrEqual(1080);
       expect(source.durationMs).toBeGreaterThan(0);
-      expect(source.videoUrl).toStartWith('https://');
+      expect(best.videoUrl).toStartWith('https://');
 
-      for (const url of [source.videoUrl, source.audioUrl].filter((u) => u !== null)) {
+      for (const url of [best.videoUrl, best.audioUrl].filter((u) => u !== null)) {
         const response = await fetch(url, { headers: { range: 'bytes=0-1048575' } });
         expect([200, 206]).toContain(response.status);
         expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);

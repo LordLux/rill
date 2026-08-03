@@ -34,7 +34,7 @@ import {
 } from '../src/playback/resolve.ts';
 import { isSabrOnly, isSabrOnlyAdaptive } from '../src/playback/sabr-detect.ts';
 import { nullPoTokenProvider } from '../src/playback/po-token.ts';
-import type { PlaybackSource, PlayerResult } from '../src/types.ts';
+import type { PlaybackSource, PlaybackVariant, PlayerResult } from '../src/types.ts';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 
@@ -220,20 +220,29 @@ describe('adoptExternallyDeciphered', () => {
  * `descendLadder` is the real loop `openPlayback` runs; only the four tiers are
  * stubbed. Reimplementing the loop in this file would test the reimplementation.
  */
-function stubSource(transport: PlaybackSource['transport'], height: number): PlaybackSource {
+function stubVariant(height: number, overrides: Partial<PlaybackVariant> = {}): PlaybackVariant {
   return {
-    sessionId: 'test',
     // A legitimate constructor rather than a cast — nothing outside
     // `signed-url.ts` should be minting these, tests included.
     videoUrl: adoptExternallyDeciphered(MWEB_URL, 'test'),
     audioUrl: null,
-    durationMs: 1000,
-    videoCodec: 'vp9',
-    audioCodec: null,
+    itag: 315,
     height,
+    fps: 30,
+    videoCodec: 'vp9',
+    audioCodec: 'opus',
+    ...overrides,
+  };
+}
+
+function stubSource(transport: PlaybackSource['transport'], height: number): PlaybackSource {
+  return {
+    sessionId: 'test',
+    durationMs: 1000,
     storyboardTemplate: null,
     qualityDegraded: height < 720,
     transport,
+    variants: [stubVariant(height)],
   };
 }
 
@@ -257,6 +266,9 @@ describe('resolution ladder', () => {
     throw new RpcError(code, 'declined');
   };
 
+  /** Convenience for reading the top-level variant from a source. */
+  const best = (source: PlaybackSource) => source.variants[0]!;
+
   test('stops at the first tier that serves', async () => {
     const { tiers, attempted } = trace([
       ['mweb', async () => stubSource('plain', 2160)],
@@ -268,7 +280,7 @@ describe('resolution ladder', () => {
     const source = await descendLadder('aqz-KE-bpKQ', tiers);
     expect(attempted).toEqual(['mweb']);
     expect(source.transport).toBe('plain');
-    expect(source.height).toBe(2160);
+    expect(best(source).height).toBe(2160);
   });
 
   test('falls through SABR and yt-dlp to the progressive floor', async () => {
@@ -368,6 +380,15 @@ function rawPlayerBody(options: {
           ...address(315, 'RAWN315'),
         },
         {
+          itag: 136,
+          mimeType: 'video/mp4; codecs="avc1.64002a"',
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          bitrate: 4_000_000,
+          ...address(136, 'RAWN136'),
+        },
+        {
           itag: 251,
           mimeType: 'audio/webm; codecs="opus"',
           audioQuality: 'AUDIO_QUALITY_MEDIUM',
@@ -462,9 +483,10 @@ describe('the ladder as openPlayback wires it', () => {
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    const best = source.variants[0]!;
 
-    const video = new URL(source.videoUrl);
-    const audio = new URL(source.audioUrl!);
+    const video = new URL(best.videoUrl);
+    const audio = new URL(best.audioUrl!);
     expect(video.searchParams.get('c')).toBe('ANDROID_VR');
     expect(audio.searchParams.get('c')).toBe('ANDROID_VR');
 
@@ -473,7 +495,7 @@ describe('the ladder as openPlayback wires it', () => {
     expect(video.searchParams.has('n')).toBe(false);
     expect(audio.searchParams.has('n')).toBe(false);
 
-    expect(source.height).toBe(2160);
+    expect(best.height).toBe(2160);
     expect(source.transport).toBe('plain');
     expect(source.qualityDegraded).toBe(false);
     expect(source.storyboardTemplate).toStartWith('http');
@@ -490,8 +512,9 @@ describe('the ladder as openPlayback wires it', () => {
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    const best = source.variants[0]!;
 
-    const video = new URL(source.videoUrl);
+    const video = new URL(best.videoUrl);
     expect(video.searchParams.get('c')).toBe('MWEB');
     // Deciphered, not merely present — the raw value would throttle to ~50 KB/s.
     expect(video.searchParams.get('n')).toBe('n(RAWN315)');
@@ -505,12 +528,13 @@ describe('the ladder as openPlayback wires it', () => {
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    const best = source.variants[0]!;
 
-    expect(source.height).toBe(360);
-    expect(source.audioUrl).toBeNull();
+    expect(best.height).toBe(360);
+    expect(best.audioUrl).toBeNull();
     expect(source.qualityDegraded).toBe(true);
-    expect(source.videoCodec).toStartWith('avc1');
-    expect(source.audioCodec).toStartWith('mp4a');
+    expect(best.videoCodec).toStartWith('avc1');
+    expect(best.audioCodec).toStartWith('mp4a');
 
     // Tiers 2, 4 and 5 all want the MWEB response; between them they cost one
     // call, not three.
@@ -532,7 +556,7 @@ describe('the ladder as openPlayback wires it', () => {
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
-    expect(new URL(source.videoUrl).searchParams.get('c')).toBe('MWEB');
+    expect(new URL(source.variants[0]!.videoUrl).searchParams.get('c')).toBe('MWEB');
     // One ANDROID_VR call, not two: no retry happened.
     expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
   });
@@ -667,15 +691,21 @@ describe('fetchWithVisitorRetry', () => {
 
 const SOURCE_SHAPE = {
   sessionId: 'string',
-  videoUrl: 'string',
-  audioUrl: 'string?',
   durationMs: 'number?',
-  videoCodec: 'string?',
-  audioCodec: 'string?',
-  height: 'number?',
   storyboardTemplate: 'string?',
   qualityDegraded: 'boolean',
   transport: 'string',
+  variants: 'array',
+} as const;
+
+const VARIANT_SHAPE = {
+  videoUrl: 'string',
+  audioUrl: 'string?',
+  itag: 'number',
+  height: 'number',
+  fps: 'number',
+  videoCodec: 'string',
+  audioCodec: 'string',
 } as const;
 
 function validateSource(source: PlaybackSource): string[] {
@@ -692,6 +722,10 @@ function validateSource(source: PlaybackSource): string[] {
       problems.push(`${key}: undefined (must be a value or null)`);
       continue;
     }
+    if (spec === 'array') {
+      if (!Array.isArray(value)) problems.push(`${key}: expected array, got ${typeof value}`);
+      continue;
+    }
     const optional = spec.endsWith('?');
     if (value === null) {
       if (!optional) problems.push(`${key}: null but not nullable`);
@@ -703,6 +737,31 @@ function validateSource(source: PlaybackSource): string[] {
 
   if (!['plain', 'sabr-dash', 'ytdlp'].includes(source.transport)) {
     problems.push(`transport: '${source.transport}' is not a known tier`);
+  }
+
+  if (!Array.isArray(source.variants) || source.variants.length === 0) {
+    problems.push('variants: must be a non-empty array');
+  } else {
+    for (const [i, variant] of source.variants.entries()) {
+      const vRecord = variant as unknown as Record<string, unknown>;
+      for (const key of Object.keys(vRecord)) {
+        if (!(key in VARIANT_SHAPE)) problems.push(`variants[${i}].${key}: not in PlaybackVariant`);
+      }
+      for (const [key, spec] of Object.entries(VARIANT_SHAPE)) {
+        const value = vRecord[key];
+        if (value === undefined) {
+          problems.push(`variants[${i}].${key}: undefined (must be a value or null)`);
+          continue;
+        }
+        const optional = spec.endsWith('?');
+        if (value === null) {
+          if (!optional) problems.push(`variants[${i}].${key}: null but not nullable`);
+          continue;
+        }
+        const base = optional ? spec.slice(0, -1) : spec;
+        if (typeof value !== base) problems.push(`variants[${i}].${key}: expected ${base}, got ${typeof value}`);
+      }
+    }
   }
   return problems;
 }
@@ -727,7 +786,169 @@ describe('PlaybackSource', () => {
     // The brand is compile-time only. If it ever became a runtime wrapper,
     // Flutter would receive an object where it expects a URL.
     const serialised = JSON.parse(JSON.stringify(stubSource('plain', 1080)));
-    expect(typeof serialised.videoUrl).toBe('string');
+    expect(typeof serialised.variants[0].videoUrl).toBe('string');
+  });
+
+  test('no consumer reads a top-level videoUrl', () => {
+    // The type system enforces this at compile time; this is a runtime guard
+    // for anything that casts to `any` or reads the JSON directly.
+    const source = stubSource('plain', 1080);
+    const record = source as unknown as Record<string, unknown>;
+    expect(record['videoUrl']).toBeUndefined();
+    expect(record['audioUrl']).toBeUndefined();
+    expect(record['videoCodec']).toBeUndefined();
+    expect(record['audioCodec']).toBeUndefined();
+    expect(record['height']).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Variants — Task 09
+//
+// These are the test requirements from the task brief. They exercise the shape
+// and ranking of `variants[]` against the stub session, offline.
+// ---------------------------------------------------------------------------
+
+describe('variants', () => {
+  beforeEach(() => {
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
+
+  test('tier 1 returns more than one variant from one /player response, and makes exactly one network call', async () => {
+    // The fixture has itag 315 (2160p60) and itag 136 (1080p30) as video formats.
+    // Both should become variants. Only one ANDROID_VR /player call.
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    expect(source.variants.length).toBeGreaterThan(1);
+    // Only one /player call.
+    expect(session.calls).toEqual(['ANDROID_VR']);
+  });
+
+  test('variants are ordered best-first: highest height, then fps', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    const heights = source.variants.map((v) => v.height);
+
+    // Heights must be non-increasing (best first).
+    for (let i = 1; i < heights.length; i++) {
+      expect(heights[i]!).toBeLessThanOrEqual(heights[i - 1]!);
+    }
+
+    // The first variant is the tallest.
+    expect(heights[0]).toBe(2160);
+  });
+
+  test('every variant URL is a branded SignedUrl (starts with https://)', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    for (const variant of source.variants) {
+      // The brand is compile-time; runtime evidence is that the URL is a string.
+      expect(typeof variant.videoUrl).toBe('string');
+      expect(variant.videoUrl).toStartWith('https://');
+      if (variant.audioUrl !== null) {
+        expect(typeof variant.audioUrl).toBe('string');
+        expect(variant.audioUrl).toStartWith('https://');
+      }
+    }
+  });
+
+  test('audio is shared across variants — same signed URL, not signed repeatedly', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    // All variants should share the same audioUrl since they use the best audio track.
+    const audioUrls = source.variants.map((v) => v.audioUrl).filter(Boolean);
+    const unique = new Set(audioUrls);
+    expect(unique.size).toBe(1);
+  });
+
+  test('height and fps come from the format, not a lookup table', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    // The fixture has itag 315 at 2160p60 — height and fps must match the format fields,
+    // not an itag→height lookup table.
+    const v2160 = source.variants.find((v) => v.itag === 315);
+    expect(v2160).toBeDefined();
+    expect(v2160!.height).toBe(2160);
+    expect(v2160!.fps).toBe(60);
+  });
+
+  test('tiers 4 and 5 return exactly one variant and remain valid', async () => {
+    // Tier 5 (progressive) — single variant.
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
+      MWEB: rawPlayerBody({ client: 'MWEB', withN: true, sabrOnly: true }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    expect(source.variants).toHaveLength(1);
+    expect(validateSource(source)).toEqual([]);
+
+    // Tier 4 (yt-dlp) — single variant.
+    const ytdlpSource = sourceFromYtDlpDump(
+      {
+        duration: 634,
+        url: 'https://r1.googlevideo.com/videoplayback?itag=18&c=MWEB&n=DECIPHERED',
+        vcodec: 'avc1.42001E',
+        acodec: 'mp4a.40.2',
+        height: 360,
+      },
+      'yt-dlp',
+      null,
+    );
+    expect(ytdlpSource.variants).toHaveLength(1);
+    expect(validateSource(ytdlpSource)).toEqual([]);
+  });
+
+  test('PlaybackSource with variants survives JSON round-tripping with no field lost', async () => {
+    const session = fakeSession({
+      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    const roundTripped = JSON.parse(JSON.stringify(source)) as PlaybackSource;
+
+    expect(roundTripped.sessionId).toBe(source.sessionId);
+    expect(roundTripped.durationMs).toBe(source.durationMs);
+    expect(roundTripped.transport).toBe(source.transport);
+    expect(roundTripped.qualityDegraded).toBe(source.qualityDegraded);
+    expect(roundTripped.variants).toHaveLength(source.variants.length);
+
+    for (let i = 0; i < source.variants.length; i++) {
+      expect(roundTripped.variants[i]!.videoUrl).toBe(source.variants[i]!.videoUrl);
+      expect(roundTripped.variants[i]!.audioUrl).toBe(source.variants[i]!.audioUrl);
+      expect(roundTripped.variants[i]!.itag).toBe(source.variants[i]!.itag);
+      expect(roundTripped.variants[i]!.height).toBe(source.variants[i]!.height);
+      expect(roundTripped.variants[i]!.fps).toBe(source.variants[i]!.fps);
+      expect(roundTripped.variants[i]!.videoCodec).toBe(source.variants[i]!.videoCodec);
+      expect(roundTripped.variants[i]!.audioCodec).toBe(source.variants[i]!.audioCodec);
+    }
+
+    // Branded URLs are plain strings on the wire.
+    for (const v of roundTripped.variants) {
+      expect(typeof v.videoUrl).toBe('string');
+    }
   });
 });
 
@@ -871,14 +1092,16 @@ describe('yt-dlp tier', () => {
 
   test('an adaptive dump becomes two signed URLs', () => {
     const source = sourceFromYtDlpDump(adaptiveDump, 'yt-dlp', null);
+    const best = source.variants[0]!;
 
     expect(validateSource(source)).toEqual([]);
     expect(source.transport).toBe('ytdlp');
-    expect(source.videoUrl).toContain('itag=315');
-    expect(source.audioUrl).toContain('itag=251');
-    expect(source.height).toBe(2160);
-    expect(source.videoCodec).toStartWith('vp09');
-    expect(source.audioCodec).toBe('opus');
+    expect(source.variants).toHaveLength(1);
+    expect(best.videoUrl).toContain('itag=315');
+    expect(best.audioUrl).toContain('itag=251');
+    expect(best.height).toBe(2160);
+    expect(best.videoCodec).toStartWith('vp09');
+    expect(best.audioCodec).toBe('opus');
     expect(source.durationMs).toBe(634566);
     expect(source.qualityDegraded).toBe(false);
   });
@@ -898,8 +1121,8 @@ describe('yt-dlp tier', () => {
       null,
     );
 
-    expect(source.audioUrl).toBeNull();
-    expect(source.height).toBe(360);
+    expect(source.variants[0]!.audioUrl).toBeNull();
+    expect(source.variants[0]!.height).toBe(360);
     expect(source.qualityDegraded).toBe(true);
   });
 
@@ -946,7 +1169,7 @@ describe('yt-dlp tier', () => {
       const started = Date.now();
       const source = await tierYtDlp({ session: null as never, ytDlpPath: stub }, 'aqz-KE-bpKQ', null, null);
 
-      expect(source.height).toBe(360);
+      expect(source.variants[0]!.height).toBe(360);
       expect(source.transport).toBe('ytdlp');
       expect(Date.now() - started).toBeLessThan(15_000);
     },

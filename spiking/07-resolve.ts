@@ -122,26 +122,31 @@ if (variants.length === 0) {
   throw new Error(`${videoId}: neither itag 401 nor 315 resolved — nothing for Q3 to measure`);
 }
 
+const best = source.variants[0];
 const payload = {
   videoId,
   capturedAt: new Date().toISOString(),
-  expiresAt: expiryOf(source.videoUrl),
+  expiresAt: expiryOf(best.videoUrl),
   transport: source.transport,
   durationMs: source.durationMs,
   // The ladder's own pick, in the shape the brief asks for.
-  videoUrl: source.videoUrl,
-  audioUrl: source.audioUrl,
-  itag: variants.find((v) => v.videoUrl === source.videoUrl)?.itag ?? null,
-  codec: source.videoCodec,
-  audioCodec: source.audioCodec,
-  height: source.height,
-  variants,
+  videoUrl: best.videoUrl,
+  audioUrl: best.audioUrl,
+  itag: variants.find((v) => v.videoUrl === best.videoUrl)?.itag ?? best.itag,
+  codec: best.videoCodec,
+  audioCodec: best.audioCodec,
+  height: best.height,
+  ladderVariants: source.variants,
+  spikeVariants: variants,
 };
 
 await mkdir(outDir, { recursive: true });
 await writeFile(new URL('stream.json', outDir), `${JSON.stringify(payload, null, 2)}\n`);
 
-log.info(`${videoId}: ${source.height ?? '?'}p ${source.videoCodec ?? '?'} + ${source.audioCodec ?? '?'}`);
+log.info(`${videoId}: ${best.height ?? '?'}p ${best.videoCodec ?? '?'} + ${best.audioCodec ?? '?'}`);
+log.info(`ladder variants: ${source.variants.length}`);
+for (const v of source.variants) log.info(`  itag ${v.itag}: ${v.height}p${v.fps} ${v.videoCodec}`);
+log.info(`spike variants: ${variants.length}`);
 for (const v of variants) log.info(`  ${v.key}: itag ${v.itag} ${v.codec} ${v.height}p${v.fps ?? ''}`);
 log.info(`duration ${source.durationMs === null ? 'live' : `${Math.round(source.durationMs / 1000)}s`}`);
 log.info(`expires  ${payload.expiresAt ?? '(no expire parameter)'}`);
