@@ -71,7 +71,9 @@ class RpcClient {
 
     try {
       final command = mockCommand ?? ['run', 'sidecar/src/main.ts'];
-      _process = await Process.start('bun', command, workingDirectory: root);
+      _process = await Process.start('bun', command, workingDirectory: root, environment: {
+        'FLUTTER_PARENT_PID': pid.toString(),
+      });
 
       _process!.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
         _handleLine,
@@ -228,4 +230,5 @@ class RpcClient {
     _isDisposed = false; // Reset for next test
   }
 }
+
 

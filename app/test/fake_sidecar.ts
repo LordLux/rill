@@ -9,6 +9,18 @@ process.stdout.write(JSON.stringify({
 const rl = createInterface({ input: process.stdin });
 const pending = new Map();
 
+const parentPid = process.env.FLUTTER_PARENT_PID;
+if (parentPid) {
+  setInterval(() => {
+    try {
+      process.kill(parseInt(parentPid, 10), 0);
+    } catch (e) {
+      process.stderr.write(`fake_sidecar: process.kill failed: ${e}\n`);
+      process.exit(0);
+    }
+  }, 3000).unref();
+}
+
 process.stdin.on('end', () => {
   process.stderr.write('fake_sidecar: stdin end\n');
   process.exit(0);

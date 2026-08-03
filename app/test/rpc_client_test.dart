@@ -24,10 +24,13 @@ void main() {
 
   test('\$cancel', () async {
     final client = RpcClient.instance;
+    await client.start(); // Ensure sidecar is fully started before firing the call
     bool completed = false;
     client.call('test.echo', {'msg': 'never', 'delay': 500}).then((_) {
+      print('COMPLETED NORMALLY');
       completed = true;
-    }).catchError((_) {
+    }).catchError((e) {
+      print('COMPLETED WITH ERROR: $e');
       completed = true; // Error also counts as completion for this test
     });
     
@@ -87,7 +90,17 @@ void main() {
     expect(stopwatch.elapsedMilliseconds, lessThan(5000));
   });
   test('killing the Flutter process leaves no orphaned sidecar', () async {
-    final process = await Process.start('dart', ['test/orphan_test_helper.dart'], runInShell: true);
+    String dartPath = Platform.resolvedExecutable;
+    if (dartPath.endsWith('flutter_tester.exe')) {
+      final cacheDir = Directory(dartPath).parent.parent.parent.parent;
+      dartPath = '${cacheDir.path}\\dart-sdk\\bin\\dart.exe';
+    }
+    
+    final process = await Process.start(
+      Platform.isWindows ? dartPath : 'dart', 
+      ['test/orphan_test_helper.dart'], 
+      runInShell: false
+    );
     
     int? sidecarPid;
     final stdoutList = <String>[];
@@ -116,8 +129,8 @@ void main() {
     await process.exitCode;
     
     // Give Windows a moment to propagate the pipe close
-    await Future.delayed(const Duration(milliseconds: 500));
-    
+    // and wait for the sidecar 3s polling interval to exit
+    await Future.delayed(const Duration(milliseconds: 3500));
     // Check if the sidecar process is still running
     // On Windows, tasklist can be used. On Linux/Mac, kill -0.
     bool isAlive = false;
