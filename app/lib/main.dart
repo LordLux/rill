@@ -47,13 +47,16 @@ import 'data/rpc/client.dart';
 ///
 /// Identical to the C-API run on purpose — the whole point of this task is that
 /// the only difference between the two measurements is media_kit.
-const List<(int, int)> seekPlan = [(8, 300), (16, 60), (24, 500), (32, 120)];
+const List<(int, int)> seekPlan = [
+  (5, 100), (10, 200), (15, 300), (20, 400), (25, 500),
+  (30, 600), (35, 700), (40, 800), (45, 900), (50, 1000)
+];
 
 /// Seconds after a seek before its position is read.
 const int checkDelaySeconds = 5;
 
 /// Wall-clock second the run ends.
-const int quitAtSeconds = 40;
+const int quitAtSeconds = 5;
 
 /// **Position must advance past the target, never equal it.**
 ///
@@ -154,7 +157,7 @@ class HarnessConfig {
 
     return HarnessConfig(
       mode: mode,
-      track: env['NY_TRACK'] ?? 'av1',
+      track: env['NY_TRACK'] ?? 'vp9',
       // Q2 is the question "can this be set at all", so that mode always sets
       // it. Q1 is explicitly the no-options baseline: F13 expects 4/4 with
       // nothing set, and anything less is the finding.
@@ -457,9 +460,11 @@ class _HarnessPageState extends State<HarnessPage> {
     // It needs a loaded file, so wait for the demuxer to report a duration.
     if (source.audioUrl != null) {
       try {
-        await _player.stream.duration
-            .firstWhere((d) => d > Duration.zero)
-            .timeout(const Duration(seconds: 20));
+        if (_player.state.duration <= Duration.zero) {
+          await _player.stream.duration
+              .firstWhere((d) => d > Duration.zero)
+              .timeout(const Duration(seconds: 20));
+        }
         await _player.setAudioTrack(AudioTrack.uri(source.audioUrl!, title: 'YouTube audio'));
       } on Object catch (error) {
         // A stop condition, not a harness detail: §2.4's two-URL design depends
@@ -650,7 +655,17 @@ class _HarnessPageState extends State<HarnessPage> {
       backgroundColor: Colors.black,
       body: Column(
         children: [
-          Expanded(child: Video(controller: _video)),
+          Expanded(
+            child: _audioTrackError != null
+                ? Center(
+                    child: Text(
+                      'AUDIO ATTACH FAILED:\n$_audioTrackError',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 24),
+                    ),
+                  )
+                : Video(controller: _video),
+          ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
