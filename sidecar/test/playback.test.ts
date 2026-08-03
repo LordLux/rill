@@ -701,7 +701,7 @@ const SOURCE_SHAPE = {
 const VARIANT_SHAPE = {
   videoUrl: 'string',
   audioUrl: 'string?',
-  itag: 'number',
+  itag: 'number?',
   height: 'number',
   fps: 'number',
   videoCodec: 'string',

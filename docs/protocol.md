@@ -150,7 +150,7 @@ All execute against the authenticated `WEB` session.
     {
       "videoUrl": "https://…", // Phase 2: http://127.0.0.1:PORT/…manifest.mpd
       "audioUrl": "https://…", // Phase 2: null (multiplexed in the manifest)
-      "itag": 401,
+      "itag": 401,             // null for the yt-dlp fallback tier
       "height": 2160,
       "fps": 60,
       "videoCodec": "av01",
@@ -159,7 +159,7 @@ All execute against the authenticated `WEB` session.
     {
       "videoUrl": "https://…", // Phase 2: http://127.0.0.1:PORT/…manifest.mpd
       "audioUrl": "https://…", // Phase 2: null (multiplexed in the manifest)
-      "itag": 399,
+      "itag": 399,             // null for the yt-dlp fallback tier
       "height": 1080,
       "fps": 60,
       "videoCodec": "av01",

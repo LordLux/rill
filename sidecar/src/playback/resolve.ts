@@ -523,7 +523,7 @@ export function sourceFromYtDlpDump(
     videoUrl: adoptExternallyDeciphered(videoAddress, tool),
     audioUrl: audio?.url ? adoptExternallyDeciphered(audio.url, tool) : null,
     // yt-dlp does not give us an itag reliably; 0 signals "unknown".
-    itag: 0,
+    itag: null,
     height: height ?? 0,
     fps: 0,
     videoCodec: video?.vcodec ?? dump.vcodec ?? 'unknown',

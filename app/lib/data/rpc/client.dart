@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 enum RpcRetryMode {
   auto,
@@ -24,6 +25,9 @@ class RpcClient {
 
   static final RpcClient instance = RpcClient._();
 
+  /// Override this in tests to run a fake sidecar script.
+  List<String>? mockCommand;
+
   Process? _process;
   int _nextId = 1;
   final Map<int, Completer<dynamic>> _pending = {};
@@ -31,8 +35,9 @@ class RpcClient {
   Map<String, dynamic>? capabilities;
   Completer<void>? _readyCompleter;
   
-  bool _isDisposed = false;
+  final bool _isDisposed = false;
   int _restartBackoffMs = 1000;
+  Future<void>? _startFuture;
 
   String _findProjectRoot() {
     var dir = Directory.current;
@@ -47,15 +52,21 @@ class RpcClient {
     return Directory.current.path; // fallback
   }
 
-  Future<void> start() async {
-    if (_isDisposed) return;
-    if (_process != null) return;
-    
+  Future<void> start() {
+    if (_isDisposed) return Future.value();
+    if (_process != null) return Future.value();
+    if (_startFuture != null) return _startFuture!;
+    _startFuture = _startInternal();
+    return _startFuture!;
+  }
+
+  Future<void> _startInternal() async {
     _readyCompleter = Completer<void>();
     final root = _findProjectRoot();
 
     try {
-      _process = await Process.start('bun', ['run', 'sidecar/src/main.ts'], workingDirectory: root);
+      final command = mockCommand ?? ['run', 'sidecar/src/main.ts'];
+      _process = await Process.start('bun', command, workingDirectory: root);
 
       _process!.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
         _handleLine,
@@ -80,13 +91,15 @@ class RpcClient {
       }
     } catch (e) {
       _handleExit();
+    } finally {
+      _startFuture = null;
     }
   }
 
-  void _handleLine(String line) {
+  void _handleLine(String line) async {
     if (line.trim().isEmpty) return;
     try {
-      final msg = jsonDecode(line) as Map<String, dynamic>;
+      final msg = await Isolate.run(() => jsonDecode(line) as Map<String, dynamic>);
       
       if (msg['method'] == 'event.ready') {
         final params = msg['params'] as Map<String, dynamic>;
@@ -163,7 +176,6 @@ class RpcClient {
     
     final msg = jsonEncode({'id': id, 'method': method, 'params': params});
     _process!.stdin.writeln(msg);
-    _process!.stdin.flush();
     
     return completer.future;
   }
@@ -177,7 +189,6 @@ class RpcClient {
         'params': {'id': id}
       });
       _process!.stdin.writeln(msg);
-      _process!.stdin.flush();
     }
   }
 }

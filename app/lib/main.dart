@@ -212,16 +212,17 @@ class StreamSource {
     stderr.writeln('harness calling playback.open');
     final json = await rpc.call('playback.open', {'videoId': config.videoId}) as Map<String, dynamic>;
     
-    // The sidecar's PlaybackSource predates the variants[] amendment from protocol.md §3.5.
-    // We are consuming what the sidecar actually returns (a single videoUrl/audioUrl pair).
-    stderr.writeln('harness returned source: $json');
+    // The sidecar's PlaybackSource now carries a variants[] array.
+    final variants = json['variants'] as List<dynamic>;
+    stderr.writeln('harness returned source with ${variants.length} variants: $variants');
+    final variant0 = variants[0] as Map<String, dynamic>;
     
     return StreamSource(
       videoId: config.videoId,
-      videoUrl: json['videoUrl'] as String,
-      audioUrl: json['audioUrl'] as String?,
-      itag: null, // The current PlaybackSource doesn't expose itag at the top level
-      codec: json['videoCodec'] as String?,
+      videoUrl: variant0['videoUrl'] as String,
+      audioUrl: variant0['audioUrl'] as String?,
+      itag: variant0['itag'] as int?,
+      codec: variant0['videoCodec'] as String?,
       capturedAt: null,
       expiresAt: null,
       durationMs: json['durationMs'] as int?,

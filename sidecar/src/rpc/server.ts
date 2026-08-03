@@ -1,6 +1,5 @@
 import { createInterface } from 'node:readline';
-import { verifyAuth, createSession, type Session } from '../innertube/session.ts';
-import { openPlayback } from '../playback/resolve.ts';
+import type { Session } from '../innertube/session.ts';
 import { RpcError, isRpcError } from '../errors.ts';
 import { logger } from '../log.ts';
 import { announceCapabilities } from '../capabilities.ts';
@@ -12,6 +11,7 @@ let resolveSession: Session | null = null;
 
 async function getBrowseSession(): Promise<Session> {
   if (!browseSession) {
+    const { createSession } = await import('../innertube/session.ts');
     browseSession = await createSession({ clientType: 'WEB' });
   }
   return browseSession;
@@ -19,6 +19,7 @@ async function getBrowseSession(): Promise<Session> {
 
 async function getResolveSession(): Promise<Session> {
   if (!resolveSession) {
+    const { createSession } = await import('../innertube/session.ts');
     resolveSession = await createSession({ clientType: 'MWEB' });
   }
   return resolveSession;
@@ -72,10 +73,12 @@ async function handleRequest(request: any) {
 
   try {
     if (method === 'auth.verify') {
+      const { verifyAuth } = await import('../innertube/session.ts');
       const session = await getBrowseSession();
       const result = await verifyAuth(session);
       emitResponse(id, result);
     } else if (method === 'playback.open') {
+      const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
       const result = await openPlayback({ session }, params);
       emitResponse(id, result);

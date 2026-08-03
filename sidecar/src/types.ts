@@ -206,7 +206,7 @@ export interface PlaybackVariant {
   videoUrl: SignedUrl;
   /** null for a progressive (muxed) stream, and in Phase 2 for DASH. */
   audioUrl: SignedUrl | null;
-  itag: number;
+  itag: number | null;
   /** From the format itself, never from an itag→height lookup table. */
   height: number;
   /** From the format itself. */
