@@ -74,6 +74,31 @@ describe('RPC Transport', () => {
     expect(elapsed).toBeLessThan(500);
   });
 
+  it('starts and emits event.ready with no network', async () => {
+    // Force broken network using a dead proxy
+    const testChild = spawn('bun', [resolve(__dirname, '../src/main.ts')], {
+      env: { ...process.env, HTTP_PROXY: 'http://0.0.0.0:12345', HTTPS_PROXY: 'http://0.0.0.0:12345' }
+    });
+    const testRl = readline.createInterface({ input: testChild.stdout! });
+    
+    const start = Date.now();
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), 1000);
+      testRl.on('line', (line) => {
+        const parsed = JSON.parse(line);
+        if (parsed.method === 'event.ready') {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    const elapsed = Date.now() - start;
+    
+    testChild.stdin!.end();
+    testChild.kill();
+    expect(elapsed).toBeLessThan(1000);
+  });
+
   it('handles a request split across chunk boundaries, fed one byte at a time', async () => {
     const msg = JSON.stringify({ id: 1, method: 'unknown.method' }) + '\n';
     for (let i = 0; i < msg.length; i++) {

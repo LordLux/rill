@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:meta/meta.dart';
 
 enum RpcRetryMode {
   auto,
@@ -31,11 +32,15 @@ class RpcClient {
   Process? _process;
   int _nextId = 1;
   final Map<int, Completer<dynamic>> _pending = {};
+
+  @visibleForTesting
+  int? get processId => _process?.pid;
   
   Map<String, dynamic>? capabilities;
   Completer<void>? _readyCompleter;
   
-  final bool _isDisposed = false;
+  bool _isDisposed = false;
+  bool _isFatalError = false;
   int _restartBackoffMs = 1000;
   Future<void>? _startFuture;
 
@@ -90,7 +95,11 @@ class RpcClient {
         }
       }
     } catch (e) {
+      stderr.writeln('START INTERNAL CATCH: $e');
       _handleExit();
+      if (e is RpcException && e.retry == RpcRetryMode.no) {
+        rethrow;
+      }
     } finally {
       _startFuture = null;
     }
@@ -105,8 +114,14 @@ class RpcClient {
         final params = msg['params'] as Map<String, dynamic>;
         final version = params['protocolVersion'];
         if (version != 1) {
-          stderr.writeln('FATAL: Protocol version mismatch. Expected 1, got $version');
-          exit(1);
+          final errorMsg = 'FATAL: Protocol version mismatch. Expected 1, got $version';
+          stderr.writeln(errorMsg);
+          _isFatalError = true;
+          if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
+            _readyCompleter!.completeError(RpcException('PROTOCOL_MISMATCH', errorMsg, RpcRetryMode.no));
+          }
+          _process?.kill();
+          return;
         }
         capabilities = params['capabilities'] as Map<String, dynamic>;
         if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
@@ -143,6 +158,7 @@ class RpcClient {
 
   void _handleExit() {
     if (_isDisposed) return;
+    if (_process == null) return; // Means killForTest() was called
     _process = null;
     
     final error = RpcException('UPSTREAM_ERROR', 'Sidecar exited', RpcRetryMode.auto);
@@ -155,6 +171,8 @@ class RpcClient {
       _readyCompleter!.completeError(error);
     }
 
+    if (_isFatalError) return;
+
     Timer(Duration(milliseconds: _restartBackoffMs), () {
       _restartBackoffMs = (_restartBackoffMs * 2).clamp(1000, 30000);
       start();
@@ -165,9 +183,11 @@ class RpcClient {
     if (_process == null) {
       await start();
     }
-    // Wait for ready event if starting up
     if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
       await _readyCompleter!.future;
+    }
+    if (_process == null) {
+      throw RpcException('START_FAILED', 'Failed to start sidecar process', RpcRetryMode.auto);
     }
     
     final id = _nextId++;
@@ -191,4 +211,21 @@ class RpcClient {
       _process!.stdin.writeln(msg);
     }
   }
+
+  void killForTest() {
+    _isDisposed = true; // Prevent handleExit from doing anything
+    _process?.kill();
+    _process = null;
+    _pending.clear();
+    if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
+      _readyCompleter!.completeError(RpcException('KILLED', 'Killed for test', RpcRetryMode.no));
+    }
+    _readyCompleter = null;
+    _startFuture = null;
+    capabilities = null;
+    mockCommand = null;
+    _isFatalError = false;
+    _isDisposed = false; // Reset for next test
+  }
 }
+

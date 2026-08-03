@@ -1,10 +1,12 @@
-
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:native_youtube/data/rpc/client.dart';
 
 void main() {
-  setUp(() {
-    // Reset singleton state if possible, or just kill the process
+  setUp(() async {
+    RpcClient.instance.killForTest();
+    await Future.delayed(const Duration(milliseconds: 200));
     RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
   });
 
@@ -45,9 +47,18 @@ void main() {
   });
 
   test('protocolVersion mismatch fails fast', () async {
-    // If the client gets an event.ready with wrong protocol, it calls exit(1).
-    // We can't test exit(1) easily in the same process, so we assume it works.
-    // The requirement is to have it fail fast. 
+    final client = RpcClient.instance;
+    client.killForTest();
+    client.mockCommand = ['run', 'app/test/fake_sidecar.ts', '99']; // version 99
+    
+    try {
+      await client.call('test.echo', {});
+      fail('Expected exception');
+    } catch (e) {
+      expect(e, isA<RpcException>());
+      final rpcE = e as RpcException;
+      expect(rpcE.code, 'PROTOCOL_MISMATCH');
+    }
   });
 
   test('envelope errors decode to Dart exception carrying code, message, and retry as enum', () async {
@@ -74,5 +85,54 @@ void main() {
     final res = await req;
     expect((res as String).length, 1000000);
     expect(stopwatch.elapsedMilliseconds, lessThan(5000));
+  });
+  test('killing the Flutter process leaves no orphaned sidecar', () async {
+    final process = await Process.start('dart', ['test/orphan_test_helper.dart'], runInShell: true);
+    
+    int? sidecarPid;
+    final stdoutList = <String>[];
+    process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      stdoutList.add(line);
+      if (line.startsWith('SIDECAR_PID:')) {
+        sidecarPid = int.parse(line.split(':')[1]);
+      }
+    });
+
+    final stderrList = <String>[];
+    process.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      stderrList.add(line);
+    });
+    
+    // Wait for the sidecar PID to be printed
+    for (var i = 0; i < 50; i++) {
+      if (sidecarPid != null) break;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    
+    expect(sidecarPid, isNotNull, reason: 'Helper should print SIDECAR_PID. Stdout: $stdoutList, Stderr: $stderrList');
+    
+    // Kill the parent Dart process (the helper)
+    process.kill();
+    await process.exitCode;
+    
+    // Give Windows a moment to propagate the pipe close
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    // Check if the sidecar process is still running
+    // On Windows, tasklist can be used. On Linux/Mac, kill -0.
+    bool isAlive = false;
+    if (Platform.isWindows) {
+      final res = await Process.run('tasklist', ['/FI', 'PID eq $sidecarPid']);
+      if (res.stdout.toString().contains(sidecarPid.toString())) {
+        isAlive = true;
+      }
+    } else {
+      try {
+        final res = await Process.run('kill', ['-0', sidecarPid.toString()]);
+        isAlive = res.exitCode == 0;
+      } catch (_) {}
+    }
+    
+    expect(isAlive, isFalse, reason: 'Sidecar process $sidecarPid should have exited when parent died');
   });
 }
