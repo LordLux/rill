@@ -1,0 +1,475 @@
+{
+  "chips": [
+    {
+      "label": "All",
+      "token": "",
+      "selected": true,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 1",
+      "token": "CHIP_TOKEN_1",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 2",
+      "token": "CHIP_TOKEN_2",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 3",
+      "token": "CHIP_TOKEN_3",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 4",
+      "token": "CHIP_TOKEN_4",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 5",
+      "token": "CHIP_TOKEN_5",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 6",
+      "token": "CHIP_TOKEN_6",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 7",
+      "token": "CHIP_TOKEN_7",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 8",
+      "token": "CHIP_TOKEN_8",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 9",
+      "token": "CHIP_TOKEN_9",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 10",
+      "token": "CHIP_TOKEN_10",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 11",
+      "token": "CHIP_TOKEN_11",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 12",
+      "token": "CHIP_TOKEN_12",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 13",
+      "token": "CHIP_TOKEN_13",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 14",
+      "token": "CHIP_TOKEN_14",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 15",
+      "token": "CHIP_TOKEN_15",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 16",
+      "token": "CHIP_TOKEN_16",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 17",
+      "token": "CHIP_TOKEN_17",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 18",
+      "token": "CHIP_TOKEN_18",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 19",
+      "token": "CHIP_TOKEN_19",
+      "selected": false,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 20",
+      "token": "CHIP_TOKEN_20",
+      "selected": false,
+      "scope": "feed"
+    }
+  ],
+  "items": [
+    {
+      "kind": "mix",
+      "id": "mix_001",
+      "title": "Sanitised Title 1",
+      "subtitle": "Sanitised Subtitle 1",
+      "thumbnailUrl": "https://fake.url/img1.jpg",
+      "videoCount": null
+    },
+    {
+      "kind": "video",
+      "id": "vid_002",
+      "title": "Sanitised Title 2",
+      "channelName": "Sanitised Channel 2",
+      "channelId": "chan_002",
+      "channelAvatarUrl": "https://fake.url/avatar2.jpg",
+      "thumbnailUrl": "https://fake.url/img2.jpg",
+      "durationSeconds": 1173,
+      "isLive": false,
+      "viewCountText": "1.2M views",
+      "publishedText": "17 hours ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_003",
+      "title": "Sanitised Title 3",
+      "channelName": "Sanitised Channel 3",
+      "channelId": "chan_003",
+      "channelAvatarUrl": "https://fake.url/avatar3.jpg",
+      "thumbnailUrl": "https://fake.url/img3.jpg",
+      "durationSeconds": 86,
+      "isLive": false,
+      "viewCountText": null,
+      "publishedText": "1 month ago",
+      "badges": [
+        "Members only"
+      ],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_004",
+      "title": "Sanitised Title 4",
+      "channelName": "Sanitised Channel 4",
+      "channelId": "chan_004",
+      "channelAvatarUrl": "https://fake.url/avatar4.jpg",
+      "thumbnailUrl": "https://fake.url/img4.jpg",
+      "durationSeconds": 53,
+      "isLive": false,
+      "viewCountText": null,
+      "publishedText": "8 months ago",
+      "badges": [
+        "Members only"
+      ],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_005",
+      "title": "Sanitised Title 5",
+      "channelName": "Sanitised Channel 5",
+      "channelId": "chan_005",
+      "channelAvatarUrl": "https://fake.url/avatar5.jpg",
+      "thumbnailUrl": "https://fake.url/img5.jpg",
+      "durationSeconds": 1365,
+      "isLive": false,
+      "viewCountText": null,
+      "publishedText": "19 hours ago",
+      "badges": [
+        "Members first"
+      ],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_006",
+      "title": "Sanitised Title 6",
+      "channelName": "Sanitised Channel 6",
+      "channelId": "chan_006",
+      "channelAvatarUrl": "https://fake.url/avatar6.jpg",
+      "thumbnailUrl": "https://fake.url/img6.jpg",
+      "durationSeconds": 7286,
+      "isLive": false,
+      "viewCountText": "12K views",
+      "publishedText": "7 hours ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "mix",
+      "id": "mix_007",
+      "title": "Sanitised Title 7",
+      "subtitle": "Sanitised Subtitle 7",
+      "thumbnailUrl": "https://fake.url/img7.jpg",
+      "videoCount": null
+    },
+    {
+      "kind": "video",
+      "id": "vid_008",
+      "title": "Sanitised Title 8",
+      "channelName": "Sanitised Channel 8",
+      "channelId": "chan_008",
+      "channelAvatarUrl": "https://fake.url/avatar8.jpg",
+      "thumbnailUrl": "https://fake.url/img8.jpg",
+      "durationSeconds": 2924,
+      "isLive": false,
+      "viewCountText": "1.4K views",
+      "publishedText": "5 hours ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_009",
+      "title": "Sanitised Title 9",
+      "channelName": "Sanitised Channel 9",
+      "channelId": "chan_009",
+      "channelAvatarUrl": "https://fake.url/avatar9.jpg",
+      "thumbnailUrl": "https://fake.url/img9.jpg",
+      "durationSeconds": 602,
+      "isLive": false,
+      "viewCountText": "200K views",
+      "publishedText": "15 hours ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "mix",
+      "id": "mix_010",
+      "title": "Sanitised Title 10",
+      "subtitle": "Sanitised Subtitle 10",
+      "thumbnailUrl": "https://fake.url/img10.jpg",
+      "videoCount": null
+    },
+    {
+      "kind": "video",
+      "id": "vid_011",
+      "title": "Sanitised Title 11",
+      "channelName": "Sanitised Channel 11",
+      "channelId": "chan_011",
+      "channelAvatarUrl": "https://fake.url/avatar11.jpg",
+      "thumbnailUrl": "https://fake.url/img11.jpg",
+      "durationSeconds": 8298,
+      "isLive": false,
+      "viewCountText": "83K views",
+      "publishedText": "5 days ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_012",
+      "title": "Sanitised Title 12",
+      "channelName": "Sanitised Channel 12",
+      "channelId": "chan_012",
+      "channelAvatarUrl": "https://fake.url/avatar12.jpg",
+      "thumbnailUrl": "https://fake.url/img12.jpg",
+      "durationSeconds": 277,
+      "isLive": false,
+      "viewCountText": "762 views",
+      "publishedText": "1 day ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_013",
+      "title": "Sanitised Title 13",
+      "channelName": "Sanitised Channel 13",
+      "channelId": "chan_013",
+      "channelAvatarUrl": "https://fake.url/avatar13.jpg",
+      "thumbnailUrl": "https://fake.url/img13.jpg",
+      "durationSeconds": 31,
+      "isLive": false,
+      "viewCountText": "1.5M views",
+      "publishedText": "3 years ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_014",
+      "title": "Sanitised Title 14",
+      "channelName": "Sanitised Channel 14",
+      "channelId": "chan_014",
+      "channelAvatarUrl": "https://fake.url/avatar14.jpg",
+      "thumbnailUrl": "https://fake.url/img14.jpg",
+      "durationSeconds": 337,
+      "isLive": false,
+      "viewCountText": "136K views",
+      "publishedText": "2 days ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_015",
+      "title": "Sanitised Title 15",
+      "channelName": "Sanitised Channel 15",
+      "channelId": "chan_015",
+      "channelAvatarUrl": "https://fake.url/avatar15.jpg",
+      "thumbnailUrl": "https://fake.url/img15.jpg",
+      "durationSeconds": 295,
+      "isLive": false,
+      "viewCountText": "410K views",
+      "publishedText": "1 year ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "mix",
+      "id": "mix_016",
+      "title": "Sanitised Title 16",
+      "subtitle": "Sanitised Subtitle 16",
+      "thumbnailUrl": "https://fake.url/img16.jpg",
+      "videoCount": null
+    },
+    {
+      "kind": "video",
+      "id": "vid_017",
+      "title": "Sanitised Title 17",
+      "channelName": "Sanitised Channel 17",
+      "channelId": "chan_017",
+      "channelAvatarUrl": "https://fake.url/avatar17.jpg",
+      "thumbnailUrl": "https://fake.url/img17.jpg",
+      "durationSeconds": 491,
+      "isLive": false,
+      "viewCountText": "560K views",
+      "publishedText": "1 day ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_018",
+      "title": "Sanitised Title 18",
+      "channelName": "Sanitised Channel 18",
+      "channelId": "chan_018",
+      "channelAvatarUrl": "https://fake.url/avatar18.jpg",
+      "thumbnailUrl": "https://fake.url/img18.jpg",
+      "durationSeconds": 188,
+      "isLive": false,
+      "viewCountText": "1.3M views",
+      "publishedText": "6 months ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_019",
+      "title": "Sanitised Title 19",
+      "channelName": "Sanitised Channel 19",
+      "channelId": "chan_019",
+      "channelAvatarUrl": "https://fake.url/avatar19.jpg",
+      "thumbnailUrl": "https://fake.url/img19.jpg",
+      "durationSeconds": 176,
+      "isLive": false,
+      "viewCountText": "315K views",
+      "publishedText": "5 days ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "video",
+      "id": "vid_020",
+      "title": "Sanitised Title 20",
+      "channelName": "Sanitised Channel 20",
+      "channelId": "chan_020",
+      "channelAvatarUrl": "https://fake.url/avatar20.jpg",
+      "thumbnailUrl": "https://fake.url/img20.jpg",
+      "durationSeconds": 206,
+      "isLive": false,
+      "viewCountText": "1.4M views",
+      "publishedText": "5 years ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "mix",
+      "id": "mix_021",
+      "title": "Sanitised Title 21",
+      "subtitle": "Sanitised Subtitle 21",
+      "thumbnailUrl": "https://fake.url/img21.jpg",
+      "videoCount": 27
+    },
+    {
+      "kind": "video",
+      "id": "vid_022",
+      "title": "Sanitised Title 22",
+      "channelName": "Sanitised Channel 22",
+      "channelId": "chan_022",
+      "channelAvatarUrl": "https://fake.url/avatar22.jpg",
+      "thumbnailUrl": "https://fake.url/img22.jpg",
+      "durationSeconds": 55,
+      "isLive": false,
+      "viewCountText": "751 views",
+      "publishedText": "1 day ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    },
+    {
+      "kind": "mix",
+      "id": "mix_023",
+      "title": "Sanitised Title 23",
+      "subtitle": "Sanitised Subtitle 23",
+      "thumbnailUrl": "https://fake.url/img23.jpg",
+      "videoCount": null
+    },
+    {
+      "kind": "video",
+      "id": "vid_024",
+      "title": "Sanitised Title 24",
+      "channelName": "Sanitised Channel 24",
+      "channelId": "chan_024",
+      "channelAvatarUrl": "https://fake.url/avatar24.jpg",
+      "thumbnailUrl": "https://fake.url/img24.jpg",
+      "durationSeconds": 284,
+      "isLive": false,
+      "viewCountText": "377 views",
+      "publishedText": "2 hours ago",
+      "badges": [],
+      "canWatchLater": true,
+      "canAddToQueue": true
+    }
+  ],
+  "continuation": "CONTINUATION_TOKEN_3"
+}

@@ -27,8 +27,25 @@ function hasFixture(name: string): boolean {
   return existsSync(join(FIXTURES, `${name}.json`));
 }
 
-const home = fixture('home');
-const history = fixture('history');
+/**
+ * Captures are gitignored, so a fresh clone has none and nothing here can run.
+ * Reading them at module scope throws before any test is collected, which bun
+ * reports as an unhandled error and a red suite on every clean checkout — a
+ * missing capture is a missing precondition, not a failure.
+ */
+const HAS_CAPTURES = hasFixture('home') && hasFixture('history');
+
+if (!HAS_CAPTURES) {
+  console.warn(
+    '[parser] sidecar/fixtures/ is absent — skipping every parser test. ' +
+      'These are the only tests that prove tolerant parsing against real renderer ' +
+      'trees; with them skipped, a parser regression is a green suite. ' +
+      'Run `bun run capture` (needs YT_COOKIE) to restore them.',
+  );
+}
+
+const home = HAS_CAPTURES ? fixture('home') : null;
+const history = HAS_CAPTURES ? fixture('history') : null;
 
 /** Every feed-shaped fixture this capture produced, for corpus-wide invariants. */
 const CORPUS: Record<string, unknown> = Object.fromEntries(
@@ -202,7 +219,7 @@ beforeEach(() => {
 
 // ---------------------------------------------------------------------------
 
-describe('parseFeed — home', () => {
+describe.if(HAS_CAPTURES)('parseFeed — home', () => {
   test('yields items and chips', () => {
     const result = parseFeed(home, 'home');
     expect(result.items.length).toBeGreaterThan(0);
@@ -253,7 +270,7 @@ describe('parseFeed — home', () => {
   });
 });
 
-describe('parseFeed — history', () => {
+describe.if(HAS_CAPTURES)('parseFeed — history', () => {
   test('yields one item per watch entry, repeats included', () => {
     const { items } = parseFeed(history, 'history');
 
@@ -281,7 +298,7 @@ describe('parseFeed — history', () => {
 // Both generations
 // ---------------------------------------------------------------------------
 
-describe('renderer generations', () => {
+describe.if(HAS_CAPTURES)('renderer generations', () => {
   test('videoRenderer and lockupViewModel produce identical VideoItem shapes', () => {
     const classicSources = corpusIsolate('videoRenderer');
     const viewSources = corpusIsolate('lockupViewModel');
@@ -482,7 +499,7 @@ describe('renderer generations', () => {
 // Mixes
 // ---------------------------------------------------------------------------
 
-describe('mixes', () => {
+describe.if(HAS_CAPTURES)('mixes', () => {
   test('Mix tiles parse as kind:mix with an RD* id', () => {
     const mixes = parseFeed(home, 'home').items.filter((item) => item.kind === 'mix');
     expect(mixes.length).toBeGreaterThan(0);
@@ -504,7 +521,7 @@ describe('mixes', () => {
 // Shorts
 // ---------------------------------------------------------------------------
 
-describe('shorts', () => {
+describe.if(HAS_CAPTURES)('shorts', () => {
   test('are stripped from every feed', () => {
     const shortsIds = idsOf(home, 'shortsLockupViewModel', 'entityId');
     expect(shortsIds.size).toBeGreaterThan(0);
@@ -527,7 +544,7 @@ describe('shorts', () => {
 // Ads
 // ---------------------------------------------------------------------------
 
-describe('ads', () => {
+describe.if(HAS_CAPTURES)('ads', () => {
   test('in-feed ads are stripped, including the real lockup nested inside them', () => {
     const ads = isolate(home, 'adSlotRenderer');
     const result = parseFeed(ads, 'ads');
@@ -541,7 +558,7 @@ describe('ads', () => {
 // Tolerance — the test that matters most
 // ---------------------------------------------------------------------------
 
-describe('unknown renderers', () => {
+describe.if(HAS_CAPTURES)('unknown renderers', () => {
   /** Splice a node into the middle of the home feed's item list. */
   function injectIntoItemList(raw: unknown, node: unknown): unknown {
     const clone = structuredClone(raw) as JsonObject;
@@ -664,7 +681,7 @@ describe('unknown renderers', () => {
 // Auth verification — hard invariant 5
 // ---------------------------------------------------------------------------
 
-describe('countTiles', () => {
+describe.if(HAS_CAPTURES)('countTiles', () => {
   test('counts tiles in a real home response', () => {
     expect(countTiles(home)).toBeGreaterThan(0);
   });
@@ -686,7 +703,7 @@ describe('countTiles', () => {
 // Player
 // ---------------------------------------------------------------------------
 
-describe('parsePlayer', () => {
+describe.if(HAS_CAPTURES)('parsePlayer', () => {
   test('maps adaptive formats without ever producing a signed URL', () => {
     const raw = {
       videoDetails: { videoId: 'aqz-KE-bpKQ', lengthSeconds: '634', isLive: false },
@@ -824,7 +841,7 @@ describe('parsePlayer', () => {
 // Video detail
 // ---------------------------------------------------------------------------
 
-describe('parseVideoDetail', () => {
+describe.if(HAS_CAPTURES)('parseVideoDetail', () => {
   test('never throws on an unusable response', () => {
     for (const input of [null, {}, 'nonsense', { contents: {} }]) {
       expect(() => parseVideoDetail(input)).not.toThrow();
@@ -920,7 +937,7 @@ describe('parseVideoDetail', () => {
 // Any other fixture the capture run produced
 // ---------------------------------------------------------------------------
 
-describe('captured corpus', () => {
+describe.if(HAS_CAPTURES)('captured corpus', () => {
   const optional = [
     'home-continuation',
     'subscriptions',
