@@ -155,9 +155,18 @@ Shorts are stripped, never rendered.
 
 ```bash
 cd sidecar && bun test          # parser tests, offline, no network
+cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
+cd sidecar && bun run build     # compile to dist/sidecar.exe — see below
 cd app && flutter run -d windows
 ```
+
+The app prefers `sidecar/dist/sidecar.exe` and falls back to `bun run
+src/main.ts` when it is absent, so an unbuilt checkout still runs. The fallback
+costs ~6.3 s on first launch: `bun run` transpiles the module graph — youtubei.js
+included — on the first import that reaches it, and that lands on the first user
+action, not on startup. Rebuild after changing sidecar sources or the fallback is
+what you are testing.
 
 ---
 

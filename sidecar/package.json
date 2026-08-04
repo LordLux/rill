@@ -5,9 +5,12 @@
   "type": "module",
   "description": "Headless InnerTube sidecar: session, tolerant renderer parser, NDJSON RPC.",
   "scripts": {
+    "build": "bun build --compile --outfile dist/sidecar src/main.ts",
     "capture": "bun run src/capture.ts",
+    "export-contract-corpus": "bun run src/export-contract-corpus.ts",
     "probe": "bun run src/probe-playback.ts",
     "test": "bun test",
+    "test:network": "RUN_NETWORK_TESTS=1 bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

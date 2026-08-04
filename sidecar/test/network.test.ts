@@ -18,13 +18,17 @@
  * No cookie required: streams resolve through an anonymous session (§2.3),
  * asking as `ANDROID_VR` at tier 1 and `MWEB` at tier 2. What that session does
  * need is a server-issued visitor id, which is `createSession`'s default and the
- * first thing to check if tier 1 starts declining (F5). Set
- * `SIDECAR_SKIP_NETWORK=1` to skip, but understand what is being skipped — with
- * these off, a completely broken decipher path is a green suite.
+ * first thing to check if tier 1 starts declining (F5).
+ *
+ * Opt-in: these run only under `bun run test:network` (`RUN_NETWORK_TESTS=1`),
+ * because they are real requests and ~24 MB of traffic. Understand what is
+ * being skipped the rest of the time — with these off, a completely broken
+ * decipher path is a green suite.
  */
 
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +47,54 @@ import {
 import { forgetPlayerResponse, getPlayerResponse } from '../src/innertube/player-response.ts';
 import { isSabrOnly } from '../src/playback/sabr-detect.ts';
 
-const ONLINE = process.env['SIDECAR_SKIP_NETWORK'] !== '1';
+/**
+ * Can this machine reach YouTube at all?
+ *
+ * `SIDECAR_SKIP_NETWORK=1` is the deliberate opt-out. This probe is the other
+ * case: a clean checkout on a machine with no route out should skip these, not
+ * report a broken decipher path it never tested. The distinction that matters
+ * is *unreachable* versus *reachable and wrong* — only the first is a skip, so
+ * the probe asks the cheapest possible question and lets everything else fail
+ * loudly as before.
+ *
+ * `robots.txt` because it is small, unauthenticated, and not a InnerTube
+ * endpoint — a 200 here says the network works, nothing about the API.
+ */
+async function youtubeReachable(): Promise<boolean> {
+  try {
+    const response = await fetch('https://www.youtube.com/robots.txt', {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(5000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Live tests are opt-in.
+ *
+ * They issue real requests to YouTube and pull ~12 MB twice to measure
+ * sustained throughput — roughly 19 s. Someone who has just cloned the repo and
+ * typed `bun test` has not asked for that, and defaulting to it spends their
+ * bandwidth, appends to the tripwire history, and puts this machine's traffic
+ * in front of YouTube without anyone deciding to. `bun run test:network` (or
+ * `RUN_NETWORK_TESTS=1`) is that decision.
+ */
+const REQUESTED = process.env['RUN_NETWORK_TESTS'] === '1';
+const ONLINE = REQUESTED && (await youtubeReachable());
+
+if (!ONLINE) {
+  console.warn(
+    REQUESTED
+      ? '[network] youtube.com is unreachable — skipping the live tests.'
+      : '[network] skipped (opt-in) — run `bun run test:network` to include them.',
+    'These are the only tests that prove the decipher path: a wrongly-deciphered' +
+      ' n is well-formed and throttles to ~50 KB/s, which no offline assertion can' +
+      ' detect. With them skipped, a completely broken decipher path is a green suite.',
+  );
+}
 
 /** stderr, like everything else — hard invariant 3 applies to the suite too. */
 const log = logger('network-test');
@@ -57,14 +108,71 @@ const log = logger('network-test');
  * ones that saw SABR — a file containing only sightings can say "it happened
  * four times" and never "four times out of how many".
  *
- * Machine-local and gitignored: it is an accumulating observation about what
- * YouTube served this machine, not a fact about the repository.
+ * It lives in the per-user state directory, **not** in the checkout. The
+ * observation is about what YouTube served *this machine*, so its natural unit
+ * is the machine: a second clone on the same box must extend the same history,
+ * and a clone on a different box must start its own. Keeping it in the repo
+ * gave one history per working copy, which is the one arrangement that makes
+ * the number meaningless — two files of 92 and 1 runs answer no question that
+ * a single file of 93 does not answer better, and they silently disagree about
+ * the denominator.
+ *
+ * `NY_TRIPWIRE_LOG` overrides the location, for a throwaway run that should not
+ * touch the real history.
  */
-const TRIPWIRE_LOG = join(
+function tripwirePath(): string {
+  const override = process.env['NY_TRIPWIRE_LOG'];
+  if (override) return override;
+
+  const home = homedir();
+  const dir =
+    process.platform === 'win32'
+      ? join(process.env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local'), 'NativeYouTube')
+      : process.platform === 'darwin'
+        ? join(home, 'Library', 'Application Support', 'NativeYouTube')
+        : join(process.env['XDG_STATE_HOME'] ?? join(home, '.local', 'state'), 'native-youtube');
+
+  return join(dir, 'tripwire-mweb-sabr.ndjson');
+}
+
+const TRIPWIRE_LOG = tripwirePath();
+
+/** The in-repo location this used to write to, kept only to migrate off it. */
+const LEGACY_TRIPWIRE_LOG = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
   'tripwire-mweb-sabr.ndjson',
 );
+
+/**
+ * Fold a checkout-local history into the machine-level one, once.
+ *
+ * Appends rather than replaces: on a machine with two checkouts, both partial
+ * histories are real observations of the same machine and both belong in the
+ * total. The legacy file is renamed rather than deleted — it is unreproducible
+ * observational data, and a migration that eats it on a bad day is worse than
+ * one that leaves a stray file behind. Renaming is also what makes this run
+ * once: the second run finds nothing to migrate.
+ *
+ * Never throws, for the same reason `recordTripwire` never throws.
+ */
+function migrateLegacyTripwire(): void {
+  try {
+    if (!existsSync(LEGACY_TRIPWIRE_LOG)) return;
+    mkdirSync(dirname(TRIPWIRE_LOG), { recursive: true });
+    const legacy = readFileSync(LEGACY_TRIPWIRE_LOG, 'utf8');
+    if (legacy.trim() !== '') {
+      appendFileSync(TRIPWIRE_LOG, legacy.endsWith('\n') ? legacy : `${legacy}\n`, 'utf8');
+    }
+    renameSync(LEGACY_TRIPWIRE_LOG, `${LEGACY_TRIPWIRE_LOG}.migrated`);
+    log.info(
+      `migrated ${legacy.split('\n').filter((l) => l.trim() !== '').length} tripwire ` +
+        `entries from the checkout into ${TRIPWIRE_LOG}`,
+    );
+  } catch (error) {
+    log.warn(`could not migrate the legacy tripwire log: ${(error as Error).message}`);
+  }
+}
 
 interface TripwireEntry {
   at: string;
@@ -89,6 +197,8 @@ function recordTripwire(samples: boolean[], sabrCount: number): string | null {
   };
 
   try {
+    migrateLegacyTripwire();
+    mkdirSync(dirname(TRIPWIRE_LOG), { recursive: true });
     appendFileSync(TRIPWIRE_LOG, `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (error) {
     log.warn(`could not record the tripwire result: ${(error as Error).message}`);

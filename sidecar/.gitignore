@@ -5,6 +5,9 @@ fixtures.partial/
 raw/
 nodes/
 
-# Phase 2 tripwire history
-# One line per live suite run, so the SABR-only rate is visible over time.
+# Phase 2 tripwire history — now kept per machine, not per checkout, in the
+# user state dir (%LOCALAPPDATA%\NativeYouTube on Windows). These two patterns
+# cover checkouts predating that move: the old in-repo log, and the `.migrated`
+# rename left behind once its entries have been folded into the machine file.
 tripwire-mweb-sabr.ndjson
+tripwire-mweb-sabr.ndjson.migrated
