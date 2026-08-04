@@ -7,9 +7,11 @@ void main() async {
   try {
     await RpcClient.instance.start();
     print('SIDECAR_PID:${RpcClient.instance.processId}');
+    await stdout.flush();
   } catch (e, st) {
     print('HELPER ERROR: $e');
     print(st);
+    await stdout.flush();
   }
   // Stay alive until killed by the test
   await Future.delayed(const Duration(hours: 1));

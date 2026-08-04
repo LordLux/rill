@@ -57,6 +57,18 @@ class RpcClient {
     return Directory.current.path; // fallback
   }
 
+  /// The compiled sidecar, or null when this checkout has not been built.
+  ///
+  /// `bun run src/main.ts` transpiles the whole module graph — youtubei.js
+  /// included — on the first import that reaches it, and that cost lands on the
+  /// first real call rather than on startup. Compiling moves it to build time.
+  /// A dev checkout with no `dist/` still works; it is just slower.
+  File? _compiledSidecar(String root) {
+    final name = Platform.isWindows ? 'sidecar.exe' : 'sidecar';
+    final binary = File('$root/sidecar/dist/$name');
+    return binary.existsSync() ? binary : null;
+  }
+
   Future<void> start() {
     if (_isDisposed) return Future.value();
     if (_process != null) return Future.value();
@@ -70,8 +82,14 @@ class RpcClient {
     final root = _findProjectRoot();
 
     try {
-      final command = mockCommand ?? ['run', 'sidecar/src/main.ts'];
-      _process = await Process.start('bun', command, workingDirectory: root, environment: {
+      // A mock is always driven through bun — the fakes are .ts sources.
+      final compiled = mockCommand == null ? _compiledSidecar(root) : null;
+      final executable = compiled?.path ?? 'bun';
+      final command = compiled != null
+          ? const <String>[]
+          : (mockCommand ?? ['run', 'sidecar/src/main.ts']);
+
+      _process = await Process.start(executable, command, workingDirectory: root, environment: {
         'FLUTTER_PARENT_PID': pid.toString(),
       });
 

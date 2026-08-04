@@ -15,5 +15,5 @@ void main() {
     expect(pbRes, isA<Map<String, dynamic>>());
     expect(pbRes['sessionId'], isNotNull);
     expect(pbRes['variants'], isNotEmpty);
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

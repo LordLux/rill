@@ -24,6 +24,7 @@ app/.flutter-plugins*
 
 # Build output
 dist/
+sidecar/dist/
 build/
 *.exe
 
@@ -35,3 +36,9 @@ Thumbs.db
 /*.md
 !CLAUDE.md
 *.html
+
+# Local auth
+auth.txt
+auth.json
+sidecar/auth.txt
+sidecar/auth.json

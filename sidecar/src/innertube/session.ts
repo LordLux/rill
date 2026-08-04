@@ -321,12 +321,21 @@ export function countTiles(raw: unknown): number {
  * no error (F7), and the app must surface a re-auth prompt rather than an empty
  * homepage. So: fetch home, count tiles, zero with cookies present means
  * degraded.
+ *
+ * `fetchHome` exists so a caller that is about to fetch the same home feed can
+ * hand over a shared (briefly cached) fetch instead of paying for a second
+ * identical /browse. It must stay inside the try: a fetch failure is a session
+ * health signal, not an RPC error.
  */
-export async function verifyAuth(session: Session): Promise<AuthVerification> {
+export async function verifyAuth(
+  session: Session,
+  fetchHome: (session: Session) => Promise<unknown> = (s) =>
+    s.execute('/browse', { browseId: 'FEwhat_to_watch' }),
+): Promise<AuthVerification> {
   let tileCount = 0;
 
   try {
-    const raw = await session.execute('/browse', { browseId: 'FEwhat_to_watch' });
+    const raw = await fetchHome(session);
     tileCount = countTiles(raw);
   } catch (error) {
     log.error(`auth verification request failed: ${(error as Error).message}`);

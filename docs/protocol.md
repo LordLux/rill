@@ -100,7 +100,8 @@ flag derived from cookie presence.
 just a different token into the same call.
 
 `chips[]` merges both generations: top-level `chipCloudChipRenderer` and
-shelf-scoped `ChipView`. Each carries `{label, token, selected}`.
+shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
+`scope` is `'feed' | 'shelf'`.
 
 ### 3.3 Video and playlists
 

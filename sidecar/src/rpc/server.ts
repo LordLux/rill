@@ -6,23 +6,60 @@ import { announceCapabilities } from '../capabilities.ts';
 
 const log = logger('rpc');
 
-let browseSession: Session | null = null;
-let resolveSession: Session | null = null;
+let browseSessionPromise: Promise<Session> | null = null;
+let resolveSessionPromise: Promise<Session> | null = null;
 
-async function getBrowseSession(): Promise<Session> {
-  if (!browseSession) {
-    const { createSession } = await import('../innertube/session.ts');
-    browseSession = await createSession({ clientType: 'WEB' });
+// Memoise the promise, not the resolved value: two concurrent callers arriving
+// before the first session settles would otherwise each create one.
+function getBrowseSession(): Promise<Session> {
+  if (!browseSessionPromise) {
+    browseSessionPromise = (async () => {
+      try {
+        const { createSession } = await import('../innertube/session.ts');
+        return await createSession({ clientType: 'WEB' });
+      } catch (e) {
+        browseSessionPromise = null;
+        throw e;
+      }
+    })();
   }
-  return browseSession;
+  return browseSessionPromise;
 }
 
-async function getResolveSession(): Promise<Session> {
-  if (!resolveSession) {
-    const { createSession } = await import('../innertube/session.ts');
-    resolveSession = await createSession({ clientType: 'MWEB' });
+function getResolveSession(): Promise<Session> {
+  if (!resolveSessionPromise) {
+    resolveSessionPromise = (async () => {
+      try {
+        const { createSession } = await import('../innertube/session.ts');
+        return await createSession({ clientType: 'MWEB' });
+      } catch (e) {
+        resolveSessionPromise = null;
+        throw e;
+      }
+    })();
   }
-  return resolveSession;
+  return resolveSessionPromise;
+}
+
+/**
+ * `auth.verify` and `feed.home` both fetch base home, and the app calls them
+ * back to back at startup — auth.verify counts tiles and throws the payload
+ * away. Hold it briefly so the feed.home moments later is free.
+ *
+ * Base browse ids only. A continuation or a chip token is a different request
+ * and is never served from, or written to, this cache.
+ */
+const BROWSE_CACHE_TTL_MS = 30_000;
+const browseCache = new Map<string, { at: number; data: unknown }>();
+
+async function fetchBaseBrowse(session: Session, browseId: string): Promise<unknown> {
+  const hit = browseCache.get(browseId);
+  if (hit && Date.now() - hit.at < BROWSE_CACHE_TTL_MS) {
+    return hit.data;
+  }
+  const data = await session.execute('/browse', { browseId });
+  browseCache.set(browseId, { at: Date.now(), data });
+  return data;
 }
 
 const abortControllers = new Map<number | string, AbortController>();
@@ -75,7 +112,16 @@ async function handleRequest(request: any) {
     if (method === 'auth.verify') {
       const { verifyAuth } = await import('../innertube/session.ts');
       const session = await getBrowseSession();
-      const result = await verifyAuth(session);
+      const result = await verifyAuth(session, (s) => fetchBaseBrowse(s, 'FEwhat_to_watch'));
+      emitResponse(id, result);
+    } else if (method === 'feed.home') {
+      const { parseFeed } = await import('../parser/feed.ts');
+      const session = await getBrowseSession();
+      const token = params?.continuation || params?.chipToken;
+      const raw = token
+        ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
+        : await fetchBaseBrowse(session, 'FEwhat_to_watch');
+      const result = parseFeed(raw, 'home');
       emitResponse(id, result);
     } else if (method === 'playback.open') {
       const { openPlayback } = await import('../playback/resolve.ts');
