@@ -4,10 +4,10 @@ import 'widgets/topbar.dart';
 
 class PageWrapper extends StatefulWidget {
   final Widget body;
-  final Widget? title;
+  final Widget title;
   final List<Widget>? actions;
 
-  const PageWrapper({super.key, required this.body, this.title, this.actions});
+  const PageWrapper({super.key, required this.body, required this.title, this.actions});
 
   @override
   State<PageWrapper> createState() => _PageWrapperState();

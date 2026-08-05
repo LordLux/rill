@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
@@ -5,6 +7,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 import '../page_wrapper.dart';
 import '../debug_player.dart';
 import '../feed_controller.dart';
+import '../widgets/media_tile.dart';
 import '../../domain/feed_item.dart';
 
 class FeedPage extends ConsumerStatefulWidget {
@@ -45,7 +48,7 @@ class _FeedPageState extends ConsumerState<FeedPage> {
     final state = ref.watch(feedProvider);
 
     return PageWrapper(
-      title: const Text('Rill'),
+      title: Text('Rill', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white, fontSize: 23)),
       actions: [
         IconButton(
           icon: const Icon(Icons.bug_report),
@@ -63,13 +66,13 @@ class _FeedPageState extends ConsumerState<FeedPage> {
           },
         ),
       ],
-      body: Padding(
-        padding: EdgeInsets.only(left: 4.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (state.chips.isNotEmpty)
-              SizedBox(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (state.chips.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(bottom: 8.0, left: 8.0),
+              child: SizedBox(
                 height: 36,
                 child: SilkyListView.builder(
                   padding: EdgeInsets.only(top: 1),
@@ -92,10 +95,10 @@ class _FeedPageState extends ConsumerState<FeedPage> {
                   },
                 ),
               ),
-
-            Expanded(child: _buildBody(context, state, ref)),
-          ],
-        ),
+            ),
+      
+          Expanded(child: _buildBody(context, state, ref)),
+        ],
       ),
     );
   }
@@ -158,26 +161,68 @@ class _FeedPageState extends ConsumerState<FeedPage> {
         if (scrollInfo.metrics.pixels >= scrollInfo.metrics.maxScrollExtent - 400) ref.read(feedProvider.notifier).loadMore();
         return false;
       },
-      child: SilkyGridView.builder(
-        controller: _scroll,
-        padding: EdgeInsets.only(right: 16.0, top: 8.0, bottom: 16.0),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 340,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 24,
-          childAspectRatio: 0.85,
-        ),
-        itemCount: state.items.length + (state.isLoading && state.items.isNotEmpty ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index == state.items.length) return const Center(child: CircularProgressIndicator());
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const double maxExtent = 430.0;
+          const double spacing = 32.0;
+          const double hSpacing = 16.0;
 
-          final feedItem = state.items[index];
-          return feedItem.map(
-            video: (v) => _VideoTile(video: v),
-            mix: (m) => _MixTile(mix: m),
-            playlist: (p) => _PlaylistTile(playlist: p),
-            channel: (c) => _ChannelTile(channel: c),
-            unknown: (_) => const SizedBox.shrink(),
+          int crossAxisCount = ((constraints.maxWidth + hSpacing) / (maxExtent + hSpacing)).ceil();
+          crossAxisCount = math.max(1, crossAxisCount);
+
+          final int totalItems = state.items.length + (state.isLoading && state.items.isNotEmpty ? 1 : 0);
+          final int rowCount = (totalItems / crossAxisCount).ceil();
+
+          return Scrollbar(
+            controller: _scroll,
+            thumbVisibility: true,
+            interactive: true,
+            child: Padding(
+              padding: EdgeInsets.only(right: 13.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10)),
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false), // hide original scrollbar
+                    child: SilkyListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.only(bottom: 16.0, top: 8.0, left: 8.0, right: 8.0),
+                    itemCount: rowCount,
+                    itemBuilder: (context, rowIndex) {
+                      return Padding(
+                        padding: EdgeInsets.only(bottom: rowIndex < rowCount - 1 ? spacing : 0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          spacing: hSpacing,
+                          children: List.generate(crossAxisCount, (colIndex) {
+                            final int itemIndex = rowIndex * crossAxisCount + colIndex;
+                            // Handles empty spaces in the final row
+                            if (itemIndex >= totalItems) return const Expanded(child: SizedBox.shrink());
+                    
+                            Widget child;
+                            if (itemIndex == state.items.length) {
+                              child = const Center(child: CircularProgressIndicator()); // "load more" item
+                            } else {
+                              final feedItem = state.items[itemIndex];
+                              final spec = specFor(feedItem);
+                              if (spec != null) {
+                                child = MediaTile(spec: spec);
+                              } else {
+                                child = feedItem.maybeMap(
+                                  channel: (c) => _ChannelTile(channel: c),
+                                  orElse: () => const SizedBox.shrink(),
+                                );
+                              }
+                            }
+                    
+                            return Expanded(child: child);
+                          }),
+                        ),
+                      );
+                    },
+                                        ),
+                ),
+              ),
+            ),
           );
         },
       ),
@@ -185,150 +230,6 @@ class _FeedPageState extends ConsumerState<FeedPage> {
   }
 }
 
-class _VideoTile extends StatelessWidget {
-  final VideoItem video;
-  const _VideoTile({required this.video});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.network(
-              video.thumbnailUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(color: Colors.grey[800], child: const Icon(Icons.image)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (video.channelAvatarUrl != null)
-              CircleAvatar(
-                radius: 18,
-                backgroundImage: NetworkImage(video.channelAvatarUrl!),
-                onBackgroundImageError: (error, stackTrace) {},
-              )
-            else
-              const CircleAvatar(radius: 18, child: Icon(Icons.person, size: 20)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    video.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    video.channelName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  if (video.viewCountText != null || video.publishedText != null)
-                    Text(
-                      '${video.viewCountText ?? ''} ${video.publishedText ?? ''}'.trim(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _MixTile extends StatelessWidget {
-  final MixItem mix;
-  const _MixTile({required this.mix});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.network(
-              mix.thumbnailUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(color: Colors.grey[800], child: const Icon(Icons.queue_music)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          mix.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        if (mix.subtitle != null)
-          Text(
-            mix.subtitle!,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-      ],
-    );
-  }
-}
-
-class _PlaylistTile extends StatelessWidget {
-  final PlaylistItem playlist;
-  const _PlaylistTile({required this.playlist});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.network(
-              playlist.thumbnailUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(color: Colors.grey[800], child: const Icon(Icons.playlist_play)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          playlist.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        if (playlist.channelName != null)
-          Text(
-            playlist.channelName!,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-      ],
-    );
-  }
-}
 
 class _ChannelTile extends StatelessWidget {
   final ChannelItem channel;

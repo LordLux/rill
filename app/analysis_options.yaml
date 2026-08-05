@@ -4,3 +4,6 @@ linter:
     require_trailing_commas: true
 formatter:
   trailing_commas: preserve
+analyzer:
+  errors:
+    curly_braces_in_flow_control_structures: ignore
