@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
-import 'theme.dart';
+import 'theme/accent.dart';
+import 'theme/app_theme.dart';
 import 'ui/debug_player.dart';
 import 'ui/pages/feed.dart';
 
@@ -28,23 +29,25 @@ Future<void> main() async {
   // Boot the app normally
   runApp(
     const ProviderScope(
-      child: NativeYouTubeApp(),
+      child: RillApp(),
     ),
   );
 }
 
-class NativeYouTubeApp extends StatelessWidget {
-  const NativeYouTubeApp({super.key});
+class RillApp extends ConsumerWidget {
+  const RillApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    var themeData = ThemeData.dark(useMaterial3: true);
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Watching the seed here is the whole re-theming mechanism: every role every
+    // widget reads is derived from it, so one rebuild repaints the app.
+    final accent = ref.watch(accentProvider);
 
     return MaterialApp(
-      title: 'Native YouTube',
-      theme: themeData,
+      title: 'Rill',
+      theme: buildRillTheme(accent),
       debugShowCheckedModeBanner: false,
-      home: TextThemeMod(themeMode: ThemeMode.dark, onThemeModeChanged: (_) {}, child: const FeedPage()),
+      home: const FeedPage(),
     );
   }
 }

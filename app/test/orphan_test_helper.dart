@@ -1,4 +1,8 @@
-import 'package:native_youtube/data/rpc/client.dart';
+// ignore_for_file: avoid_print
+// This helper's stdout *is* its interface: rpc_client_test parses SIDECAR_PID
+// out of it. stderr would not be read.
+
+import 'package:rill/data/rpc/client.dart';
 import 'dart:io';
 
 void main() async {

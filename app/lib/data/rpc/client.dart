@@ -125,11 +125,38 @@ class RpcClient {
     }
   }
 
-  void _handleLine(String line) async {
+  /// Above this, a decode is offloaded to an isolate; below it, parsed inline.
+  ///
+  /// Hard invariant 9 is about a *large payload* on the frame loop, not about
+  /// every message. Nearly all of them are a couple of hundred bytes — a
+  /// `feed.home` result is the exception, not the rule — and spawning an isolate
+  /// to parse 200 bytes costs orders of magnitude more than the parse. 64 KiB is
+  /// comfortably above any envelope that is not a feed page and comfortably
+  /// below one that is.
+  static const int _isolateDecodeThreshold = 64 * 1024;
+
+  /// Serialises message handling.
+  ///
+  /// `listen` does not await its handler, so an `async` handler returns at its
+  /// first `await` and the next line starts decoding immediately. Two decodes of
+  /// different sizes then finish in the wrong order. Responses are keyed by `id`
+  /// so that is mostly survivable, but `event.ready` arriving after a response
+  /// would break the ready gate — the one message where order is the whole
+  /// contract. Chaining costs a microtask per message and makes the order the
+  /// wire's order, always.
+  Future<void> _handlerChain = Future<void>.value();
+
+  void _handleLine(String line) {
     if (line.trim().isEmpty) return;
+    _handlerChain = _handlerChain.then((_) => _decodeAndDispatch(line));
+  }
+
+  Future<void> _decodeAndDispatch(String line) async {
     try {
-      final msg = await Isolate.run(() => jsonDecode(line) as Map<String, dynamic>);
-      
+      final msg = line.length <= _isolateDecodeThreshold
+          ? jsonDecode(line) as Map<String, dynamic>
+          : await Isolate.run(() => jsonDecode(line) as Map<String, dynamic>);
+
       if (msg['method'] == 'event.ready') {
         final params = msg['params'] as Map<String, dynamic>;
         final version = params['protocolVersion'];
@@ -262,6 +289,7 @@ class RpcClient {
     }
     _readyCompleter = null;
     _startFuture = null;
+    _handlerChain = Future<void>.value();
     capabilities = null;
     mockCommand = null;
     _isFatalError = false;

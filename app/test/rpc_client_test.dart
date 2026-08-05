@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:native_youtube/data/rpc/client.dart';
+import 'package:rill/data/rpc/client.dart';
 
 void main() {
   setUp(() async {
@@ -27,10 +28,8 @@ void main() {
     await client.start(); // Ensure sidecar is fully started before firing the call
     bool completed = false;
     client.call('test.echo', {'msg': 'never', 'delay': 500}).then((_) {
-      print('COMPLETED NORMALLY');
       completed = true;
     }).catchError((e) {
-      print('COMPLETED WITH ERROR: $e');
       completed = true; // Error also counts as completion for this test
     });
     
@@ -89,6 +88,69 @@ void main() {
     expect((res as String).length, 1000000);
     expect(stopwatch.elapsedMilliseconds, lessThan(5000));
   });
+  test('a large payload and the small ones behind it arrive in order, off the frame loop', () async {
+    final client = RpcClient.instance;
+    await client.start();
+
+    final order = <String>[];
+
+    // A 1 ms periodic timer stands in for the frame loop. If the big decode ran
+    // inline on this isolate, the timer would simply stop firing for the length
+    // of the parse, and the largest gap between ticks would swallow it.
+    final ticks = <int>[];
+    final clock = Stopwatch()..start();
+    final ticker = Timer.periodic(const Duration(milliseconds: 1), (_) {
+      ticks.add(clock.elapsedMilliseconds);
+    });
+
+    // Issued back-to-back, so the sidecar writes all three replies in this
+    // order and the large one is first in line ahead of two small ones.
+    final large = client.call('test.structured_payload', {}).then((r) {
+      order.add('large');
+      return r;
+    });
+    final first = client.call('test.echo', {'msg': 'first'}).then((r) {
+      order.add('first');
+      return r;
+    });
+    final second = client.call('test.echo', {'msg': 'second'}).then((r) {
+      order.add('second');
+      return r;
+    });
+
+    // `finally`, so a failed RPC does not leave the periodic timer running —
+    // flutter_test then fails on the pending timer instead of on the RPC, which
+    // hides the actual reason the test broke.
+    final List<dynamic> results;
+    try {
+      results = await Future.wait([large, first, second]);
+    } finally {
+      ticker.cancel();
+    }
+
+    // All delivered, intact.
+    expect((results[0] as List).length, 120000);
+    expect((results[0] as List).first['title'], startsWith('row 0 '));
+    expect(results[1], 'first');
+    expect(results[2], 'second');
+
+    // In wire order. Without the handler chain the two small replies decode
+    // while the large one is still in its isolate and land first.
+    expect(order, ['large', 'first', 'second']);
+
+    // And the main isolate kept running while it decoded. The parse is hundreds
+    // of milliseconds of work; the bound is loose enough to survive a loaded CI
+    // box and still far below an inline decode of this payload.
+    var largestGap = 0;
+    for (var i = 1; i < ticks.length; i++) {
+      final gap = ticks[i] - ticks[i - 1];
+      if (gap > largestGap) largestGap = gap;
+    }
+    expect(ticks.length, greaterThan(20), reason: 'timer should have kept firing throughout');
+    expect(largestGap, lessThan(150),
+        reason: 'the main isolate stalled for ${largestGap}ms — the decode ran inline');
+  });
+
   test('killing the Flutter process leaves no orphaned sidecar', skip: Platform.isWindows ? 'Failing on Windows' : false, () async {
     String dartPath = Platform.resolvedExecutable;
     if (dartPath.endsWith('flutter_tester.exe')) {

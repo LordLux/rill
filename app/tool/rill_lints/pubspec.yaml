@@ -1,0 +1,15 @@
+name: rill_lints
+description: Project-local analysis rules for the Rill app.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  analysis_server_plugin: ^0.3.20
+  # `any`, deliberately. `analysis_server_plugin` pins an exact `analyzer`, so
+  # any constraint written here that is not that exact version fails version
+  # solving. It is listed at all because the rule imports it directly, and
+  # `depend_on_referenced_packages` is right to insist on that.
+  analyzer: any

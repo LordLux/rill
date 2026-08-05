@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../domain/feed_item.dart';
+import '../../theme/tokens.dart';
 
 // ---- TEMPORARY: unfed tile slots ----
 // Master switch to turn off all placeholder elements at once
@@ -15,9 +16,9 @@ const double tmpTitleTrailingIconSize = 14.0;
 // waiting on: menu items data from DTO
 const List<String> tmpMenuContents = [];
 
-// waiting on: palette extraction cached off UI isolate
-const Color tmpMixCard1Color = Color.fromARGB(255, 168, 168, 168);
-const Color tmpMixCard2Color = Color.fromARGB(255, 65, 65, 65);
+// The stacked-card colours moved to `theme/tokens.dart` as
+// `stackedCardBack`/`stackedCardFront`, still waiting on palette extraction from
+// the thumbnail, cached off the UI isolate.
 // -------------------------------------
 
 enum DurationBadgeTone { normal, live, music }
@@ -127,6 +128,10 @@ class _MediaTileState extends State<MediaTile> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final tokens = theme.tokens;
+
     // Thumbnail area
     Widget topArea = AspectRatio(
       aspectRatio: 16 / 9,
@@ -143,7 +148,7 @@ class _MediaTileState extends State<MediaTile> {
               bottom: 8,
               child: Container(
                 decoration: BoxDecoration(
-                  color: tmpMixCard2Color,
+                  color: tokens.stackedCardBack,
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
@@ -156,7 +161,7 @@ class _MediaTileState extends State<MediaTile> {
               bottom: 4,
               child: Container(
                 decoration: BoxDecoration(
-                  color: tmpMixCard1Color,
+                  color: tokens.stackedCardFront,
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
@@ -174,8 +179,8 @@ class _MediaTileState extends State<MediaTile> {
                     widget.spec.thumbnailUrl,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) => Container(
-                      color: Colors.grey[800],
-                      child: const Icon(Icons.image),
+                      color: scheme.surfaceContainerHighest,
+                      child: Icon(Icons.image, color: scheme.onSurfaceVariant),
                     ),
                   ),
                   // Duration badge
@@ -186,25 +191,29 @@ class _MediaTileState extends State<MediaTile> {
                       child: Container(
                         padding: EdgeInsets.only(left: 4.5, right: 4.5, bottom: .75, top: .5),
                         decoration: BoxDecoration(
-                          color: widget.spec.durationTone == DurationBadgeTone.live ? Colors.red.withValues(alpha: 0.8) : Colors.black.withValues(alpha: 0.8),
+                          // Both sit over an arbitrary thumbnail, so both come
+                          // from the scrim family rather than a surface role.
+                          color: widget.spec.durationTone == DurationBadgeTone.live
+                              ? tokens.liveBadge.withValues(alpha: 0.8)
+                              : tokens.scrim.withValues(alpha: 0.8),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (widget.spec.durationTone == DurationBadgeTone.live)
-                              const Padding(
-                                padding: EdgeInsets.only(right: 4.0),
-                                child: Icon(Icons.sensors, size: 12, color: Colors.white),
+                              Padding(
+                                padding: const EdgeInsets.only(right: 4.0),
+                                child: Icon(Icons.sensors, size: 12, color: tokens.onScrim),
                               )
                             else if (widget.spec.durationTone == DurationBadgeTone.music)
-                              const Padding(
-                                padding: EdgeInsets.only(right: 4.0),
-                                child: Icon(Icons.music_note, size: 12, color: Colors.white),
+                              Padding(
+                                padding: const EdgeInsets.only(right: 4.0),
+                                child: Icon(Icons.music_note, size: 12, color: tokens.onScrim),
                               ),
                             Text(
                               widget.spec.durationTone == DurationBadgeTone.live ? 'LIVE' : (widget.spec.durationText ?? ''),
-                              style: TextStyle(color: Colors.white, fontSize: 11, letterSpacing: 1.1, fontWeight: FontWeight.w400),
+                              style: TextStyle(color: tokens.onScrim, fontSize: 11, letterSpacing: 1.1, fontWeight: FontWeight.w400),
                             ),
                           ],
                         ),
@@ -221,7 +230,9 @@ class _MediaTileState extends State<MediaTile> {
                       child: FractionallySizedBox(
                         alignment: Alignment.centerLeft,
                         widthFactor: tmpProgressBarValue,
-                        child: Container(color: Colors.red),
+                        // The watched-progress bar is one of the places the
+                        // accent belongs (§3.3).
+                        child: Container(color: scheme.primary),
                       ),
                     ),
 
@@ -242,14 +253,16 @@ class _MediaTileState extends State<MediaTile> {
                               if (widget.spec.canWatchLater) ...[
                                 IconButton(
                                   style: IconButton.styleFrom(
-                                    backgroundColor: const Color.fromARGB(180, 0, 0, 0), // Moved from the Container
+                                    // Scrim, not a surface: these buttons have to
+                                    // stay readable over a thumbnail nobody chose.
+                                    backgroundColor: tokens.scrim.withValues(alpha: 0.7),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(6), // Matches your desired radius
                                     ),
                                   ),
-                                  hoverColor: Colors.black,
+                                  hoverColor: tokens.scrim,
                                   mouseCursor: SystemMouseCursors.click,
-                                  icon: const Icon(Icons.schedule, color: Colors.white, size: 23),
+                                  icon: Icon(Icons.schedule, color: tokens.onScrim, size: 23),
                                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                   padding: EdgeInsets.zero,
                                   onPressed: () {
@@ -261,14 +274,14 @@ class _MediaTileState extends State<MediaTile> {
                               if (widget.spec.canAddToQueue)
                                 IconButton(
                                   style: IconButton.styleFrom(
-                                    backgroundColor: const Color.fromARGB(180, 0, 0, 0), // Moved from the Container
+                                    backgroundColor: tokens.scrim.withValues(alpha: 0.7),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(6), // Matches your desired radius
                                     ),
                                   ),
-                                  hoverColor: Colors.black,
+                                  hoverColor: tokens.scrim,
                                   mouseCursor: SystemMouseCursors.click,
-                                  icon: const Icon(Icons.playlist_play, color: Colors.white, size: 23),
+                                  icon: Icon(Icons.playlist_play, color: tokens.onScrim, size: 23),
                                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                   padding: EdgeInsets.zero,
                                   onPressed: () {
@@ -330,7 +343,7 @@ class _MediaTileState extends State<MediaTile> {
                         widget.spec.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.white),
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: scheme.onSurface),
                       ),
                     ),
                   ),
@@ -339,7 +352,7 @@ class _MediaTileState extends State<MediaTile> {
                     top: -1,
                     right: -4,
                     child: IconButton(
-                      icon: const Icon(Icons.more_vert, size: 21, color: Colors.white),
+                      icon: Icon(Icons.more_vert, size: 21, color: scheme.onSurface),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
                       mouseCursor: SystemMouseCursors.click,
@@ -354,7 +367,7 @@ class _MediaTileState extends State<MediaTile> {
                 widget.spec.primaryLine,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
               ),
               // Secondary line (view count + published date)
               if (widget.spec.secondaryLine != null && widget.spec.secondaryLine!.isNotEmpty)
@@ -364,7 +377,7 @@ class _MediaTileState extends State<MediaTile> {
                     widget.spec.secondaryLine!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                   ),
                 ),
               // Badges
@@ -376,13 +389,15 @@ class _MediaTileState extends State<MediaTile> {
                     runSpacing: 4,
                     children: widget.spec.badges
                         .map(
+                          // Badges stay on a surface role — §3.3 keeps the accent
+                          // off them.
                           (b) => Container(
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.grey[800],
+                              color: scheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(2),
                             ),
-                            child: Text(b, style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                            child: Text(b, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
                           ),
                         )
                         .toList(),
@@ -407,7 +422,7 @@ class _MediaTileState extends State<MediaTile> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 100),
                 decoration: BoxDecoration(
-                  color: isHovering ? Colors.grey[850] : Colors.transparent,
+                  color: isHovering ? scheme.surfaceContainerHigh : Colors.transparent,
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),

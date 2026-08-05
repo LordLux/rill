@@ -14,9 +14,9 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:native_youtube/data/rpc/client.dart';
-import 'package:native_youtube/domain/feed_item.dart';
-import 'package:native_youtube/ui/feed_controller.dart';
+import 'package:rill/data/rpc/client.dart';
+import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/feed_controller.dart';
 
 /// Titles of the items currently in the feed, which carry the token that
 /// produced them.

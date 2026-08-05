@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:native_youtube/domain/feed_item.dart';
+import 'package:rill/domain/feed_item.dart';
 
 void main() {
   test('Contract test against exported corpus', () {

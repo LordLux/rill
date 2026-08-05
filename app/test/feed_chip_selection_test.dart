@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:native_youtube/domain/feed_item.dart';
-import 'package:native_youtube/ui/feed_controller.dart';
+import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/feed_controller.dart';
 
 Chip _chip(String label, String token, {bool selected = false, String scope = 'feed'}) =>
     Chip(label: label, token: token, selected: selected, scope: scope);

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:native_youtube/data/rpc/client.dart';
+import 'package:rill/data/rpc/client.dart';
 
 void main() {
   test('Integration: auth.verify and playback.open end to end', () async {

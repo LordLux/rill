@@ -7,6 +7,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 import '../page_wrapper.dart';
 import '../debug_player.dart';
 import '../feed_controller.dart';
+import '../widgets/accent_debug_button.dart';
 import '../widgets/media_tile.dart';
 import '../../domain/feed_item.dart';
 
@@ -48,8 +49,16 @@ class _FeedPageState extends ConsumerState<FeedPage> {
     final state = ref.watch(feedProvider);
 
     return PageWrapper(
-      title: Text('Rill', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white, fontSize: 23)),
+      title: Text(
+        'Rill',
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.onSurface,
+          fontSize: 23,
+        ),
+      ),
       actions: [
+        const AccentDebugButton(),
         IconButton(
           icon: const Icon(Icons.bug_report),
           tooltip: 'Debug Player',
@@ -104,6 +113,8 @@ class _FeedPageState extends ConsumerState<FeedPage> {
   }
 
   Widget _buildBody(BuildContext context, FeedState state, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+
     if (state.error != null && state.items.isEmpty) {
       return Center(
         child: Padding(
@@ -111,12 +122,12 @@ class _FeedPageState extends ConsumerState<FeedPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 48),
+              Icon(Icons.error_outline, color: scheme.error, size: 48),
               const SizedBox(height: 16),
               Text(
                 'Error loading feed:\n${state.error}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
+                style: TextStyle(color: scheme.error),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
@@ -136,11 +147,11 @@ class _FeedPageState extends ConsumerState<FeedPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.account_circle_outlined, size: 64, color: Colors.white54),
+            Icon(Icons.account_circle_outlined, size: 64, color: scheme.onSurfaceVariant),
             const SizedBox(height: 16),
             const Text('You are browsing anonymously.', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text('Log in to see your personalized home feed.', style: TextStyle(color: Colors.white70)),
+            Text('Log in to see your personalized home feed.', style: TextStyle(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () {
@@ -237,6 +248,7 @@ class _ChannelTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -258,7 +270,7 @@ class _ChannelTile extends StatelessWidget {
             channel.subscriberText!,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
           ),
       ],
     );

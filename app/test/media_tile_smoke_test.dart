@@ -1,8 +1,8 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:native_youtube/domain/feed_item.dart';
-import 'package:native_youtube/ui/widgets/media_tile.dart';
+import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/widgets/media_tile.dart';
 
 void main() {
   Widget buildTile(TileSpec spec) {

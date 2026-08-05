@@ -9,6 +9,9 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../data/rpc/client.dart';
+import '../theme/accent.dart';
+import '../theme/app_theme.dart';
+import '../theme/tokens.dart';
 import 'debug_constants.dart';
 
 enum HarnessMode { manual, q1, q2, q3 }
@@ -148,18 +151,22 @@ class FailedApp extends StatelessWidget {
   final String message;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Text(message, style: const TextStyle(color: Colors.redAccent)),
-            ),
+  Widget build(BuildContext context) {
+    final theme = buildRillTheme(kDefaultAccent);
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: theme,
+      home: Scaffold(
+        backgroundColor: theme.tokens.scrim,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(message, style: TextStyle(color: theme.colorScheme.error)),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class HarnessApp extends StatelessWidget {
@@ -171,6 +178,7 @@ class HarnessApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
         debugShowCheckedModeBanner: false,
+        theme: buildRillTheme(kDefaultAccent),
         home: HarnessPage(config: config, source: source),
       );
 }
@@ -418,8 +426,11 @@ class _HarnessPageState extends State<HarnessPage> {
   @override
   Widget build(BuildContext context) {
     final state = _player.state;
+    final theme = Theme.of(context);
+    final tokens = theme.tokens;
     return Scaffold(
-      backgroundColor: Colors.black,
+      // Letterbox around a video frame, not a themed surface.
+      backgroundColor: tokens.scrim,
       body: Column(
         children: [
           Expanded(
@@ -428,7 +439,7 @@ class _HarnessPageState extends State<HarnessPage> {
                     child: Text(
                       'AUDIO ATTACH FAILED:\n$_audioTrackError',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.redAccent, fontSize: 24),
+                      style: TextStyle(color: theme.colorScheme.error, fontSize: 24),
                     ),
                   )
                 : Video(controller: _video),
@@ -454,7 +465,7 @@ class _HarnessPageState extends State<HarnessPage> {
                 ),
                 const SizedBox(height: 8),
                 DefaultTextStyle(
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: tokens.onScrim.withValues(alpha: 0.7), fontSize: 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -480,7 +491,7 @@ class _HarnessPageState extends State<HarnessPage> {
                           '${widget.config.mode.name} run ${widget.config.runLabel}'),
                       if (_audioTrackError != null)
                         Text('audio track FAILED: $_audioTrackError',
-                            style: const TextStyle(color: Colors.redAccent)),
+                            style: TextStyle(color: theme.colorScheme.error)),
                       if (_seeks.isNotEmpty)
                         Text(_seeks.entries
                             .map((e) => '${e.key}:${e.value['target']}→'

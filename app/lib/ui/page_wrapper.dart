@@ -48,13 +48,10 @@ class _PageWrapperState extends State<PageWrapper> {
                     isSelected: true, // Example of selected state
                     onTap: () {},
                   ),
-                  _DrawerItem(
-                    key: const ValueKey('shorts'),
-                    icon: Icons.explore_outlined,
-                    label: 'Shorts',
-                    isOpen: _isDrawerOpen,
-                    onTap: () {},
-                  ),
+                  // No Shorts entry. The parser strips Shorts by design — it is
+                  // the product's first requirement — so the item could never
+                  // have shown anything. The rest of these are placeholders that
+                  // become real in later tasks.
                   _DrawerItem(
                     key: const ValueKey('subscriptions'),
                     icon: Icons.subscriptions_outlined,

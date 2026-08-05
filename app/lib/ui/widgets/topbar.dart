@@ -14,6 +14,8 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return AppBar(
       automaticallyImplyLeading: false, // We provide our own leading widget
       surfaceTintColor: Colors.transparent,
@@ -41,7 +43,7 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                           padding: const EdgeInsets.only(left: 16, right: 13),
                           child: IconButton(
                             constraints: const BoxConstraints.tightFor(width: 40, height: 40),
-                            icon: const Icon(Icons.menu, color: Colors.white),
+                            icon: Icon(Icons.menu, color: scheme.onSurface),
                             onPressed: toggleDrawer,
                           ),
                         ),
@@ -49,17 +51,17 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                       ],
                     ),
                   ),
-              
+
                   // 2. CENTER SECTION (Search Bar - ABSOLUTE CENTER)
-                  // The horizontal padding guarantees it shrinks on medium screens 
+                  // The horizontal padding guarantees it shrinks on medium screens
                   // without overlapping the left/right sections.
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 280.0),
-                    child: showFullSearch 
-                        ? _buildFullSearchBar() 
-                        : _buildCollapsedSearchButton(),
+                    child: showFullSearch
+                        ? const _SearchField()
+                        : _buildCollapsedSearchButton(scheme),
                   ),
-              
+
                   // 3. RIGHT SECTION (Actions)
                   Positioned(
                     right: 16,
@@ -70,17 +72,23 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                         Stack(
                           clipBehavior: Clip.none,
                           children: [
-                            const Icon(Icons.notifications_none, color: Colors.white, size: 28),
+                            Icon(Icons.notifications_none, color: scheme.onSurface, size: 28),
                             Positioned(
                               right: -8,
                               top: -4,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFCC0000),
+                                  // Was YouTube red. A count badge is an
+                                  // attention marker, which is what `error` is
+                                  // for — and it is emphatically not the accent
+                                  // (§3.3: no accent on badges).
+                                  color: scheme.error,
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: const Color(0xFF0F0F0F),
+                                    // Reads as a cut-out from the bar behind it,
+                                    // so it has to be the bar's own colour.
+                                    color: scheme.surface,
                                     width: 2,
                                   ),
                                 ),
@@ -91,7 +99,7 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                                     child: Text(
                                       '9+',
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: scheme.onError,
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
                                         height: 1,
@@ -105,14 +113,14 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                           ],
                         ),
                         const SizedBox(width: 24),
-                        
+
                         // User Profile Avatar
-                        const CircleAvatar(
+                        CircleAvatar(
                           radius: 16,
-                          backgroundColor: Color(0xFF404040),
-                          child: Icon(Icons.person, color: Colors.white, size: 20),
+                          backgroundColor: scheme.surfaceContainerHighest,
+                          child: Icon(Icons.person, color: scheme.onSurfaceVariant, size: 20),
                         ),
-                        
+
                         // Include any extra actions passed to the widget
                         ...actions,
                       ],
@@ -126,17 +134,78 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
       ),
     );
   }
-  Widget _buildFullSearchBar() {
+
+  Widget _buildCollapsedSearchButton(ColorScheme scheme) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest, // Same styling as the search bar background
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        icon: Icon(Icons.search, color: scheme.onSurface, size: 20),
+        onPressed: () {
+          // TODO: Open search overlay / expand search
+        },
+      ),
+    );
+  }
+
+  @override
+  Size get preferredSize => const Size.fromHeight(64.0);
+}
+
+/// The search field, stateful only so it can own a [FocusNode].
+///
+/// The field draws its own container rather than using an `InputBorder`, so the
+/// focus ring has to be drawn here too — and a focus ring is one of the places
+/// the accent belongs (§3.3). Nothing else about the field changes on focus.
+class _SearchField extends StatefulWidget {
+  const _SearchField();
+
+  @override
+  State<_SearchField> createState() => _SearchFieldState();
+}
+
+class _SearchFieldState extends State<_SearchField> {
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChanged);
+  }
+
+  /// `mounted` because `FocusNode.dispose()` unfocuses, and unfocusing notifies
+  /// listeners — after the element is defunct. Without the guard that path calls
+  /// `setState` on a disposed State.
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_onFocusChanged);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final focused = _focus.hasFocus;
+
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 600),
       child: Container(
         height: 40,
         decoration: BoxDecoration(
-          color: const Color.fromARGB(66, 0, 0, 0),
+          color: scheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(40),
           border: Border.all(
-            color: const Color.fromARGB(109, 105, 105, 105),
-            width: 1,
+            color: focused ? scheme.primary : scheme.outlineVariant,
+            width: focused ? 2 : 1,
           ),
         ),
         child: Row(
@@ -144,13 +213,16 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
             // Search Input Field
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(left: 16.0, right: 8.0),
+                // The focused border is a pixel thicker; absorbing that here
+                // keeps the text from shifting when the field takes focus.
+                padding: EdgeInsets.only(left: focused ? 15.0 : 16.0, right: 8.0),
                 child: TextField(
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  focusNode: _focus,
+                  style: TextStyle(color: scheme.onSurface, fontSize: 16),
                   decoration: InputDecoration(
                     hintText: 'Search',
                     hintStyle: TextStyle(
-                      color: Colors.grey.shade500,
+                      color: scheme.onSurfaceVariant,
                       fontSize: 16,
                       fontWeight: FontWeight.w400,
                     ),
@@ -164,18 +236,18 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
             // Search Button
             Container(
               width: 64,
-              decoration: const BoxDecoration(
-                color: Color.fromARGB(100, 51, 51, 51),
-                borderRadius: BorderRadius.only(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: const BorderRadius.only(
                   topRight: Radius.circular(40),
                   bottomRight: Radius.circular(40),
                 ),
                 border: Border(
-                  left: BorderSide(color: Color(0xFF303030), width: 1),
+                  left: BorderSide(color: scheme.outlineVariant, width: 1),
                 ),
               ),
-              child: const Center(
-                child: Icon(Icons.search, color: Colors.white, size: 24),
+              child: Center(
+                child: Icon(Icons.search, color: scheme.onSurface, size: 24),
               ),
             ),
           ],
@@ -183,24 +255,4 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
       ),
     );
   }
-
-  Widget _buildCollapsedSearchButton() {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: const BoxDecoration(
-        color: Color.fromARGB(66, 0, 0, 0), // Same styling as the search bar background
-        shape: BoxShape.circle,
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.search, color: Colors.white, size: 20),
-        onPressed: () {
-          // TODO: Open search overlay / expand search
-        },
-      ),
-    );
-  }
-  
-  @override
-  Size get preferredSize => const Size.fromHeight(64.0);
 }

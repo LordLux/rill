@@ -139,6 +139,18 @@ rl.on('line', (line) => {
     } else if (req.method === 'test.large_payload') {
       const largeStr = 'x'.repeat(1000000);
       process.stdout.write(JSON.stringify({ id: req.id, result: largeStr }) + '\n');
+    } else if (req.method === 'test.structured_payload') {
+      // Deliberately structured rather than one long string: `test.large_payload`
+      // is a megabyte of 'x', which jsonDecode chews through in a few ms — far
+      // too fast to tell an offloaded decode from an inline one. An array of
+      // objects is the shape that actually costs parser time, which is what the
+      // ordering test needs to be measuring.
+      const n = req.params?.count ?? 120000;
+      const rows = [];
+      for (let i = 0; i < n; i++) {
+        rows.push({ i, id: `vid_${i}`, title: `row ${i} ${'y'.repeat(48)}`, live: false });
+      }
+      process.stdout.write(JSON.stringify({ id: req.id, result: rows }) + '\n');
     }
   } catch (err) {
     process.stderr.write(`fake_sidecar error: ${err}\n`);

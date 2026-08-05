@@ -1,4 +1,11 @@
 include: package:flutter_lints/flutter.yaml
+# Project-local rules. `no_color_literals` scopes itself to lib/ui/ from inside
+# the rule — plugin rules cannot be configured in a nested analysis options file.
+plugins:
+  rill_lints:
+    path: tool/rill_lints
+    diagnostics:
+      no_color_literals: true
 linter:
   rules:
     require_trailing_commas: true
