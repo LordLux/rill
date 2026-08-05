@@ -27,6 +27,8 @@ dist/
 sidecar/dist/
 build/
 *.exe
+# Interrupted bun build leftovers
+*.bun-build
 
 # Editor / OS
 .vscode/

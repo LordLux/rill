@@ -11,12 +11,33 @@ let resolveSessionPromise: Promise<Session> | null = null;
 
 // Memoise the promise, not the resolved value: two concurrent callers arriving
 // before the first session settles would otherwise each create one.
+/**
+ * The browse session, and the only one that ever sees a cookie.
+ *
+ * `YT_COOKIE` is read from the environment rather than a file: the sidecar
+ * inherits it from whatever launched it (Dart's `Process.start` passes the
+ * parent environment through by default), so nothing has to live on disk next
+ * to the code. Unset or blank means anonymous, which is a supported state and
+ * not an error — `auth.verify` reports `anonymous` and the feed says so.
+ *
+ * Browse and resolve are deliberately different clients (§2.3): this session
+ * browses and reports as `WEB` with cookies, while `getResolveSession` stays
+ * anonymous on purpose. Do not pass the cookie there — the two are independent
+ * calls and bridging them is a rejected alternative.
+ *
+ * A cookie present is not a session accepted. Hard invariant 5: `logged_in`
+ * reflects cookie presence only, a degraded session answers HTTP 200 with an
+ * empty feed, and `auth.verify` is what tells the difference.
+ */
 function getBrowseSession(): Promise<Session> {
   if (!browseSessionPromise) {
     browseSessionPromise = (async () => {
       try {
         const { createSession } = await import('../innertube/session.ts');
-        return await createSession({ clientType: 'WEB' });
+        return await createSession({
+          clientType: 'WEB',
+          cookie: process.env.YT_COOKIE?.trim() || undefined,
+        });
       } catch (e) {
         browseSessionPromise = null;
         throw e;

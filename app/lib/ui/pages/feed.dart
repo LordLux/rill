@@ -7,11 +7,41 @@ import '../debug_player.dart';
 import '../feed_controller.dart';
 import '../../domain/feed_item.dart';
 
-class FeedPage extends ConsumerWidget {
+class FeedPage extends ConsumerStatefulWidget {
   const FeedPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FeedPage> createState() => _FeedPageState();
+}
+
+class _FeedPageState extends ConsumerState<FeedPage> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A filter change starts at the top, said out loud.
+    //
+    // It already happens by accident: clearing `items` swaps the grid for the
+    // spinner, and disposing the grid takes its scroll position with it. That
+    // is not a decision anyone made, and the obvious future improvement —
+    // keeping the previous results visible while the next filter loads — would
+    // silently bring back landing halfway down someone else's list.
+    //
+    // Post-frame because the grid may not be mounted at the instant the token
+    // changes; when it is (results kept visible), this is the whole mechanism.
+    ref.listen(feedProvider.select((s) => s.selectedToken), (previous, next) {
+      if (previous == next) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) _scroll.jumpTo(0);
+      });
+    });
+
     final state = ref.watch(feedProvider);
 
     return PageWrapper(
@@ -33,37 +63,39 @@ class FeedPage extends ConsumerWidget {
           },
         ),
       ],
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (state.chips.isNotEmpty)
-            SizedBox(
-              height: 56,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                scrollDirection: Axis.horizontal,
-                itemCount: state.chips.length,
-                itemBuilder: (context, index) {
-                  final chip = state.chips[index];
-                  final isSelected = state.selectedChip?.token == chip.token;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: FilterChip(
-                      label: Text(chip.label),
-                      selected: isSelected,
-                      onSelected: (_) {
-                        ref.read(feedProvider.notifier).selectChip(chip);
-                      },
-                    ),
-                  );
-                },
+      body: Padding(
+        padding: EdgeInsets.only(left: 4.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (state.chips.isNotEmpty)
+              SizedBox(
+                height: 36,
+                child: SilkyListView.builder(
+                  padding: EdgeInsets.only(top: 1),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: state.chips.length,
+                  itemBuilder: (context, index) {
+                    final chip = state.chips[index];
+                    final isSelected = state.selectedChip?.token == chip.token;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: FilterChip(
+                        label: Text(chip.label),
+                        selected: isSelected,
+                        showCheckmark: false,
+                        onSelected: (_) {
+                          ref.read(feedProvider.notifier).selectChip(chip);
+                        },
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
 
-          Expanded(
-            child: _buildBody(context, state, ref),
-          ),
-        ],
+            Expanded(child: _buildBody(context, state, ref)),
+          ],
+        ),
       ),
     );
   }
@@ -127,7 +159,8 @@ class FeedPage extends ConsumerWidget {
         return false;
       },
       child: SilkyGridView.builder(
-        padding: const EdgeInsets.all(16),
+        controller: _scroll,
+        padding: EdgeInsets.only(right: 16.0, top: 8.0, bottom: 16.0),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 340,
           crossAxisSpacing: 16,
@@ -136,11 +169,10 @@ class FeedPage extends ConsumerWidget {
         ),
         itemCount: state.items.length + (state.isLoading && state.items.isNotEmpty ? 1 : 0),
         itemBuilder: (context, index) {
-          if (index == state.items.length) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final item = state.items[index];
-          return item.map(
+          if (index == state.items.length) return const Center(child: CircularProgressIndicator());
+
+          final feedItem = state.items[index];
+          return feedItem.map(
             video: (v) => _VideoTile(video: v),
             mix: (m) => _MixTile(mix: m),
             playlist: (p) => _PlaylistTile(playlist: p),

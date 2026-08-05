@@ -15,6 +15,8 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return AppBar(
+      automaticallyImplyLeading: false, // We provide our own leading widget
+      surfaceTintColor: Colors.transparent,
       backgroundColor: Colors.transparent, // Ensure the container color shows through
       elevation: 0,
       leading: SizedBox(

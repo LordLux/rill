@@ -56,6 +56,18 @@ they are listed first.
       anything the UI renders. Direct property reads are for diagnostics
       only, off the UI isolate.
 
+10. **A `copyWith` over nullable fields needs a sentinel.** The reflex
+    `value ?? this.value` cannot *clear* anything — passing `null` means "leave
+    it alone", so a field can be set but never unset, and the call that looks
+    like a reset silently isn't one. `FeedState.copyWith` had exactly this:
+    `continuation: null` at the start of a fresh load was a no-op, so switching
+    chip filters kept the previous filter's continuation and the next page
+    would have been paged from the *old* feed. Use
+    `Object? field = _unchanged` with an `identical(field, _unchanged)` test.
+    The failure is silent in both directions — nothing throws, the field simply
+    keeps a value that is now wrong — and it gets rewritten the same wrong way
+    in every new controller.
+
 ---
 
 ## The flat DTO contract

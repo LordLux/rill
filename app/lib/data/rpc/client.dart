@@ -199,7 +199,28 @@ class RpcClient {
     });
   }
 
-  Future<dynamic> call(String method, Map<String, dynamic> params) async {
+  Future<dynamic> call(String method, Map<String, dynamic> params) =>
+      callCancelable(method, params).response;
+
+  /// A request plus the id needed to `$cancel` it.
+  ///
+  /// The id is allocated synchronously, before the sidecar has necessarily
+  /// finished starting, so a caller that supersedes this request can cancel it
+  /// even while it is still waiting on the handshake.
+  ///
+  /// A cancelled request's future never completes — that is the transport's
+  /// contract, asserted in `rpc_client_test.dart`. Callers must therefore not
+  /// treat the future as their only path forward; supersede on your own signal
+  /// rather than waiting for a cancelled response that will never arrive.
+  ({int id, Future<dynamic> response}) callCancelable(
+    String method,
+    Map<String, dynamic> params,
+  ) {
+    final id = _nextId++;
+    return (id: id, response: _send(id, method, params));
+  }
+
+  Future<dynamic> _send(int id, String method, Map<String, dynamic> params) async {
     if (_process == null) {
       await start();
     }
@@ -209,14 +230,13 @@ class RpcClient {
     if (_process == null) {
       throw RpcException('START_FAILED', 'Failed to start sidecar process', RpcRetryMode.auto);
     }
-    
-    final id = _nextId++;
+
     final completer = Completer<dynamic>();
     _pending[id] = completer;
-    
+
     final msg = jsonEncode({'id': id, 'method': method, 'params': params});
     _process!.stdin.writeln(msg);
-    
+
     return completer.future;
   }
 
