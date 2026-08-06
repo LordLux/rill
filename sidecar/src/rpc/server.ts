@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { Session } from '../innertube/session.ts';
-import { RpcError, isRpcError } from '../errors.ts';
+import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { announceCapabilities } from '../capabilities.ts';
 
@@ -94,8 +94,22 @@ function emitError(id: number | string, error: unknown) {
   if (isRpcError(error)) {
     try {
       envelope = error.toEnvelope();
-    } catch (e: any) {
-      envelope = { code: 'UPSTREAM_ERROR', message: e.message, retry: 'auto' };
+    } catch (e) {
+      // `toEnvelope` throws on an internal signal rather than inventing a
+      // `retry` for it (§4). Reaching Flutter as an upstream error is the least
+      // wrong answer: the request did fail, and the app must not be told a
+      // `retry` the protocol never defined for this code.
+      //
+      // Both messages. `error` says what actually failed; `e` says why it could
+      // not be enveloped. Keeping only the second — which is what this line used
+      // to do — reports "internal signal cannot be enveloped" and drops every
+      // clue about what the signal was about, on the one path that only runs
+      // when something has already gone wrong in an unanticipated way.
+      envelope = {
+        code: 'UPSTREAM_ERROR',
+        message: `${messageOf(error)} (${messageOf(e)})`,
+        retry: 'auto',
+      };
     }
   } else {
     envelope = {
@@ -111,18 +125,69 @@ function emitEvent(method: string, params: unknown) {
   process.stdout.write(JSON.stringify({ method, params }) + '\n');
 }
 
-async function handleRequest(request: any) {
+/**
+ * One decoded line off stdin.
+ *
+ * Deliberately permissive: this is whatever `JSON.parse` produced, not something
+ * the type system can vouch for. Every field is optional because a malformed
+ * frame is a thing the transport has to survive, not a thing it may assume away
+ * — `handleRequest` checks for a missing `id` two lines in for exactly that
+ * reason. What this buys over `any` is that the checks cannot be forgotten.
+ */
+interface RpcRequest {
+  id?: number;
+  method?: string;
+  params?: Record<string, unknown>;
+}
+
+/**
+ * A required string parameter, or `BAD_REQUEST`.
+ *
+ * Shared rather than open-coded per method because §3 is about to grow five more
+ * methods that all take params, and the failure mode of open-coding it is that
+ * one of them forgets and the missing check surfaces as a `TypeError` from deep
+ * inside whatever the param was passed to.
+ */
+function requireString(
+  params: Record<string, unknown> | undefined,
+  name: string,
+  method: string,
+): string {
+  const value = params?.[name];
+  // Trimmed, not just non-empty. `"   "` is a string and it is not empty, so the
+  // exact-emptiness check waved it through to be used as a video id — which
+  // fails much further downstream, as an upstream error about a video that was
+  // never asked for.
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new RpcError('BAD_REQUEST', `${method} requires a non-empty string '${name}'`);
+  }
+  return value.trim();
+}
+
+async function handleRequest(request: RpcRequest) {
   const { id, method, params } = request;
 
   if (method === '$cancel') {
+    // Narrowed rather than asserted: the id arrived over a wire, and a frame
+    // carrying `{"id": {}}` must be ignored, not used as a Map key.
     const cancelId = params?.id;
-    if (cancelId !== undefined && abortControllers.has(cancelId)) {
-      abortControllers.get(cancelId)!.abort();
+    if (typeof cancelId === 'number' || typeof cancelId === 'string') {
+      abortControllers.get(cancelId)?.abort();
     }
     return;
   }
 
   if (id === undefined) {
+    return;
+  }
+
+  // Checked before anything interpolates it. `{"method": {"toString": null}}` is
+  // a real frame the transport has to survive, and `${method}` on that object
+  // throws "Cannot convert object to primitive value" — from inside the line
+  // building the error message, so the failure arrives as an UPSTREAM_ERROR
+  // about a client bug. Which is `auto`, so the app would retry it.
+  if (typeof method !== 'string') {
+    emitError(id, new RpcError('BAD_REQUEST', `method must be a string, got ${typeof method}`));
     return;
   }
 
@@ -138,22 +203,40 @@ async function handleRequest(request: any) {
     } else if (method === 'feed.home') {
       const { parseFeed } = await import('../parser/feed.ts');
       const session = await getBrowseSession();
-      const token = params?.continuation || params?.chipToken;
+      // `||` over both, exactly as before: a non-string is absent, and an empty
+      // string falls through to the next candidate and then to a base browse.
+      // The "All" chip's token *is* `''`, so that last step is load-bearing.
+      const continuation = typeof params?.continuation === 'string' ? params.continuation : '';
+      const chipToken = typeof params?.chipToken === 'string' ? params.chipToken : '';
+      const token = continuation || chipToken;
       const raw = token
         ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
         : await fetchBaseBrowse(session, 'FEwhat_to_watch');
       const result = parseFeed(raw, 'home');
       emitResponse(id, result);
     } else if (method === 'playback.open') {
+      // Validate *before* the dynamic import. `videoId` is the one parameter the
+      // ladder cannot proceed without, and it comes off a wire — checking here
+      // makes a malformed frame a BAD_REQUEST the app can act on, rather than a
+      // `TypeError` from five tiers down arriving as UPSTREAM_ERROR, which is
+      // `auto`, so the app would have retried a request that can never succeed.
+      //
+      // Order matters beyond tidiness: `import('../playback/resolve.ts')` pulls
+      // in the whole resolution module graph, and doing that first made a
+      // rejected request pay for a ladder it was never going to use.
+      const videoId = requireString(params, 'videoId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
-      const result = await openPlayback({ session }, params);
+      const result = await openPlayback(
+        { session },
+        { videoId, preload: params?.preload === true },
+      );
       emitResponse(id, result);
     } else {
-      emitError(id, new RpcError('UPSTREAM_ERROR', `Unknown method: ${method}`));
+      emitError(id, new RpcError('BAD_REQUEST', `Unknown method: ${method}`));
     }
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
+  } catch (error) {
+    if (nameOf(error) === 'AbortError') {
       // Aborted, don't send a response
     } else {
       emitError(id, error);
@@ -170,19 +253,25 @@ export function startRpcServer() {
     capabilities
   });
 
+  // No `output`. stdout is the protocol (hard invariant 3), and handing it to
+  // readline hands readline a writer into the NDJSON stream. `terminal: false`
+  // means it does not use that writer *today* — it makes the gun silent, not
+  // unloaded. Anything that later flips `terminal`, or calls `rl.prompt()` or
+  // `rl.write()`, corrupts the stream from inside a module that has no business
+  // writing to it, and the failure lands on the Flutter side as a frame that
+  // will not parse.
   const rl = createInterface({
     input: process.stdin,
-    output: process.stdout,
     terminal: false
   });
 
   rl.on('line', (line) => {
     if (!line.trim()) return;
     try {
-      const request = JSON.parse(line);
+      const request = JSON.parse(line) as RpcRequest;
       handleRequest(request).catch(e => log.error(`Unhandled request error: ${e}`));
-    } catch (e: any) {
-      log.error(`Malformed JSON: ${e.message}`);
+    } catch (e) {
+      log.error(`Malformed JSON: ${messageOf(e)}`);
     }
   });
 

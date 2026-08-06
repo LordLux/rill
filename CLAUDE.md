@@ -167,6 +167,7 @@ Shorts are stripped, never rendered.
 
 ```bash
 cd sidecar && bun test          # parser tests, offline, no network
+cd sidecar && bun run check     # typecheck + lint + tests — run before calling it done
 cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
 cd sidecar && bun run build     # compile to dist/sidecar.exe — see below

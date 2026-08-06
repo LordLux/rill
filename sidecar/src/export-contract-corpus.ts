@@ -4,6 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFeed } from './parser/feed.ts';
 import type { Chip, FeedItem } from './types.ts';
+import { logger } from './log.ts';
+
+const log = logger('corpus');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const FIXTURES = join(ROOT, 'sidecar/fixtures');
@@ -113,7 +116,7 @@ async function main() {
     };
 
     await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
-    console.log(`Exported sanitised ${file}`);
+    log.info(`exported sanitised ${file}`);
   }
 }
 

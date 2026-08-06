@@ -31,8 +31,9 @@ ThemeData buildRillTheme(Color accent) {
     extensions: [tokens],
     chipTheme: base.chipTheme.copyWith(
       // The selected filter chip is one of the few places the accent belongs.
-      selectedColor: scheme.primaryContainer,
+      backgroundColor: scheme.surfaceContainerHighest,
       side: BorderSide.none,
+      selectedColor: scheme.primaryContainer,
       labelStyle: TextStyle(color: scheme.onSurface),
       secondaryLabelStyle: TextStyle(color: scheme.onPrimaryContainer),
     ),

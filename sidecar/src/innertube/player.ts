@@ -97,7 +97,37 @@ function remember(memo: Map<string, string>, key: string, value: string): void {
   memo.set(key, value);
 }
 
-function buildHandle(source: JsPlayer): Player {
+/**
+ * Read a parameter back out of whatever the player code returned.
+ *
+ * `new URL()` on its own is the wrong failure mode here. The input is the output
+ * of obfuscated JavaScript that YouTube rewrites at will, so "not a URL" is a
+ * thing it can genuinely produce — and a bare `TypeError: Invalid URL` escapes
+ * the resolution ladder instead of declining a rung. The ladder is built to have
+ * tiers say "not my case, keep going"; a tier that throws something the ladder
+ * does not recognise takes the whole `playback.open` down with it, and the user
+ * sees a crash rather than the next tier's answer.
+ *
+ * `STREAM_UNAVAILABLE` because that is what a rung declining looks like, and it
+ * is `retry: "user"` — the honest reading of a player the sidecar could not make
+ * sense of.
+ */
+function readParam(out: string, param: string, context: string): string | null {
+  try {
+    return new URL(out).searchParams.get(param);
+  } catch {
+    throw new RpcError(
+      'STREAM_UNAVAILABLE',
+      `${context} did not return a URL (got ${out.slice(0, 60)}…)`,
+    );
+  }
+}
+
+/**
+ * Exported for tests only. Everything in production reaches a handle through
+ * `getPlayer` / `rebuildPlayer`, which own the cache and the TTL.
+ */
+export function buildHandle(source: JsPlayer): Player {
   // youtubei.js writes deciphered `n` values into this map and reads them back,
   // so passing the same one to every call memoises across formats. Adaptive
   // responses repeat `n` across the whole format list, so this is most of the
@@ -111,7 +141,7 @@ function buildHandle(source: JsPlayer): Player {
     async decipherSignature(s, sp) {
       const cipher = new URLSearchParams({ s, sp, url: MOCK_URL }).toString();
       const out = await source.decipher(undefined, cipher);
-      const value = new URL(out).searchParams.get(sp || 'signature');
+      const value = readParam(out, sp || 'signature', `player ${source.player_id} signature decipher`);
       if (!value) {
         throw new RpcError(
           'STREAM_UNAVAILABLE',
@@ -126,7 +156,7 @@ function buildHandle(source: JsPlayer): Player {
       if (cached) return cached;
 
       const out = await source.decipher(`${MOCK_URL}&n=${encodeURIComponent(n)}`);
-      const value = new URL(out).searchParams.get('n');
+      const value = readParam(out, 'n', `player ${source.player_id} n decipher`);
       if (!value) {
         throw new RpcError(
           'STREAM_UNAVAILABLE',

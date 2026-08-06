@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import '../domain/feed_item.dart';
 import '../data/rpc/client.dart';
 
@@ -35,6 +36,16 @@ class FeedState {
   final String? continuation;
   final bool isLoading;
   final String? error;
+
+  /// How this error may be answered, from `protocol.md` §4. `null` when there is
+  /// no error.
+  ///
+  /// Carried next to the message because the message alone cannot tell the UI
+  /// whether to offer a retry: `user` means show one, `no` means retrying
+  /// changes nothing until a login or a policy does. A retry button on a `no`
+  /// is a button that lies.
+  final RpcRetryMode? errorRetry;
+
   final bool isAuthDegraded;
   final bool isAnonymous;
 
@@ -46,6 +57,7 @@ class FeedState {
     this.continuation,
     this.isLoading = true,
     this.error,
+    this.errorRetry,
     this.isAuthDegraded = false,
     this.isAnonymous = false,
   });
@@ -63,6 +75,7 @@ class FeedState {
     Object? continuation = _unchanged,
     bool? isLoading,
     Object? error = _unchanged,
+    Object? errorRetry = _unchanged,
     bool? isAuthDegraded,
     bool? isAnonymous,
   }) {
@@ -76,6 +89,8 @@ class FeedState {
           identical(continuation, _unchanged) ? this.continuation : continuation as String?,
       isLoading: isLoading ?? this.isLoading,
       error: identical(error, _unchanged) ? this.error : error as String?,
+      errorRetry:
+          identical(errorRetry, _unchanged) ? this.errorRetry : errorRetry as RpcRetryMode?,
       isAuthDegraded: isAuthDegraded ?? this.isAuthDegraded,
       isAnonymous: isAnonymous ?? this.isAnonymous,
     );
@@ -133,6 +148,37 @@ class FeedController extends Notifier<FeedState> {
   int _generation = 0;
   int? _inFlight;
 
+  /// Delays for silently re-trying a `retry: "auto"` failure.
+  ///
+  /// This lives here rather than in the sidecar on purpose, and §4 now says so.
+  /// A sidecar-side retry cannot be superseded: switch chip filters while it is
+  /// on attempt 3 and it keeps working on a request nobody wants, with `$cancel`
+  /// arriving while it is asleep between attempts and no one listening. Here,
+  /// the timer is cancelled by `loadHome` and any answer it produces is dropped
+  /// by the generation guard — the same two mechanisms that supersede everything
+  /// else, rather than a second cancellation path plumbed into a retry loop
+  /// across the process boundary.
+  ///
+  /// Capped, because an uncapped silent retry is the same pathology as the
+  /// scroll loop it replaces, only politer: nothing on screen ever says the feed
+  /// has stopped working. After the last delay the failure becomes visible and
+  /// the user decides. The cap is only real if a retry cannot refill it — see
+  /// `isAutoRetry` on [loadHome], which is the bug this comment used to describe
+  /// without preventing.
+  ///
+  /// Mutable only so a test need not spend the real 15 s watching the budget run
+  /// out. Nothing in the app writes to it.
+  @visibleForTesting
+  static List<Duration> autoBackoff = const [
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+  ];
+
+  int _autoAttempt = 0;
+  Timer? _retryTimer;
+
   /// Completed when a newer request supersedes this one.
   ///
   /// A cancelled request's future never completes — the transport's contract —
@@ -144,12 +190,35 @@ class FeedController extends Notifier<FeedState> {
 
   @override
   FeedState build() {
+    // A backoff timer can outlive the notifier — a disposed `Notifier` throws on
+    // assignment to `state`, so the tick would land as an error with no owner.
+    ref.onDispose(() {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+    });
     Future.microtask(loadHome);
     return const FeedState(surface: surface);
   }
 
-  Future<void> loadHome({String? chipToken, bool isLoadMore = false}) async {
+  Future<void> loadHome({
+    String? chipToken,
+    bool isLoadMore = false,
+    /// Set only by the backoff timer in [_fail].
+    ///
+    /// Without it a base load's retry re-entered here as an ordinary base load
+    /// and reset `_autoAttempt` to 0 — refilling the budget it was spending, so
+    /// the cap never bit. A failing base feed then retried every second forever
+    /// behind a spinner that never became an error: precisely the pathology the
+    /// cap exists to prevent, reintroduced by the retry path itself.
+    bool isAutoRetry = false,
+  }) async {
     final generation = ++_generation;
+
+    // A pending backoff belongs to the request this one replaces. Left running
+    // it would re-issue the old filter's page on top of the new one.
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    if (!isLoadMore && !isAutoRetry) _autoAttempt = 0;
 
     // Supersede whatever is in flight. Filtering fast while a load-more is
     // pending would otherwise append the old filter's next page to the new
@@ -163,11 +232,12 @@ class FeedController extends Notifier<FeedState> {
     final superseded = _superseded = Completer<void>();
 
     if (isLoadMore) {
-      state = state.copyWith(isLoading: true, error: null);
+      state = state.copyWith(isLoading: true, error: null, errorRetry: null);
     } else {
       state = state.copyWith(
         isLoading: true,
         error: null,
+        errorRetry: null,
         items: const [],
         continuation: null,
         selectedToken: chipToken,
@@ -226,6 +296,7 @@ class FeedController extends Notifier<FeedState> {
       // browse — so it comes back with a bar, and is one.
       final isBaseBrowse = !isLoadMore && (chipToken == null || chipToken.isEmpty);
 
+      _autoAttempt = 0;
       state = state.copyWith(
         isLoading: false,
         chipBars: storeChipBar(state.chipBars, surface, parsedChips, isBaseBrowse: isBaseBrowse),
@@ -237,18 +308,71 @@ class FeedController extends Notifier<FeedState> {
       _inFlight = null;
       if (e.code == 'AUTH_DEGRADED') {
         state = state.copyWith(isAuthDegraded: true, isLoading: false);
-      } else {
-        state = state.copyWith(isLoading: false, error: e.message);
+        return;
       }
+      _fail(e.message, e.retry, generation: generation, chipToken: chipToken, isLoadMore: isLoadMore);
     } catch (e) {
       if (generation != _generation) return;
       _inFlight = null;
-      state = state.copyWith(isLoading: false, error: e.toString());
+      // Not an envelope — a bug on this side of the boundary. It carries no
+      // `retry` of its own, and `user` is the honest reading: nothing will fix
+      // itself, but letting the user try again costs nothing.
+      _fail(e.toString(), RpcRetryMode.user, generation: generation, chipToken: chipToken, isLoadMore: isLoadMore);
     }
   }
 
+  /// Land a failure: silently for an `auto` still inside its budget, visibly
+  /// otherwise.
+  void _fail(
+    String message,
+    RpcRetryMode retry, {
+    required int generation,
+    required String? chipToken,
+    required bool isLoadMore,
+  }) {
+    if (retry == RpcRetryMode.auto && _autoAttempt < autoBackoff.length) {
+      final delay = autoBackoff[_autoAttempt++];
+      // No error on the state: §4 says an `auto` failure shows a loading state,
+      // and `isLoading` is also what holds `loadMore`'s gate shut in the
+      // meantime, so a scroll cannot race the timer.
+      state = state.copyWith(isLoading: true, error: null, errorRetry: null);
+      _retryTimer?.cancel();
+      _retryTimer = Timer(delay, () {
+        if (generation != _generation) return;
+        loadHome(chipToken: chipToken, isLoadMore: isLoadMore, isAutoRetry: true);
+      });
+      return;
+    }
+
+    state = state.copyWith(
+      isLoading: false,
+      error: message,
+      // An `auto` that has run out of budget is no longer the sidecar's to
+      // retry. It becomes the user's call, which is what `user` means.
+      errorRetry: retry == RpcRetryMode.auto ? RpcRetryMode.user : retry,
+    );
+  }
+
+  /// Paging triggered by the scroll position.
+  ///
+  /// The listener behind this fires on *every* scroll notification within 400 px
+  /// of the bottom, so the error gate is not a nicety: without it one failed
+  /// page turns each subsequent scroll into another identical failing request,
+  /// unbounded and invisible — the error surface only replaces the grid when
+  /// there are no items, so a populated feed shows nothing at all while it
+  /// hammers the sidecar.
+  ///
+  /// Nothing here clears the gate. `retryMore` does, because a person asked.
   Future<void> loadMore() async {
     if (state.isLoading || state.continuation == null) return;
+    if (state.error != null) return;
+    await loadHome(chipToken: state.selectedToken, isLoadMore: true);
+  }
+
+  /// The user answering a `retry: "user"` footer.
+  Future<void> retryMore() async {
+    if (state.isLoading || state.continuation == null) return;
+    _autoAttempt = 0;
     await loadHome(chipToken: state.selectedToken, isLoadMore: true);
   }
 

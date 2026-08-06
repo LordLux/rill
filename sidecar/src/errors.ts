@@ -15,6 +15,8 @@
 export type EnvelopeErrorCode =
   | 'AUTH_DEGRADED'
   | 'AUTH_REQUIRED'
+  /** Unknown method, or params that failed validation. The caller is at fault. */
+  | 'BAD_REQUEST'
   | 'STREAM_UNAVAILABLE'
   | 'RATE_LIMITED'
   | 'UPSTREAM_ERROR';
@@ -44,7 +46,13 @@ export type ErrorCode = EnvelopeErrorCode | InternalSignalCode;
  * user be offered a retry* — and the UI contract turns on the difference.
  */
 export type RetryMode =
-  /** The sidecar retries with backoff. The app shows loading, not an error. */
+  /**
+   * The app retries with backoff and shows loading, not an error.
+   *
+   * The app, not the sidecar (`protocol.md` §4). A sidecar-side retry cannot be
+   * superseded: a filter switch mid-retry leaves it working on a request nobody
+   * wants, with `$cancel` arriving while it sleeps between attempts.
+   */
   | 'auto'
   /** Show the error with a retry affordance. Never loop silently. */
   | 'user'
@@ -62,6 +70,10 @@ export type RetryMode =
 const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.freeze({
   AUTH_DEGRADED: 'no',
   AUTH_REQUIRED: 'no',
+  // The only `no` that is a certainty rather than a judgement: the same bytes
+  // will fail the same way forever. Retrying a client bug just hides it behind a
+  // spinner, which is what `UPSTREAM_ERROR` (`auto`) used to do to it.
+  BAD_REQUEST: 'no',
   // The ladder's floor is a very good bet, not a promise (F9, `protocol.md`
   // §3.5): every rung can decline for a video that is fine. So the user gets an
   // affordance — but not a silent loop, which on a genuinely deleted video would
@@ -129,4 +141,24 @@ export function hasCode(error: unknown, code: ErrorCode): boolean {
 /** The retry mode for an envelope code, for anything that needs it without an instance. */
 export function retryModeFor(code: EnvelopeErrorCode): RetryMode {
   return RETRY_BY_CODE[code];
+}
+
+/**
+ * A message out of an unknown thrown value.
+ *
+ * `catch (e)` is `unknown` under `strict`, and it really can be anything —
+ * `throw 'string'` is legal, and a rejected fetch can hand back a `DOMException`.
+ * Typing the catch as `any` to reach `.message` trades a compile error for a
+ * runtime `undefined` in a log line written precisely when something has already
+ * gone wrong.
+ */
+export function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return String(error);
+}
+
+/** The `name` of an unknown thrown value, for `AbortError` and friends. */
+export function nameOf(error: unknown): string | null {
+  return error instanceof Error ? error.name : null;
 }

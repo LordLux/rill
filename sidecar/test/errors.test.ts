@@ -23,6 +23,7 @@ import {
 const ENVELOPE_CODES: EnvelopeErrorCode[] = [
   'AUTH_DEGRADED',
   'AUTH_REQUIRED',
+  'BAD_REQUEST',
   'STREAM_UNAVAILABLE',
   'RATE_LIMITED',
   'UPSTREAM_ERROR',
@@ -75,10 +76,25 @@ describe('retry modes', () => {
     expect(ENVELOPE_CODES.map((code) => [code, retryModeFor(code)])).toEqual([
       ['AUTH_DEGRADED', 'no'],
       ['AUTH_REQUIRED', 'no'],
+      ['BAD_REQUEST', 'no'],
       ['STREAM_UNAVAILABLE', 'user'],
       ['RATE_LIMITED', 'auto'],
       ['UPSTREAM_ERROR', 'auto'],
     ]);
+  });
+
+  test('BAD_REQUEST is no, never auto — a client bug must not be retried', () => {
+    // The regression this code exists to prevent. A malformed request used to
+    // answer UPSTREAM_ERROR, which is `auto`, so the app backed off and retried
+    // a request that could never succeed — four attempts spent hiding a client
+    // bug behind a spinner. `no` is a certainty here, not a judgement: the same
+    // bytes fail the same way forever.
+    expect(retryModeFor('BAD_REQUEST')).toBe('no');
+    expect(new RpcError('BAD_REQUEST', 'nope').toEnvelope()).toEqual({
+      code: 'BAD_REQUEST',
+      message: 'nope',
+      retry: 'no',
+    });
   });
 
   test('STREAM_UNAVAILABLE is user-retryable, not auto and not terminal', () => {

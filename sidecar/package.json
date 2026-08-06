@@ -12,7 +12,8 @@
     "test": "bun test",
     "test:network": "RUN_NETWORK_TESTS=1 bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check": "tsc --noEmit && eslint . && bun test"
   },
   "dependencies": {
     "youtubei.js": "^17.0.1"

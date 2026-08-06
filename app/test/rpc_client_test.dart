@@ -151,7 +151,7 @@ void main() {
         reason: 'the main isolate stalled for ${largestGap}ms — the decode ran inline');
   });
 
-  test('killing the Flutter process leaves no orphaned sidecar', skip: Platform.isWindows ? 'Failing on Windows' : false, () async {
+  test('killing the Flutter process leaves no orphaned sidecar', () async {
     String dartPath = Platform.resolvedExecutable;
     if (dartPath.endsWith('flutter_tester.exe')) {
       final cacheDir = Directory(dartPath).parent.parent.parent.parent;
@@ -189,25 +189,47 @@ void main() {
     // Kill the parent Dart process (the helper)
     process.kill();
     await process.exitCode;
-    
-    // Give Windows a moment to propagate the pipe close
-    // and wait for the sidecar 3s polling interval to exit
-    await Future.delayed(const Duration(milliseconds: 3500));
-    // Check if the sidecar process is still running
-    // On Windows, tasklist can be used. On Linux/Mac, kill -0.
-    bool isAlive = false;
-    if (Platform.isWindows) {
-      final res = await Process.run('tasklist', ['/FI', 'PID eq $sidecarPid']);
-      if (res.stdout.toString().contains(sidecarPid.toString())) {
-        isAlive = true;
-      }
-    } else {
-      try {
-        final res = await Process.run('kill', ['-0', sidecarPid.toString()]);
-        isAlive = res.exitCode == 0;
-      } catch (_) {}
+
+    // Poll rather than sleep a fixed 3.5 s.
+    //
+    // Two independent mechanisms can end the sidecar and they run at very
+    // different speeds: the broken stdin pipe fires in milliseconds, the parent
+    // PID watch only on its next 3 s tick. A fixed wait has to be long enough for
+    // the slow one, which left ~500 ms of margin — thin enough to go red on a
+    // loaded machine for reasons that have nothing to do with orphans. Polling
+    // is fast when the pipe wins and patient when the watch does.
+    //
+    // The tolerance is timing only. The assertion is unchanged: after the parent
+    // dies, that pid must be gone.
+    final deadline = DateTime.now().add(const Duration(seconds: 12));
+    bool isAlive = true;
+    while (DateTime.now().isBefore(deadline)) {
+      isAlive = await _isProcessAlive(sidecarPid!);
+      if (!isAlive) break;
+      await Future.delayed(const Duration(milliseconds: 100));
     }
-    
+
     expect(isAlive, isFalse, reason: 'Sidecar process $sidecarPid should have exited when parent died');
   });
+}
+
+/// Whether [pid] is still running.
+///
+/// A false negative here would make the orphan test pass without testing
+/// anything, so this is deliberately the narrowest check available on each
+/// platform. Verified by mutation: with every exit path in `fake_sidecar.ts`
+/// disabled and the event loop pinned open, the test fails as it should.
+Future<bool> _isProcessAlive(int pid) async {
+  if (Platform.isWindows) {
+    // `tasklist /FI` prints "INFO: No tasks are running..." when nothing matches,
+    // which cannot contain the pid; a match always echoes it.
+    final res = await Process.run('tasklist', ['/FI', 'PID eq $pid']);
+    return res.stdout.toString().contains(pid.toString());
+  }
+  try {
+    final res = await Process.run('kill', ['-0', '$pid']);
+    return res.exitCode == 0;
+  } catch (_) {
+    return false;
+  }
 }

@@ -3,11 +3,48 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import * as readline from 'node:readline';
 
+/**
+ * A frame read off the sidecar's stdout.
+ *
+ * The transport's whole job is that these are the only four keys, so a test that
+ * reaches for a fifth is asserting something the protocol does not promise —
+ * which is exactly what `any` here used to allow.
+ */
+interface Frame {
+  id?: number;
+  method?: string;
+  result?: unknown;
+  error?: { code: string; message: string; retry: string };
+  params?: Record<string, unknown>;
+}
+
+/**
+ * The frame for `id`, or a failure naming the id that never arrived.
+ *
+ * `Array.find` returns `T | undefined`, and reaching straight through it — which
+ * `any` used to permit — turns "the sidecar never answered id 3" into
+ * `Cannot read properties of undefined`, a message about the test rather than
+ * about the transport.
+ */
+function frameFor(lines: Frame[], id: number): Frame {
+  const frame = lines.find((l) => l.id === id);
+  if (!frame) throw new Error(`no frame arrived for id ${id}`);
+  return frame;
+}
+
+/** The error envelope on a frame, or a failure saying it carried none. */
+function errorOf(frame: Frame): { code: string; message: string; retry: string } {
+  if (!frame.error) {
+    throw new Error(`frame ${frame.id} carried no error envelope (result: ${JSON.stringify(frame.result)})`);
+  }
+  return frame.error;
+}
+
 describe('RPC Transport', () => {
   let child: ReturnType<typeof spawn>;
   let rl: readline.Interface;
-  let lines: any[] = [];
-  let onLine: ((line: any) => void) | null = null;
+  let lines: Frame[] = [];
+  let onLine: ((line: Frame) => void) | null = null;
 
   beforeEach(async () => {
     lines = [];
@@ -23,7 +60,7 @@ describe('RPC Transport', () => {
     // Wait for event.ready
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('event.ready timeout')), 1000);
-      if (lines.length > 0 && lines[0].method === 'event.ready') {
+      if (lines.length > 0 && lines[0]?.method === 'event.ready') {
         clearTimeout(timeout);
         resolve();
       } else {
@@ -117,11 +154,11 @@ describe('RPC Transport', () => {
       }
     });
     
-    const res = lines.find(l => l.id === 1);
-    expect(res.error.code).toBe('UPSTREAM_ERROR');
+    const res = frameFor(lines, 1);
+    expect(errorOf(res).code).toBe('BAD_REQUEST');
   });
 
-  it('unknown method returns UPSTREAM_ERROR', async () => {
+  it('unknown method returns BAD_REQUEST with retry no', async () => {
     child.stdin!.write(JSON.stringify({ id: 2, method: 'foo.bar' }) + '\n');
     await new Promise<void>((resolve) => {
       if (lines.find(l => l.id === 2)) {
@@ -132,10 +169,12 @@ describe('RPC Transport', () => {
         };
       }
     });
-    const res = lines.find(l => l.id === 2);
-    expect(res.error).toMatchObject({
-      code: 'UPSTREAM_ERROR',
-      retry: 'auto'
+    const res = frameFor(lines, 2);
+    // `no`, not `auto`: retrying an unknown method can never succeed, and an
+    // `auto` here had the app backing off four times over a client bug.
+    expect(errorOf(res)).toMatchObject({
+      code: 'BAD_REQUEST',
+      retry: 'no'
     });
   });
 
@@ -153,8 +192,8 @@ describe('RPC Transport', () => {
       }
     });
     
-    const res = lines.find(l => l.id === 3);
-    expect(res.error.code).toBe('UPSTREAM_ERROR');
+    const res = frameFor(lines, 3);
+    expect(errorOf(res).code).toBe('BAD_REQUEST');
   });
 
   it('$cancel on an unknown id is a no-op', async () => {
@@ -171,8 +210,8 @@ describe('RPC Transport', () => {
       }
     });
     
-    const res = lines.find(l => l.id === 4);
-    expect(res.error.code).toBe('UPSTREAM_ERROR');
+    const res = frameFor(lines, 4);
+    expect(errorOf(res).code).toBe('BAD_REQUEST');
   });
 
   it('two concurrent requests return to the correct ids, out of order', async () => {
@@ -190,17 +229,17 @@ describe('RPC Transport', () => {
       }
     });
     
-    const res11 = lines.find(l => l.id === 11);
     const res10 = lines.find(l => l.id === 10);
     
     // 11 should have returned, 10 should not have returned yet.
-    expect(res11).toBeDefined();
     expect(res10).toBeUndefined();
-    
-    expect(res11.error.code).toBe('UPSTREAM_ERROR');
+
+    // `frameFor` throws if 11 never arrived, which is the assertion that used to
+    // be `expect(res11).toBeDefined()`.
+    expect(errorOf(frameFor(lines, 11)).code).toBe('BAD_REQUEST');
   }, 10000);
 
-  it('internal signal escaping to dispatch becomes UPSTREAM_ERROR, not a crash', async () => {
+  it('a non-string method is answered, not crashed on', async () => {
     child.stdin!.write(JSON.stringify({ id: 20, method: { toString: null } }) + '\n');
     
     await new Promise<void>((resolve) => {
@@ -213,11 +252,30 @@ describe('RPC Transport', () => {
       }
     });
     
-    const res = lines.find(l => l.id === 20);
-    expect(res.error).toBeDefined();
-    // It should not have crashed, meaning we got a response envelope
-    expect(res.error.code).not.toBe('INTERNAL_SIGNAL'); // because it becomes something like UPSTREAM_ERROR or STREAM_UNAVAILABLE
-    // The main point is it didn't crash.
+    // The point is the envelope, not the code: dispatch must answer rather than
+    // die, and an internal signal must never be what it answers with.
+    const res = frameFor(lines, 20);
+    expect(errorOf(res).code).toBe('BAD_REQUEST');
+    expect(['STREAM_REQUIRES_SABR', 'PARSE_FAILED']).not.toContain(errorOf(res).code);
+  }, 10000);
+
+  it('playback.open without a videoId is BAD_REQUEST, not a retried UPSTREAM_ERROR', async () => {
+    // The concrete regression: params that fail validation used to answer
+    // UPSTREAM_ERROR (`auto`), so the app retried a call that can never work.
+    // §3 is about to grow five more methods that all take params.
+    child.stdin!.write(JSON.stringify({ id: 30, method: 'playback.open', params: {} }) + '\n');
+
+    await new Promise<void>((resolve) => {
+      if (lines.find(l => l.id === 30)) {
+        resolve();
+      } else {
+        onLine = (parsed) => {
+          if (parsed.id === 30) resolve();
+        };
+      }
+    });
+
+    expect(errorOf(frameFor(lines, 30))).toMatchObject({ code: 'BAD_REQUEST', retry: 'no' });
   }, 10000);
 
 });

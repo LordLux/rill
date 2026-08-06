@@ -222,9 +222,34 @@ allowed to try again* — and the difference is the whole UI contract.
 
 | Value | Meaning |
 | --- | --- |
-| `auto` | The sidecar retries with backoff. The app shows a loading state, not an error |
+| `auto` | **The app** retries with backoff; the sidecar reports and does not retry. The app shows a loading state, not an error |
 | `user` | Do **not** retry silently. Show the error with a retry affordance and let the user decide |
 | `no` | Retrying changes nothing until something external changes — a login, a cookie, a policy |
+
+**`auto` retry belongs to the app, not the sidecar.** This is the one place the
+obvious division of labour is the wrong one — the sidecar is closer to the
+failure, so it looks like the natural place to retry, and it is not.
+
+A sidecar-side retry cannot be superseded. Switch chip filters while the sidecar
+is on attempt 3 of 4 and it keeps working on a request nobody wants, holding a
+slot and spending requests on a filter the user has already left. `$cancel`
+arrives while it is asleep between attempts, and the retry loop is not listening.
+
+The app already has both mechanisms this needs. `$cancel` releases the sidecar,
+and the generation counter drops any answer that arrives for a superseded
+request — so a retry scheduled by the controller is cancelled by the same thing
+that cancels everything else, for free, rather than needing a second cancellation
+path plumbed through the sidecar's retry loop to reach it.
+
+So: the sidecar answers once, with an envelope whose `retry` says what kind of
+failure it is. Deciding what to do about it is the caller's, because only the
+caller knows whether anyone still wants the answer.
+
+This governs *envelope-level* retry — answering a request that already failed. It
+says nothing about a tier retrying inside a single call before there is an answer
+at all, which stays the sidecar's business: tier 1 minting a fresh visitor id and
+retrying once (§3.5) is not covered here and must not be removed on the strength
+of this rule.
 
 **Envelope errors.** These are what a failure envelope carries, and every one of
 them has a `retry` value:
@@ -233,9 +258,23 @@ them has a `retry` value:
 | --- | --- | --- |
 | `AUTH_DEGRADED` | `no` | Re-authentication prompt |
 | `AUTH_REQUIRED` | `no` | Login flow |
+| `BAD_REQUEST` | `no` | This is a client bug. Surface it — never retry, never swallow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
-| `RATE_LIMITED` | `auto` | Backoff, retry silently |
-| `UPSTREAM_ERROR` | `auto` | Retry with backoff |
+| `RATE_LIMITED` | `auto` | App backs off and retries silently |
+| `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
+
+**`BAD_REQUEST` is for an unknown method or params that fail validation** — the
+request was malformed before anything upstream was asked. It is `no` because
+retrying is *provably* pointless: the same bytes will fail the same way forever.
+That is the one case where `no` is a certainty rather than a judgement.
+
+It exists because the alternative was worse. A malformed request used to answer
+`UPSTREAM_ERROR`, which is `auto`, so the app dutifully backed off and retried a
+request that could never succeed — four attempts before it degraded to `user`.
+Bounded, but each of those attempts is a client bug being hidden by a spinner.
+
+Keep `UPSTREAM_ERROR` for genuine upstream failures: YouTube answered badly, or
+did not answer. If the sidecar rejected the request itself, it is `BAD_REQUEST`.
 
 `STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
 very good bet and not a promise (§3.5, F9): every rung can decline for a video
@@ -271,8 +310,8 @@ session and no PO token.
 
 ## 6. Supervision
 
-- Sidecar dies → restart with backoff, fail in-flight with `retry: "auto"`,
-  replay auth
+- Sidecar dies → the app restarts it with backoff, fails in-flight requests with
+  `retry: "auto"`, replays auth
 - Sidecar watches the parent PID and self-exits, so no orphans on Windows
 - Version mismatch at handshake → fail fast
 

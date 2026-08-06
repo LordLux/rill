@@ -9,6 +9,7 @@ import '../debug_player.dart';
 import '../feed_controller.dart';
 import '../widgets/accent_debug_button.dart';
 import '../widgets/media_tile.dart';
+import '../../data/rpc/client.dart';
 import '../../domain/feed_item.dart';
 
 class FeedPage extends ConsumerStatefulWidget {
@@ -129,11 +130,16 @@ class _FeedPageState extends ConsumerState<FeedPage> {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: scheme.error),
               ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => ref.read(feedProvider.notifier).loadHome(),
-                child: const Text('Retry'),
-              ),
+              // No retry button on a `no`: protocol.md §4 says retrying changes
+              // nothing there until a login or a policy changes first, and a
+              // button that cannot work is worse than no button.
+              if (state.errorRetry != RpcRetryMode.no) ...[
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => ref.read(feedProvider.notifier).loadHome(),
+                  child: const Text('Retry'),
+                ),
+              ],
             ],
           ),
         ),
@@ -181,8 +187,15 @@ class _FeedPageState extends ConsumerState<FeedPage> {
           int crossAxisCount = ((constraints.maxWidth + hSpacing) / (maxExtent + hSpacing)).ceil();
           crossAxisCount = math.max(1, crossAxisCount);
 
-          final int totalItems = state.items.length + (state.isLoading && state.items.isNotEmpty ? 1 : 0);
-          final int rowCount = (totalItems / crossAxisCount).ceil();
+          // A footer row under a populated grid: the spinner while the next page
+          // loads, or the failure that stopped it. It gets its own full-width
+          // row rather than the next free cell, because an error plus a retry
+          // button does not fit in a tile-sized slot — and a failed page the
+          // user cannot see is how the retry storm stayed invisible.
+          final bool hasFooter =
+              state.items.isNotEmpty && (state.isLoading || state.error != null);
+          final int gridRows = (state.items.length / crossAxisCount).ceil();
+          final int rowCount = gridRows + (hasFooter ? 1 : 0);
 
           return Scrollbar(
             controller: _scroll,
@@ -199,35 +212,31 @@ class _FeedPageState extends ConsumerState<FeedPage> {
                     padding: const EdgeInsets.only(bottom: 16.0, top: 8.0, left: 8.0, right: 8.0),
                     itemCount: rowCount,
                     itemBuilder: (context, rowIndex) {
+                      final bool isFooter = hasFooter && rowIndex == rowCount - 1;
                       return Padding(
                         padding: EdgeInsets.only(bottom: rowIndex < rowCount - 1 ? spacing : 0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          spacing: hSpacing,
-                          children: List.generate(crossAxisCount, (colIndex) {
-                            final int itemIndex = rowIndex * crossAxisCount + colIndex;
-                            // Handles empty spaces in the final row
-                            if (itemIndex >= totalItems) return const Expanded(child: SizedBox.shrink());
-                    
-                            Widget child;
-                            if (itemIndex == state.items.length) {
-                              child = const Center(child: CircularProgressIndicator()); // "load more" item
-                            } else {
-                              final feedItem = state.items[itemIndex];
-                              final spec = specFor(feedItem);
-                              if (spec != null) {
-                                child = MediaTile(spec: spec);
-                              } else {
-                                child = feedItem.maybeMap(
-                                  channel: (c) => _ChannelTile(channel: c),
-                                  orElse: () => const SizedBox.shrink(),
-                                );
-                              }
-                            }
-                    
-                            return Expanded(child: child);
-                          }),
-                        ),
+                        child: isFooter
+                            ? _FeedFooter(state: state)
+                            : Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                spacing: hSpacing,
+                                children: List.generate(crossAxisCount, (colIndex) {
+                                  final int itemIndex = rowIndex * crossAxisCount + colIndex;
+                                  // Handles empty spaces in the final row
+                                  if (itemIndex >= state.items.length) return const Expanded(child: SizedBox.shrink());
+
+                                  final feedItem = state.items[itemIndex];
+                                  final spec = specFor(feedItem);
+                                  final Widget child = spec != null
+                                      ? MediaTile(spec: spec)
+                                      : feedItem.maybeMap(
+                                          channel: (c) => _ChannelTile(channel: c),
+                                          orElse: () => const SizedBox.shrink(),
+                                        );
+
+                                  return Expanded(child: child);
+                                }),
+                              ),
                       );
                     },
                                         ),
@@ -241,6 +250,56 @@ class _FeedPageState extends ConsumerState<FeedPage> {
   }
 }
 
+
+/// The row under the grid: loading the next page, or the failure that stopped
+/// it.
+///
+/// Its whole reason for existing is that `loadMore` now refuses to run again
+/// after a failure. Something has to say so, or the feed just quietly stops
+/// growing and the user is left scrolling into nothing.
+class _FeedFooter extends ConsumerWidget {
+  const _FeedFooter({required this.state});
+
+  final FeedState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (state.error == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24.0),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, color: scheme.error, size: 20),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              "Couldn't load more: ${state.error}",
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          ),
+          if (state.errorRetry != RpcRetryMode.no) ...[
+            const SizedBox(width: 16),
+            TextButton(
+              onPressed: () => ref.read(feedProvider.notifier).retryMore(),
+              child: const Text('Retry'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 class _ChannelTile extends StatelessWidget {
   final ChannelItem channel;

@@ -6,13 +6,26 @@ const version = parseInt(process.argv[2] || '1', 10);
 // can land after a newer request — auth.verify is issued with a plain call —
 // so it is the only way to exercise the controller's generation guard on its
 // own, rather than behind $cancel.
+// 'base-fail-auto': the *base* browse itself fails with retry:"auto", which is
+// the shape that exposed an unbounded retry — a scheduled retry re-entering
+// loadHome as a base load refilled the very budget it was spending. The reply
+// counts attempts so a test can assert the budget is finite.
+// 'paging-user' / 'paging-auto': the base browse hands back a continuation that
+// is rigged to fail, so a test can reach the *second* page's error path. Without
+// a continuation the controller's `loadMore` never issues anything at all.
 const mode = process.argv[3] || '';
+const pagingContinuation = mode === 'paging-user'
+  ? 'PAGE2!fail=user'
+  : mode === 'paging-auto'
+    ? 'PAGE2!fail=auto'
+    : null;
 process.stdout.write(JSON.stringify({
   method: 'event.ready',
   params: { protocolVersion: version, capabilities: {} }
 }) + '\n');
 
 const rl = createInterface({ input: process.stdin });
+let baseAttempts = 0;
 const pending = new Map();
 
 const parentPid = process.env.FLUTTER_PARENT_PID;
@@ -82,13 +95,44 @@ rl.on('line', (line) => {
       //   "MUSIC"            filtered — echoed back in every item title
       //   "MUSIC@250"        the same, answered after 250 ms
       //   "MUSIC@250!keepalive"  answered even after $cancel
+      //   "MUSIC!fail=user"  answered with a retry:"user" failure envelope
+      //   "MUSIC!fail=auto"  answered with a retry:"auto" failure envelope
       //
       // `!keepalive` makes the sidecar answer a request the client cancelled,
       // so a superseded payload is genuinely put on the wire after its
       // replacement rather than never being sent. What drops it on the client
       // is layered — see the test — but without this the scenario cannot even
       // be staged.
+      //
+      // `!fail=` stages the paging-error path. The failure has to arrive as a
+      // real envelope with a real `retry` value, because what the controller
+      // does next is decided entirely by that field.
       const raw = (req.params && (req.params.continuation || req.params.chipToken)) || '';
+
+      if (mode === 'base-fail-auto' && raw === '') {
+        baseAttempts++;
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: {
+            code: 'UPSTREAM_ERROR',
+            message: `base browse failed, attempt ${baseAttempts}`,
+            retry: 'auto',
+          },
+        }) + '\n');
+        return;
+      }
+
+      const failAt = raw.indexOf('!fail=');
+      if (failAt !== -1) {
+        const mode = raw.slice(failAt + '!fail='.length);
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: mode === 'auto'
+            ? { code: 'UPSTREAM_ERROR', message: 'upstream fell over', retry: 'auto' }
+            : { code: 'STREAM_UNAVAILABLE', message: 'page unavailable', retry: 'user' },
+        }) + '\n');
+        return;
+      }
       const keepalive = raw.endsWith('!keepalive');
       const spec = keepalive ? raw.slice(0, -'!keepalive'.length) : raw;
       const at = spec.indexOf('@');
@@ -124,7 +168,7 @@ rl.on('line', (line) => {
               canWatchLater: true,
               canAddToQueue: true,
             })),
-            continuation: null,
+            continuation: label === '' ? pagingContinuation : null,
           },
         }) + '\n');
       };
