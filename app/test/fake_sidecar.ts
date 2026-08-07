@@ -28,6 +28,15 @@ const rl = createInterface({ input: process.stdin });
 let baseAttempts = 0;
 const pending = new Map();
 
+// Playback, recorded rather than answered blindly: `test.playbackLog` hands the
+// whole conversation back so a test can assert on the cadence of reports and on
+// preloads it has no other way to observe.
+const opens: Array<{ videoId?: string; preload: boolean }> = [];
+const reports: unknown[] = [];
+const closes: unknown[] = [];
+let sessions = 0;
+let realOpens = 0;
+
 const parentPid = process.env.FLUTTER_PARENT_PID;
 if (parentPid) {
   setInterval(() => {
@@ -87,7 +96,92 @@ rl.on('line', (line) => {
       // with a plain call and never cancels it, which is exactly the point.
       if (mode === 'empty-home') setTimeout(replyAuth, 400); else replyAuth();
     } else if (req.method === 'playback.open') {
-      process.stdout.write(JSON.stringify({ id: req.id, result: { sessionId: 's1', durationMs: 1000, variants: [] } }) + '\n');
+      // 'open-fails-once': the first real open answers STREAM_UNAVAILABLE with
+      // retry:"user" — the §4 shape the watch page has to offer a retry out of.
+      // The ladder's floor is a very good bet and not a promise (F9), so this is
+      // a state a user can retry out of, and the retry has to actually work.
+      opens.push({ videoId: req.params?.videoId, preload: req.params?.preload === true });
+      const isPreload = req.params?.preload === true;
+      if (mode === 'open-fails-once' && !isPreload && realOpens++ === 0) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'STREAM_UNAVAILABLE', message: 'every resolution tier declined', retry: 'user' },
+        }) + '\n');
+        return;
+      }
+      // A preload "resolves and caches without opening a session" (§3.6), so it
+      // does not mint one here either.
+      const sessionId = isPreload ? 'preload' : `session_${++sessions}`;
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: {
+          sessionId,
+          durationMs: 600000,
+          storyboardTemplate: null,
+          qualityDegraded: false,
+          transport: 'plain',
+          variants: [
+            {
+              videoUrl: `https://fake.invalid/${req.params?.videoId}/video`,
+              audioUrl: `https://fake.invalid/${req.params?.videoId}/audio`,
+              itag: 315,
+              height: 2160,
+              fps: 60,
+              videoCodec: 'vp9',
+              audioCodec: 'opus',
+            },
+          ],
+        },
+      }) + '\n');
+    } else if (req.method === 'playback.report') {
+      reports.push(req.params);
+      // 'report-fails': every report is refused. Reporting is load-bearing, so
+      // the app has to be able to say it has stopped working rather than going
+      // quiet — this is the only way to stage that from outside.
+      if (mode === 'report-fails') {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'UPSTREAM_ERROR', message: 'watchtime ping answered HTTP 403', retry: 'auto' },
+        }) + '\n');
+        return;
+      }
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'playback.close') {
+      closes.push(req.params?.sessionId);
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'video.info') {
+      const videoId = req.params?.videoId;
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: {
+          id: videoId,
+          title: `Detail for ${videoId}`,
+          description: 'A description long enough to collapse.',
+          channelName: 'Fake Channel',
+          channelId: 'chan_001',
+          channelAvatarUrl: null,
+          subscriberText: '1.2M subscribers',
+          durationSeconds: 600,
+          isLive: false,
+          viewCountText: '31,000,000 views',
+          publishedText: '16 years ago',
+          likeText: '1.1M',
+          isSubscribed: false,
+          badges: [],
+          related: [],
+          relatedContinuation: null,
+        },
+      }) + '\n');
+    } else if (req.method === 'video.related') {
+      process.stdout.write(JSON.stringify({ id: req.id, result: { items: [], continuation: null } }) + '\n');
+    } else if (req.method === 'test.playbackLog') {
+      // The test's window into what the client actually sent. Reports are
+      // fire-and-forget from the app's side, so there is nowhere else to see
+      // whether the cadence is real or whether it only pings at completion.
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: { opens, reports, closes },
+      }) + '\n');
     } else if (req.method === 'feed.home') {
       // Token grammar, for tests only:
       //

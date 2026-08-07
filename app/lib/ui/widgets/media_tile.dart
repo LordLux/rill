@@ -117,7 +117,27 @@ TileSpec? specFor(FeedItem item) {
 
 class MediaTile extends StatefulWidget {
   final TileSpec spec;
-  const MediaTile({super.key, required this.spec});
+
+  /// Opens the tile. Null for a kind that cannot be watched — a playlist is
+  /// explicitly out of scope for now, and an inert tile is better than a route
+  /// to nothing.
+  final VoidCallback? onTap;
+
+  /// The two hover actions. Both sit inside `IconButton`s, which win the gesture
+  /// arena against the tile behind them — so pressing one does not also navigate
+  /// (task §6). That is asserted in `media_tile_tap_test.dart` as behaviour,
+  /// because "the arena handles it" is exactly the kind of thing that stops
+  /// being true after an innocent-looking wrapper is added.
+  final VoidCallback? onWatchLater;
+  final VoidCallback? onAddToQueue;
+
+  const MediaTile({
+    super.key,
+    required this.spec,
+    this.onTap,
+    this.onWatchLater,
+    this.onAddToQueue,
+  });
 
   @override
   State<MediaTile> createState() => _MediaTileState();
@@ -265,9 +285,7 @@ class _MediaTileState extends State<MediaTile> {
                                   icon: Icon(Icons.schedule, color: tokens.onScrim, size: 23),
                                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                   padding: EdgeInsets.zero,
-                                  onPressed: () {
-                                    /* TODO: RPC method does not exist yet */
-                                  },
+                                  onPressed: widget.onWatchLater,
                                 ),
                                 SizedBox(height: 8.0),
                               ],
@@ -284,9 +302,7 @@ class _MediaTileState extends State<MediaTile> {
                                   icon: Icon(Icons.playlist_play, color: tokens.onScrim, size: 23),
                                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                   padding: EdgeInsets.zero,
-                                  onPressed: () {
-                                    /* TODO: RPC method does not exist yet */
-                                  },
+                                  onPressed: widget.onAddToQueue,
                                 ),
                             ],
                           ),
@@ -413,7 +429,13 @@ class _MediaTileState extends State<MediaTile> {
       onEnter: (_) => setState(() => isHovering = true),
       onExit: (_) => setState(() => isHovering = false),
       cursor: SystemMouseCursors.click,
-      child: Stack(
+      child: GestureDetector(
+        onTap: widget.onTap,
+        // Opaque so the whole tile — including the gaps between its children —
+        // is a target. `deferToChild` would leave the padding dead, which reads
+        // as a tile that only sometimes opens.
+        behavior: HitTestBehavior.opaque,
+        child: Stack(
         children: [
           Positioned.fill(
             child: AnimatedScale(
@@ -443,7 +465,8 @@ class _MediaTileState extends State<MediaTile> {
               ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

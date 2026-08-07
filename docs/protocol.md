@@ -118,6 +118,16 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 Mixes are `RD*` radio playlists that auto-extend; fetch the continuation as the
 user nears the end. Same code path as queue autoplay.
 
+**`video.info` composes two responses.** `/next` carries the watch page but no
+duration — `lengthSeconds` is only on `/player` — so it fetches both. The
+`/player` half asks as **`ANDROID_VR` over the anonymous resolve session**, which
+is the same client and the same cached response ladder tier 1 uses, so opening a
+video costs **one** `/player` call rather than two. Reading a length out of a
+response already fetched is not the cross-client CPN bridging A5 rejects; nothing
+is carried across. `/next` stays on the authenticated `WEB` session, because a
+personalised sidebar, the like count and subscription state are what the cookie
+is for.
+
 ### 3.4 Actions
 
 | Method | Params |
@@ -202,6 +212,25 @@ means in §4 — show the error, offer the retry, and do not loop silently.
 stops training and the homepage drifts from the real one — which defeats the
 product's premise. Report on a real cadence (every 10–30 s plus state changes),
 not once at completion.
+
+`state` is one of `playing` | `paused` | `buffering` | `ended`, and a malformed
+one is `BAD_REQUEST`. A closed set rather than a free string because the failure
+mode of a typo here is silent: the stats endpoint answers 200 to nonsense, so a
+client reporting `"Playing"` forever would look healthy from every angle except
+the homepage slowly ceasing to resemble the account.
+
+`sessionId` is the one a **non-preload** `playback.open` returned. A preload
+opens no session (§3.6), so its `sessionId` is not reportable — a preloaded item
+that is never played must not appear in anyone's history. Reporting against an
+unknown or closed session is `BAD_REQUEST`.
+
+The report itself goes out over the authenticated `WEB` session with a CPN of the
+sidecar's own, one per session (F6, and A5 which rejects bridging a resolution
+client's CPN). That needs a `WEB` `/player` response for its playback-tracking
+URLs — the `ei`/`of`/`vm` parameters on them are minted for the request that
+produced them, so the anonymous resolution response's URLs are not a substitute.
+It is fetched on the first report and cached for the whole watch: one extra call
+per video actually watched, and none for a video merely opened.
 
 **Never let a raw URL cross this boundary.** An undeciphered `n` parameter
 throttles to ~50 KB/s and presents as a network problem. Enforce with a branded

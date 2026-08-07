@@ -26,6 +26,38 @@ function findOwner(secondary: Json): Json {
   return findRenderer(secondary, 'videoOwnerRenderer') ?? secondary;
 }
 
+/**
+ * The channel this video belongs to — or `null` when it does not belong to one.
+ *
+ * A deep scan for the first `UC…` browseId is wrong here, and wrong silently.
+ * A **collaboration** upload replaces the owner's channel link with a
+ * `showDialogCommand` listing the collaborators, and the first `UC…` id inside
+ * that dialog is the first *collaborator*. Deep-scanning returned it as if it
+ * were the video's channel: no error, no empty field, just the wrong channel —
+ * which a "go to channel" or a subscribe action would then act on.
+ *
+ * So the endpoint is read structurally, and the rule is deliberately narrow:
+ *
+ *  1. The owner's own `navigationEndpoint.browseEndpoint` — the classic shape.
+ *  2. An owner whose `navigationEndpoint` is something *other* than a browse is
+ *     a dialog, not a channel: answer `null`. There genuinely is no single
+ *     channel to name, and `null` says that where a plausible-looking id lies.
+ *  3. Only an owner with no endpoint at all falls back to the deep scan, which
+ *     is what covers layouts that bury the link somewhere new.
+ *
+ * Structural rather than matching the dialog's headline, because that headline
+ * is localised — this account browses with `tz=Europe.Rome`, and "Collaborators"
+ * is not what it would say.
+ */
+function ownerChannelId(owner: Json): string | null {
+  const endpoint = get(owner, 'navigationEndpoint');
+  if (isObject(endpoint)) {
+    const browseId = str(get(endpoint, 'browseEndpoint', 'browseId'));
+    return browseId !== null && /^UC[\w-]{20,}$/.test(browseId) ? browseId : null;
+  }
+  return channelIdFrom(owner);
+}
+
 export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
   const body = isObject(raw) && isObject(raw['data']) ? raw['data'] : raw;
 
@@ -80,9 +112,20 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     id,
     title,
     description,
-    channelName: text(get(owner, 'title')) ?? str(get(details, 'author')) ?? '',
-    channelId: channelIdFrom(owner) ?? str(get(details, 'channelId')),
-    channelAvatarUrl: bestImageUrl(get(owner, 'thumbnail')),
+    // `attributedTitle` is the view-based owner byline, and on a collaboration
+    // upload it is the only one: "jazziiRed and 3 more", where a classic page
+    // would carry `title.runs`. Without it the watch page drew a blank channel.
+    channelName:
+      text(get(owner, 'title')) ??
+      text(get(owner, 'attributedTitle')) ??
+      str(get(details, 'author')) ??
+      '',
+    channelId: ownerChannelId(owner) ?? str(get(details, 'channelId')),
+    // `avatarStack` is the collaboration shape — four circular avatars where a
+    // single-owner page has one `thumbnail`. The first is the one YouTube shows
+    // in front, and `bestImageUrl` keeps the first of equally-sized sources.
+    channelAvatarUrl:
+      bestImageUrl(get(owner, 'thumbnail')) ?? bestImageUrl(get(owner, 'avatarStack')),
     subscriberText: text(get(owner, 'subscriberCountText')),
     durationSeconds: isLive ? null : lengthSeconds,
     isLive,

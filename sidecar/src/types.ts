@@ -181,6 +181,33 @@ export interface PlayerResult {
    */
   sabrOnly: boolean;
   serverAbrStreamingUrl: string | null;
+  /**
+   * `playbackTracking.videostatsPlaybackUrl` — the ping that registers a view.
+   *
+   * Read from whichever client fetched this response, and only ever *used* from
+   * the `WEB` one: these URLs carry an `ei`/`of`/`vm` minted for the request that
+   * produced them, so sending a resolution client's URL over the authenticated
+   * session is the cross-client bridging A5 rejects. See `playback/report.ts`.
+   */
+  videostatsPlaybackUrl: string | null;
+  /** `playbackTracking.videostatsWatchtimeUrl` — the recurring progress ping. */
+  videostatsWatchtimeUrl: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Lists
+// ---------------------------------------------------------------------------
+
+/**
+ * What every non-feed list method answers with (`protocol.md` §3.3).
+ *
+ * `FeedResult` minus the chip bar: `video.related`, `playlist.get` and
+ * `search.query` have no filter strip of their own, and shipping an empty
+ * `chips: []` would invite a caller to render one.
+ */
+export interface ItemListResult {
+  items: FeedItem[];
+  continuation: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +249,23 @@ export interface PlaybackVariant {
  * `variants` is ranked best-first. The client picks one and may switch without
  * reopening — all variants come from a single `/player` response (§3.5).
  */
+/**
+ * What the player is doing, as `playback.report` carries it (`protocol.md` §3.5).
+ *
+ * A closed set rather than a free string. The report path is load-bearing — if
+ * watch events stop landing the recommender stops training — and the failure
+ * mode of a free string is a typo that reports forever into nothing while every
+ * call returns success.
+ */
+export type PlaybackReportState = 'playing' | 'paused' | 'buffering' | 'ended';
+
+export const PLAYBACK_REPORT_STATES: readonly PlaybackReportState[] = [
+  'playing',
+  'paused',
+  'buffering',
+  'ended',
+];
+
 export interface PlaybackSource {
   sessionId: string;
   /** null when live — a live stream has no final duration. */

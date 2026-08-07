@@ -7,6 +7,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 import '../page_wrapper.dart';
 import '../debug_player.dart';
 import '../feed_controller.dart';
+import '../open_video.dart';
 import '../widgets/accent_debug_button.dart';
 import '../widgets/media_tile.dart';
 import '../../data/rpc/client.dart';
@@ -111,6 +112,24 @@ class _FeedPageState extends ConsumerState<FeedPage> {
         ],
       ),
     );
+  }
+
+  /// The tile's Watch Later button. `AUTH_REQUIRED` gets its own line because
+  /// "sign in" is actionable and the raw envelope message is not.
+  Future<void> _watchLater(BuildContext context, FeedItem item) async {
+    final target = watchTargetFor(item);
+    if (target == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await RpcClient.instance.call('action.addToWatchLater', {'videoId': target.id});
+      messenger.showSnackBar(const SnackBar(content: Text('Saved to Watch Later')));
+    } on RpcException catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to save to Watch Later' : e.message),
+      ));
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   Widget _buildBody(BuildContext context, FeedState state, WidgetRef ref) {
@@ -228,7 +247,17 @@ class _FeedPageState extends ConsumerState<FeedPage> {
                                   final feedItem = state.items[itemIndex];
                                   final spec = specFor(feedItem);
                                   final Widget child = spec != null
-                                      ? MediaTile(spec: spec)
+                                      ? MediaTile(
+                                          spec: spec,
+                                          // Null for a kind with nothing to
+                                          // play, which leaves the tile inert
+                                          // rather than opening an empty page.
+                                          onTap: watchTargetFor(feedItem) == null
+                                              ? null
+                                              : () => openFromTile(ref, feedItem),
+                                          onAddToQueue: () => queueFromTile(ref, feedItem),
+                                          onWatchLater: () => _watchLater(context, feedItem),
+                                        )
                                       : feedItem.maybeMap(
                                           channel: (c) => _ChannelTile(channel: c),
                                           orElse: () => const SizedBox.shrink(),

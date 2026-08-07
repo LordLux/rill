@@ -3,6 +3,7 @@ import type { Session } from '../innertube/session.ts';
 import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { announceCapabilities } from '../capabilities.ts';
+import { PLAYBACK_REPORT_STATES } from '../types.ts';
 
 const log = logger('rpc');
 
@@ -45,6 +46,19 @@ function getBrowseSession(): Promise<Session> {
     })();
   }
   return browseSessionPromise;
+}
+
+/**
+ * Both sessions, for the methods that genuinely need one of each.
+ *
+ * `video.info` is the only one today: `/next` is a browse call and wants the
+ * cookie, while the `/player` half is a resolution call and must ask as the same
+ * client ladder tier 1 does, or the shared response is not shared at all. See
+ * `video/info.ts` for why that split is the right reading of §2.3.
+ */
+async function videoDeps(): Promise<{ browse: Session; resolve: Session }> {
+  const [browse, resolve] = await Promise.all([getBrowseSession(), getResolveSession()]);
+  return { browse, resolve };
 }
 
 function getResolveSession(): Promise<Session> {
@@ -164,6 +178,64 @@ function requireString(
   return value.trim();
 }
 
+/**
+ * An optional string parameter: the value, or `null` when absent.
+ *
+ * Absent and empty are the same answer here, deliberately — a continuation token
+ * is either a real token or there is no next page, and `""` has never meant the
+ * latter to any caller. A non-string present is still `BAD_REQUEST`, because
+ * that is a client bug rather than an omission.
+ */
+function optionalString(
+  params: Record<string, unknown> | undefined,
+  name: string,
+  method: string,
+): string | null {
+  const value = params?.[name];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw new RpcError('BAD_REQUEST', `${method}: '${name}' must be a string if present`);
+  }
+  return value.trim() === '' ? null : value.trim();
+}
+
+/**
+ * A required finite number, or `BAD_REQUEST`.
+ *
+ * `Number.isFinite` rather than `typeof === 'number'`: `NaN` is a number, and a
+ * `NaN` position reaches the stats endpoint as `st=NaN`, which answers 200 and
+ * records nothing. The whole point of validating `playback.report`'s params is
+ * that its failures are otherwise invisible.
+ */
+function requireNumber(
+  params: Record<string, unknown> | undefined,
+  name: string,
+  method: string,
+): number {
+  const value = params?.[name];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new RpcError('BAD_REQUEST', `${method} requires a finite number '${name}'`);
+  }
+  return value;
+}
+
+/** One of a closed set, or `BAD_REQUEST` naming what was allowed. */
+function requireEnum<T extends string>(
+  params: Record<string, unknown> | undefined,
+  name: string,
+  method: string,
+  allowed: readonly T[],
+): T {
+  const value = params?.[name];
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
+    throw new RpcError(
+      'BAD_REQUEST',
+      `${method} requires '${name}' to be one of ${allowed.join(', ')}`,
+    );
+  }
+  return value as T;
+}
+
 async function handleRequest(request: RpcRequest) {
   const { id, method, params } = request;
 
@@ -232,6 +304,50 @@ async function handleRequest(request: RpcRequest) {
         { videoId, preload: params?.preload === true },
       );
       emitResponse(id, result);
+    } else if (method === 'video.info') {
+      const videoId = requireString(params, 'videoId', 'video.info');
+      const { getVideoInfo } = await import('../video/info.ts');
+      const result = await getVideoInfo(await videoDeps(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'video.related') {
+      const videoId = requireString(params, 'videoId', 'video.related');
+      const continuation = optionalString(params, 'continuation', 'video.related');
+      const { getRelated } = await import('../video/info.ts');
+      const result = await getRelated(await videoDeps(), { videoId, continuation });
+      emitResponse(id, result);
+    } else if (method === 'action.addToWatchLater') {
+      const videoId = requireString(params, 'videoId', 'action.addToWatchLater');
+      const { addToWatchLater } = await import('../actions/playlist.ts');
+      const result = await addToWatchLater(await getBrowseSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'action.addToPlaylist') {
+      const videoId = requireString(params, 'videoId', 'action.addToPlaylist');
+      const playlistId = requireString(params, 'playlistId', 'action.addToPlaylist');
+      const { addToPlaylist } = await import('../actions/playlist.ts');
+      const result = await addToPlaylist(await getBrowseSession(), videoId, playlistId);
+      emitResponse(id, result);
+    } else if (method === 'playback.report') {
+      // Validated before the import, like `playback.open`: a malformed report is
+      // a client bug, and answering it with anything `auto` would have the app
+      // retrying a ping that can never land while the real cadence carries on
+      // around it.
+      const sessionId = requireString(params, 'sessionId', 'playback.report');
+      const positionMs = requireNumber(params, 'positionMs', 'playback.report');
+      const state = requireEnum(params, 'state', 'playback.report', PLAYBACK_REPORT_STATES);
+      const { reportPlayback } = await import('../playback/report.ts');
+      const result = await reportPlayback(
+        { browse: await getBrowseSession() },
+        { sessionId, positionMs, state },
+      );
+      emitResponse(id, result);
+    } else if (method === 'playback.close') {
+      const sessionId = requireString(params, 'sessionId', 'playback.close');
+      const { closePlaybackSession } = await import('../playback/sessions.ts');
+      // Closing an unknown session is not an error. Phase 1 holds no server-side
+      // state, so a double close — the app tearing down while a final report is
+      // still in flight — has nothing to fail about.
+      closePlaybackSession(sessionId);
+      emitResponse(id, {});
     } else {
       emitError(id, new RpcError('BAD_REQUEST', `Unknown method: ${method}`));
     }

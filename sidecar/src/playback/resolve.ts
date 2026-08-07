@@ -43,6 +43,7 @@ import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/si
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
 import { isSabrOnly } from './sabr-detect.ts';
 import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
+import { openPlaybackSession } from './sessions.ts';
 
 const log = logger('playback');
 
@@ -777,7 +778,7 @@ export async function openPlayback(
       },
     ));
 
-  return descendLadder(
+  const source = await descendLadder(
     videoId,
     [
       {
@@ -797,4 +798,16 @@ export async function openPlayback(
     ],
     preload,
   );
+
+  // A preload "resolves and caches without opening a session" (§3.6), so it
+  // registers nothing and its `sessionId` is not reportable. That is not a gap
+  // to paper over: a preloaded item that is never played must not appear in
+  // anyone's watch history, and the item that *is* played opens for real —
+  // paying nothing for it, because the `/player` response the preload fetched is
+  // still cached.
+  if (!preload) {
+    openPlaybackSession(source.sessionId, videoId);
+  }
+
+  return source;
 }

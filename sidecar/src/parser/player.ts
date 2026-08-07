@@ -125,6 +125,18 @@ function extractCpn(body: Json): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * A playback-tracking base URL, by name.
+ *
+ * These are what `playback.report` pings (F6). They are read here rather than
+ * rebuilt from `docid` because every one of them carries request-scoped
+ * parameters — `ei`, `of`, `vm` — that cannot be reconstructed and that YouTube
+ * checks; a hand-built URL answers 200 and lands nowhere.
+ */
+function trackingUrl(body: Json, name: string): string | null {
+  return str(get(body, 'playbackTracking', name, 'baseUrl'));
+}
+
 export function parsePlayer(raw: Json): PlayerResult {
   const body = isObject(raw) && isObject(raw['data']) ? (raw['data'] as Json) : raw;
 
@@ -159,5 +171,7 @@ export function parsePlayer(raw: Json): PlayerResult {
     sabrOnly: isSabrOnlyAdaptive(adaptive),
     serverAbrStreamingUrl:
       str(get(streaming, 'serverAbrStreamingUrl')) ?? str(get(streaming, 'server_abr_streaming_url')),
+    videostatsPlaybackUrl: trackingUrl(body, 'videostatsPlaybackUrl'),
+    videostatsWatchtimeUrl: trackingUrl(body, 'videostatsWatchtimeUrl'),
   };
 }

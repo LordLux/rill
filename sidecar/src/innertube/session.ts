@@ -232,9 +232,15 @@ export async function refreshVisitorId(session: Session): Promise<string> {
  *
  * `ANDROID_VR` is ladder tier 1 (F5, F11): plain URLs with no `n`, ranges and
  * bare GETs accepted, and it seeks on the libmpv media_kit ships. `MWEB` is
- * tier 2 and the only client with a proven decipher path. `WEB` is here because
- * `video.info` reads durations from it, not because anything streams from it —
- * F3 has it SABR-only.
+ * tier 2 and the only client with a proven decipher path.
+ *
+ * `WEB` is here for `playback.report`, not for streaming — F3 has it SABR-only.
+ * The tracking URLs a watch is reported through carry request-scoped parameters
+ * minted for the call that produced them, so they have to come from the
+ * authenticated client that will send them (F6, A5). This comment used to say
+ * `WEB` existed so `video.info` could read a duration; that would have been a
+ * second `/player` round trip per open, and `video.info` now shares tier 1's
+ * `ANDROID_VR` response instead. See `video/info.ts`.
  */
 export type PlayerClient = 'WEB' | 'MWEB' | 'ANDROID_VR';
 

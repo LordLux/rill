@@ -1,13 +1,19 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'data/playback/engine.dart';
+import 'domain/feed_item.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
 import 'ui/debug_player.dart';
 import 'ui/pages/feed.dart';
+import 'ui/playback_controller.dart';
+import 'ui/player_shell.dart';
+import 'ui/queue_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,12 +32,90 @@ Future<void> main() async {
     return;
   }
 
-  // Boot the app normally
+  // Boot the app normally.
+  //
+  // The engine is created here, on the `ProviderScope` — above the `MaterialApp`
+  // and therefore above the `Navigator`. That placement is the whole of task
+  // §1: a `Player` owned by the watch route is destroyed on pop, which makes a
+  // mini-player and background playback impossible. Owned this high, playback
+  // surviving a route change is not a feature, it is the absence of a bug.
+  final engine = MediaKitEngine();
+
+  final container = ProviderContainer(
+    overrides: [playbackEngineProvider.overrideWithValue(engine)],
+  );
+
   runApp(
-    const ProviderScope(
-      child: RillApp(),
+    UncontrolledProviderScope(
+      container: container,
+      child: const RillApp(),
     ),
   );
+
+  _openOnLaunch(container);
+}
+
+/// What a tile would have supplied. `video.info` replaces every one of these a
+/// moment later; this is only what the page shows meanwhile.
+VideoItem _placeholderItem(String videoId) => VideoItem(
+      kind: 'video',
+      id: videoId,
+      title: videoId,
+      channelName: '',
+      thumbnailUrl: '',
+      isLive: false,
+      canWatchLater: false,
+      canAddToQueue: false,
+    );
+
+/// `RILL_OPEN_VIDEO=<id>[,<id>…]` plays the first and queues the rest, as soon
+/// as there is a frame. `RILL_SEEK_TO_END=1` jumps each one to five seconds from
+/// its end.
+///
+/// The same debug affordance as the `NY_*` harness above, for the half of the
+/// app that needs a mouse: it drives exactly what a tile tap and the queue
+/// button drive — the queue's cursor, and the route — so a run can be exercised
+/// end to end without a hand on it. Unset, it costs one environment lookup at
+/// startup and nothing else.
+///
+/// The seek exists because of what it makes checkable. "Queue three videos, let
+/// one finish, next starts" is a real-player property: a widget test can prove
+/// the controller advances when `completedStream` fires, but only mpv can prove
+/// that stream fires at all at end of media. Waiting out three videos to find
+/// out is why that check kept not happening.
+void _openOnLaunch(ProviderContainer container) {
+  final raw = Platform.environment['RILL_OPEN_VIDEO']?.trim();
+  if (raw == null || raw.isEmpty) return;
+
+  final ids = raw.split(',').map((id) => id.trim()).where((id) => id.isNotEmpty).toList();
+  if (ids.isEmpty) return;
+
+  // Every cursor move, on stderr — the queue's behaviour read off a log instead
+  // of off a screenshot.
+  container.listen(queueProvider, (previous, next) {
+    stderr.writeln(
+      'rill: queue cursor=${next.currentIndex} current=${next.current?.id ?? '-'} '
+      'of ${next.items.length} [${next.items.map((i) => i.id).join(', ')}]',
+    );
+  });
+
+  if (Platform.environment['RILL_SEEK_TO_END'] == '1') {
+    final engine = container.read(playbackEngineProvider);
+    engine.durationStream.listen((duration) {
+      if (duration <= const Duration(seconds: 30)) return;
+      final target = duration - const Duration(seconds: 5);
+      stderr.writeln('rill: RILL_SEEK_TO_END — seeking to $target of $duration');
+      unawaited(engine.seek(target));
+    });
+  }
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    stderr.writeln('rill: RILL_OPEN_VIDEO=${ids.join(',')} — opening the watch page');
+    openWatchIn(container, _placeholderItem(ids.first));
+    for (final id in ids.skip(1)) {
+      container.read(queueProvider.notifier).addToQueue(_placeholderItem(id));
+    }
+  });
 }
 
 class RillApp extends ConsumerWidget {
@@ -47,6 +131,12 @@ class RillApp extends ConsumerWidget {
       title: 'Rill',
       theme: buildRillTheme(accent),
       debugShowCheckedModeBanner: false,
+      navigatorKey: rootNavigatorKey,
+      navigatorObservers: [ref.watch(routeTrackerProvider)],
+      // `builder` wraps the `Navigator`, so `child` here *is* it. That is what
+      // puts the shell — and the mini-player it draws — above every route
+      // instead of inside one.
+      builder: (context, child) => PlayerShell(child: child ?? const SizedBox.shrink()),
       home: const FeedPage(),
     );
   }

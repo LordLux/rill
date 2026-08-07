@@ -278,4 +278,84 @@ describe('RPC Transport', () => {
     expect(errorOf(frameFor(lines, 30))).toMatchObject({ code: 'BAD_REQUEST', retry: 'no' });
   }, 10000);
 
+  /**
+   * Send a request and wait for its answer.
+   *
+   * The watch-page methods below all fail validation before anything touches the
+   * network, which is the property under test: a malformed frame must be refused
+   * by the transport, not carried into a session it would then wait on.
+   */
+  async function answer(id: number, method: string, params: unknown): Promise<Frame> {
+    child.stdin!.write(JSON.stringify({ id, method, params }) + '\n');
+    await new Promise<void>((resolve) => {
+      if (lines.find((l) => l.id === id)) {
+        resolve();
+      } else {
+        onLine = (parsed) => {
+          if (parsed.id === id) resolve();
+        };
+      }
+    });
+    onLine = null;
+    return frameFor(lines, id);
+  }
+
+  describe('watch-page parameter validation (§3.3–3.5)', () => {
+    // Each of these is a client bug, and every one of them used to be the kind
+    // that reaches YouTube as a request about a video nobody asked for. `no`,
+    // not `auto`: the same bytes fail the same way forever.
+    const malformed: Array<[string, string, unknown]> = [
+      ['video.info with no videoId', 'video.info', {}],
+      ['video.info with a blank videoId', 'video.info', { videoId: '   ' }],
+      ['video.related with no videoId', 'video.related', {}],
+      [
+        'video.related with a non-string continuation',
+        'video.related',
+        { videoId: 'aqz-KE-bpKQ', continuation: 42 },
+      ],
+      ['action.addToWatchLater with no videoId', 'action.addToWatchLater', {}],
+      [
+        'action.addToPlaylist with no playlistId',
+        'action.addToPlaylist',
+        { videoId: 'aqz-KE-bpKQ' },
+      ],
+      ['playback.report with no sessionId', 'playback.report', { positionMs: 0, state: 'playing' }],
+      [
+        'playback.report with a missing position',
+        'playback.report',
+        { sessionId: 's1', state: 'playing' },
+      ],
+      [
+        // NaN survives JSON as null, and a string "NaN" survives intact. Either
+        // reaches the stats endpoint as st=NaN, which answers 200 and records
+        // nothing — the exact failure mode this method cannot afford.
+        'playback.report with a non-numeric position',
+        'playback.report',
+        { sessionId: 's1', positionMs: 'NaN', state: 'playing' },
+      ],
+      [
+        'playback.report with an unknown state',
+        'playback.report',
+        { sessionId: 's1', positionMs: 0, state: 'scrubbing' },
+      ],
+      ['playback.close with no sessionId', 'playback.close', {}],
+    ];
+
+    let nextId = 100;
+    for (const [label, method, params] of malformed) {
+      const id = nextId++;
+      it(`${label} is BAD_REQUEST with retry no`, async () => {
+        expect(errorOf(await answer(id, method, params))).toMatchObject({
+          code: 'BAD_REQUEST',
+          retry: 'no',
+        });
+      }, 10000);
+    }
+
+    it('playback.close on an unknown session succeeds — a double close is not an error', async () => {
+      const frame = await answer(200, 'playback.close', { sessionId: 'never-opened' });
+      expect(frame.error).toBeUndefined();
+      expect(frame.result).toEqual({});
+    }, 10000);
+  });
 });
