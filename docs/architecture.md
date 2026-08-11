@@ -90,6 +90,30 @@ the reproduction run logged `inactive` → `resumed` twice. What does *not* exis
 is a device-loss callback: there is no "your texture just died" event, only the
 `id` change after the fact.
 
+**Parked as cosmetic, 2026-08-11 — a ~1 ms stale-audio blip after a seek.**
+Observed by hand on both machines: when audio and video come back after a seek,
+roughly a millisecond of audio from the *pre-seek* position plays first, then
+everything is normal. Rate is informal — "about 2 times out of 30", the user's
+own estimate and explicitly rough. It is unrelated to everything F18 measures:
+that is start *latency*, this is a stale sample already decoded. The likely
+mechanism is residue in the audio output path being drained before the post-seek
+samples arrive, possibly a flush racing the resume, and the two-URL design gives
+it room — the external audio track is a second demuxer with its own buffers.
+
+**Not investigated, deliberately, and the reason is measurability rather than
+laziness.** `audio-pts` observations arrive at ~10–20 ms granularity, so a 1 ms
+artefact will not move the property at all; the existing traces cannot confirm or
+deny it. Establishing it needs audio loopback capture and waveform comparison
+against the source — a new rig, not a probe flag. Against that cost: the artefact
+is three orders of magnitude smaller than the 0.8–4.6 s seek latency this same
+finding already records as a limitation, and the one available lever
+(`audio-buffer`, present in the artefact) would trade the residue for less output
+headroom, which is exactly what the slower machine cannot spare.
+
+Worth revisiting **only** if it becomes frequent, or on the way into Phase 2 —
+where a muxed DASH stream has no second demuxer, so the bridge may dissolve it
+without anyone touching it.
+
 **Measurement gap on F13 — closed 2026-08-02.** F13 was taken through the libmpv
 client API against the real shipped DLL, not through `media_kit` inside a Flutter
 app, because the measuring machine had no Flutter SDK, Visual Studio or CMake at
