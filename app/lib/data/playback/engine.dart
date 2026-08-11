@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
@@ -65,8 +66,16 @@ abstract class PlaybackEngine {
 /// Owned by the shell above the `Navigator` (task §1), so a route pop cannot
 /// take it — and with it the audio and the position — down.
 class MediaKitEngine implements PlaybackEngine {
-  MediaKitEngine() {
-    _player = Player();
+  /// [logLevel] is for measurement harnesses only. mpv at `v` is the level that
+  /// shows stream opens and cache events — the per-track evidence no property
+  /// exposes, because `demuxer-cache-state` describes one demuxer and an
+  /// external audio track is a second one. It is off in the app.
+  MediaKitEngine({MPVLogLevel? logLevel}) {
+    _player = Player(
+      configuration: logLevel == null
+          ? const PlayerConfiguration()
+          : PlayerConfiguration(logLevel: logLevel),
+    );
     _video = VideoController(_player);
 
     // The one option architecture §2.4 says to set unconditionally. The build
@@ -95,6 +104,21 @@ class MediaKitEngine implements PlaybackEngine {
   /// The controller, which outlives every route. Prefer [videoSurface].
   VideoController get videoController => _video;
 
+  /// mpv itself, **for diagnostics only** — hard invariant 9's own carve-out.
+  ///
+  /// Nothing that renders may touch this. `getProperty` is a blocking FFI call
+  /// that can sit on mpv's core lock through a seek (F15 recorded a 6.4 s
+  /// freeze), so the UI reads streams and this exists for measurement harnesses
+  /// that need `observeProperty` — which delivers on mpv's event thread and
+  /// polls nothing.
+  NativePlayer get diagnostics => _player.platform as NativePlayer;
+
+  /// mpv's own log lines. Empty unless the engine was built with a `logLevel`.
+  Stream<PlayerLog> get logStream => _player.stream.log;
+
+  /// mpv's error channel — failures it reports rather than logs. Diagnostics.
+  Stream<String> get errorStream => _player.stream.error;
+
   /// `controls: NoVideoControls` because every caller draws its own.
   ///
   /// media_kit_video mounts `AdaptiveVideoControls` by default, and on Windows
@@ -106,8 +130,17 @@ class MediaKitEngine implements PlaybackEngine {
   }
 
   Future<void> _setStreamOptions() async {
+    // `RILL_STREAM_LAVF_O` replaces the value for one run. Measurement only —
+    // it exists so ffmpeg's `reconnect*` options can be tested **one at a time**
+    // against a real 15-minute idle, which is the only way to know which of them
+    // matters rather than that some combination did. Unset in ordinary use.
+    final override = Platform.environment['RILL_STREAM_LAVF_O']?.trim();
+    final value = (override == null || override.isEmpty) ? streamLavfOptions : override;
+    if (override != null && override.isNotEmpty) {
+      stderr.writeln('engine: stream-lavf-o overridden -> $value');
+    }
     try {
-      await (_player.platform as NativePlayer).setProperty('stream-lavf-o', streamLavfOptions);
+      await (_player.platform as NativePlayer).setProperty('stream-lavf-o', value);
     } on Object {
       // media_kit discards mpv's return code anyway (F15), so a throw here is
       // the binding failing, not mpv refusing. Nothing this app does depends on

@@ -9,6 +9,7 @@ import 'data/playback/engine.dart';
 import 'domain/feed_item.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
+import 'ui/audio_delay_probe.dart';
 import 'ui/debug_player.dart';
 import 'ui/pages/feed.dart';
 import 'ui/playback_controller.dart';
@@ -29,6 +30,13 @@ Future<void> main() async {
       stderr.writeln('harness: $error');
       runApp(FailedApp(message: '$error'));
     }
+    return;
+  }
+
+  // `RILL_AUDIO_PROBE=<plan>` measures the resume/seek audio delay and exits.
+  final probePlan = Platform.environment['RILL_AUDIO_PROBE']?.trim();
+  if (probePlan != null && probePlan.isNotEmpty) {
+    _runAudioProbe(probePlan);
     return;
   }
 
@@ -53,6 +61,43 @@ Future<void> main() async {
   );
 
   _openOnLaunch(container);
+}
+
+/// Run the audio-delay probe and exit.
+///
+/// `RILL_AUDIO_PROBE="resume:2x10,seek:+60x10"`, `RILL_AUDIO_PROBE_VIDEO=<id>`,
+/// `RILL_AUDIO_PROBE_OUT=<path>`, `RILL_AUDIO_PROBE_VERBOSE=1` for mpv at `v`.
+void _runAudioProbe(String plan) {
+  final steps = plan.split(',').map(ProbeStep.parse).nonNulls.toList();
+  if (steps.isEmpty) {
+    stderr.writeln('probe: nothing parseable in "$plan"');
+    exit(2);
+  }
+
+  final engine = MediaKitEngine(
+    logLevel: Platform.environment['RILL_AUDIO_PROBE_VERBOSE'] == '1' ? MPVLogLevel.v : null,
+  );
+
+  final probe = AudioDelayProbe(
+    engine: engine,
+    videoId: Platform.environment['RILL_AUDIO_PROBE_VIDEO']?.trim() ?? 'aqz-KE-bpKQ',
+    plan: steps,
+    outPath: Platform.environment['RILL_AUDIO_PROBE_OUT']?.trim() ?? 'audio-delay.json',
+  );
+
+  // A real window, because `observeProperty` waits on the `VideoController`
+  // attaching a texture and that never completes without one. See `ProbeApp`.
+  runApp(ProbeApp(engine: engine));
+
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    try {
+      await probe.run();
+    } on Object catch (error, stack) {
+      stderr.writeln('probe: FAILED $error\n$stack');
+      exit(1);
+    }
+    exit(0);
+  });
 }
 
 /// What a tile would have supplied. `video.info` replaces every one of these a
