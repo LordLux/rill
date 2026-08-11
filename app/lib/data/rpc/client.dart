@@ -44,17 +44,49 @@ class RpcClient {
   int _restartBackoffMs = 1000;
   Future<void>? _startFuture;
 
-  String _findProjectRoot() {
-    var dir = Directory.current;
+  /// The directory holding a `sidecar/` tree, or null if there is none.
+  ///
+  /// Two layouts, in this order:
+  ///
+  ///  1. **Beside the executable.** A copied build directory is the only thing a
+  ///     second machine has, and it must be able to run without a checkout, a
+  ///     `bun`, or a particular working directory. `Platform.resolvedExecutable`
+  ///     is where the app actually is; `Directory.current` is wherever it was
+  ///     launched *from*, which for a shortcut, a `cd` elsewhere, or Explorer on
+  ///     another drive is not the app at all.
+  ///  2. **Up from the current directory**, for `flutter run` in a dev checkout,
+  ///     where the binary lives in `sidecar/dist/` at the repo root and the cwd
+  ///     is `app/`.
+  ///
+  /// Split out with its inputs passed in so both layouts can be tested without a
+  /// filesystem — the failure this fixes ("Failed to start sidecar process" on
+  /// any machine that is not this one) is invisible in a dev checkout, because
+  /// there the search always succeeds.
+  @visibleForTesting
+  static String? findSidecarRoot({
+    required String exeDir,
+    required String cwd,
+    required bool Function(String path) hasSidecarDir,
+  }) {
+    if (hasSidecarDir(exeDir)) return exeDir;
+
+    var dir = Directory(cwd);
     for (var i = 0; i < 8; i++) {
-      if (Directory('${dir.path}/sidecar').existsSync()) {
-        return dir.path;
-      }
+      if (hasSidecarDir(dir.path)) return dir.path;
       final parent = dir.parent;
       if (parent.path == dir.path) break;
       dir = parent;
     }
-    return Directory.current.path; // fallback
+    return null;
+  }
+
+  String _findProjectRoot() {
+    return findSidecarRoot(
+          exeDir: File(Platform.resolvedExecutable).parent.path,
+          cwd: Directory.current.path,
+          hasSidecarDir: (path) => Directory('$path/sidecar').existsSync(),
+        ) ??
+        Directory.current.path;
   }
 
   /// The compiled sidecar, or null when this checkout has not been built.
