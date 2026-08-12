@@ -11,6 +11,7 @@ import 'theme/accent.dart';
 import 'theme/app_theme.dart';
 import 'ui/audio_delay_probe.dart';
 import 'ui/debug_player.dart';
+import 'ui/hover_preview.dart';
 import 'ui/pages/feed.dart';
 import 'ui/playback_controller.dart';
 import 'ui/player_shell.dart';
@@ -181,7 +182,18 @@ class RillApp extends ConsumerWidget {
       // `builder` wraps the `Navigator`, so `child` here *is* it. That is what
       // puts the shell — and the mini-player it draws — above every route
       // instead of inside one.
-      builder: (context, child) => PlayerShell(child: child ?? const SizedBox.shrink()),
+      //
+      // The hover-preview scope sits above the shell for the same reason: the feed and the
+      // related rail draw the same tiles, and one controller above both is what keeps "one
+      // shared preview player, never one per tile" true.
+      builder: (context, child) => HoverPreviewScopeHost(
+        shell: ref.watch(playbackEngineProvider),
+        // Lazy and called at most once, so a user who never hovers pays for no second mpv. A
+        // *second* engine rather than the shell's: previewing on that one would open media over
+        // whatever is paused there and take its position with it.
+        engineFactory: MediaKitEngine.new,
+        child: PlayerShell(child: child ?? const SizedBox.shrink()),
+      ),
       home: const FeedPage(),
     );
   }

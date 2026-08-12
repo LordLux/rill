@@ -309,6 +309,13 @@ async function handleRequest(request: RpcRequest) {
       const { getVideoInfo } = await import('../video/info.ts');
       const result = await getVideoInfo(await videoDeps(), videoId);
       emitResponse(id, result);
+    } else if (method === 'video.storyboard') {
+      // The resolve session only, deliberately not `videoDeps()`: this must not wait on — or
+      // wake — the authenticated browse session (§3.7).
+      const videoId = requireString(params, 'videoId', 'video.storyboard');
+      const { getStoryboard } = await import('../video/storyboard.ts');
+      const result = await getStoryboard(await getResolveSession(), videoId);
+      emitResponse(id, result);
     } else if (method === 'video.related') {
       const videoId = requireString(params, 'videoId', 'video.related');
       const continuation = optionalString(params, 'continuation', 'video.related');

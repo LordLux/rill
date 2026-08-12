@@ -27,6 +27,7 @@
  */
 
 import { beforeAll, describe, expect, test } from 'bun:test';
+import { Platform } from 'youtubei.js';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -46,6 +47,8 @@ import {
 } from '../src/playback/resolve.ts';
 import { forgetPlayerResponse, getPlayerResponse } from '../src/innertube/player-response.ts';
 import { isSabrOnly } from '../src/playback/sabr-detect.ts';
+import { playbackSessionCount, resetPlaybackSessions } from '../src/playback/sessions.ts';
+import { forgetStoryboards, getStoryboard } from '../src/video/storyboard.ts';
 
 /**
  * Can this machine reach YouTube at all?
@@ -264,6 +267,43 @@ beforeAll(async () => {
   if (!ONLINE) return;
   session = await createSession({ clientType: 'MWEB' });
 });
+
+/**
+ * A sprite sheet's pixel dimensions, from the file header — JPEG *or* WebP, because the format
+ * is not ours to pin: the same video's level 0 answered `image/webp` on 2026-08-01 and
+ * `image/jpeg` on 2026-08-11, differing only in the `sqp` YouTube minted. An unrecognised header
+ * returns nulls so the assertion fails loudly rather than comparing `undefined` to a grid.
+ */
+function imageSize(bytes: Uint8Array): [number | null, number | null] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  // JPEG: walk the marker segments to the frame header, which is the only place
+  // the dimensions live.
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < bytes.byteLength) {
+      if (bytes[i] !== 0xff) break;
+      const marker = bytes[i + 1]!;
+      // SOF0..SOF15, minus the three that are not frame headers (DHT, JPG, DAC).
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return [view.getUint16(i + 7), view.getUint16(i + 5)];
+      }
+      i += 2 + view.getUint16(i + 2);
+    }
+    return [null, null];
+  }
+
+  if (String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF' && bytes.byteLength >= 30) {
+    const fourcc = String.fromCharCode(...bytes.subarray(12, 16));
+    if (fourcc === 'VP8 ') return [view.getUint16(26, true) & 0x3fff, view.getUint16(28, true) & 0x3fff];
+    if (fourcc === 'VP8X') {
+      const read24 = (at: number) => bytes[at]! | (bytes[at + 1]! << 8) | (bytes[at + 2]! << 16);
+      return [read24(24) + 1, read24(27) + 1];
+    }
+  }
+
+  return [null, null];
+}
 
 interface Throughput {
   mbps: number;
@@ -638,6 +678,127 @@ describe.if(ONLINE && YT_DLP !== null)('ladder tier 4 — yt-dlp', () => {
       }
     },
     3 * MINUTE,
+  );
+});
+
+// ---------------------------------------------------------------------------
+
+describe.if(ONLINE)('video.storyboard', () => {
+  test(
+    'resolves a real video without opening a session or resolving a stream',
+    async () => {
+      // Both claims are invisible from the result alone — a storyboard that quietly went through
+      // the resolution ladder returns exactly the same spec. So count requests and sessions.
+      forgetStoryboards();
+      forgetPlayerResponse(VIDEO);
+      resetPlaybackSessions();
+
+      // Two things about this spy, each of which silently records *nothing* and leaves the
+      // assertions below passing vacuously: it must go on `Platform.shim.fetch` rather than
+      // `globalThis.fetch` (youtubei.js never reads the global), and it must be installed
+      // *before* the session it watches, since `Innertube.create` captures the shim's fetch.
+      // Hence a session of its own, with the log cleared once it is up. The
+      // `toBeGreaterThan(0)` below guards against this arrangement quietly breaking again.
+      const requested: string[] = [];
+      const realFetch = Platform.shim.fetch;
+      Platform.shim.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        requested.push(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+        return realFetch(input, init);
+      }) as typeof Platform.shim.fetch;
+
+      let result;
+      try {
+        const watched = await createSession({ clientType: 'MWEB' });
+        requested.length = 0;
+        result = await getStoryboard(watched, VIDEO);
+      } finally {
+        Platform.shim.fetch = realFetch;
+      }
+
+      // The spy has to see something, or every assertion below is vacuous.
+      expect(requested.length).toBeGreaterThan(0);
+
+      const spec = result.storyboard;
+      expect(spec).not.toBeNull();
+      expect(spec!.url).toStartWith('https://i.ytimg.com/sb/');
+      expect(spec!.frameCount).toBeGreaterThan(0);
+      expect(spec!.frameCount).toBeLessThanOrEqual(spec!.columns * spec!.rows);
+      expect(spec!.intervalMs).toBeGreaterThan(0);
+
+      // Phase 2's cap of 3 makes a preview that opened one a denial of service on the player.
+      expect(playbackSessionCount()).toBe(0);
+
+      // No stream resolution: nothing was asked of googlevideo, and no player
+      // script was downloaded to decipher anything with.
+      const stream = requested.filter((url) => url.includes('googlevideo.com'));
+      const playerJs = requested.filter((url) => /\/s\/player\/|base\.js|iframe_api/.test(url));
+      expect({ stream, playerJs }).toEqual({ stream: [], playerJs: [] });
+
+      // One InnerTube call, the `/player` one `video.info` and tier 1 share. A second would be
+      // the cost a hover preview is not allowed to have.
+      const innertube = requested.filter((url) => url.includes('youtubei/v1/'));
+      expect(innertube).toHaveLength(1);
+      expect(innertube[0]).toContain('/player');
+    },
+    2 * MINUTE,
+  );
+
+  test(
+    'the substituted URL fetches an image — not a URL that merely looks right',
+    async () => {
+      // A URL missing `sigh`, missing `sqp`, or with an unresolved `$M` passes every string
+      // assertion in `storyboard.test.ts` and answers 403. Only pulling the bytes separates them.
+      forgetStoryboards();
+      const spec = (await getStoryboard(session, VIDEO)).storyboard!;
+
+      const response = await fetch(spec.url);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const contentType = response.headers.get('content-type') ?? '';
+      const detail = `HTTP ${response.status} ${contentType} ${bytes.byteLength}B ${spec.url}`;
+
+      expect({ detail, ok: response.status === 200 }).toEqual({ detail, ok: true });
+      // `image/*` and deliberately neither one: which comes back has been observed to differ
+      // between captures of the same video, so pinning either pins something untrue.
+      expect({ detail, image: contentType.startsWith('image/') }).toEqual({ detail, image: true });
+
+      // A sheet that is not `columns × frameWidth` puts every frame at the wrong offset, which
+      // renders as a smear rather than an error.
+      const size = imageSize(bytes);
+      expect({ detail, size }).toEqual({
+        detail,
+        size: [spec.columns * spec.frameWidth, spec.rows * spec.frameHeight],
+      });
+    },
+    2 * MINUTE,
+  );
+
+  test(
+    'a re-hover costs no request at all',
+    async () => {
+      // `player-response.ts`'s own 5-minute TTL is not enough: a scroll back up an hour later is
+      // the same gesture.
+      forgetStoryboards();
+      await getStoryboard(session, VIDEO);
+
+      const requested: string[] = [];
+      const realFetch = Platform.shim.fetch;
+      Platform.shim.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        requested.push(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+        return realFetch(input, init);
+      }) as typeof Platform.shim.fetch;
+
+      try {
+        // Past the underlying TTL too, so this is genuinely the storyboard cache answering.
+        forgetPlayerResponse(VIDEO);
+        const again = await getStoryboard(session, VIDEO);
+        expect(again.storyboard).not.toBeNull();
+      } finally {
+        Platform.shim.fetch = realFetch;
+      }
+
+      expect(requested).toEqual([]);
+    },
+    2 * MINUTE,
   );
 });
 

@@ -108,6 +108,7 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | Method | Params | Result |
 | --- | --- | --- |
 | `video.info` | `{videoId}` | `VideoDetail` |
+| `video.storyboard` | `{videoId}` | `{storyboard}` — §3.7 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` |
@@ -241,6 +242,103 @@ throttles to ~50 KB/s and presents as a network problem. Enforce with a branded
 `playback.open {preload: true}` resolves and caches without opening a session.
 Use for the next queue item so transitions are instant.
 
+### 3.7 Hover previews
+
+**Revised 2026-08-11.** A hover preview is **the real video, muted, played in
+the tile** — see `architecture.md` §2.6 for the decision and what it replaced.
+It needs no method of its own: it is `playback.open` and `playback.report`, used
+in a particular way, and that is the whole point of specifying it here.
+
+**Resolving is `playback.open {preload: true}`.** §3.6's preload resolves and
+caches *without opening a session*, and §3.5 says a preload's `sessionId` is not
+reportable — a report against one is `BAD_REQUEST`. That is exactly the property
+a hover needs, and it is why the preview does not simply open normally and
+decline to report: it makes **"a hover is not a watch" structural** rather than a
+rule someone has to keep remembering, so no amount of pointer traffic can put a
+video the user never chose into their history.
+
+**Past 30 s a preview stops being a preview.** The point of playing video in the
+feed is that it is watching, and a watch that never reports is one the
+recommender never learns from — the exact failure `playback.report` exists to
+prevent, and one that would make the homepage drift further from the account the
+more the feature is used. So past the threshold the client opens a **second,
+non-preload** `playback.open` for the same video and reports against that session
+on the ordinary §3.5 cadence. The `/player` response is already cached from the
+preload, so this costs one RPC round trip and no request to YouTube.
+
+Below the threshold nothing is reported at all. Thirty seconds is long enough
+that a pointer resting on a tile while the user reads something else is not a
+view, and short enough that anything deliberate is one.
+
+**A preview that reaches the end of the video reports `ended`**, not `paused`,
+before closing its session — a video watched through is a much stronger signal
+than one the viewer walked away from, and the difference is invisible from every
+angle except the homepage slowly ceasing to resemble the account. A preview that
+never crossed the threshold reports nothing when it ends, the same as when the
+pointer leaves.
+
+**The client picks a low variant.** `variants` arrives ranked best-first and
+§3.5 leaves the choice to the client; a preview takes the best entry at or under
+720p. F16 measured 2160p60 dropping 16–29% of frames on an Intel iGPU for the
+video the user actually chose, at full size — a thumbnail-sized preview has
+neither that budget nor that justification.
+
+#### `video.storyboard` — the scrubber's input, currently unused
+
+```jsonc
+// video.storyboard {videoId} → one fetchable sprite sheet, or null
+{
+  "storyboard": {
+    "url": "https://i.ytimg.com/sb/…/storyboard3_L0/default.jpg?sqp=…&sigh=rs$…",
+    "columns": 10,
+    "rows": 10,
+    "frameCount": 100,   // ≤ columns × rows; trailing cells may hold no frame
+    "frameWidth": 48,
+    "frameHeight": 27,
+    "intervalMs": 6350,  // video time per frame — NOT a playback cadence
+    "level": 0           // the $L this came from; telemetry
+  }
+}
+```
+
+**Nothing calls this yet.** It was built for hover previews, which now play
+video; it is kept for the **scrubber**, where showing one frame at a pointer
+position is what its ~6 s frame spacing is actually good for. It is documented
+rather than deleted because the substitution below was measured against real
+responses and verified by fetching, and re-deriving it from the shape would be
+expensive.
+
+It reads one field out of the **`ANDROID_VR` `/player` response that
+`video.info` and ladder tier 1 already share** (§3.3), so it opens no session,
+resolves no stream, and needs no PO token.
+
+**`storyboard: null` is an ordinary answer, not a failure.** YouTube does not
+build sheets for everything — `jNQXAC9IVRw` (19 s) carries zero levels on both
+clients, measured 2026-08-11, and so does `uQ0LGwPBC2c` in the live feed. That
+unpredictability is also why sprites are not a hover-preview fallback: they are
+missing exactly when they would be needed.
+
+**Exactly one sheet, always.** The sidecar picks the largest zoom level whose
+entire frame set fits a single sheet and substitutes every placeholder — `$L`
+(level), `$N` (the level's name field) and `$M` (sheet index) — so `url` is
+fetchable as-is and the client constructs no URLs.
+
+Three things about that URL are not obvious and are all load-bearing:
+
+- **`sqp` and `sigh` are both required.** Dropping either answers HTTP 403.
+- **The response is not necessarily JPEG.** The path ends `.jpg`, but `sqp` is a
+  transcode request: the same video's level 0 came back `image/webp` on
+  2026-08-01 and `image/jpeg` on 2026-08-11. Decode by content, never by
+  extension.
+- **They are long-lived.** URLs captured 2026-08-01 still fetched on 2026-08-11.
+  The sidecar caches the resolved spec for 6 hours; it cannot "re-sign" one,
+  because `sqp` and `sigh` are minted inside the `/player` response and
+  re-signing would mean re-resolving.
+
+**`intervalMs` is what a frame *represents*, not how fast to show it.** Level 0
+spreads a fixed frame count across the whole runtime, so a 10-minute video puts
+6.35 s behind every frame.
+
 ---
 
 ## 4. Errors
@@ -332,8 +430,18 @@ building an envelope from an internal signal throws rather than inventing a
 - Hard cap of 3 concurrent: current, preloaded next, spare
 - LRU eviction
 
-Hover previews never open a session — they use storyboard sprites, which need no
-session and no PO token.
+**Hover previews open no session while they are previews** (§3.7). They resolve
+through `playback.open {preload: true}`, which §3.6 defines as resolving and
+caching without registering one — so a pointer sweeping a grid cannot consume the
+cap above, and a preload's `sessionId` is not reportable.
+
+A preview that runs past 30 s is no longer a preview and does open one, exactly
+like any other watch. That is the only path from a hover to a session, and it is
+deliberate rather than incidental: reaching it takes a video playing in a tile
+for half a minute.
+
+`video.storyboard` (§3.7) opens no session either, and the registry staying empty
+across a call is asserted live rather than left as a claim about the code.
 
 ---
 

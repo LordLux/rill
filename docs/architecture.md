@@ -23,7 +23,7 @@ the spike; do not assume they still hold six months from now.
 | F5 | **`ANDROID_VR`'s refusal tracks the visitor id.** A server-issued `X-Goog-Visitor-Id` is sufficient and reliable; a locally-generated one is **unreliable, not rejected outright** | Refines the earlier reading (0 formats on 3 of 4 runs, `PlayerErrorCommand` / `auth_required_command`) on 2026-08-01. Aggregated over every attempt across four runs: server-issued **13/13** `OK` with 28 adaptive formats to 2160p; locally-generated **2/28**; omitted **0/7**. Failures are `LOGIN_REQUIRED / "Sign in to confirm you're not a bot"`. The 2/28 matters — a fabricated id is not categorically refused, it is refused ~93% of the time, which is the same coin-flip the original F5 saw as "3 of 4" and is why one lucky run reads as a fix. Both passes are in the spike corpus (`q1-B-headers-fixed-*.json`, `q1c-tally.json` variant A). `generate_session_locally: true` (what an anonymous session uses) produces a 32-char fabricated id; a `/watch` fetch or `generate_session_locally: false` yields a ~558-char server-issued one. Header spelling is irrelevant: youtubei.js's `X-Youtube-Client-Name: 1` + desktop Chrome UA against a body declaring `ANDROID_VR` is accepted, and correcting all three headers to yt-dlp's values does not rescue a local id (0/14). Cookies are irrelevant (passes with none, fails with a full jar and no visitor id). `TV` was not retested |
 | F6 | Watch history reporting from the authenticated `WEB` session lands | 183 history entries readable; target video present after reporting |
 | F7 | Cookie sessions degrade **silently** — auth endpoints return empty shells while the client still reports `logged_in: true` | Home + history both returned 0 items with no error, after browser-side cookie rotation |
-| F8 | No moving-thumbnail media in the feed. Storyboards are present | 0 mp4/webm URLs; `PlayerStoryboardSpec` with a resolved template URL |
+| F8 | No moving-thumbnail media in the feed. Storyboards are present | 0 mp4/webm URLs; `PlayerStoryboardSpec` with a resolved template URL. **Read it narrowly:** it says a feed *response* ships no preview media, not that hover previews cannot be video — §2.6 resolves a stream through `playback.open` instead, which F8 says nothing about |
 | F9 | A SABR-only `WEB` response still carries a working itag 18 progressive stream | 40/40 adaptive formats have neither URL nor cipher; itag 18 present with a working URL. Confirms the progressive floor is reachable on both clients. **Amended 2026-08-02:** "still carries" is not "always carries" — one live suite run in ~5 got an `MWEB` response with **no progressive format at all**, and tier 5 threw `no progressive format either`. It did not reproduce: 14/14 controlled `MWEB` fetches in the same hour carried itag 18 with an address. Same day, same shape as the F3 sighting and the F11 403 — an anonymous caller intermittently served a degraded response — and in every case tier 1 (`ANDROID_VR`) served normally. The floor is a very good bet, not a guarantee |
 | F10 | **`MWEB` stream URLs refuse open-ended range requests; `ANDROID_VR` URLs accept them.** ffmpeg opens every HTTP stream with `Range: bytes=0-`, so a deciphered `MWEB` URL cannot be handed to libmpv directly | `c=MWEB` itag 315: HTTP 403 on `bytes=0-` at offsets 0, 100 MB and 1000 MB; HTTP 206 on `bytes=0-1048575`. `c=ANDROID_VR` itag 401 (via yt-dlp): 206 on both. mpv plays the `ANDROID_VR` URL and 403s on the `MWEB` one. Both URLs carry `rqh=1`, so the client — not that parameter — is the discriminator. Confirmed against ffmpeg's `libavformat/http.c`: the Range header is emitted as `Range: bytes=<off>-` whenever no explicit Range header is set, the request is not a POST, and an offset, end offset, or seekability is in play. Open-ended by construction. `seekable=0` suppresses the header entirely but a bare GET is also refused (403), so it is not a workaround. **Refined 2026-08-01:** bounding the request does not fix it either, it relocates the failure. With `--stream-lavf-o=request_size=1048576` the open succeeds, 1 MB chunks return 206 and mpv plays for ~7 s — then the mid-file seek asks for `Range: bytes=583998372-585046947` and gets **403 on both the video and the audio URL**, ending playback. Reproduced 4/4 across default, 32 MiB, 8 MiB and disabled readahead, so it is the reposition rather than an accumulated-volume ceiling — though with default readahead a purely sequential run also 403s at ~128 MB, matching "the boundary shifted as requests accumulated". `initial_request_size` alone behaves the same |
 | F11 | **`ANDROID_VR` URLs clear F10 end to end, but mid-file seeking needs ffmpeg's `request_size`.** The URL was never the obstacle to seeking — ffmpeg was | Measured 2026-08-01 on itag 401 (AV1 2160p60), 315 (VP9 2160p60) and 251. Open-ended `Range: bytes=0-` → **206** at offsets 0, 100 MB and end−5 MB on all three. **Not quite every time, though (2026-08-02):** 2 live suite runs in ~20 saw a **403** to an open-ended range on a URL tier 1 had just resolved normally, and the run captured in full 403'd twice ~200 ms apart — a refusal window rather than an unlucky request. It never reproduced deliberately: **28/28** open-ended requests answered 206 across freshly resolved URLs, URLs that had already served 12 MB, and back-to-back / 1 s / 4 s spacings. **Cause unidentified.** The suite's probe now aborts at the status line instead of cancelling a 712 MB body — that pattern also panicked Bun 1.3.14 twice with `Out of memory while copying request body`, so it was doing more than reading a status — and 12 consecutive live runs have been clean since. Suggestive, not conclusive: at the earlier ~10% rate, 12 clean runs occur by chance about a quarter of the time. The test retries once, five seconds later, on a fresh URL; a *persistent* 403 means F11 has stopped holding. Bare GET, no headers → **200**, not the 403 `MWEB` gives. Sustained over an *open-ended* range: 2.11 MB/s (itag 401), 4.02 MB/s (itag 315), 28 MB/s (audio) — all above the 1.5 MB/s bar. Bounded and open-ended rates are identical to two decimal places, so delivery is paced per format at ~2× realtime rather than penalised by request shape; F4's 4.0 MB/s is that same pacing on that same itag, not a client difference. mpv plays both codecs with audio in sync, and **both hardware-decode here** — Intel Graphics (driver 31.0.101.4953) via `d3d11va`, ~6.2 s CPU across a 40 s run, so the AV1 software-decode risk does not apply on this machine and does not argue for preferring VP9. **Seeking without `request_size` fails 0/4**: ffmpeg never repositions, it soft-seeks — `"Soft-seeking to offset 320812391 by draining 694816224 remaining byte(s)"` — and stalls at the target on one connection, one request. With `--stream-lavf-o=request_size=1048576,short_seek_size=1048576`: **4/4 seeks, forward and backward, both codecs**, playback resuming past every target |
@@ -275,9 +275,60 @@ that session, browser-side cookie rotation cannot invalidate it.
 
 ### 2.6 Hover previews
 
-Per **F8**, feed responses carry no preview video. Use storyboard sprite sheets
-from the player response, animated on hover. One shared preview surface, ~400 ms
-hover delay. Never instantiate a player per tile.
+**Revised 2026-08-11.** Hovering a tile plays the real video, muted, in the
+tile. The goal is watching from the feed without opening anything.
+
+Per **F8** a feed *response* carries no preview media — 0 mp4/webm URLs across
+nine captures — so the stream is resolved the same way any other playback is,
+through `playback.open`. F8 constrains where preview media comes from, not
+whether video previews are possible.
+
+- **One shared preview player, never one per tile.** The player moves between
+  tiles; only one video ever decodes.
+- **It is a second player, separate from the shell's.** The shell's holds a
+  paused video's position and its texture, and opening media on it would destroy
+  exactly what the suppression rule below protects. Created lazily, on the first
+  preview that actually starts.
+- **~800 ms hover delay**, longer than a sprite preview would need, because this
+  one opens a video stream and only a hover somebody meant should do that.
+- **Suppressed while a video is playing**; a paused one does not suppress. Two
+  decoders and two soundtracks is not a preview, it is a competition. Playback
+  starting takes a running preview down.
+- **Muted, at 720p or below** (F16: 2160p60 dropped 16–29% of frames on an Intel
+  iGPU at full size, and a thumbnail has none of that budget).
+- **Static thumbnail until the first frame.** Mounting the surface while mpv
+  loads paints a black rectangle, which reads as a broken tile.
+- **Past 30 s it stops being a preview** and is reported as a watch. See
+  `protocol.md` §3.7.
+- **When the video ends, the preview deactivates** — thumbnail back, mute
+  toggle gone, Watch Later and Add to queue back — exactly as if the pointer had
+  left, and without looping or restarting under a pointer that never moved. It
+  is the same teardown call, so the two paths cannot drift apart.
+
+**Sprite sheets were the previous decision and are not a fallback.** Three
+reasons, all measured:
+
+1. Level 0 is 100 frames spread across the whole runtime, so consecutive frames
+   are ~6 s apart. Animating them to cover the gap before video starts scrubs
+   ~25 s forward and then cuts back to 0:00 — it cannot bridge anything, and
+   holding frame 0 still is just the thumbnail.
+2. Videos carry zero storyboard levels unpredictably (`jNQXAC9IVRw`,
+   `uQ0LGwPBC2c`, and others in the live feed), so a sprite fallback is absent
+   exactly when it would be needed.
+3. YouTube shows nothing when a stream will not resolve. Matching that is
+   simpler and more familiar than a degraded animation.
+
+So the answer to "suppressed, unresolvable, or not yet decoding" is the static
+thumbnail, in all three cases.
+
+The sprite machinery is kept, wired to nothing, as the **scrubber's** input —
+one frame at a pointer position is what its ~6 s spacing is actually good for.
+`video.storyboard` and its substitution were measured against real responses and
+verified by fetching, and re-deriving that would be expensive.
+
+There is no CC button on a preview. Captions do not exist anywhere in this app
+yet; they are their own task, where the watch page gets them too, and a dead
+control is worse than no control.
 
 Tile action buttons (Watch Later, Add to queue) come from
 `ThumbnailHoverOverlayToggleActionsView` and the associated

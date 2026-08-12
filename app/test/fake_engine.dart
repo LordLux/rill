@@ -23,6 +23,9 @@ class FakeEngine implements PlaybackEngine {
   int disposeCount = 0;
   final List<Duration> seeks = [];
 
+  /// Every volume handed to [setVolume], in order — "it looked silent" is not an assertion.
+  final List<double> volumes = [];
+
   Duration _positionValue = Duration.zero;
   Duration _durationValue = Duration.zero;
   bool _playingValue = false;
@@ -54,9 +57,15 @@ class FakeEngine implements PlaybackEngine {
   Widget videoSurface({BoxFit fit = BoxFit.contain}) =>
       const SizedBox.expand(key: surfaceKey);
 
+  /// Held open by a test that needs `open` to still be in flight later. media_kit really can
+  /// take ~20 s here, waiting on a duration before it attaches the audio track.
+  Future<void>? openGate;
+
   @override
   Future<void> open(PlaybackVariant variant, {bool play = true}) async {
     opened.add(variant);
+    final gate = openGate;
+    if (gate != null) await gate;
     _positionValue = Duration.zero;
     _durationValue = const Duration(minutes: 10);
     _duration.add(_durationValue);
@@ -76,7 +85,10 @@ class FakeEngine implements PlaybackEngine {
   }
 
   @override
-  Future<void> setVolume(double volume) async {}
+  Future<void> setVolume(double volume) async => volumes.add(volume);
+
+  /// One of the hover preview's two "there is a picture now" signals.
+  void setBuffering(bool value) => _buffering.add(value);
 
   @override
   Future<void> stop() async {

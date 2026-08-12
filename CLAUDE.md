@@ -196,10 +196,16 @@ what you are testing.
 - **Fixtures are one moment.** The home feed's renderer mix shifted measurably
   within 8½ hours. Never assert that a given surface contains a given
   generation; search the corpus for wherever it lives.
-- **Storyboard hover previews are not video.** Download the sprite sheet and
-  shift the image offset with a `CustomPainter` or clipped `Positioned`. Cache
-  sheets aggressively in memory or hover lags. Never instantiate a player per
-  tile.
+- **Hover previews are the real video, muted, in the tile** (revised 2026-08-11;
+  this note used to say sprite sheets, and `architecture.md` §2.6 records why it
+  changed). **Never instantiate a player per tile** — that part is unchanged and
+  is the rule that matters: one shared preview player moves between tiles, and it
+  is a *second* player from the shell's, because opening media on the shell's
+  would destroy a paused video's position. Suppressed while anything is playing,
+  ~800 ms delay, 720p cap, muted, and the static thumbnail until the first frame.
+  Sprite sheets survive in `storyboard_sheets.dart` and `video.storyboard`, wired
+  to nothing, as the scrubber's input: at ~6 s between frames they are good for
+  showing one frame at a pointer position and nothing else.
 - **Browse and resolve are different clients.** Browse and report as `WEB` with
   cookies; resolve streams anonymously, asking as `ANDROID_VR` (ladder tier 1)
   and falling back to `MWEB` (tier 2). Do not attempt to bridge CPNs between

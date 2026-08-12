@@ -60,10 +60,17 @@ function mapFormat(entry: Json, isAdaptive: boolean): PlayerFormat | null {
  *
  *   <baseUrl>|w#h#count#cols#rows#intervalMs#name#sigh|w#h#…
  *
- * Each trailing segment is one zoom level. `$L` in the base URL is the level
- * index and `$N` the level's name field; both stay in the template so the UI can
- * pick a level per hover. Per F8 these sprite sheets are the only hover-preview
- * media YouTube serves — there is no preview video in the feed.
+ * Each trailing segment is one zoom level. The substitution was measured against real responses
+ * and verified by fetching (`protocol.md` §3.7), on `aqz-KE-bpKQ`, 2026-08-11:
+ *
+ *   base `…/storyboard3_L$L/$N.jpg?sqp=…`
+ *   L0   `48#27#100#10#10#0#default#rs$AOn4CL…` → `…_L0/default.jpg?sqp=…&sigh=rs$AOn4CL…`
+ *   L1   `80#45#128#10#10#5000#M$M#rs$AOn4CL…`  → `…_L1/M0.jpg?sqp=…&sigh=rs$AOn4CL…`
+ *
+ * `$L` is the level's index, `$N` its own name field (a literal, or `M$M` leaving `$M` for the
+ * sheet index), and `sigh` is appended as a query parameter. Substitutions go through a function
+ * and `sigh` through a concat, because a value containing `$&` or `$'` would otherwise be read
+ * as a replacement pattern — every real signature starts `rs$…`.
  */
 function parseStoryboardSpec(spec: string): Storyboard[] {
   const [baseUrl, ...levels] = spec.split('|');
@@ -76,11 +83,12 @@ function parseStoryboardSpec(spec: string): Storyboard[] {
     if (!width) return;
 
     const templateUrl = baseUrl
-      .replace('$L', String(index))
-      .replace('$N', name ?? 'M$M')
+      .replace('$L', () => String(index))
+      .replace('$N', () => name ?? 'M$M')
       .concat(sigh ? `&sigh=${sigh}` : '');
 
     boards.push({
+      level: index,
       templateUrl,
       thumbnailWidth: num(width),
       thumbnailHeight: num(height),
@@ -91,6 +99,14 @@ function parseStoryboardSpec(spec: string): Storyboard[] {
     });
   });
   return boards;
+}
+
+/**
+ * The URL of one sheet within a level. Level 0's name is a literal, so it carries no `$M` and
+ * this is the identity — correct, because level 0 is always a single sheet.
+ */
+export function sheetUrl(board: Storyboard, index: number): string {
+  return board.templateUrl.replace('$M', () => String(index));
 }
 
 function extractStoryboards(body: Json): Storyboard[] {

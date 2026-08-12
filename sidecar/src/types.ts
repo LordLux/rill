@@ -154,14 +154,54 @@ export interface PlayerFormat {
 }
 
 export interface Storyboard {
-  /** Template URL with `$L`/`$N`/`$M` placeholders still in place. */
+  /** The `$L` value, and this level's index in the spec — they are the same. */
+  level: number;
+  /**
+   * The sheet URL with `$L` and `$N` resolved and `sigh` appended. `$M` — the sheet index — is
+   * deliberately left in, because it is per-sheet rather than per-level; use `sheetUrl`.
+   */
   templateUrl: string;
   thumbnailWidth: number | null;
   thumbnailHeight: number | null;
+  /** Frames in this level **across every sheet**, not per sheet. */
   thumbnailCount: number | null;
   columns: number | null;
   rows: number | null;
+  /**
+   * Video time one frame represents. `0` on level 0, where YouTube spreads a fixed count across
+   * the whole runtime instead — `selectSheet` divides that out; nothing else should treat a
+   * `0` as an interval.
+   */
   intervalMs: number | null;
+}
+
+/**
+ * One fetchable sprite sheet — `video.storyboard`'s result and the only storyboard shape that
+ * crosses the RPC boundary (`protocol.md` §3.7). Every placeholder is already substituted, so
+ * Flutter constructs no URLs. Exactly one sheet, by construction.
+ */
+export interface StoryboardSpec {
+  /** Fully substituted and signed. One GET, one image. */
+  url: string;
+  /** Grid of the sheet at `url`. */
+  columns: number;
+  rows: number;
+  /** Frames present, row-major from the top left. Never more than `columns * rows`. */
+  frameCount: number;
+  frameWidth: number;
+  frameHeight: number;
+  /**
+   * Video time one frame represents, always positive and resolved. **Not a playback cadence** —
+   * level 0 puts ~6 s behind every frame.
+   */
+  intervalMs: number;
+  /** The `$L` level this came from. Telemetry — the client picks nothing. */
+  level: number;
+}
+
+/** `video.storyboard`'s result. `null` for a video YouTube ships no sheets for. */
+export interface StoryboardResult {
+  storyboard: StoryboardSpec | null;
 }
 
 export interface PlayerResult {

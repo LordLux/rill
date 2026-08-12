@@ -98,3 +98,11 @@ export function closePlaybackSession(sessionId: string): boolean {
 export function resetPlaybackSessions(): void {
   sessions.clear();
 }
+
+/**
+ * How many playback sessions are open. Test seam: §5's claim that hover previews open none is
+ * about this registry, so it has to be observable rather than checked by reading the code.
+ */
+export function playbackSessionCount(): number {
+  return sessions.size;
+}

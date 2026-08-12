@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
+import '../hover_preview.dart';
+import '../open_video.dart';
 
 // ---- TEMPORARY: unfed tile slots ----
 // Master switch to turn off all placeholder elements at once
@@ -27,6 +31,15 @@ class TileSpec {
   final String title;
   final String thumbnailUrl;
 
+  /// The video whose storyboard this tile previews on hover, or null for a tile
+  /// with nothing to preview.
+  ///
+  /// Deliberately the same derivation as [watchTargetFor]: a mix previews its
+  /// seed video because that is what the tile opens, and a playlist previews
+  /// nothing because it opens nothing. A tile that previewed one video and
+  /// opened another would be worse than a tile that previews nothing.
+  final String? previewVideoId;
+
   // top slots
   final bool isStackedCards;
   final String? durationText;
@@ -43,6 +56,7 @@ class TileSpec {
   const TileSpec({
     required this.title,
     required this.thumbnailUrl,
+    this.previewVideoId,
     required this.isStackedCards,
     this.durationText,
     required this.durationTone,
@@ -73,6 +87,7 @@ TileSpec? specFor(FeedItem item) {
       return TileSpec(
         title: v.title,
         thumbnailUrl: v.thumbnailUrl,
+        previewVideoId: v.id.isEmpty ? null : v.id,
         isStackedCards: false,
         durationText: durText,
         durationTone: v.isLive ? DurationBadgeTone.live : DurationBadgeTone.normal,
@@ -87,6 +102,7 @@ TileSpec? specFor(FeedItem item) {
     mix: (m) => TileSpec(
       title: m.title,
       thumbnailUrl: m.thumbnailUrl,
+      previewVideoId: mixSeedVideoId(m),
       isStackedCards: true,
       durationText: m.videoCount != null ? '${m.videoCount} videos' : null,
       durationTone: DurationBadgeTone.normal,
@@ -146,6 +162,166 @@ class MediaTile extends StatefulWidget {
 class _MediaTileState extends State<MediaTile> {
   bool isHovering = false;
 
+  /// This tile's preview slot. The shared [HoverPreview] writes to at most one across the grid,
+  /// so a running preview rebuilds one builder rather than every tile on screen.
+  final PreviewSink _slot = PreviewSink(null);
+
+  /// Null outside a [HoverPreviewScope], which disables previews entirely.
+  HoverPreview? _preview;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = HoverPreviewScope.maybeOf(context);
+    if (identical(next, _preview)) return;
+    _stopPreview();
+    _preview = next;
+  }
+
+  @override
+  void didUpdateWidget(MediaTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previous = oldWidget.spec.previewVideoId;
+    if (previous == widget.spec.previewVideoId) return;
+
+    // A recycled tile is a different video in the same element. Stop the **old** one by id:
+    // `didUpdateWidget` runs after `widget` is swapped, so passing the new id makes `exit` bail
+    // early and leaves the previous video decoding forever.
+    _stopPreview(videoId: previous);
+
+    // The pointer never left, so no `onEnter` is coming. Without this the tile under a
+    // stationary cursor sits inert until the user moves off and back on.
+    if (isHovering) _onEnter();
+  }
+
+  @override
+  void dispose() {
+    _stopPreview();
+    _slot.dispose();
+    super.dispose();
+  }
+
+  void _stopPreview({String? videoId}) {
+    final id = videoId ?? widget.spec.previewVideoId;
+    if (id != null) _preview?.exit(id);
+    _slot.value = null;
+  }
+
+  void _onEnter() {
+    setState(() => isHovering = true);
+    final videoId = widget.spec.previewVideoId;
+    if (videoId != null) _preview?.enter(videoId, _slot);
+  }
+
+  void _onExit() {
+    setState(() => isHovering = false);
+    _stopPreview();
+  }
+
+  /// A preview with a picture on screen — the state the tile's chrome reacts to.
+  static bool _isPreviewing(PreviewSession? session) => session != null && session.visible;
+
+  /// One hover button. Scrim rather than a surface role: it sits over an arbitrary thumbnail.
+  Widget _hoverButton({
+    required RillTokens tokens,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    return IconButton(
+      style: IconButton.styleFrom(
+        backgroundColor: tokens.scrim.withValues(alpha: 0.7),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      hoverColor: tokens.scrim,
+      mouseCursor: SystemMouseCursors.click,
+      tooltip: tooltip,
+      icon: Icon(icon, color: tokens.onScrim, size: 23),
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      padding: EdgeInsets.zero,
+      onPressed: onPressed,
+    );
+  }
+
+  /// The duration / LIVE pill. Scrim family rather than a surface role: it sits over an
+  /// arbitrary thumbnail.
+  Widget _durationBadge(RillTokens tokens) {
+    final isLive = widget.spec.durationTone == DurationBadgeTone.live;
+    return Container(
+      padding: const EdgeInsets.only(left: 4.5, right: 4.5, bottom: .75, top: .5),
+      decoration: BoxDecoration(
+        color: isLive ? tokens.liveBadge.withValues(alpha: 0.8) : tokens.scrim.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isLive)
+            Padding(
+              padding: const EdgeInsets.only(right: 4.0),
+              child: Icon(Icons.sensors, size: 12, color: tokens.onScrim),
+            )
+          else if (widget.spec.durationTone == DurationBadgeTone.music)
+            Padding(
+              padding: const EdgeInsets.only(right: 4.0),
+              child: Icon(Icons.music_note, size: 12, color: tokens.onScrim),
+            ),
+          Text(
+            isLive ? 'LIVE' : (widget.spec.durationText ?? ''),
+            style: TextStyle(color: tokens.onScrim, fontSize: 11, letterSpacing: 1.1, fontWeight: FontWeight.w400),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The top-right hover cluster: the mute toggle while previewing, Watch Later and Add to
+  /// queue otherwise. Not both — three buttons over a 16:9 thumbnail is a toolbar. A CC button
+  /// belongs in the previewing branch once captions exist (§2.6).
+  Widget _hoverActions(RillTokens tokens, PreviewSession? session) {
+    final playing = _isPreviewing(session) ? session! : null;
+    final showsAnything = playing != null || widget.spec.canWatchLater || widget.spec.canAddToQueue;
+    if (!showsAnything) return const SizedBox.shrink();
+
+    return AnimatedOpacity(
+      opacity: isHovering ? 1 : 0,
+      duration: const Duration(milliseconds: 100),
+      child: IgnorePointer(
+        // Faded-out buttons must not swallow clicks meant for the tile underneath.
+        ignoring: !isHovering,
+        child: Column(
+          children: playing != null
+              ? [
+                  _hoverButton(
+                    tokens: tokens,
+                    icon: playing.muted ? Icons.volume_off : Icons.volume_up,
+                    tooltip: playing.muted ? 'Unmute preview' : 'Mute preview',
+                    onPressed: () => unawaited(_preview!.toggleMute()),
+                  ),
+                ]
+              : [
+                  if (widget.spec.canWatchLater) ...[
+                    _hoverButton(
+                      tokens: tokens,
+                      icon: Icons.schedule,
+                      tooltip: 'Watch later',
+                      onPressed: widget.onWatchLater,
+                    ),
+                    const SizedBox(height: 8.0),
+                  ],
+                  if (widget.spec.canAddToQueue)
+                    _hoverButton(
+                      tokens: tokens,
+                      icon: Icons.playlist_play,
+                      tooltip: 'Add to queue',
+                      onPressed: widget.onAddToQueue,
+                    ),
+                ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -203,40 +379,39 @@ class _MediaTileState extends State<MediaTile> {
                       child: Icon(Icons.image, color: scheme.onSurfaceVariant),
                     ),
                   ),
-                  // Duration badge
+                  // The hover preview, over the thumbnail and under the chrome (§2.6).
+                  //
+                  // Mounted as soon as there is a session and hidden until the first frame, rather
+                  // than unmounted: media_kit sizes its native VideoOutput from the mounted
+                  // texture, so a surface never in the tree can leave mpv rendering into 0×0.
+                  // `Opacity` keeps the child laid out and skips only the paint.
+                  Positioned.fill(
+                    child: ValueListenableBuilder<PreviewSession?>(
+                      valueListenable: _slot,
+                      builder: (context, session, _) {
+                        if (session == null) return const SizedBox.shrink();
+                        return Opacity(
+                          opacity: session.visible ? 1 : 0,
+                          // `cover` matches the `Image.network` underneath, so the swap does not
+                          // reframe the picture.
+                          child: RepaintBoundary(
+                            child: session.engine.videoSurface(fit: BoxFit.cover),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  // Duration badge — hidden while a preview is playing: it describes the
+                  // thumbnail, and over a running video it is stale chrome.
                   if (widget.spec.durationText != null || widget.spec.durationTone == DurationBadgeTone.live)
                     Positioned(
                       bottom: 6,
                       right: 6,
-                      child: Container(
-                        padding: EdgeInsets.only(left: 4.5, right: 4.5, bottom: .75, top: .5),
-                        decoration: BoxDecoration(
-                          // Both sit over an arbitrary thumbnail, so both come
-                          // from the scrim family rather than a surface role.
-                          color: widget.spec.durationTone == DurationBadgeTone.live
-                              ? tokens.liveBadge.withValues(alpha: 0.8)
-                              : tokens.scrim.withValues(alpha: 0.8),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (widget.spec.durationTone == DurationBadgeTone.live)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 4.0),
-                                child: Icon(Icons.sensors, size: 12, color: tokens.onScrim),
-                              )
-                            else if (widget.spec.durationTone == DurationBadgeTone.music)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 4.0),
-                                child: Icon(Icons.music_note, size: 12, color: tokens.onScrim),
-                              ),
-                            Text(
-                              widget.spec.durationTone == DurationBadgeTone.live ? 'LIVE' : (widget.spec.durationText ?? ''),
-                              style: TextStyle(color: tokens.onScrim, fontSize: 11, letterSpacing: 1.1, fontWeight: FontWeight.w400),
-                            ),
-                          ],
-                        ),
+                      child: ValueListenableBuilder<PreviewSession?>(
+                        valueListenable: _slot,
+                        builder: (context, session, child) =>
+                            _isPreviewing(session) ? const SizedBox.shrink() : child!,
+                        child: _durationBadge(tokens),
                       ),
                     ),
 
@@ -256,59 +431,16 @@ class _MediaTileState extends State<MediaTile> {
                       ),
                     ),
 
-                  // Watch Later + Add to Queue buttons
-                  if (widget.spec.canWatchLater || widget.spec.canAddToQueue)
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: AnimatedOpacity(
-                        opacity: isHovering ? 1 : 0,
-                        duration: const Duration(milliseconds: 100),
-                        child: IgnorePointer(
-                          // Faded-out buttons must not swallow clicks meant for
-                          // the tile underneath.
-                          ignoring: !isHovering,
-                          child: Column(
-                            children: [
-                              if (widget.spec.canWatchLater) ...[
-                                IconButton(
-                                  style: IconButton.styleFrom(
-                                    // Scrim, not a surface: these buttons have to
-                                    // stay readable over a thumbnail nobody chose.
-                                    backgroundColor: tokens.scrim.withValues(alpha: 0.7),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(6), // Matches your desired radius
-                                    ),
-                                  ),
-                                  hoverColor: tokens.scrim,
-                                  mouseCursor: SystemMouseCursors.click,
-                                  icon: Icon(Icons.schedule, color: tokens.onScrim, size: 23),
-                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: widget.onWatchLater,
-                                ),
-                                SizedBox(height: 8.0),
-                              ],
-                              if (widget.spec.canAddToQueue)
-                                IconButton(
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: tokens.scrim.withValues(alpha: 0.7),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(6), // Matches your desired radius
-                                    ),
-                                  ),
-                                  hoverColor: tokens.scrim,
-                                  mouseCursor: SystemMouseCursors.click,
-                                  icon: Icon(Icons.playlist_play, color: tokens.onScrim, size: 23),
-                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: widget.onAddToQueue,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                  // Watch Later + Add to Queue — or, while a preview is
+                  // playing, the mute toggle that replaces them.
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: ValueListenableBuilder<PreviewSession?>(
+                      valueListenable: _slot,
+                      builder: (context, session, _) => _hoverActions(tokens, session),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -425,9 +557,13 @@ class _MediaTileState extends State<MediaTile> {
       ],
     );
 
+    // `onExit` fires when the pointer leaves *this* region, and a nested
+    // `MouseRegion` — the two action buttons are inside `IconButton`s, which
+    // have one — does not trigger it. That is what keeps hovering Watch Later
+    // from stopping the preview, and it is asserted rather than assumed.
     return MouseRegion(
-      onEnter: (_) => setState(() => isHovering = true),
-      onExit: (_) => setState(() => isHovering = false),
+      onEnter: (_) => _onEnter(),
+      onExit: (_) => _onExit(),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,

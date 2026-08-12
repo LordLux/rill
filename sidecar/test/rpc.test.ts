@@ -307,6 +307,8 @@ describe('RPC Transport', () => {
     const malformed: Array<[string, string, unknown]> = [
       ['video.info with no videoId', 'video.info', {}],
       ['video.info with a blank videoId', 'video.info', { videoId: '   ' }],
+      ['video.storyboard with no videoId', 'video.storyboard', {}],
+      ['video.storyboard with a blank videoId', 'video.storyboard', { videoId: ' ' }],
       ['video.related with no videoId', 'video.related', {}],
       [
         'video.related with a non-string continuation',

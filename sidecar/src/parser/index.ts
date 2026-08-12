@@ -6,7 +6,7 @@
 
 export { parseFeed } from './feed.ts';
 export { parseVideoDetail } from './video.ts';
-export { parsePlayer } from './player.ts';
+export { parsePlayer, sheetUrl } from './player.ts';
 
 export { normaliseRendererName, roleOf } from './vocabulary.ts';
 export {
