@@ -263,9 +263,26 @@ class MediaKitEngine implements PlaybackEngine {
     if (audioUrl == null) return;
 
     if (_player.state.duration <= Duration.zero) {
-      await _player.stream.duration
-          .firstWhere((d) => d > Duration.zero)
-          .timeout(const Duration(seconds: 20));
+      // **Whichever comes first: a duration, or mpv saying the stream is dead.**
+      //
+      // The wait alone is what made a failed open cost 21.8 s (F20). When the
+      // video URL is refused, mpv reports `Failed to open …` on
+      // `player.stream.error` within a second and then has nothing left to do —
+      // no duration is ever coming, so the guard sat out its full 20 s waiting
+      // for an event that the failure had already ruled out. The timeout is
+      // still the backstop for a stream that is merely slow; this is the path
+      // for one that is already over.
+      //
+      // Racing rather than replacing: mpv's error channel is not a reliable
+      // *absence* signal — F18 needed both it and the log — so a duration
+      // arriving still wins, and an error that turns out to be non-fatal costs
+      // an open that would have failed anyway.
+      await Future.any([
+        _player.stream.duration.firstWhere((d) => d > Duration.zero),
+        _player.stream.error.first.then((error) {
+          throw StateError('mpv could not open the stream: $error');
+        }),
+      ]).timeout(const Duration(seconds: 20));
     }
     await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
   }

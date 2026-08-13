@@ -46,8 +46,92 @@ import '../playback_controller.dart';
 const Duration _firstFrameDeadline = Duration(seconds: 45);
 
 void runLaunchProbe(ProviderContainer container) {
+  if (Platform.environment['RILL_FEXP_PROBE'] == '1') {
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_fexpProbe()));
+    return;
+  }
   if (Platform.environment['RILL_LAUNCH_PROBE'] != '1') return;
   WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_probe(container)));
+}
+
+/// `RILL_FEXP_PROBE=1` — is the poisoned experiment bucket per session or per
+/// request?
+///
+/// F20 found `fexp=51946838` on 12/12 failing mints and 0/13 healthy ones, and
+/// could not reproduce it outside the app. The app mints **one** resolve session
+/// at startup and reuses it; a standalone script makes a fresh one per run. If
+/// the bucket is assigned per *session*, a short-lived session would never carry
+/// it and a long-lived one would carry it for life — which fits 33% of launches
+/// against 0/12 standalone exactly.
+///
+/// Two arms in one launch, because one alone cannot separate the hypotheses:
+///
+///  - **the same video, repeatedly.** Requires the sidecar's `/player` cache to
+///    be off (`SIDECAR_PLAYER_RESPONSE_TTL_MS=0`), or every repeat is one
+///    request wearing ten hats.
+///  - **different videos.** A flag that is constant across the same video but
+///    varies across different ones is per-*video*, not per-session — which the
+///    first arm alone would happily misread as a session property.
+///
+/// Constant across both arms ⇒ per session. Varying within a launch ⇒ per
+/// request, and the session idea is dead.
+Future<void> _fexpProbe() async {
+  const flag = '51946838';
+  const others = [
+    'jNQXAC9IVRw', 'dQw4w9WgXcQ', '9bZkp7q19f0', 'kJQP7kiw5Fk',
+    'fJ9rUzIMcZQ', 'YQHsXMglC9A',
+  ];
+  const repeats = 6;
+  final record = <String, Object?>{'startedAt': DateTime.now().toIso8601String()};
+
+  Future<Map<String, Object?>> resolve(String videoId) async {
+    try {
+      final response = await RpcClient.instance.call('playback.open', {'videoId': videoId});
+      final source = PlaybackSource.fromJson(response as Map<String, dynamic>);
+      final url = Uri.parse(source.variants.first.videoUrl);
+      final fexp = url.queryParameters['fexp'] ?? '';
+      return {
+        'videoId': videoId,
+        'flagged': fexp.split(',').contains(flag),
+        'fexp': fexp,
+      };
+    } on Object catch (e) {
+      return {'videoId': videoId, 'error': e.toString()};
+    }
+  }
+
+  try {
+    final sameVideo = <Map<String, Object?>>[];
+    for (var i = 0; i < repeats; i++) {
+      sameVideo.add(await resolve('aqz-KE-bpKQ'));
+    }
+    final differentVideos = <Map<String, Object?>>[];
+    for (final id in others) {
+      differentVideos.add(await resolve(id));
+    }
+
+    bool? verdictOf(List<Map<String, Object?>> rows) {
+      final flags = rows.where((r) => r['flagged'] != null).map((r) => r['flagged'] as bool).toSet();
+      return flags.length == 1 ? flags.first : null;
+    }
+
+    record['sameVideo'] = sameVideo;
+    record['differentVideos'] = differentVideos;
+    record['sameVideoConstant'] = verdictOf(sameVideo);
+    record['differentVideosConstant'] = verdictOf(differentVideos);
+    final all = [...sameVideo, ...differentVideos]
+        .where((r) => r['flagged'] != null)
+        .map((r) => r['flagged'] as bool)
+        .toSet();
+    record['launchConstant'] = all.length == 1;
+    record['launchFlagged'] = all.length == 1 ? all.first : null;
+    await _emit(record);
+    exit(0);
+  } on Object catch (error) {
+    record['probeError'] = '$error';
+    await _emit(record);
+    exit(2);
+  }
 }
 
 Future<void> _probe(ProviderContainer container) async {
@@ -104,6 +188,12 @@ Future<void> _probe(ProviderContainer container) async {
     record['height'] = attempted?.height ?? playback.variant?.height;
     record['variants'] = source?.variants.length;
     record['transport'] = source?.transport;
+    // The URL itself, on **every** launch. Diffing a failing mint against a
+    // healthy one needs both populations, and the first pass only kept the
+    // failures — which made every difference look significant because there was
+    // nothing to compare it with.
+    record['videoUrl'] = attempted?.videoUrl;
+    record['audioUrl'] = attempted?.audioUrl;
 
     // --- 2. first frame ---------------------------------------------------
     final frameAt = source == null
@@ -134,9 +224,43 @@ Future<void> _probe(ProviderContainer container) async {
 
     // --- 3. is the URL dead, or was it never opened? ----------------------
     if (attempted != null) {
-      record['videoUrlStatus'] = await _probeUrl(attempted.videoUrl);
+      // Both shapes. Bounded is the control; open-ended is what ffmpeg sends
+      // and the only one that has ever been refused.
+      record['videoBounded'] = await _probeUrl(attempted.videoUrl, 'bytes=0-1');
+      record['videoOpenEnded'] = await _probeUrl(attempted.videoUrl, 'bytes=0-');
       final audioUrl = attempted.audioUrl;
-      record['audioUrlStatus'] = audioUrl == null ? null : await _probeUrl(audioUrl);
+      record['audioBounded'] = audioUrl == null ? null : await _probeUrl(audioUrl, 'bytes=0-1');
+      record['audioOpenEnded'] = audioUrl == null ? null : await _probeUrl(audioUrl, 'bytes=0-');
+    }
+
+    // --- 3b. are the *other rungs* of this same resolution healthy? -------
+    //
+    // The ladder declines tiers; nothing declines variants. If the sibling URLs
+    // from the same `/player` answer ffmpeg's request shape, a fallback down
+    // `variants[]` — which already ships ranked — recovers the launch for free.
+    // If they are all refused, the whole mint is poisoned and only a re-resolve
+    // can help. `playback.open` here is served from the sidecar's TTL'd cache,
+    // so it returns *the list the app actually used* rather than a new one.
+    try {
+      final again =
+          await RpcClient.instance.call('playback.open', {'videoId': record['videoId']});
+      final same = PlaybackSource.fromJson(again as Map<String, dynamic>);
+      record['siblingsFromCache'] = same.variants.first.videoUrl == attempted?.videoUrl;
+
+      final seen = <String>{};
+      final rungs = <Map<String, Object?>>[];
+      for (final v in same.variants) {
+        if (!seen.add('${v.height}x${v.fps}')) continue;
+        if (rungs.length >= 6) break;
+        rungs.add({
+          'itag': v.itag,
+          'height': v.height,
+          'openEnded': await _probeUrl(v.videoUrl, 'bytes=0-'),
+        });
+      }
+      record['rungs'] = rungs;
+    } on Object catch (e) {
+      record['rungsError'] = e.toString();
     }
 
     // --- 4. does a freshly resolved URL recover? --------------------------
@@ -205,11 +329,11 @@ Future<Duration?> _waitFor(bool Function() ready, Duration deadline) async {
 /// **Bounded and drained deliberately.** F11 records the live suite panicking
 /// Bun by cancelling a 712 MB body mid-flight, so this asks for two bytes and
 /// reads them rather than aborting a stream the server is still filling.
-Future<String> _probeUrl(String url) async {
+Future<String> _probeUrl(String url, [String range = 'bytes=0-1']) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
     final request = await client.getUrl(Uri.parse(url));
-    request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
+    request.headers.set(HttpHeaders.rangeHeader, range);
     final response = await request.close().timeout(const Duration(seconds: 15));
     final status = response.statusCode;
     await response.drain<void>();
