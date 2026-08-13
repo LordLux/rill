@@ -5,6 +5,9 @@ import '../domain/feed_item.dart';
 import '../theme/tokens.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
+import 'player/controls.dart';
+import 'player/shortcuts.dart';
+import 'player/view_mode.dart';
 import 'queue_controller.dart';
 import 'widgets/queue_panel.dart';
 
@@ -93,6 +96,28 @@ void openWatchIn(ProviderContainer container, VideoItem item) {
   showWatchPageIn(container);
 }
 
+/// Leave the watch page and let the mini-player take over — the `i` key and the
+/// mini-player button.
+///
+/// **A pop, not a mode.** The mini-player is already what the shell draws
+/// whenever something is playing and the watch route is not on top, so this needs
+/// no state of its own: going back to wherever the user came from *is* the
+/// feature. That also means it lands on the previous page rather than on a fixed
+/// one, which is what "return to the previous page" has to mean once there is
+/// more than one place a video can be opened from.
+///
+/// Fullscreen is dropped first. Popping while borderless would leave the window
+/// covering the monitor with a feed in it — the same stranding
+/// `PlayerViewController` guards against, and cheaper to prevent here than to
+/// unpick afterwards.
+void toMiniPlayer(WidgetRef ref) => toMiniPlayerIn(_containerOf(ref));
+
+void toMiniPlayerIn(ProviderContainer container) {
+  container.read(playerViewProvider.notifier).reset();
+  if (container.read(currentRouteProvider) != watchRouteName) return;
+  rootNavigatorKey.currentState?.maybePop();
+}
+
 void showWatchPageIn(ProviderContainer container) {
   if (container.read(currentRouteProvider) == watchRouteName) return;
   rootNavigatorKey.currentState?.push(
@@ -127,18 +152,73 @@ class PlayerShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final playback = ref.watch(playbackProvider);
     final onWatchPage = ref.watch(currentRouteProvider) == watchRouteName;
-    final showMini = playback.item != null && !onWatchPage;
+    final view = ref.watch(playerViewProvider);
+    final fullscreen = view.fullscreen && playback.item != null;
+    final showMini = playback.item != null && !onWatchPage && !fullscreen;
 
-    return Stack(
-      children: [
-        Positioned.fill(child: child),
-        if (showMini)
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: MiniPlayer(),
+    return PlayerShortcuts(
+      child: Stack(
+        children: [
+          Positioned.fill(child: child),
+          // The fullscreen mount point.
+          //
+          // The **same** surface the watch page draws, moved here rather than
+          // rebuilt — the third mount point after the watch page and the
+          // mini-player, and the same mechanism: the texture belongs to the
+          // engine, so a `Video` widget appearing here and disappearing there
+          // creates and frees nothing. That is what makes "do not destroy and
+          // recreate the video output on a mode change" a property of the
+          // structure rather than something to be careful about.
+          if (fullscreen) const Positioned.fill(child: _FullscreenPlayer()),
+          if (showMini)
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: MiniPlayer(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The player filling the window, with the app chrome behind it.
+///
+/// The OS window is made borderless by `PlayerViewController`; this is only the
+/// part of fullscreen that is pixels. Both halves are needed and neither implies
+/// the other.
+class _FullscreenPlayer extends ConsumerWidget {
+  const _FullscreenPlayer();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final engine = ref.read(playbackEngineProvider);
+
+    return ColoredBox(
+      color: theme.tokens.scrim,
+      // An `Overlay` of its own, and it is not decoration.
+      //
+      // This subtree is above the `Navigator`, so it inherits none — and
+      // Material's `Slider` renders its value indicator through an
+      // `OverlayPortal`, which throws "No Overlay widget found" without one.
+      // Measured: both the scrubber and the volume slider took the whole
+      // fullscreen layer down the first time it was entered. The same absence
+      // is why nothing here carries a tooltip (see `MiniPlayer`), and one
+      // `Overlay` answers both.
+      child: Overlay(
+        initialEntries: [
+          OverlayEntry(
+            builder: (context) => Stack(
+              fit: StackFit.expand,
+              children: [
+                engine.videoSurface(),
+                PlayerControls(engine: engine),
+              ],
+            ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -247,14 +327,21 @@ class MiniPlayer extends ConsumerWidget {
                   ),
                 ],
               ),
-              // Position from the stream, never a property read (invariant 9).
+              // Position from the stream, never a property read (invariant 9) —
+              // and the quality-switch hold ahead of it, for the same reason the
+              // scrubber prefers it: a reopened media reports zero until the
+              // seek back lands, and this bar would drop to the start with it.
               StreamBuilder<Duration>(
                 stream: engine.positionStream,
                 initialData: engine.position,
                 builder: (context, snapshot) {
-                  final duration = engine.duration;
+                  // Duration from the hold as well as position — a reopened
+                  // media reports zero for both, and this bar divides by it.
+                  final hold = playback.hold;
+                  final duration = hold?.duration ?? engine.duration;
+                  final position = hold?.position ?? snapshot.data ?? Duration.zero;
                   final value = duration > Duration.zero
-                      ? (snapshot.data ?? Duration.zero).inMilliseconds / duration.inMilliseconds
+                      ? position.inMilliseconds / duration.inMilliseconds
                       : 0.0;
                   return LinearProgressIndicator(
                     value: value.clamp(0.0, 1.0),

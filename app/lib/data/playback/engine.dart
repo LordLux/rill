@@ -23,7 +23,35 @@ abstract class PlaybackEngine {
   Stream<Duration> get positionStream;
   Stream<Duration> get durationStream;
   Stream<bool> get playingStream;
+
+  /// mpv waiting rather than presenting: opening a file, repositioning after a
+  /// seek, or genuinely starved of data.
+  ///
+  /// **Wider than "the cache ran dry", and that is what makes it useful.**
+  /// media_kit raises this from `core-idle` as well as `paused-for-cache`, and
+  /// F18 measured seeks as ~95% `core-idle` (median 2458 ms of 2600) with
+  /// `paused-for-cache` at **zero in all 75 samples** — so a spinner keyed on
+  /// cache starvation alone would never appear on the thing that actually makes
+  /// the user wait. media_kit also suppresses the `core-idle` that a `pause`
+  /// causes, so this does not fire on a deliberate pause.
+  ///
+  /// It does **not** cover the long-pause resume penalty: F18 found those never
+  /// touch `core-idle` or `paused-for-cache` at all, so a 0.5–2.3 s resume after
+  /// a long idle shows nothing. Known gap, no signal available for it.
   Stream<bool> get bufferingStream;
+
+  /// How far the demuxer has read ahead — the scrubber's buffered range.
+  Stream<Duration> get bufferStream;
+
+  /// The height mpv is **actually decoding**, which is not the height that was
+  /// asked for: a variant can be opened and then serve something else, and the
+  /// quality menu that reports the request rather than the result is the one
+  /// that lies exactly when it matters. Null until the first frame is decoded.
+  Stream<int?> get heightStream;
+
+  /// mpv's own volume, 0–100. Streamed rather than assumed, so a volume set from
+  /// anywhere is the one the slider draws.
+  Stream<double> get volumeStream;
 
   /// Fires once per media that plays to its end. Drives queue autoplay.
   Stream<bool> get completedStream;
@@ -32,6 +60,12 @@ abstract class PlaybackEngine {
   Duration get position;
   Duration get duration;
   bool get playing;
+
+  /// Whether mpv is waiting rather than presenting — see [bufferingStream].
+  bool get buffering;
+  Duration get buffer;
+  int? get height;
+  double get volume;
 
   /// The video surface, for whichever widget is currently showing it.
   ///
@@ -54,6 +88,13 @@ abstract class PlaybackEngine {
   Future<void> playOrPause();
   Future<void> seek(Duration to);
   Future<void> setVolume(double volume);
+
+  /// One frame forward (`direction > 0`) or back — the `,` and `.` keys.
+  ///
+  /// A distinct operation from [seek] rather than a seek of 1/fps, because
+  /// "one frame" is a thing only the decoder knows: a computed seek lands *near*
+  /// the neighbouring frame and rounds differently on variable frame rate.
+  Future<void> stepFrame(int direction);
 
   /// Stop playback and release the current media. The engine stays usable.
   Future<void> stop();
@@ -90,6 +131,10 @@ class MediaKitEngine implements PlaybackEngine {
       _player.stream.position.listen((value) => _position = value),
       _player.stream.duration.listen((value) => _duration = value),
       _player.stream.playing.listen((value) => _playing = value),
+      _player.stream.buffering.listen((value) => _buffering = value),
+      _player.stream.buffer.listen((value) => _buffer = value),
+      _player.stream.height.listen((value) => _height = value),
+      _player.stream.volume.listen((value) => _volume = value),
     ]);
   }
 
@@ -100,6 +145,10 @@ class MediaKitEngine implements PlaybackEngine {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _playing = false;
+  bool _buffering = false;
+  Duration _buffer = Duration.zero;
+  int? _height;
+  double _volume = 100;
 
   /// The controller, which outlives every route. Prefer [videoSurface].
   VideoController get videoController => _video;
@@ -157,6 +206,12 @@ class MediaKitEngine implements PlaybackEngine {
   @override
   Stream<bool> get bufferingStream => _player.stream.buffering;
   @override
+  Stream<Duration> get bufferStream => _player.stream.buffer;
+  @override
+  Stream<int?> get heightStream => _player.stream.height;
+  @override
+  Stream<double> get volumeStream => _player.stream.volume;
+  @override
   Stream<bool> get completedStream => _player.stream.completed;
 
   @override
@@ -165,6 +220,14 @@ class MediaKitEngine implements PlaybackEngine {
   Duration get duration => _duration;
   @override
   bool get playing => _playing;
+  @override
+  bool get buffering => _buffering;
+  @override
+  Duration get buffer => _buffer;
+  @override
+  int? get height => _height;
+  @override
+  double get volume => _volume;
 
   /// Open a variant: video first, then the audio track attached to it.
   ///
@@ -177,6 +240,12 @@ class MediaKitEngine implements PlaybackEngine {
   Future<void> open(PlaybackVariant variant, {bool play = true}) async {
     _position = Duration.zero;
     _duration = Duration.zero;
+    _buffer = Duration.zero;
+    // Cleared rather than left: this is what the quality menu reads as "actually
+    // playing", and a stale height from the *previous* variant would keep
+    // claiming the old one for as long as it took the first frame to decode —
+    // which is precisely the window a user watches after switching.
+    _height = null;
 
     await _player.open(Media(variant.videoUrl), play: play);
 
@@ -201,6 +270,26 @@ class MediaKitEngine implements PlaybackEngine {
   Future<void> seek(Duration to) => _player.seek(to);
   @override
   Future<void> setVolume(double volume) => _player.setVolume(volume);
+
+  /// mpv's own `frame-step` / `frame-back-step`.
+  ///
+  /// **This is not the property read hard invariant 9 forbids.** That rule is
+  /// about *polling* `getProperty` from the UI isolate — a blocking read that can
+  /// sit on mpv's core lock (F15 recorded a 6.4 s freeze). This writes: it is one
+  /// `mpv_command` per key press, the same call `Player.seek` and `Player.play`
+  /// already make through this binding, and it reads nothing back.
+  ///
+  /// Both commands pause as a side effect. That is mpv's behaviour and also
+  /// YouTube's — frame stepping is something done to a still picture — so it is
+  /// left alone rather than papered over with a `play()` afterwards.
+  ///
+  /// `frame-back-step` is documented as slow and best-effort: it seeks precisely
+  /// and can miss. Nothing above this depends on it landing exactly, and the
+  /// alternative — refusing to bind the key — is worse than an occasional
+  /// two-frame jump.
+  @override
+  Future<void> stepFrame(int direction) => (_player.platform as NativePlayer)
+      .command([direction < 0 ? 'frame-back-step' : 'frame-step']);
 
   @override
   Future<void> stop() => _player.stop();

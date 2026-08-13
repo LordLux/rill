@@ -14,6 +14,7 @@ import 'ui/debug_player.dart';
 import 'ui/hover_preview.dart';
 import 'ui/pages/feed.dart';
 import 'ui/playback_controller.dart';
+import 'ui/player/controls_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 
@@ -62,6 +63,7 @@ Future<void> main() async {
   );
 
   _openOnLaunch(container);
+  runControlsProbe(container);
 }
 
 /// Run the audio-delay probe and exit.

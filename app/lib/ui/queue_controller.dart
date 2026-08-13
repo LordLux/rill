@@ -38,6 +38,19 @@ class QueueState {
 
   bool get hasNext => next != null;
 
+  /// What "previous" would go back to, or null at the front of the queue.
+  ///
+  /// Null rather than the last item: the queue **stops rather than wrapping**
+  /// (task 14 §5), and the previous button has to agree with that or the two
+  /// halves of the same rule disagree at the two ends of the same list.
+  VideoItem? get previous {
+    final index = currentIndex;
+    if (index == null) return null;
+    return index - 1 >= 0 ? items[index - 1] : null;
+  }
+
+  bool get hasPrevious => previous != null;
+
   QueueState _with(List<VideoItem> items, int? currentIndex) =>
       QueueState(items: items, currentIndex: currentIndex);
 
@@ -132,6 +145,14 @@ class QueueState {
     return _with(items, index + 1);
   }
 
+  /// The previous button. A no-op at the front, for the same reason [advanced]
+  /// is one at the back.
+  QueueState reversed() {
+    final index = currentIndex;
+    if (index == null || index - 1 < 0) return this;
+    return _with(items, index - 1);
+  }
+
   QueueState cleared() => const QueueState();
 }
 
@@ -157,6 +178,14 @@ class QueueController extends Notifier<QueueState> {
   bool advance() {
     final before = state.currentIndex;
     state = state.advanced();
+    return state.currentIndex != before;
+  }
+
+  /// Step back one. Returns false at the front of the queue, where the button
+  /// is disabled anyway — both halves so neither is the only guard.
+  bool back() {
+    final before = state.currentIndex;
+    state = state.reversed();
     return state.currentIndex != before;
   }
 

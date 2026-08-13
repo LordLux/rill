@@ -15,6 +15,9 @@ class FakeEngine implements PlaybackEngine {
   final _duration = StreamController<Duration>.broadcast();
   final _playing = StreamController<bool>.broadcast();
   final _buffering = StreamController<bool>.broadcast();
+  final _buffer = StreamController<Duration>.broadcast();
+  final _height = StreamController<int?>.broadcast();
+  final _volume = StreamController<double>.broadcast();
   final _completed = StreamController<bool>.broadcast();
 
   /// Every variant handed to [open], in order.
@@ -23,12 +26,19 @@ class FakeEngine implements PlaybackEngine {
   int disposeCount = 0;
   final List<Duration> seeks = [];
 
+  /// Every [stepFrame] direction, in order. `-1` and `1` — the `,` and `.` keys.
+  final List<int> frameSteps = [];
+
   /// Every volume handed to [setVolume], in order — "it looked silent" is not an assertion.
   final List<double> volumes = [];
 
   Duration _positionValue = Duration.zero;
   Duration _durationValue = Duration.zero;
   bool _playingValue = false;
+  bool _bufferingValue = false;
+  Duration _bufferValue = Duration.zero;
+  int? _heightValue;
+  double _volumeValue = 100;
 
   @override
   Stream<Duration> get positionStream => _position.stream;
@@ -39,6 +49,12 @@ class FakeEngine implements PlaybackEngine {
   @override
   Stream<bool> get bufferingStream => _buffering.stream;
   @override
+  Stream<Duration> get bufferStream => _buffer.stream;
+  @override
+  Stream<int?> get heightStream => _height.stream;
+  @override
+  Stream<double> get volumeStream => _volume.stream;
+  @override
   Stream<bool> get completedStream => _completed.stream;
 
   @override
@@ -47,6 +63,14 @@ class FakeEngine implements PlaybackEngine {
   Duration get duration => _durationValue;
   @override
   bool get playing => _playingValue;
+  @override
+  bool get buffering => _bufferingValue;
+  @override
+  Duration get buffer => _bufferValue;
+  @override
+  int? get height => _heightValue;
+  @override
+  double get volume => _volumeValue;
 
   /// Stands in for the `Texture` widget. Keyed so a test can find it wherever
   /// it is currently mounted — which is the point: there is one surface, and it
@@ -64,11 +88,28 @@ class FakeEngine implements PlaybackEngine {
   @override
   Future<void> open(PlaybackVariant variant, {bool play = true}) async {
     opened.add(variant);
+
+    // **Cleared on the way in, before anything is awaited — as `MediaKitEngine`
+    // does.** A reopened media reports nothing valid until it loads, and that is
+    // the whole hazard a quality switch has to paper over. The fake used to keep
+    // the previous duration and set the new one only on the way *out*, so the
+    // window where the engine says `0 of 0` did not exist here at all — and the
+    // bug where the scrubber's range collapses to 1 ms and pins the thumb to the
+    // far right was invisible to every test in this file.
+    emitPosition(Duration.zero);
+    _durationValue = Duration.zero;
+    _duration.add(_durationValue);
+    setHeight(null);
+
     final gate = openGate;
     if (gate != null) await gate;
-    _positionValue = Duration.zero;
+
     _durationValue = const Duration(minutes: 10);
     _duration.add(_durationValue);
+    // The real engine clears this and lets mpv report what it actually decodes.
+    // Here the variant is taken at its word, which is enough for "the menu marks
+    // what is playing" without pretending to model a mid-stream downgrade.
+    setHeight(variant.height);
     setPlaying(play);
   }
 
@@ -78,17 +119,42 @@ class FakeEngine implements PlaybackEngine {
   Future<void> pause() async => setPlaying(false);
   @override
   Future<void> playOrPause() async => setPlaying(!_playingValue);
+  /// Record the seek and go nowhere. Stands in for mpv taking its time — which
+  /// is the ordinary case, not a pathological one: F19 measured a median 4.1 s
+  /// between a seek being issued and the position coming back.
+  bool swallowSeeks = false;
+
+  /// Reports the target and stops there, which is what a seek does. Playback
+  /// carrying on *past* the target is a separate thing a test drives with
+  /// [emitPosition] — modelling it in here silently added 100 ms to every
+  /// subsequent relative seek and broke the arithmetic the shortcut tests pin.
   @override
   Future<void> seek(Duration to) async {
     seeks.add(to);
-    emitPosition(to);
+    if (!swallowSeeks) emitPosition(to);
   }
 
   @override
-  Future<void> setVolume(double volume) async => volumes.add(volume);
+  Future<void> setVolume(double volume) async {
+    volumes.add(volume);
+    _volumeValue = volume;
+    _volume.add(volume);
+  }
 
-  /// One of the hover preview's two "there is a picture now" signals.
-  void setBuffering(bool value) => _buffering.add(value);
+  /// mpv's `frame-step` pauses; so does this, or the assertion "stepping a frame
+  /// leaves a still picture" would pass here and fail in front of a user.
+  @override
+  Future<void> stepFrame(int direction) async {
+    frameSteps.add(direction);
+    setPlaying(false);
+  }
+
+  /// One of the hover preview's two "there is a picture now" signals, and what
+  /// the busy spinner watches.
+  void setBuffering(bool value) {
+    _bufferingValue = value;
+    _buffering.add(value);
+  }
 
   @override
   Future<void> stop() async {
@@ -103,6 +169,9 @@ class FakeEngine implements PlaybackEngine {
     await _duration.close();
     await _playing.close();
     await _buffering.close();
+    await _buffer.close();
+    await _height.close();
+    await _volume.close();
     await _completed.close();
   }
 
@@ -111,6 +180,16 @@ class FakeEngine implements PlaybackEngine {
   void emitPosition(Duration value) {
     _positionValue = value;
     _position.add(value);
+  }
+
+  void emitBuffer(Duration value) {
+    _bufferValue = value;
+    _buffer.add(value);
+  }
+
+  void setHeight(int? value) {
+    _heightValue = value;
+    _height.add(value);
   }
 
   void setPlaying(bool value) {

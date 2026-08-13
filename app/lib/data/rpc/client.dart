@@ -109,7 +109,49 @@ class RpcClient {
     return _startFuture!;
   }
 
+  /// `Process.start`, retried through a transient Windows spawn failure.
+  ///
+  /// **Starting a sidecar close behind killing one can fail to spawn at all**,
+  /// with `SocketException: Write failed (OS Error: The pipe is being closed,
+  /// errno = 232)` raised by `Process.start` itself — the previous process's
+  /// pipes are still being torn down and the new process cannot get its own.
+  /// Measured at roughly one run in three across a 35-test file that restarts
+  /// the sidecar per test.
+  ///
+  /// **It has to be retried here rather than around `start()`**, and that is the
+  /// part worth remembering: `start()` caches `_startFuture`, so a caller that
+  /// catches the failure and calls `start()` again is handed the *same failed
+  /// future* and fails identically however many times it tries. The retry has to
+  /// be inside the thing that can actually be retried. The failure also arrives
+  /// as an unhandled async error rather than out of the awaited call, so in a
+  /// test suite it lands on whichever test happens to be running — it read as a
+  /// flaky double-click for a while, which is why this comment is this long.
+  ///
+  /// **Corrected after a review found the real cause.** This retry was written
+  /// believing the spawn raced only the OS tearing down the previous process's
+  /// pipes. It also raced *this class*: a stale `onDone` from the killed sidecar
+  /// tore down the freshly started one, and the next spawn then hit a pipe that
+  /// really was closing — see `_handleExit`, which now checks process identity.
+  /// The retry stays, because a spawn racing the OS is still possible and the
+  /// hedge costs nothing, but it is a hedge and no longer the fix.
+  Future<Process> _spawn(String executable, List<String> command, String root) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await Process.start(executable, command, workingDirectory: root, environment: {
+          'FLUTTER_PARENT_PID': pid.toString(),
+        });
+      } on Object {
+        if (attempt >= 4) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 100 * (attempt + 1)));
+      }
+    }
+  }
+
   Future<void> _startInternal() async {
+    // Cleared per attempt. It was only ever reset by `killForTest`, so a mismatch
+    // resolved by fixing the sidecar on disk left the flag set and suppressed
+    // every future restart — supervision silently switched itself off.
+    _isFatalError = false;
     _readyCompleter = Completer<void>();
     final root = _findProjectRoot();
 
@@ -121,17 +163,30 @@ class RpcClient {
           ? const <String>[]
           : (mockCommand ?? ['run', 'sidecar/src/main.ts']);
 
-      _process = await Process.start(executable, command, workingDirectory: root, environment: {
-        'FLUTTER_PARENT_PID': pid.toString(),
-      });
+      final process = await _spawn(executable, command, root);
+      _process = process;
 
-      _process!.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
+      // **Every exit handler names the process it belongs to.**
+      //
+      // A dying sidecar's `onDone` arrives asynchronously, and `killForTest`
+      // starts the next one immediately — so by the time the *old* process's
+      // stream closes, `_process` can already be the *new* one. Handlers that
+      // only checked `_process != null` then tore down a healthy process:
+      // pending requests failed with `UPSTREAM_ERROR`, and a restart was
+      // scheduled on top of the process that was already running. It surfaced as
+      // `SocketException: … The pipe is being closed` from the next spawn, on
+      // whichever test happened to be running, which is why it read for a while
+      // as a flaky double-click.
+      //
+      // Identity, not a flag: a boolean guard has to be un-set at exactly the
+      // right moment and this does not.
+      process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
         _handleLine,
-        onDone: _handleExit,
-        onError: (e) => _handleExit(),
+        onDone: () => _handleExit(process),
+        onError: (e) => _handleExit(process),
       );
 
-      _process!.stderr.transform(utf8.decoder).listen((line) {
+      process.stderr.transform(utf8.decoder).listen((line) {
         stderr.write(line);
       });
       
@@ -148,7 +203,7 @@ class RpcClient {
       }
     } catch (e) {
       stderr.writeln('START INTERNAL CATCH: $e');
-      _handleExit();
+      _handleExit(null);
       if (e is RpcException && e.retry == RpcRetryMode.no) {
         rethrow;
       }
@@ -180,7 +235,15 @@ class RpcClient {
 
   void _handleLine(String line) {
     if (line.trim().isEmpty) return;
-    _handlerChain = _handlerChain.then((_) => _decodeAndDispatch(line));
+    // `catchError` is not decoration. This future is the *chain*: if it ever
+    // rejects, every later `.then` skips its handler and forwards the rejection
+    // instead, so one throw would silently drop every remaining message for the
+    // life of the process. `_decodeAndDispatch` catches its own body, so this
+    // should be unreachable — which is exactly the sort of guard worth having,
+    // because the failure it prevents is invisible.
+    _handlerChain = _handlerChain
+        .then((_) => _decodeAndDispatch(line))
+        .catchError((Object e) => stderr.writeln('harness rpc: handler chain error: $e'));
   }
 
   Future<void> _decodeAndDispatch(String line) async {
@@ -235,12 +298,22 @@ class RpcClient {
     }
   }
 
-  void _handleExit() {
+  /// [source] is the process whose stream ended, or null for a start failure.
+  void _handleExit(Process? source) {
     if (_isDisposed) return;
     if (_process == null) return; // Means killForTest() was called
+    // A late exit from a process that has already been replaced. Ignoring it is
+    // the whole point of passing the identity in — see the listener above.
+    if (source != null && !identical(source, _process)) return;
     _process = null;
-    
-    final error = RpcException('UPSTREAM_ERROR', 'Sidecar exited', RpcRetryMode.auto);
+
+    // A fatal protocol mismatch is `no`: the sidecar on disk cannot talk to this
+    // build, and telling every in-flight caller to retry with backoff is telling
+    // them to spend requests on a conversation that cannot happen. `auto` here
+    // was a silent instruction to loop.
+    final error = _isFatalError
+        ? RpcException('PROTOCOL_MISMATCH', 'Sidecar protocol mismatch', RpcRetryMode.no)
+        : RpcException('UPSTREAM_ERROR', 'Sidecar exited', RpcRetryMode.auto);
     for (final completer in _pending.values) {
       completer.completeError(error);
     }
@@ -308,6 +381,31 @@ class RpcClient {
         'params': {'id': id}
       });
       _process!.stdin.writeln(msg);
+    }
+  }
+
+  /// [killForTest], but waits for the process to actually be gone.
+  ///
+  /// **`killForTest` signals and returns; it does not wait.** A `setUp` that
+  /// kills the previous sidecar and immediately starts the next one races
+  /// Windows finishing the teardown of the old process's pipes, and
+  /// `Process.start` then fails with `SocketException: Write failed (OS Error:
+  /// The pipe is being closed, errno = 232)`. That failure surfaces as an
+  /// unhandled async error rather than out of the `start()` future, so it fails
+  /// **whichever test happens to be running** — it looked for a while like a
+  /// flaky double-click, and no amount of retrying around `start()` caught it.
+  ///
+  /// Awaiting `exitCode` is the fix a fixed sleep was standing in for: fast when
+  /// the process dies quickly, patient when the machine is loaded.
+  Future<void> killForTestAndWait() async {
+    final process = _process;
+    killForTest();
+    if (process == null) return;
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 5));
+    } on Object {
+      // A process that will not report its exit is not worth failing a suite
+      // over; the caller's next `start()` will say so far more clearly.
     }
   }
 

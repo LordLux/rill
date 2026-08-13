@@ -120,17 +120,24 @@ rl.on('line', (line) => {
           storyboardTemplate: null,
           qualityDegraded: false,
           transport: 'plain',
+          // A real ladder, ranked best-first. One rung was enough while nothing
+          // consumed `variants[]`; the quality picker is what made the shape of
+          // the list matter, and "the client may switch without reopening"
+          // (§3.5) is not testable against a list of one.
           variants: [
-            {
-              videoUrl: `https://fake.invalid/${req.params?.videoId}/video`,
-              audioUrl: `https://fake.invalid/${req.params?.videoId}/audio`,
-              itag: 315,
-              height: 2160,
-              fps: 60,
-              videoCodec: 'vp9',
-              audioCodec: 'opus',
-            },
-          ],
+            [2160, 60, 315],
+            [1080, 60, 299],
+            [720, 30, 136],
+            [360, 30, 134],
+          ].map(([height, fps, itag]) => ({
+            videoUrl: `https://fake.invalid/${req.params?.videoId}/video/${height}`,
+            audioUrl: `https://fake.invalid/${req.params?.videoId}/audio`,
+            itag,
+            height,
+            fps,
+            videoCodec: 'vp9',
+            audioCodec: 'opus',
+          })),
         },
       }) + '\n');
     } else if (req.method === 'playback.report') {
@@ -174,6 +181,23 @@ rl.on('line', (line) => {
       }) + '\n');
     } else if (req.method === 'video.related') {
       process.stdout.write(JSON.stringify({ id: req.id, result: { items: [], continuation: null } }) + '\n');
+    } else if (req.method === 'test.reset') {
+      // Forget everything this run has recorded, so one sidecar can serve a
+      // whole test file instead of one per test.
+      //
+      // **Restarting it per test is what made the suite flaky.** Killing and
+      // respawning close behind each other raced Windows tearing down the old
+      // process's pipes, and `Process.start` then failed outright — as an
+      // unhandled async error, so it failed whichever test was running rather
+      // than the one that caused it. One sidecar per file, reset between tests,
+      // removes the race rather than widening the window around it.
+      opens.length = 0;
+      reports.length = 0;
+      closes.length = 0;
+      sessions = 0;
+      realOpens = 0;
+      baseAttempts = 0;
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
     } else if (req.method === 'test.playbackLog') {
       // The test's window into what the client actually sent. Reports are
       // fire-and-forget from the app's side, so there is nowhere else to see

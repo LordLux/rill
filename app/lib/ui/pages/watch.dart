@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/playback/engine.dart';
 import '../../data/rpc/client.dart';
 // `Chip` here is Material's. The domain's `Chip` is the feed's filter strip and
 // has no business on this page — hidden rather than aliased so a later edit that
@@ -13,6 +12,8 @@ import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
 import '../playback_controller.dart';
+import '../player/controls.dart';
+import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
 import '../widgets/media_tile.dart';
@@ -92,37 +93,81 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       ],
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth > 1100;
+          // Theatre takes the whole content width, so there is nothing left to
+          // put a rail beside. It drops to the one-column layout regardless of
+          // how wide the window is, and the rail moves below the player.
+          final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
+          final wide = constraints.maxWidth > 1100 && !theatre;
           final detail = info.value;
-
-          final main = ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            children: [
-              _PlayerSurface(playback: playback),
-              const SizedBox(height: 12),
-              _Meta(item: item, info: info),
-              const SizedBox(height: 12),
-              _Actions(item: item),
-              const SizedBox(height: 16),
-              if (detail != null)
-                _Description(
-                  detail: detail,
-                  expanded: _descriptionExpanded,
-                  onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
-                ),
-              if (!wide) ...[
-                const SizedBox(height: 24),
-                ..._relatedSection(detail, item.id),
-              ],
-            ],
-          );
-
-          if (!wide) return main;
 
           // A third of the width, capped. A fixed 400 overflows the row on any
           // window narrow enough to still count as wide — measured at 1500 px,
           // where the rail ran off the right edge and the tiles were cut in half.
           final railWidth = math.min(400.0, constraints.maxWidth / 3);
+
+          // **Theatre grows sideways only.** The box keeps the height it has in
+          // the ordinary layout and spans the full content width, so a 16:9
+          // video gains side bars rather than a taller picture. Computed from
+          // the width the player *would* have without theatre — which is why the
+          // rail's width is subtracted here whether or not the rail is currently
+          // drawn: in theatre it is not, and taking the current width would make
+          // the box grow every time it was entered.
+          //
+          // It filled `constraints.maxHeight` before this, which is the other
+          // reading of "expands to fill the content area" and the wrong one: on
+          // a 2560×1080 window that is a player nearly three times as tall,
+          // pushing everything below it off the screen.
+          final normalPlayerWidth =
+              (constraints.maxWidth > 1100 ? constraints.maxWidth - railWidth : constraints.maxWidth) - 32;
+          final theatreHeight = math.min(normalPlayerWidth * 9 / 16, constraints.maxHeight);
+
+          final main = ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              // **Theatre**: the player spans the app's content area edge to
+              // edge at the height it already had, the chrome stays, and the OS
+              // window is untouched. A layout change and nothing more — which is
+              // the whole difference from fullscreen.
+              if (theatre)
+                SizedBox(
+                  height: theatreHeight,
+                  child: _PlayerSurface(playback: playback, rounded: false),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: _PlayerSurface(playback: playback),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Meta(item: item, info: info),
+                    const SizedBox(height: 12),
+                    _Actions(item: item),
+                    const SizedBox(height: 16),
+                    if (detail != null)
+                      _Description(
+                        detail: detail,
+                        expanded: _descriptionExpanded,
+                        onToggle: () =>
+                            setState(() => _descriptionExpanded = !_descriptionExpanded),
+                      ),
+                    if (!wide) ...[
+                      const SizedBox(height: 24),
+                      ..._relatedSection(detail, item.id),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          );
+
+          if (!wide) return main;
 
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,39 +272,46 @@ class _WatchPageState extends ConsumerState<WatchPage> {
 /// this route is popped. On a fake engine (tests) the surface is a placeholder,
 /// which is the point of the engine being an interface.
 class _PlayerSurface extends ConsumerWidget {
-  const _PlayerSurface({required this.playback});
+  const _PlayerSurface({required this.playback, this.rounded = true});
 
   final PlaybackState playback;
+
+  /// Theatre runs the player to the edges of the content area, where a rounded
+  /// corner reads as a mistake rather than as a card.
+  final bool rounded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final engine = ref.read(playbackEngineProvider);
+    final fullscreen = ref.watch(playerViewProvider.select((view) => view.fullscreen));
 
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: ColoredBox(
-          color: theme.tokens.scrim,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // The shell's surface, mounted here. Popping back to the feed
-              // moves this same texture into the mini-player — nothing is
-              // created or freed by the move.
-              engine.videoSurface(),
-              if (playback.isLoading)
-                Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
-              if (playback.error != null) _Unavailable(playback: playback),
-              if (playback.error == null && !playback.isLoading)
-                Positioned(left: 0, right: 0, bottom: 0, child: _TransportBar(engine: engine)),
-            ],
-          ),
-        ),
+    final content = ColoredBox(
+      color: theme.tokens.scrim,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // The shell's surface, mounted here. Popping back to the feed moves
+          // this same texture into the mini-player — nothing is created or freed
+          // by the move.
+          //
+          // **One mount point at a time.** While fullscreen the shell draws it
+          // instead, so this box goes empty rather than asking for a second
+          // `Video` on the same texture id. The box itself stays, which is what
+          // keeps the page from reflowing behind the fullscreen layer.
+          if (!fullscreen) engine.videoSurface(),
+          if (playback.isLoading)
+            Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
+          if (playback.error != null) _Unavailable(playback: playback),
+          if (playback.error == null && !playback.isLoading && !fullscreen)
+            PlayerControls(engine: engine),
+        ],
       ),
     );
+
+    if (!rounded) return content;
+    return ClipRRect(borderRadius: BorderRadius.circular(12), child: content);
   }
 }
 
@@ -314,88 +366,6 @@ class _Unavailable extends ConsumerWidget {
         ),
       ),
     );
-  }
-}
-
-/// Play/pause, a scrubber and a clock.
-///
-/// Every value here comes off `player.stream.*` (hard invariant 9). A
-/// `getProperty` poll on this path is a blocking FFI call that can sit on mpv's
-/// core lock through a seek — F15 recorded a 6.4 s freeze doing it.
-class _TransportBar extends ConsumerStatefulWidget {
-  const _TransportBar({required this.engine});
-
-  final PlaybackEngine engine;
-
-  @override
-  ConsumerState<_TransportBar> createState() => _TransportBarState();
-}
-
-class _TransportBarState extends ConsumerState<_TransportBar> {
-  double? _dragging;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final tokens = theme.tokens;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(color: tokens.scrim.withValues(alpha: 0.55)),
-      child: StreamBuilder<Duration>(
-        stream: widget.engine.positionStream,
-        initialData: widget.engine.position,
-        builder: (context, snapshot) {
-          final duration = widget.engine.duration;
-          final position = snapshot.data ?? Duration.zero;
-          final max = math.max(duration.inMilliseconds.toDouble(), 1.0);
-          final value = (_dragging ?? position.inMilliseconds.toDouble()).clamp(0.0, max);
-
-          return Row(
-            children: [
-              StreamBuilder<bool>(
-                stream: widget.engine.playingStream,
-                initialData: widget.engine.playing,
-                builder: (context, playing) => IconButton(
-                  mouseCursor: SystemMouseCursors.click,
-                  icon: Icon(
-                    (playing.data ?? false) ? Icons.pause : Icons.play_arrow,
-                    color: tokens.onScrim,
-                  ),
-                  onPressed: () => ref.read(playbackProvider.notifier).togglePlayPause(),
-                ),
-              ),
-              Expanded(
-                child: Slider(
-                  value: value,
-                  max: max,
-                  onChanged: (next) => setState(() => _dragging = next),
-                  onChangeEnd: (next) {
-                    setState(() => _dragging = null);
-                    ref
-                        .read(playbackProvider.notifier)
-                        .seek(Duration(milliseconds: next.round()));
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Text(
-                  '${_clock(position)} / ${_clock(duration)}',
-                  style: TextStyle(color: tokens.onScrim, fontSize: 12),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  static String _clock(Duration d) {
-    final hours = d.inHours;
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(hours > 0 ? 2 : 1, '0');
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
   }
 }
 

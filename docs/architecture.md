@@ -34,6 +34,7 @@ the spike; do not assume they still hold six months from now.
 | F16 | **Hardware decode survives the ANGLE path, but as `d3d11va-copy`, and 2160p60 does not present. The decoder properties disagree with each other; only the control settles it** | Measured 2026-08-02, same machine and GPU as F11/F13 (Intel Graphics, driver 31.0.101.4953), so the comparison is clean. media_kit_video's Windows controller sets `vo=libmpv` and `hwdec=auto` itself (`VideoControllerConfiguration`). mpv logs `Using hardware decoding (d3d11va-copy)` on **both** codecs — copy-back, where F11 and F13 got plain `d3d11va` under `vo=gpu`. On AV1 the properties contradict themselves: `hwdec-current` reads `d3d11va-copy` while `video-codec` and `current-tracks/video/decoder-desc` both read `libdav1d`, a software decoder. **The `hwdec=no` control is what settles it**: same track, same build, **166.2 s of CPU instead of 44.6 s**, and the output format changes `nv12` → `yuv420p`. VP9 the same shape, 114.6 s vs 43.7 s, and visibly degraded without it (1205 drops, 787 ms out of sync). So hardware decode is real and F11's conclusion that AV1 needs no special treatment still holds — the two codecs land within noise of each other. **What is new is presentation.** Over a 32 s uninterrupted window at 2160p60: **310–563 frames dropped by the VO** (2 runs each codec), accruing steadily at 10–17/s rather than as a startup burst, with `decoder-frame-drop-count` **0** throughout — 16–29% of frames never reach the screen. At **1920×1080@60, same codecs, same everything: 0 drops** (itag 399 and 303). This is the ANGLE presentation path failing to sustain 4K60 on an iGPU, not a property of media_kit playback. The Q1 seek runs show the same rate between seeks; their low totals are only because mpv resets the counters on every seek. CPU figures include the Flutter engine and are **not** comparable one-to-one with F13's 6.6–17.3 s from a bare libmpv host — the 1080p control burns 34.7 s while dropping nothing, so most of the number is a fixed floor |
 | F17 | **Windows orphan prevention: the sidecar watches the parent PID and self-exits.** The earlier conclusion that a bidirectional heartbeat was required was wrong; `TerminateProcess` does skip user-mode cleanup, but the sidecar can poll instead | **Amended 2026-08-04:** Windows Job Objects are the correct kernel-level solution. They successfully kill the child when the job handle closes, but our specific Dart FFI implementation closed the handle prematurely during normal operation. This was a bug in the implementation attempt — a handle lifecycle issue — not a flaw in the Job Object mechanism itself, which remains the ideal long-term fix. As a fallback, the sidecar is passed the parent PID via `FLUTTER_PARENT_PID` and polls it every 3s via `process.kill(pid, 0)`. This leaves an orphan window of up to 3 s during which a killed parent's sidecar still holds cookies and a live session. The `rpc_client_test.dart` orphan test was modified with a 3.5s tolerance to accommodate the polling interval, and `runInShell: false` was used to ensure the tested Dart process is genuinely killed instead of just its shell wrapper. **Re-measured 2026-08-06, and the picture is better than recorded here.** That orphan test had been carrying `skip: Platform.isWindows` with the reason "Failing on Windows" — on Windows-only software, meaning it had never once run, and every report claiming it passed was reporting a skip. It was un-skipped and it passes, 5/5. Mutation testing then established that **two independent mechanisms** each close the orphan on their own, measured by disabling one and leaving the other: with the PID watch disabled the sidecar still exits, and with every pipe handler disabled (and the event loop pinned open so it cannot simply drain) the 3 s PID poll still gets it. So the up-to-3 s orphan window above is the **worst case, not the normal one** — it applies only if the stdin pipe path fails, and in this configuration it does not. That last point contradicts the F16-era claim that `TerminateProcess` leaves stdin EOF unpropagated: with only `stdin.on('end')` and `rl.on('close')` alive, the sidecar still exits. The likely reconciliation is a shell wrapper holding the pipe's write end open in the original repro — `kill_test2.dart` still spawns with `runInShell: true` while the real test uses `false` — but that was **not** tested, so treat the divergence as unexplained rather than resolved. The test's fixed 3.5 s sleep is now a poll with a 12 s deadline: fast when the pipe wins, patient when the watch does, and no longer ~500 ms from going red on a loaded machine. The assertion is unchanged. |
 | F18 | **The resume delay is not a seek re-sync, and it is not the audio track running late. Pause/resume and seeking are two different mechanisms, and the long-pause penalty is intermittent** | Measured 2026-08-07 through `app/lib/ui/audio_delay_probe.dart` against the release build, real account, itag 315 (VP9 2160p60) + opus, on the machine of F11/F13/F16. Every figure is read from mpv via `observeProperty`, which fetches on mpv's event thread — no `getProperty` polling, per hard invariant 9. **Milliseconds from `play()`/`seek()` until `time-pos` passes the resume point, n=10 each:** resume after a **2 s** pause — min 59, med 170, max 232; after **30 s** — min 113, med 284, max 485; after **5 min** — min 290, med 596, max 1573; **seek +60 s** — min 796, med 2600, max 4609; **seek −60 s** — min 359, med 1758, max 4965. **The 5-minute arm is bimodal**, which a median hides: five samples at 290–427 ms, indistinguishable from the 30 s arm, and five at 765–1573 ms. Two further samples from an earlier run were both slow (1472, 1895), making 7 of 12. So this is a **~1 s penalty that either fires or does not**, seen only after long pauses and never once at 2 s or 30 s — not a delay that grows smoothly with idle time. **Audio never lags video.** A detector watching for `audio-pts` frozen while `time-pos` advances — which is what the reported symptom would look like — fired **0 times in 52 samples**; wherever both clocks are measurable they cross the resume point within 1 ms. What a user experiences as late audio is the whole player taking up to 1.5 s to start. **Seeks and resumes have different fingerprints.** Seeks are ~95% `core-idle` (med 2458 ms of 2600) — mpv waiting on data after repositioning. Long-pause resumes never touch `core-idle` or `paused-for-cache` at all, and the demuxer cache is **9–21 s full** at the moment of resume. So the resume penalty is not data starvation, and `cache-secs` / `demuxer-readahead-secs` would raise a buffer that is already full and unused. **Idle connections do die, but off the critical path.** At `--msg-level=all=v`, every long-pause resume with a full log window shows `[ffmpeg] https: Will reconnect at <offset> in 0 second(s), error=I/O error` — 6 of 8 samples, the other two truncated. It always arrives **after** playback has already resumed (+300 to +900 ms past the moment `time-pos` moved), because mpv restarts out of the cache it still holds and ffmpeg only finds the dead socket when the demuxer next reaches for bytes. Every observed reconnect offset (49.9, 71.5, 72.2, 87.3, 88.5 MB) tracks the ~20 Mbps **video** stream; **no reconnect was ever observed on the audio URL** in 8 long-pause resumes. So `multiple_requests=1` also targets something that is not the bottleneck. **What co-occurs with the slow resumes** is an `[ao/wasapi] OnPropertyValueChanged` on the output device, present in every sample — but it too lands at or after the resume moment (+2 to +415 ms past it), so it is a correlate and not a demonstrated cause. **The cause is not isolated.** **Method limits, stated rather than left as gaps:** `demuxer-cache-state` describes **one** demuxer and a two-URL setup has two — mpv exposes nothing for the external audio track, so the log is the only per-track evidence and "video has frames buffered while audio has none" is not directly measurable. `audioResumeMs` is unreliable wherever `audio-pts` sat >0.05 s ahead of `time-pos` when the pause began, since the detector then trips on a pre-pause value (shows as a large negative); it affected 2 of 10 five-minute samples and every backward seek, and those rows are excluded rather than quietly kept. **Lever availability, scanned rather than assumed** (hard invariant 8, and `strings` is not on this machine — its absence returns 0 for everything, which reads exactly like a missing option, so the scan carries controls): in the shipped `libmpv-2.dll`, `audio-wait-open`, `cache-secs`, `demuxer-readahead-secs`, `multiple_requests`, `reconnect`, `reconnect_delay_max` and `audio-stream-silence` are all **present**, while `request_size` is **absent** — reproducing F12/F15 on this same artefact, which is what says the scanner works. **No playback option was changed.** Three of the four candidate levers are ruled out by the evidence above rather than by trial, and setting the fourth on a correlation would be the same mistake in a different coat. **Amended 2026-08-11, and this supersedes an amendment of 2026-08-10 that was confounded.** Wiring `player.stream.error` in — mpv reports socket failures there, distinct from its log — identified the mechanism, and extending the pause ladder corrected the magnitudes. **The cause is an idle-killed connection to the *video* stream.** On resume, `tcp: ffurl_read returned 0xffffd8ba` (`WSAECONNRESET`) arrives close to playback starting: of the **15** samples taken after `player.stream.error` was instrumented, **13** show the error and **10 of those 13** resume within ~300 ms of it. (An earlier count of "15 of 16" was wrong — four of the samples it included predate the instrumentation and could not have shown an error at all.) The delay is the dead socket being discovered, or the reconnect and refill behind it — not buffering: `paused-for-cache` is **0 in all 75 samples** and the demuxer cache is 9–15 s full at every resume. **Audio never dies.** Reconnect offsets (34.0, 46.8, 49.6, 71.8, 88.5, 97.3 MB) all track the ~20 Mbps video stream and rise with position; **no audio-URL reconnect was ever observed**, at 5, 15 or 30 minutes. A fix would need to cover video only. **Corrected magnitudes, machine held awake, default options** — the 2026-08-10 figures of 2790 and 5756 ms came from the one run where the machine was left free to idle, which is a 2–4× effect on its own and must not be compared against: **2 s** med 170 (n=10); **30 s** med 284 (n=10); **5 min** med 596, range 290–1573 (n=10); **15 min** med 768, range 541–1529 (n=5); **30 min** 974 and 2298 (n=2). **It plateaus rather than growing** — doubling the idle from 15 to 30 minutes stays in the same band. Left free to idle, the same 15-minute pause gives 2790 and 5756 (n=2), so **the machine's own power state during the pause matters more than the length of the pause**. **Every candidate lever is ruled out, three of them by experiment rather than by argument.** `reconnect` is **already enabled by default** — setting `reconnect=0` made the `Will reconnect` line vanish, and with reconnection disabled entirely a resume still took 1120 ms, so the wait is upstream of it. `reconnect_delay_max` has no backoff to shorten: the log already reads *"in 0 second(s)"*. `reconnect_streamed` applies to non-seekable inputs and these are seekable with range support (F11). `rw_timeout=300000`, tested **alone**, n=5, identical conditions: median **2063 ms against the baseline's 768** — worse, and it never bounded the read it was aimed at (first error still at 690–2434 ms, never near the 300 ms cap), so it does not govern this wait. `cache-secs` / `demuxer-readahead-secs` raise a buffer that is already full and never drained. **No option was applied to the app.** **Honest edges.** The coupling is 10/13, not universal — one baseline sample resumed slowly (1262 ms) with no socket error and no reconnect at all, so the dead connection is the usual cause and not the only one. At 30 minutes the coupling loosens further: one sample errored 1467 ms *after* a 974 ms resume, another errored at 82 ms and still took 2298 ms, so the delay is sometimes detection and sometimes reconnect-and-refill. n=2 at 30 minutes and n=5 at 15, on one machine, one video, one codec pair. **So the state of it: 0.5–1.5 s occasionally with the machine awake, 1–2.3 s at half an hour, 2.8–5.8 s when the machine is left to idle — cause identified, no available lever fixes it, documented and left alone.** That is a limitation to be aware of, not polish |
+| F19 | **A mode change does not touch the video output. A quality switch does — it rebuilds the texture and costs 0.55–12 s before the picture moves, which is a stall and is why the automatic stepper stays out of scope** | Measured 2026-08-12 through `RILL_CONTROLS_PROBE=1` against the release build, `aqz-KE-bpKQ` (22-rung ladder, 7 distinct height+fps rows), two full runs on the machine of F11/F13/F16/F18. **Modes: `VideoController.id` is unchanged across all four transitions** — theatre on, fullscreen on, fullscreen off, theatre off — in both runs (`2016289986736` and `2337064972400` throughout their runs), with playback continuing across them (position 4.5 → 12.7 s) and no second `engine.open`. Task 16's stop condition, "a mode change tears down the video texture", does **not** fire: the player lives above the `Navigator` and a mode change moves the controls, not the surface. **The baseline has to be taken after a settle, and this is the trap**: media_kit frees and recreates the texture ~1 s after an open, once the video's real size is known (`Free Texture` → `Create Texture` → `VideoOutput.Resize` to 3840×2160), so a baseline read at the first frame reports every later comparison as a rebuild — the first version of this probe did exactly that and called four unchanged ids "REBUILT". **Fullscreen restores the window exactly.** `GetWindowPlacement`'s `rcNormalPosition` read either side of a fullscreen round trip: `[10, 10, 1290, 730]` → `[0, 0, 2560, 1080]` (the whole monitor, borderless) → `[10, 10, 1290, 730]`. Read from Win32 rather than from the fake, because `flutter test` has no window and can only assert that the window was *asked*. **A quality switch, by contrast, does rebuild the texture** — every one logs `Free Texture` / `Create Texture` with a new id and a resize to the new dimensions. That is the media reopen, not the mode, and it is what §3.5 permits: no `playback.open` is issued, so the RPC session, the history entry and the report cadence carry on. **Cost, n=14 (7 rungs × 2 runs), stepping down the ladder while playing:** the `switchQuality` call returns in **306–743 ms**, but what a viewer waits for is the picture moving again — **551, 577, 672, 1130, 1925, 2833, 3072, 5074, 5243, 5285, 5702, 11676, 11874, 11954 ms; median 4073, range 0.55–12.0 s.** **The long tail does not track the rung**: 480p was 1925 ms in one run and 11676 ms in the other, and each run had two samples near 11.9 s at different rungs — so this is intermittent, 3 of 14 above 11.6 s, not "low rungs are slower". It is consistent with **F18** rather than additional to it: a switch is a reopen plus a seek back, F18 measured seeks alone at 0.8–4.6 s, and the seek dominates. **What that settles for automatic quality stepping** (out of scope in task 16, and this is the evidence for keeping it there): a stepper reacting to sustained frame drops would spend 1–12 s of visible stall per step, on a machine where F16 says the only step worth making is 2160p60 → 1080p60. Choosing once at open costs nothing and buys the same thing. One video, one machine, one sample per rung per run. **Amended 2026-08-12 — the stall is not a frozen UI, and the two were being read as one thing.** The app blocking and the video not moving are different durations, and they were measured separately after the app was reported as freezing during a switch. A persistent frame callback recording **wall-clock** gaps between frames is the instrument — no frames are produced while the UI isolate is blocked, so the largest gap across a switch *is* the freeze, and it has to be wall clock rather than the frame timestamp Flutter passes, which is the vsync the frame was scheduled for and hides exactly the delay being looked for. **On an idle machine the frame loop is not blocked at all**: worst gap **17, 18, 18, 19, 22, 23, 24 ms** across the seven switches of one run — one frame each, indistinguishable from ordinary playback. So the 1–12 s above is the picture not moving while the controls stay live, and not the app being unresponsive. **The first pass at this said otherwise and was confounded, in the same way F18's 2026-08-10 figures were.** It reported 19–650 ms (median 148), and that run was taken while a full `flutter test` suite was compiling and running on the same machine — it measured contention for the CPU, not the switch. Recorded rather than deleted because the confound is the finding: two runs of the same instrument differ by 30× on machine load alone, so any future "the app freezes" number is worthless without stating what else was running. **A second correction from the same run, and this one was a real bug**: `time-pos` reaches the seek target as soon as mpv *accepts* the seek, not when it decodes there — one switch reported the target at **448 ms** and did not move past it until **5343 ms**. Anything keyed on "position is at or past where we were" therefore fires in the middle of the stall; the black cover over the switch waits for strictly *past* it, which is the predicate this finding's own resume figures were measured with |
 
 
 **F18 has no earlier conclusion to correct.** This investigation was opened on the
@@ -256,6 +257,13 @@ Report watch events on a real cadence, not once at completion. A single
 end-of-video ping is a weak training signal, and homepage fidelity is the
 product requirement.
 
+**Quality is switched inside mpv, never by reopening the RPC session** (F19,
+`protocol.md` §3.5). All variants are signed from one `/player` response, so the
+client reopens the media on the existing player and seeks back — no
+`playback.open`, no second `sessionId`, and no second history entry for one
+watch. It costs a visible stall (median 4.1 s to the picture moving, worst 12 s),
+which is the measurement that keeps automatic frame-drop stepping out of scope.
+
 ### 2.5 Authentication and the silent-degradation problem
 
 Cookie auth is the only option: OAuth device-code no longer works against
@@ -329,6 +337,131 @@ verified by fetching, and re-deriving that would be expensive.
 There is no CC button on a preview. Captions do not exist anywhere in this app
 yet; they are their own task, where the watch page gets them too, and a dead
 control is worse than no control.
+
+### 2.7 Player controls
+
+The shell player's overlay. Four decisions here are not obvious from the code and
+were each corrected once, so they are written down rather than left to be
+rediscovered.
+
+**Theatre grows sideways only.** The player keeps the height it has in the
+ordinary layout and spans the full content width, so a 16:9 video gains larger
+side bars and everything below it stays where it was. The other reading of
+"expands to fill the content area" — filling the viewport's *height* — was built
+first and is wrong: on a 2560×1080 window it is a player nearly three times as
+tall as before, and the description and related rail leave the screen. Theatre is
+also what drops the page to one column, so the rail moves below the player rather
+than being squeezed.
+
+**Previous and next are absent, not disabled, when there is nowhere to go.** The
+queue stops rather than wrapping, and an ordinary video has no queue at all — so
+a disabled pair would be two permanently dead controls on almost every video.
+They appear exactly when a playlist, mix or queue has given them a destination.
+`Shift + P` / `Shift + N` fire either way, so the keyboard is not the thing that
+disappeared with the buttons.
+
+**A quality switch covers the video in black until the picture is back.** The
+switch reopens the media inside mpv, which starts the new stream at zero and only
+then takes the seek back — so an uncovered switch shows black, then one real
+frame of the new stream from position zero (on most uploads, the thumbnail), then
+the resumed picture. The middle third reads as a bug. `isSwitchingQuality` is
+therefore held until the position returns to where the user was, not until the
+calls have been issued; F19 measures those as 4.1 s and 0.3–0.7 s respectively,
+which is the whole gap the cover exists to fill. A frozen last frame
+(`Player.screenshot()`, which media_kit runs in a background isolate) would read
+as a pause rather than a reload and is the obvious upgrade; black is what is
+built, because it cannot fail and adds no mpv call to a transition that is
+already stalling.
+
+**The displayed position is held across a quality switch, and so is the reported
+one — and the duration is held with it.** A reopened media reports position
+*and duration* zero until the seek back lands, so for the seconds F19 measures,
+mpv is telling the truth about a stream nobody asked for. `PlaybackState.hold`
+carries both; the scrubber, the clock and the mini-player's bar all prefer it, in
+the order *drag > hold > stream*. **They are one object rather than two nullable
+fields because holding half of it is worse than holding none**: with the position
+held and the duration not, the scrubber's range collapses to `max(0, 1) = 1 ms`,
+a held 3:00 clamps into it, and the thumb pins to the **far right** for half a
+second — which is what shipped in the first attempt at this. The seek clamps read
+it too, or `J` near the end and the `0`–`9` deciles go dead for the length of a
+switch. **`playback.report` prefers it
+too**, and that half is not cosmetic: without it a switch posts a position of
+zero to the account's history, telling YouTube the viewer went back to the start
+— the load-bearing call whose failures only ever surface as a homepage that stops
+resembling the account. **The hold is not a freeze**: every seek in the app goes
+through `PlaybackController.seek`, which moves the hold with the user, and the
+wait that lifts the cover re-reads the target on every position event rather than
+capturing it — otherwise scrubbing *backwards* mid-switch leaves the cover up
+until the 25 s deadline, still waiting to pass a point the user has just chosen
+to be behind. Note where this does *not* live: the sidecar has no idea where
+playback is. It resolves URLs and receives reports; position is mpv's, through
+`player.stream.position`, and there is nothing upstream to pause.
+
+**One spinner for every kind of waiting, after a 250 ms grace period.** mpv
+buffering, a quality switch, and the initial load are the same thing to a viewer.
+The signal is media_kit's `buffering`, which it raises from **`core-idle`** as
+well as `paused-for-cache` — that matters, because F18 measured seeks as ~95%
+`core-idle` with `paused-for-cache` at **zero in all 75 samples**, so a spinner
+keyed on cache starvation alone would never appear on the thing that actually
+makes anyone wait. media_kit suppresses the `core-idle` a `pause` raises, so a
+deliberate pause shows nothing. The grace period is what keeps a fast seek from
+flashing a spinner for two frames, which reads as a glitch rather than feedback.
+**Known gap:** F18's long-pause resume penalty (0.5–2.3 s) touches neither
+property, so nothing fires for it and there is no signal to hang it on.
+
+**The spinner carries a `Key`, and it does not work without one.** It is the only
+child of the controls `Stack` that owns `State`, and the quality-switch cover
+above it comes and goes. Flutter's list diff scans forward while widgets match,
+scans backward from the end, then rematches everything in between **by key
+alone** — unkeyed children in that middle range are discarded and inflated fresh.
+The cover appearing breaks the forward scan at index 0 and the quality menu
+breaks the backward scan, which puts the spinner squarely in the middle: unkeyed,
+its `State` was destroyed and its grace timer cancelled at the exact moment a
+switch began, so the spinner could never appear for the case it was written for.
+Diagnosed by tracing `initState`/`dispose` — a second `initState` ran before the
+first `dispose`, which is the signature of this rematch and not of an ordinary
+rebuild.
+
+**The volume slider opens on hover and takes room in the row.** It sits between
+the mute button and the clock, so opening it pushes the clock and everything
+after it to the right rather than floating over them — a clock you cannot read
+while changing the volume is a worse trade than a clock that moves. It closes on
+a 200 ms delay, because the pointer travelling from the speaker to the slider is
+briefly over neither and an immediate close would collapse it out from under a
+pointer heading for it. The slider stays mounted at width zero rather than being
+swapped out, so open and close are one continuous motion.
+
+**The bar's background is a gradient, not a wash.** A flat scrim darkens a band
+of the picture and ends on a hard horizontal edge; a ramp from 50% at the bottom
+to nothing at the top has no edge to notice and puts the density where the
+controls actually are. Fullscreen adds the same gradient mirrored at the top,
+carrying the title and channel — fullscreen hides the watch page, which was the
+only thing on screen that said what was playing.
+
+**Captions are a disabled button, not a reserved gap.** The gap read as a missing
+control. A disabled button says "later"; a live one that did nothing would lie.
+This reverses task 16's "leave a gap rather than shipping a dead one" at the
+user's request.
+
+**The theatre icon reports state; every other icon reports action.** Theatre has
+no glyph anyone recognises, so the icon is more useful as a status than as an
+instruction. Fullscreen keeps action semantics beside it, because
+`fullscreen_exit` reads as a verb in a way the crop icons do not. The
+inconsistency is deliberate and confined to this one control.
+
+**`i` and the mini-player button pop the route rather than entering a mode.** The
+mini-player is already what the shell draws whenever something is playing and the
+watch route is not on top, so going back to wherever the user came from *is* the
+feature — and it lands on the previous page rather than a fixed one. Fullscreen
+is dropped first, or popping would leave the window borderless over the monitor
+with a feed in it.
+
+**One flex child between the control bar's clusters.** `Flexible(clock)` followed
+by a `Spacer()` leaves the right-hand cluster hundreds of pixels short of the
+right edge: both are flex 1, `Row` gives each half the free space, and the loose
+`Flexible` returns what the clock does not use — to the *end* of the row under
+the default `MainAxisAlignment.start`, not to the `Spacer`, which has already
+been sized. One `Expanded` holding a left-aligned clock has no share to return.
 
 Tile action buttons (Watch Later, Add to queue) come from
 `ThumbnailHoverOverlayToggleActionsView` and the associated
