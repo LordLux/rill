@@ -153,6 +153,15 @@ class MediaKitEngine implements PlaybackEngine {
   /// The controller, which outlives every route. Prefer [videoSurface].
   VideoController get videoController => _video;
 
+  /// The variant handed to the last [open], **for diagnostics only**.
+  ///
+  /// `PlaybackController` publishes `source` and `variant` to state only *after*
+  /// `open` returns, so when `open` throws — the 20 s audio-attach timeout being
+  /// the case that matters — nothing above the engine ever learns which URL was
+  /// being played. That is precisely the failure worth investigating, and it was
+  /// unobservable from outside. Nothing that renders reads this.
+  PlaybackVariant? lastOpened;
+
   /// mpv itself, **for diagnostics only** — hard invariant 9's own carve-out.
   ///
   /// Nothing that renders may touch this. `getProperty` is a blocking FFI call
@@ -238,6 +247,7 @@ class MediaKitEngine implements PlaybackEngine {
   /// `firstWhere` on a stream that has passed waits forever.
   @override
   Future<void> open(PlaybackVariant variant, {bool play = true}) async {
+    lastOpened = variant;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffer = Duration.zero;

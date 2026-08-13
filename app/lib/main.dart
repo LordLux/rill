@@ -15,6 +15,7 @@ import 'ui/hover_preview.dart';
 import 'ui/pages/feed.dart';
 import 'ui/playback_controller.dart';
 import 'ui/player/controls_probe.dart';
+import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 
@@ -49,7 +50,11 @@ Future<void> main() async {
   // §1: a `Player` owned by the watch route is destroyed on pop, which makes a
   // mini-player and background playback impossible. Owned this high, playback
   // surviving a route change is not a feature, it is the absence of a bug.
-  final engine = MediaKitEngine();
+  // `RILL_LAUNCH_PROBE` needs mpv's own log to tell a dead URL from one mpv
+  // never opened. Off otherwise: `v` is thousands of lines a run.
+  final engine = MediaKitEngine(
+    logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
+  );
 
   final container = ProviderContainer(
     overrides: [playbackEngineProvider.overrideWithValue(engine)],
@@ -64,6 +69,7 @@ Future<void> main() async {
 
   _openOnLaunch(container);
   runControlsProbe(container);
+  runLaunchProbe(container);
 }
 
 /// Run the audio-delay probe and exit.
