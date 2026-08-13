@@ -75,6 +75,7 @@ const SHAPES = {
     viewCountText: 'string?',
     publishedText: 'string?',
     badges: 'string[]',
+    premiereAtMs: 'number?',
     canWatchLater: 'boolean',
     canAddToQueue: 'boolean',
   },

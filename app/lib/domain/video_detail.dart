@@ -36,6 +36,9 @@ abstract class VideoDetail with _$VideoDetail {
     String? likeText,
     required bool isSubscribed,
     @Default(<String>[]) List<String> badges,
+    /// When a premiere starts, unix ms. The watch page's slate reads this;
+    /// `playback.open`'s `VIDEO_UPCOMING` says only *that* it is a premiere.
+    int? premiereAtMs,
     @Default(<FeedItem>[]) List<FeedItem> related,
     String? relatedContinuation,
   }) = _VideoDetail;

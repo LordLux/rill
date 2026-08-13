@@ -13,6 +13,7 @@
 
 import type { FeedItem, VideoDetail } from '../types.ts';
 import { parseFeed } from './feed.ts';
+import { premiereStartMs } from './premiere.ts';
 import { bestImageUrl, channelIdFrom, durationToSeconds, text } from './text.ts';
 import { deepCollect, deepFind, get, isObject, num, str, type Json } from './tree.ts';
 
@@ -135,6 +136,11 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     likeText,
     isSubscribed: hasSubscribedButton(body),
     badges: [...new Set(badges)],
+    // Deep-searched for the same reason the tiles are: the watch page hangs this
+    // off a different renderer depending on generation, and no premiere is in
+    // the fixture corpus to pin a path against. Null here is ordinary —
+    // `video.info` falls back to the `/player` half, which is the reliable one.
+    premiereAtMs: premiereStartMs(body),
     related: related.items as FeedItem[],
     relatedContinuation: related.continuation,
   };

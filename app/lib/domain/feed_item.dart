@@ -20,6 +20,11 @@ sealed class FeedItem with _$FeedItem {
     String? viewCountText,
     String? publishedText,
     @Default([]) List<String> badges,
+    /// When a premiere starts, unix ms — null for everything already published.
+    ///
+    /// Carried on the tile so a card can offer a reminder without a `/player`
+    /// call per item.
+    int? premiereAtMs,
     required bool canWatchLater,
     required bool canAddToQueue,
   }) = VideoItem;

@@ -31,6 +31,19 @@ const pending = new Map();
 // Playback, recorded rather than answered blindly: `test.playbackLog` hands the
 // whole conversation back so a test can assert on the cadence of reports and on
 // preloads it has no other way to observe.
+/** The one video id that is a premiere. 2026-08-22T15:00:00Z. */
+const PREMIERE_ID = 'premiere1';
+const PREMIERE_AT_MS = 1787670000_000;
+/**
+ * The one video id that always fails to resolve.
+ *
+ * Keyed on the id rather than on a launch mode so a single sidecar can serve a
+ * whole test file — a test needing both a premiere and a genuine failure would
+ * otherwise restart the process mid-file, which is the race that made
+ * `player_controls_test.dart` flaky.
+ */
+const BROKEN_ID = 'broken1';
+
 const opens: Array<{ videoId?: string; preload: boolean }> = [];
 const reports: unknown[] = [];
 const closes: unknown[] = [];
@@ -102,6 +115,23 @@ rl.on('line', (line) => {
       // a state a user can retry out of, and the retry has to actually work.
       opens.push({ videoId: req.params?.videoId, preload: req.params?.preload === true });
       const isPreload = req.params?.preload === true;
+      if (req.params?.videoId === BROKEN_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'STREAM_UNAVAILABLE', message: 'every resolution tier declined', retry: 'user' },
+        }) + '\n');
+        return;
+      }
+      // A premiere, keyed on the video id rather than a mode so one test can
+      // hold both an ordinary video and an upcoming one — which is what the feed
+      // does, and what the watch page has to switch between.
+      if (req.params?.videoId === PREMIERE_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'VIDEO_UPCOMING', message: 'Premieres in 9 days', retry: 'no' },
+        }) + '\n');
+        return;
+      }
       if (mode === 'open-fails-once' && !isPreload && realOpens++ === 0) {
         process.stdout.write(JSON.stringify({
           id: req.id,
@@ -175,6 +205,7 @@ rl.on('line', (line) => {
           likeText: '1.1M',
           isSubscribed: false,
           badges: [],
+          premiereAtMs: videoId === PREMIERE_ID ? PREMIERE_AT_MS : null,
           related: [],
           relatedContinuation: null,
         },

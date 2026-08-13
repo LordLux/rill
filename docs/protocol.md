@@ -99,6 +99,11 @@ flag derived from cookie presence.
 `*.more` method — first page and infinite scroll share one path, and chips are
 just a different token into the same call.
 
+`premiereAtMs` is on every `VideoItem` (unix ms, null for anything already
+published) so a card can offer a reminder without a `/player` call per tile — a
+feed of premieres would otherwise cost one round trip each to discover something
+the feed response already said.
+
 `chips[]` merges both generations: top-level `chipCloudChipRenderer` and
 shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 `scope` is `'feed' | 'shelf'`.
@@ -387,6 +392,7 @@ them has a `retry` value:
 | `AUTH_REQUIRED` | `no` | Login flow |
 | `BAD_REQUEST` | `no` | This is a client bug. Surface it — never retry, never swallow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
+| `VIDEO_UPCOMING` | `no` | The premiere slate: thumbnail, scheduled time, reminder. **Not** an error state |
 | `RATE_LIMITED` | `auto` | App backs off and retries silently |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
 
@@ -402,6 +408,18 @@ Bounded, but each of those attempts is a client bug being hidden by a spinner.
 
 Keep `UPSTREAM_ERROR` for genuine upstream failures: YouTube answered badly, or
 did not answer. If the sidecar rejected the request itself, it is `BAD_REQUEST`.
+
+**`VIDEO_UPCOMING` is not a failure wearing an error envelope.** A premiere is a
+video that exists, is fine, and has a start time; no rung of the ladder will ever
+resolve one, so it terminates the ladder rather than declining down it — four
+further `/player` calls to reach "every tier declined" would be slower and wrong.
+It is `no` because retrying cannot beat a clock, and that is the one case where
+`no` is a statement about arithmetic rather than about policy. The UI obligation
+is the opposite of `STREAM_UNAVAILABLE`'s: **do not offer a retry**, show the
+scheduled time and a reminder. It arrives with YouTube's own prose as its message
+("Premieres in 9 days"), which is enough to render the slate before `video.info`
+answers; the machine-readable time is `VideoDetail.premiereAtMs` (§3.3), on a
+call the watch page already makes.
 
 `STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
 very good bet and not a promise (§3.5, F9): every rung can decline for a video

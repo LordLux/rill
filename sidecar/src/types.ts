@@ -32,6 +32,15 @@ export interface VideoItem {
   publishedText: string | null;
   /** "4K", "New", "Members only", … */
   badges: string[];
+  /**
+   * When a premiere or scheduled stream starts, unix ms — null for everything
+   * that has already happened, which is nearly every tile.
+   *
+   * Carried on the tile so a card can offer a reminder without a `/player` call
+   * per item: a feed of upcoming videos would otherwise cost one round trip each
+   * to discover something the feed response already said.
+   */
+  premiereAtMs: number | null;
   canWatchLater: boolean;
   canAddToQueue: boolean;
 }
@@ -97,6 +106,16 @@ export interface VideoDetail {
   likeText: string | null;
   isSubscribed: boolean;
   badges: string[];
+  /**
+   * When a premiere starts, unix ms — null for anything already published.
+   *
+   * The watch page's source of truth for the premiere slate. `playback.open`
+   * answers `VIDEO_UPCOMING` with YouTube's own prose ("Premieres in 9 days"),
+   * which is enough to say *that* it is a premiere but not enough to render a
+   * date; this is the machine-readable half, and it arrives on a call the watch
+   * page already makes.
+   */
+  premiereAtMs: number | null;
   /** Sidebar / up-next tiles, already flattened to the same DTOs as any feed. */
   related: FeedItem[];
   relatedContinuation: string | null;
@@ -214,6 +233,10 @@ export interface PlayerResult {
   playabilityReason: string | null;
   durationSeconds: number | null;
   isLive: boolean;
+  /** A premiere or scheduled stream that has not started. Never playable yet. */
+  isUpcoming: boolean;
+  /** When it starts, unix ms. Null even when [isUpcoming] — see the parser. */
+  scheduledStartMs: number | null;
   /**
    * True when the *adaptive* ladder lacks both a URL and a cipher — the
    * SABR-only case. Defined over adaptive formats only; see

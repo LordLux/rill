@@ -18,6 +18,16 @@ export type EnvelopeErrorCode =
   /** Unknown method, or params that failed validation. The caller is at fault. */
   | 'BAD_REQUEST'
   | 'STREAM_UNAVAILABLE'
+  /**
+   * The video exists and is fine; it has not premiered yet.
+   *
+   * Distinct from `STREAM_UNAVAILABLE` because it is not a failure to resolve —
+   * there is nothing to resolve until the scheduled time, and no rung of the
+   * ladder will ever produce one. Collapsing the two put a premiere behind
+   * "This video would not open" with a *Try again* button that could only fail
+   * for the next nine days.
+   */
+  | 'VIDEO_UPCOMING'
   | 'RATE_LIMITED'
   | 'UPSTREAM_ERROR';
 
@@ -79,6 +89,10 @@ const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.fre
   // affordance — but not a silent loop, which on a genuinely deleted video would
   // spend requests to keep showing a spinner instead of the honest answer.
   STREAM_UNAVAILABLE: 'user',
+  // `no`, and for once that is a statement about the clock rather than about
+  // policy: retrying before the scheduled time cannot succeed, and the UI has
+  // something better than a retry button to offer — the date and a reminder.
+  VIDEO_UPCOMING: 'no',
   RATE_LIMITED: 'auto',
   UPSTREAM_ERROR: 'auto',
 });

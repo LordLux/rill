@@ -54,13 +54,23 @@ export interface VideoDeps {
  * and failing `video.info` over it would replace a watch page missing one number
  * with no watch page at all.
  */
-async function durationFromPlayer(deps: VideoDeps, videoId: string): Promise<number | null> {
+async function fromPlayer(
+  deps: VideoDeps,
+  videoId: string,
+): Promise<{ durationSeconds: number | null; premiereAtMs: number | null }> {
   try {
     const response = await getPlayerResponse(deps.resolve, videoId, 'ANDROID_VR');
-    return response.durationSeconds;
+    return {
+      durationSeconds: response.durationSeconds,
+      // The premiere's start time, from the response that actually knows it.
+      // `/next` carries the prose ("Premieres Aug 22, 2026") and not always a
+      // timestamp; `/player` carries the timestamp. Read out of a response this
+      // call already makes, so a premiere costs no extra round trip.
+      premiereAtMs: response.scheduledStartMs,
+    };
   } catch (error) {
     log.warn(`${videoId}: /player gave no duration (${messageOf(error)})`);
-    return null;
+    return { durationSeconds: null, premiereAtMs: null };
   }
 }
 
@@ -72,9 +82,9 @@ async function durationFromPlayer(deps: VideoDeps, videoId: string): Promise<num
  * behind the `/next` one for no reason.
  */
 export async function getVideoInfo(deps: VideoDeps, videoId: string): Promise<VideoDetail> {
-  const [raw, durationSeconds] = await Promise.all([
+  const [raw, player] = await Promise.all([
     deps.browse.execute('/next', { videoId }),
-    durationFromPlayer(deps, videoId),
+    fromPlayer(deps, videoId),
   ]);
 
   const detail = parseVideoDetail(raw, 'video.info');
@@ -83,7 +93,11 @@ export async function getVideoInfo(deps: VideoDeps, videoId: string): Promise<Vi
     ...detail,
     // `/next` wins when it has one — a live stream's `null` is a statement, not
     // a gap, and `parseVideoDetail` already nulls the duration when `isLive`.
-    durationSeconds: detail.isLive ? null : (detail.durationSeconds ?? durationSeconds),
+    durationSeconds: detail.isLive ? null : (detail.durationSeconds ?? player.durationSeconds),
+    // `/next` first, `/player` behind it — same precedence as the duration, for
+    // the same reason: the watch page's own payload is the one describing the
+    // page the user is looking at.
+    premiereAtMs: detail.premiereAtMs ?? player.premiereAtMs,
     // An id is what every follow-up call keys on. A layout that hides it in a
     // place the parser does not know about would otherwise produce a detail
     // nothing can act on, silently.

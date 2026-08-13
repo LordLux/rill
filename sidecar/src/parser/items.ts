@@ -8,6 +8,7 @@
  */
 
 import type { ChannelItem, FeedItem, MixItem, PlaylistItem, VideoItem } from '../types.ts';
+import { premiereStartMs } from './premiere.ts';
 import {
   asArray,
   deepFind,
@@ -118,6 +119,7 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     viewCountText: detailRows.find(isViewCountText) ?? null,
     publishedText: detailRows.find(isPublishedText) ?? null,
     badges: badges.labels.filter((label) => label !== 'LIVE'),
+    premiereAtMs: premiereStartMs(node),
     canWatchLater: actions.canWatchLater,
     canAddToQueue: actions.canAddToQueue,
   } satisfies VideoItem;
@@ -163,6 +165,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     viewCountText,
     publishedText: text(node['publishedTimeText']),
     badges: badges.labels.filter((label) => label !== 'LIVE'),
+    premiereAtMs: premiereStartMs(node),
     canWatchLater: actions.canWatchLater,
     canAddToQueue: actions.canAddToQueue,
   } satisfies VideoItem;

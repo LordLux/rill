@@ -10,6 +10,7 @@
  */
 
 import { isSabrOnlyAdaptive } from '../playback/sabr-detect.ts';
+import { premiereStartMs } from './premiere.ts';
 import type { PlayerFormat, PlayerResult, Storyboard } from '../types.ts';
 import { asArray, deepFind, get, isObject, num, str, type Json } from './tree.ts';
 
@@ -170,6 +171,14 @@ export function parsePlayer(raw: Json): PlayerResult {
   const lengthSeconds = num(get(details, 'lengthSeconds'));
   const isLive = get(details, 'isLive') === true || get(details, 'isLiveContent') === true;
 
+  // A premiere or scheduled stream. `isUpcoming` is the flag YouTube sets, and
+  // `LIVE_STREAM_OFFLINE` is the status the ladder sees for the same video — both
+  // are accepted because neither has been observed alone and a premiere that
+  // reads as an ordinary dead video is the bug this exists to stop.
+  const isUpcoming =
+    get(details, 'isUpcoming') === true ||
+    str(get(body, 'playabilityStatus', 'status')) === 'LIVE_STREAM_OFFLINE';
+
   return {
     videoId: str(get(details, 'videoId')),
     formats,
@@ -181,6 +190,8 @@ export function parsePlayer(raw: Json): PlayerResult {
       str(get(body, 'playabilityStatus', 'messages', '0')),
     durationSeconds: isLive ? null : lengthSeconds,
     isLive,
+    isUpcoming,
+    scheduledStartMs: isUpcoming ? premiereStartMs(body) : null,
     // Deliberately about the *adaptive* ladder, not about every format — a
     // SABR-only WEB response still carries a working itag 18. The rule lives in
     // playback/sabr-detect.ts so there is exactly one copy of it.

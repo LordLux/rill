@@ -68,6 +68,7 @@ class PlaybackState {
     this.isSwitchingQuality = false,
     this.hold,
     this.error,
+    this.errorCode,
     this.errorRetry,
     this.reportError,
   });
@@ -105,6 +106,13 @@ class PlaybackState {
 
   final String? error;
 
+  /// The envelope's code, kept alongside its message.
+  ///
+  /// The message is for a human; this is what the UI switches on. Added for
+  /// `VIDEO_UPCOMING`, which needs a different screen entirely rather than a
+  /// differently-worded failure — see [isUpcoming].
+  final String? errorCode;
+
   /// From `protocol.md` §4. `STREAM_UNAVAILABLE` is `user`: show the error with
   /// a retry affordance, never loop silently — the ladder's floor is a very good
   /// bet and not a promise (F9), so "Unavailable" is a state a user can retry
@@ -121,6 +129,13 @@ class PlaybackState {
   bool get hasVideo => source?.best != null;
   bool get canRetry => error != null && errorRetry != RpcRetryMode.no;
 
+  /// A premiere: the video is fine, it has not started.
+  ///
+  /// Not an error state the user can act on by retrying — `retry` is `no` — so
+  /// the watch page shows the scheduled time and a reminder rather than
+  /// "This video would not open" over a *Try again* that cannot work yet.
+  bool get isUpcoming => errorCode == 'VIDEO_UPCOMING';
+
   /// The ladder the quality menu lists. Empty when nothing is open.
   List<PlaybackVariant> get variants => source?.variants ?? const [];
 
@@ -133,6 +148,7 @@ class PlaybackState {
     bool? isSwitchingQuality,
     Object? hold = _unchanged,
     Object? error = _unchanged,
+    Object? errorCode = _unchanged,
     Object? errorRetry = _unchanged,
     Object? reportError = _unchanged,
   }) {
@@ -150,6 +166,7 @@ class PlaybackState {
       // *cleared* when the switch finishes, and `??` cannot clear anything.
       hold: identical(hold, _unchanged) ? this.hold : hold as PlaybackHold?,
       error: identical(error, _unchanged) ? this.error : error as String?,
+      errorCode: identical(errorCode, _unchanged) ? this.errorCode : errorCode as String?,
       errorRetry: identical(errorRetry, _unchanged) ? this.errorRetry : errorRetry as RpcRetryMode?,
       reportError:
           identical(reportError, _unchanged) ? this.reportError : reportError as String?,
@@ -291,6 +308,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       isLoading: true,
       isSwitchingQuality: false,
       error: null,
+      errorCode: null,
       errorRetry: null,
       reportError: null,
     );
@@ -328,7 +346,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       _reportTimer = Timer.periodic(reportInterval, (_) => unawaited(_report(null)));
     } on RpcException catch (e) {
       if (generation != _generation || _disposed) return;
-      _fail(e.message, e.retry);
+      _fail(e.message, e.retry, code: e.code);
     } catch (e) {
       if (generation != _generation || _disposed) return;
       // Not an envelope — a bug on this side. `user` is the honest reading:
@@ -337,13 +355,14 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
   }
 
-  void _fail(String message, RpcRetryMode retry) {
+  void _fail(String message, RpcRetryMode retry, {String? code}) {
     if (_disposed) return;
     state = state.copyWith(
       isLoading: false,
       source: null,
       sessionId: null,
       error: message,
+      errorCode: code,
       errorRetry: retry,
     );
   }

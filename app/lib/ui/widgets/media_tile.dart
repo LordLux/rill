@@ -27,6 +27,20 @@ const List<String> tmpMenuContents = [];
 
 enum DurationBadgeTone { normal, live, music }
 
+/// The reminder CTA on a premiere tile.
+const Key tileNotifyKey = ValueKey('tile-notify');
+
+/// `Notify me` — with the date when the card is wide enough to carry it.
+///
+/// Short by design: this sits under a channel name in a grid column, and the
+/// long form ("Premieres 22/8/2026 at 15:00") is the watch page's job, where
+/// there is room for it to be the headline rather than a button label.
+String tilePremiereLabel(int premiereAtMs) {
+  final at = DateTime.fromMillisecondsSinceEpoch(premiereAtMs).toLocal();
+  final minute = at.minute.toString().padLeft(2, '0');
+  return 'Notify me • ${at.day}/${at.month} ${at.hour}:$minute';
+}
+
 class TileSpec {
   final String title;
   final String thumbnailUrl;
@@ -48,6 +62,12 @@ class TileSpec {
   final bool canWatchLater;
   final bool canAddToQueue;
 
+  /// When this video premieres, unix ms — null for everything already out.
+  ///
+  /// Drives the reminder CTA at the foot of the card. A tile carries this from
+  /// the feed response itself, so a grid of premieres costs no extra request.
+  final int? premiereAtMs;
+
   // bottom slots
   final String? avatarUrl;
   final String primaryLine;
@@ -63,6 +83,7 @@ class TileSpec {
     required this.badges,
     required this.canWatchLater,
     required this.canAddToQueue,
+    this.premiereAtMs,
     this.avatarUrl,
     required this.primaryLine,
     this.secondaryLine,
@@ -94,6 +115,7 @@ TileSpec? specFor(FeedItem item) {
         badges: v.badges,
         canWatchLater: v.canWatchLater,
         canAddToQueue: v.canAddToQueue,
+        premiereAtMs: v.premiereAtMs,
         avatarUrl: v.channelAvatarUrl,
         primaryLine: v.channelName,
         secondaryLine: (v.viewCountText != null || v.publishedText != null) ? '${v.viewCountText ?? ''}${v.publishedText != null ? ' • ${v.publishedText}' : ''}'.trim() : null,
@@ -549,6 +571,38 @@ class _MediaTileState extends State<MediaTile> {
                           ),
                         )
                         .toList(),
+                  ),
+                ),
+              // **The premiere CTA, at the foot of the card.**
+              //
+              // Disabled, like the watch page's: the affordance is real, the
+              // reminder is not wired to YouTube yet, and a button that looks
+              // like it worked and did nothing is the worse of the two.
+              //
+              // Full width rather than tucked beside the metadata, because it is
+              // the only thing on this tile that is not describing the video —
+              // and because the grid's tiles are narrow enough that a button
+              // sharing a row with a channel name would truncate one of them.
+              if (widget.spec.premiereAtMs != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      key: tileNotifyKey,
+                      onPressed: null,
+                      icon: const Icon(Icons.notifications_none, size: 16),
+                      label: Text(
+                        tilePremiereLabel(widget.spec.premiereAtMs!),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
                   ),
                 ),
             ],

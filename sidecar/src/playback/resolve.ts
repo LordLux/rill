@@ -231,6 +231,13 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
 
   const reason = response.playabilityReason ?? '(no reason given)';
 
+  // A premiere. Checked before everything else because `LIVE_STREAM_OFFLINE`
+  // would otherwise fall through to `STREAM_UNAVAILABLE` and present a perfectly
+  // healthy video as one that would not open.
+  if (response.isUpcoming) {
+    throw new RpcError('VIDEO_UPCOMING', reason);
+  }
+
   if (status === 'UNPLAYABLE' && /page needs to be reloaded/i.test(reason)) {
     // Hard invariant 7. If this ever fires, the `/player` payload lost its
     // signatureTimestamp or it no longer matches the deciphering player.
@@ -733,6 +740,18 @@ export async function descendLadder(
       // `STREAM_REQUIRES_SABR` is the designed decline and stays at debug; the
       // rest are worth seeing, because a tier failing for an unexpected reason
       // still looks like success from the outside once a lower tier serves it.
+      // **A premiere ends the ladder rather than declining down it.** No lower
+      // tier can resolve a video that has not started — tier 5's progressive
+      // floor least of all — so continuing spends four more `/player` calls to
+      // arrive at "every tier declined", which is both slower and the wrong
+      // answer: the UI would offer *Try again* on something that cannot succeed
+      // until a date. Rethrown as-is so the scheduled time and YouTube's own
+      // wording survive to Flutter.
+      if (hasCode(error, 'VIDEO_UPCOMING')) {
+        log.info(`${videoId}: not resolving — ${error instanceof Error ? error.message : error}`);
+        throw error;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       declined.push(`${tier.name}: ${message}`);
       if (hasCode(error, 'STREAM_REQUIRES_SABR')) {

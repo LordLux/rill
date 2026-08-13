@@ -92,6 +92,7 @@ interface VideoItem {
   viewCountText: string | null;     // display string, not parsed
   publishedText: string | null;
   badges: string[];                 // "4K", "New", "Members only"
+  premiereAtMs: number | null;      // unix ms; null unless it is a premiere
   canWatchLater: boolean;
   canAddToQueue: boolean;
 }
@@ -221,6 +222,14 @@ what you are testing.
 - **When `app/pubspec.yaml` is first created**, pin
   `media_kit_libs_windows_video: 1.0.11` exactly (not caret). A bump lands
   modern FFmpeg and reintroduces the F13 seek freeze. See §2.4.
+- **A premiere is not a broken video.** `playback.open` answers `VIDEO_UPCOMING`
+  (`retry: no`) for anything YouTube reports as `LIVE_STREAM_OFFLINE` or
+  `isUpcoming`, and that code **ends the ladder** instead of declining down it —
+  no lower tier can resolve a stream that has not started. The UI shows the
+  thumbnail, the scheduled time and a reminder, never a *Try again*. The time
+  itself rides on `VideoItem.premiereAtMs` and `VideoDetail.premiereAtMs`; the
+  extraction is one shared rule in `parser/premiere.ts`, because three parsers
+  need it and YouTube puts it in three different places.
 - **`playback.report` is load-bearing.** If watch events stop landing, the
   recommender stops training and the homepage drifts from the real one, which
   defeats the point of the app. Report every 10–30 s plus on state changes.

@@ -19,6 +19,10 @@ import '../video_info.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
 
+/// The premiere slate and its reminder button, for tests.
+const Key premiereSlateKey = ValueKey('premiere-slate');
+const Key premiereNotifyKey = ValueKey('premiere-notify');
+
 /// The watch page (task §3).
 ///
 /// It renders **whatever the queue is pointing at**, rather than a video handed
@@ -303,7 +307,11 @@ class _PlayerSurface extends ConsumerWidget {
           if (!fullscreen) engine.videoSurface(),
           if (playback.isLoading)
             Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
-          if (playback.error != null) _Unavailable(playback: playback),
+          // A premiere is not a failure, so it does not get the failure screen.
+          if (playback.isUpcoming)
+            _PremiereSlate(playback: playback)
+          else if (playback.error != null)
+            _Unavailable(playback: playback),
           if (playback.error == null && !playback.isLoading && !fullscreen)
             PlayerControls(engine: engine),
         ],
@@ -313,6 +321,114 @@ class _PlayerSurface extends ConsumerWidget {
     if (!rounded) return content;
     return ClipRRect(borderRadius: BorderRadius.circular(12), child: content);
   }
+}
+
+/// A video that has not premiered yet.
+///
+/// **The thumbnail, the date, and a reminder — not an error.** `playback.open`
+/// answers `VIDEO_UPCOMING` for these, and before this they landed on
+/// "This video would not open" above a *Try again* button that could only fail
+/// for another nine days. Nothing is wrong with the video; it has a start time.
+///
+/// The exact time comes from `video.info` (`premiereAtMs`), which the page
+/// already fetches. When that has not arrived — or a layout hid it — the slate
+/// falls back to YouTube's own prose, which rides along on the error message
+/// ("Premieres in 9 days"). One of the two is always present, and the fallback
+/// is the reason this does not wait on `video.info` before drawing.
+class _PremiereSlate extends ConsumerWidget {
+  const _PremiereSlate({required this.playback});
+
+  final PlaybackState playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final tokens = theme.tokens;
+    final item = playback.item;
+    final detail = item == null ? null : ref.watch(videoInfoProvider(item.id)).value;
+    final premiereAt = detail?.premiereAtMs;
+    final thumbnailUrl = item?.thumbnailUrl;
+
+    return Stack(
+      key: premiereSlateKey,
+      fit: StackFit.expand,
+      children: [
+        // The thumbnail YouTube shows in place of the video. `contain` rather
+        // than `cover`: a 16:9 thumbnail in a 16:9 box is the same either way,
+        // and anything else loses its edges rather than its bars.
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+          Image.network(thumbnailUrl, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+        // Enough scrim at the bottom to read the text off any thumbnail, and
+        // none at the top — the same shape as the control bar's.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                tokens.scrim.withValues(alpha: 0.75),
+                tokens.scrim.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomLeft,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Premiere',
+                  style: TextStyle(
+                    color: tokens.onScrim.withValues(alpha: 0.7),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  premiereText(premiereAt, playback.error),
+                  style: TextStyle(
+                    color: tokens.onScrim,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Disabled, like the captions button: the affordance is real,
+                // the reminder is not wired to YouTube yet, and a button that
+                // looks like it worked and did nothing is the worse of the two.
+                FilledButton.icon(
+                  key: premiereNotifyKey,
+                  onPressed: null,
+                  icon: const Icon(Icons.notifications_none, size: 18),
+                  label: const Text('Notify me'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The line under "Premiere".
+///
+/// Prefers the timestamp, because a date is what someone deciding whether to
+/// come back actually needs. Falls back to YouTube's relative prose, which is
+/// what arrives when `video.info` has not answered yet or carried no timestamp.
+@visibleForTesting
+String premiereText(int? premiereAtMs, String? fallback) {
+  if (premiereAtMs == null) return fallback ?? 'Premieres soon';
+  final at = DateTime.fromMillisecondsSinceEpoch(premiereAtMs).toLocal();
+  final time = TimeOfDay.fromDateTime(at);
+  final minute = time.minute.toString().padLeft(2, '0');
+  return 'Premieres ${at.day}/${at.month}/${at.year} at ${time.hour}:$minute';
 }
 
 /// `STREAM_UNAVAILABLE` and friends (§4).
