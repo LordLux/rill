@@ -182,6 +182,24 @@ included — on the first import that reaches it, and that lands on the first us
 action, not on startup. Rebuild after changing sidecar sources or the fallback is
 what you are testing.
 
+**A release build carries its own copy, and `bun run build` does not update it.**
+`flutter build windows` copies the whole `sidecar/` tree into
+`app/build/windows/x64/runner/Release/sidecar/`, and `findSidecarRoot` checks the
+directory beside the executable *first* — so a release app runs that copy, not
+the one in the repo. Rebuilding the sidecar alone leaves the app on whatever was
+current when Flutter last built. This is silent and it wastes whole measurement
+runs: a fix verified this way appears not to work, with no error and no clue,
+because the code being exercised is the old code. Either re-run
+`flutter build windows --release` after `bun run build`, or copy
+`sidecar/dist/sidecar.exe` over the bundled one. **Re-running
+`flutter build windows --release` is *not* enough** — measured 2026-08-13: the
+copy step does not re-run for an already-populated bundle, so the app kept a
+sidecar nine hours older than the one just built, with no warning. Copy the
+binary over the bundled one **explicitly**, and check it took — `grep` a string
+from the new build inside the bundled `.exe` — before trusting any device
+measurement. Otherwise the run measures the previous sidecar and says so
+nowhere.
+
 ---
 
 ## Notes that will bite otherwise

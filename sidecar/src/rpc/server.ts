@@ -61,6 +61,22 @@ async function videoDeps(): Promise<{ browse: Session; resolve: Session }> {
   return { browse, resolve };
 }
 
+/**
+ * Throw away the resolve session and mint a replacement.
+ *
+ * **Resolve only, and that is the whole safety property.** `browseSessionPromise`
+ * is untouched: it is the `WEB` session carrying the user's cookies, and
+ * dropping it would sign them out on a quarter of launches to fix a stream URL —
+ * a worse failure, and a silent one, because a degraded session answers HTTP 200
+ * with an empty feed (F7). Asserted in `bucket.test.ts`.
+ *
+ * Used only by the poisoned-bucket retry (`playback/bucket.ts`, F20).
+ */
+function remintResolveSession(): Promise<Session> {
+  resolveSessionPromise = null;
+  return getResolveSession();
+}
+
 function getResolveSession(): Promise<Session> {
   if (!resolveSessionPromise) {
     resolveSessionPromise = (async () => {
@@ -297,10 +313,10 @@ async function handleRequest(request: RpcRequest) {
       // in the whole resolution module graph, and doing that first made a
       // rejected request pay for a ladder it was never going to use.
       const videoId = requireString(params, 'videoId', 'playback.open');
-      const { openPlayback } = await import('../playback/resolve.ts');
+      const { openPlaybackPastBucket } = await import('../playback/bucket.ts');
       const session = await getResolveSession();
-      const result = await openPlayback(
-        { session },
+      const result = await openPlaybackPastBucket(
+        { session, remintResolveSession },
         { videoId, preload: params?.preload === true },
       );
       emitResponse(id, result);
