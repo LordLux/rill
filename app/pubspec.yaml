@@ -28,6 +28,7 @@ dependencies:
   silky_scroll: ^2.6.4
   # The accent has to survive a restart; one resetting each launch reads as broken.
   shared_preferences: ^2.3.2
+  selectable: ^0.6.5
 
 dev_dependencies:
   flutter_test:
