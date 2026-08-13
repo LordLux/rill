@@ -1,5 +1,19 @@
 @echo off
 setlocal
+
+if exist .env (
+  for /f "usebackq tokens=1,* delims==" %%A in (.env) do (
+    if "%%A"=="YT_COOKIE" set "YT_COOKIE=%%~B"
+  )
+)
+
+where fvm >nul 2>nul
+if errorlevel 1 (
+  set FLUTTER_CMD=flutter
+) else (
+  set FLUTTER_CMD=fvm flutter
+)
+
 set RELEASE=app\build\windows\x64\runner\Release
 
 echo Building sidecar...
@@ -7,7 +21,7 @@ cd sidecar
 call bun run build
 cd ..\app
 echo Building Flutter app...
-call flutter build windows --release
+call %FLUTTER_CMD% build windows --release
 cd ..
 
 REM Bundle the sidecar INTO the release folder.
