@@ -204,13 +204,13 @@ void main() {
     expect(barOpacity(tester), 1.0, reason: 'the controls start up');
 
     // Just under the threshold: still up.
-    await tester.pump(const Duration(milliseconds: 2500));
+    await tester.pump(const Duration(milliseconds: 400));
     expect(barOpacity(tester), 1.0, reason: 'they do not go early');
 
     // Past it: gone.
-    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
-    expect(barOpacity(tester), 0.0, reason: 'three seconds of a still pointer hides them');
+    expect(barOpacity(tester), 0.0, reason: 'one second of a still pointer hides them');
 
     // Movement brings them back.
     await movePointer(tester);

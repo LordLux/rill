@@ -43,6 +43,9 @@ abstract class PlaybackEngine {
   /// How far the demuxer has read ahead — the scrubber's buffered range.
   Stream<Duration> get bufferStream;
 
+  /// The width mpv is **actually decoding**. Null until the first frame is decoded.
+  Stream<int?> get widthStream;
+
   /// The height mpv is **actually decoding**, which is not the height that was
   /// asked for: a variant can be opened and then serve something else, and the
   /// quality menu that reports the request rather than the result is the one
@@ -64,6 +67,7 @@ abstract class PlaybackEngine {
   /// Whether mpv is waiting rather than presenting — see [bufferingStream].
   bool get buffering;
   Duration get buffer;
+  int? get width;
   int? get height;
   double get volume;
 
@@ -133,6 +137,7 @@ class MediaKitEngine implements PlaybackEngine {
       _player.stream.playing.listen((value) => _playing = value),
       _player.stream.buffering.listen((value) => _buffering = value),
       _player.stream.buffer.listen((value) => _buffer = value),
+      _player.stream.width.listen((value) => _width = value),
       _player.stream.height.listen((value) => _height = value),
       _player.stream.volume.listen((value) => _volume = value),
     ]);
@@ -147,6 +152,7 @@ class MediaKitEngine implements PlaybackEngine {
   bool _playing = false;
   bool _buffering = false;
   Duration _buffer = Duration.zero;
+  int? _width;
   int? _height;
   double _volume = 100;
 
@@ -184,7 +190,12 @@ class MediaKitEngine implements PlaybackEngine {
   /// slider painted over ours, both live and both responding to clicks.
   @override
   Widget videoSurface({BoxFit fit = BoxFit.contain}) {
-    return Video(controller: _video, controls: NoVideoControls, fit: fit);
+    return Video(
+      controller: _video,
+      controls: NoVideoControls,
+      fit: fit,
+      fill: const Color(0x00000000), // Colors.transparent
+    );
   }
 
   Future<void> _setStreamOptions() async {
@@ -217,6 +228,8 @@ class MediaKitEngine implements PlaybackEngine {
   @override
   Stream<Duration> get bufferStream => _player.stream.buffer;
   @override
+  Stream<int?> get widthStream => _player.stream.width;
+  @override
   Stream<int?> get heightStream => _player.stream.height;
   @override
   Stream<double> get volumeStream => _player.stream.volume;
@@ -233,6 +246,8 @@ class MediaKitEngine implements PlaybackEngine {
   bool get buffering => _buffering;
   @override
   Duration get buffer => _buffer;
+  @override
+  int? get width => _width;
   @override
   int? get height => _height;
   @override
@@ -255,6 +270,7 @@ class MediaKitEngine implements PlaybackEngine {
     // playing", and a stale height from the *previous* variant would keep
     // claiming the old one for as long as it took the first frame to decode —
     // which is precisely the window a user watches after switching.
+    _width = null;
     _height = null;
 
     await _player.open(Media(variant.videoUrl), play: play);

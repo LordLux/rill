@@ -32,7 +32,7 @@ import 'shortcuts.dart' show volumeStep;
 import 'view_mode.dart';
 
 /// How long the pointer must be still before the controls go away.
-const Duration autoHideDelay = Duration(seconds: 3);
+const Duration autoHideDelay = Duration(seconds: 1);
 
 /// How close two clicks have to be to count as one double click.
 ///
@@ -60,6 +60,9 @@ const Duration busySpinnerDelay = Duration(milliseconds: 250);
 
 /// How long the volume slider stays open after the pointer leaves it.
 const Duration volumeSliderHideDelay = Duration(milliseconds: 200);
+
+Duration _fadeDuration(bool visible) => visible ? const Duration(milliseconds: 150) : const Duration(milliseconds: 400);
+
 const Key playerPreviousKey = ValueKey('player-previous');
 const Key playerNextKey = ValueKey('player-next');
 const Key playerPlayPauseKey = ValueKey('player-play-pause');
@@ -301,8 +304,14 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                 top: 0,
                 child: AnimatedOpacity(
                   opacity: _visible ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: IgnorePointer(child: _FullscreenHeader(tokens: tokens)),
+                  duration: _fadeDuration(_visible),
+                  curve: Curves.easeIn,
+                  child: AnimatedSlide(
+                    offset: Offset.zero.translate(0, _visible ? 0 : -0.15),
+                    duration: _fadeDuration(_visible),
+                    curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                    child: IgnorePointer(child: _FullscreenHeader(tokens: tokens)),
+                  ),
                 ),
               ),
             Positioned(
@@ -312,33 +321,35 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               child: AnimatedOpacity(
                 key: playerControlsBarKey,
                 opacity: _visible ? 1 : 0,
-                duration: const Duration(milliseconds: 180),
-                child: IgnorePointer(
-                  ignoring: !_visible,
-                  child: GestureDetector(
-                    // Absorbs. A click on the bar's background is not a click on
-                    // the video, and must not pause it.
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {},
-                    child: DecoratedBox(
-                      // A gradient rather than a flat wash. A solid 55% scrim
-                      // over the whole bar darkens a band of the picture and
-                      // ends on a hard horizontal edge; a ramp to nothing has no
-                      // edge to notice, and it puts the density where the text
-                      // and icons actually are.
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [
-                            tokens.scrim.withValues(alpha: 0.5),
-                            tokens.scrim.withValues(alpha: 0),
-                          ],
+                duration: _fadeDuration(_visible),
+                curve: Curves.easeIn,
+                child: AnimatedSlide(
+                  offset: Offset.zero.translate(0, _visible ? 0 : 0.15),
+                  duration: _fadeDuration(_visible),
+                  curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                  child: IgnorePointer(
+                    ignoring: !_visible,
+                    child: GestureDetector(
+                      // Absorbs. A click on the bar's background is not a click on
+                      // the video, and must not pause it.
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              tokens.scrim.withValues(alpha: .95),
+                              tokens.scrim.withValues(alpha: .75),
+                              tokens.scrim.withValues(alpha: 0),
+                            ],
+                          ),
                         ),
-                      ),
-                      child: Material(
-                        type: MaterialType.transparency,
-                        child: _buildBar(context),
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: _buildBar(context),
+                        ),
                       ),
                     ),
                   ),
@@ -573,41 +584,45 @@ class _FullscreenHeader extends ConsumerWidget {
     final item = ref.watch(playbackProvider.select((playback) => playback.item));
     if (item == null) return const SizedBox.shrink();
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            tokens.scrim.withValues(alpha: 0.5),
-            tokens.scrim.withValues(alpha: 0),
-          ],
+    return Material(
+      type: MaterialType.transparency,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              tokens.scrim.withValues(alpha: .95),
+              tokens.scrim.withValues(alpha: .75),
+              tokens.scrim.withValues(alpha: 0),
+            ],
+          ),
         ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: tokens.onScrim,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: tokens.onScrim,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              item.channelName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: tokens.onScrim.withValues(alpha: 0.75), fontSize: 13),
-            ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                item.channelName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: tokens.onScrim.withValues(alpha: 0.75), fontSize: 13),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -893,9 +908,7 @@ class _VolumeState extends ConsumerState<_Volume> {
             children: [
               _ControlIcon(
                 iconKey: playerMuteKey,
-                icon: volume == 0
-                    ? Icons.volume_off
-                    : (volume < 50 ? Icons.volume_down : Icons.volume_up),
+                icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
                 onPressed: () {
                   widget.onChanged();
                   unawaited(ref.read(playbackProvider.notifier).toggleMute());

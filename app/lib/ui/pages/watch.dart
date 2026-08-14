@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:async/async.dart' show StreamGroup;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silky_scroll/silky_scroll.dart';
 import '../../data/rpc/client.dart';
 // `Chip` here is Material's. The domain's `Chip` is the feed's filter strip and
 // has no business on this page — hidden rather than aliased so a later edit that
@@ -19,9 +22,25 @@ import '../video_info.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
 
-/// The premiere slate and its reminder button, for tests.
 const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
+
+final _aspectRatioProvider = StreamProvider.autoDispose<double>((ref) async* {
+  final engine = ref.watch(playbackEngineProvider);
+  double currentRatio() {
+    if (engine.width != null && engine.height != null && engine.height! > 0) {
+      return engine.width! / engine.height!;
+    }
+    return 16 / 9;
+  }
+
+  yield currentRatio();
+
+  final merged = StreamGroup.merge<int?>([engine.widthStream, engine.heightStream]);
+  await for (final _ in merged) {
+    yield currentRatio();
+  }
+});
 
 /// The watch page (task §3).
 ///
@@ -65,9 +84,11 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     final playback = ref.watch(playbackProvider);
     final item = ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
 
-    if (item == null) {
-      return const PageWrapper(title: Text('Watch'), body: Center(child: Text('Nothing playing.')));
-    }
+    if (item == null)
+      return const PageWrapper(
+        title: Text('Watch'),
+        body: Center(child: Text('Nothing playing.')),
+      );
 
     _loadedRelatedFor ??= item.id;
     final info = ref.watch(videoInfoProvider(item.id));
@@ -97,128 +118,213 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       ],
       body: LayoutBuilder(
         builder: (context, constraints) {
-          // Theatre takes the whole content width, so there is nothing left to
-          // put a rail beside. It drops to the one-column layout regardless of
-          // how wide the window is, and the rail moves below the player.
           final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
-          final wide = constraints.maxWidth > 1100 && !theatre;
           final detail = info.value;
+          final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (16 / 9);
+          final targetAspectRatio = math.max(16 / 9, actualAspectRatio);
 
-          // A third of the width, capped. A fixed 400 overflows the row on any
-          // window narrow enough to still count as wide — measured at 1500 px,
-          // where the rail ran off the right edge and the tiles were cut in half.
-          final railWidth = math.min(400.0, constraints.maxWidth / 3);
+          return TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: targetAspectRatio),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            builder: (context, aspectRatio, _) {
+              double railWidth = 0;
+              double mainContainerWidth = constraints.maxWidth;
+              final isDesktop = constraints.maxWidth >= 889;
 
-          // **Theatre grows sideways only.** The box keeps the height it has in
-          // the ordinary layout and spans the full content width, so a 16:9
-          // video gains side bars rather than a taller picture. Computed from
-          // the width the player *would* have without theatre — which is why the
-          // rail's width is subtracted here whether or not the rail is currently
-          // drawn: in theatre it is not, and taking the current width would make
-          // the box grow every time it was entered.
-          //
-          // It filled `constraints.maxHeight` before this, which is the other
-          // reading of "expands to fill the content area" and the wrong one: on
-          // a 2560×1080 window that is a player nearly three times as tall,
-          // pushing everything below it off the screen.
-          final normalPlayerWidth =
-              (constraints.maxWidth > 1100 ? constraints.maxWidth - railWidth : constraints.maxWidth) - 32;
-          final theatreHeight = math.min(normalPlayerWidth * 9 / 16, constraints.maxHeight);
+              if (isDesktop) {
+                final effectiveWidth = math.min(constraints.maxWidth, 2105.0);
+                if (effectiveWidth >= 1042.0) {
+                  railWidth = 453.0;
+                } else {
+                  railWidth = math.max(300.0, effectiveWidth - 589.0);
+                }
+                mainContainerWidth = effectiveWidth - railWidth;
+              }
 
-          final main = ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              // **Theatre**: the player spans the app's content area edge to
-              // edge at the height it already had, the chrome stays, and the OS
-              // window is untouched. A layout change and nothing more — which is
-              // the whole difference from fullscreen.
-              if (theatre)
-                SizedBox(
-                  height: theatreHeight,
-                  child: _PlayerSurface(playback: playback, rounded: false),
-                )
-              else
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: _PlayerSurface(playback: playback),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _Meta(item: item, info: info),
-                    const SizedBox(height: 12),
-                    _Actions(item: item),
-                    const SizedBox(height: 16),
-                    if (detail != null)
-                      _Description(
-                        detail: detail,
-                        expanded: _descriptionExpanded,
-                        onToggle: () =>
-                            setState(() => _descriptionExpanded = !_descriptionExpanded),
+              final viewportHeight = MediaQuery.of(context).size.height;
+              final maxPlayerHeight = math.max(480.0, viewportHeight - 169.0);
+              final minPlayerHeight = isDesktop ? 480.0 : 0.0;
+
+              final maxPlayerWidth = maxPlayerHeight * aspectRatio;
+              if (mainContainerWidth > maxPlayerWidth + 16.0) {
+                mainContainerWidth = maxPlayerWidth + 16.0;
+              }
+
+              // Theatre takes the whole content width, so there is nothing left to
+              // put a rail beside. It drops to the one-column layout regardless of
+              // how wide the window is, and the rail moves below the player.
+              final wide = isDesktop && !theatre;
+
+              // **Theatre grows sideways only.** The box keeps the height it has in
+              // the ordinary layout and spans the full content width, so a 16:9
+              // video gains side bars rather than a taller picture. Computed from
+              // the width the player *would* have without theatre — which is why the
+              // rail's width is subtracted here whether or not the rail is currently
+              // drawn: in theatre it is not, and taking the current width would make
+              // the box grow every time it was entered.
+              final normalPlayerWidth = mainContainerWidth - 16;
+              final theatreHeight = math.max(minPlayerHeight, math.min(normalPlayerWidth / aspectRatio, maxPlayerHeight));
+
+              final main = SilkyListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  // **Theatre**: the player spans the app's content area edge to
+                  // edge at the height it already had, the chrome stays, and the OS
+                  // window is untouched. A layout change and nothing more — which is
+                  // the whole difference from fullscreen.
+                  if (theatre)
+                    SizedBox(
+                      height: theatreHeight,
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: actualAspectRatio,
+                          child: _PlayerSurface(playback: playback, rounded: false),
+                        ),
                       ),
-                    if (!wide) ...[
-                      const SizedBox(height: 24),
-                      ..._relatedSection(detail, item.id),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          );
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: minPlayerHeight,
+                          maxHeight: maxPlayerHeight,
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: aspectRatio, // targetAspectRatio (animated)
+                          child: Center(
+                            child: AspectRatio(
+                              aspectRatio: actualAspectRatio,
+                              child: _PlayerSurface(playback: playback),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _Meta(item: item, info: info),
+                        const SizedBox(height: 12),
+                        _Actions(item: item),
+                        const SizedBox(height: 16),
+                        if (detail != null)
+                          _Description(
+                            detail: detail,
+                            expanded: _descriptionExpanded,
+                            onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+                          ),
+                        if (!wide) ...[
+                          const SizedBox(height: 24),
+                          ..._relatedSection(detail, item.id, asGrid: true),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              );
 
-          if (!wide) return main;
+              if (!wide) return main;
 
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: main),
-              SizedBox(
-                key: const ValueKey('related-rail'),
-                width: railWidth,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(0, 8, 16, 32),
-                  children: _relatedSection(detail, item.id),
-                ),
-              ),
-            ],
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: mainContainerWidth,
+                    child: main,
+                  ),
+                  SizedBox(
+                    key: const ValueKey('related-rail'),
+                    width: railWidth,
+                    child: SilkyListView(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 16, 32),
+                      children: _relatedSection(detail, item.id),
+                    ),
+                  ),
+                ],
+              );
+            },
           );
         },
       ),
     );
   }
 
-  List<Widget> _relatedSection(VideoDetail? detail, String videoId) {
+  List<Widget> _relatedSection(VideoDetail? detail, String videoId, {bool asGrid = false}) {
     final scheme = Theme.of(context).colorScheme;
     if (detail == null) return const [];
 
     final items = [...detail.related, ..._extraRelated];
     final continuation = _relatedContinuation ?? detail.relatedContinuation;
 
-    return [
-      Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          'Related',
-          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: scheme.onSurface),
-        ),
+    final header = Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        'Related',
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: scheme.onSurface),
       ),
+    );
+
+    final showMore = continuation != null
+        ? Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 24),
+              child: TextButton(
+                onPressed: _loadingRelated ? null : () => _loadMoreRelated(videoId, continuation),
+                child: Text(_loadingRelated ? 'Loading…' : 'Show more'),
+              ),
+            ),
+          )
+        : const SizedBox.shrink();
+
+    if (asGrid) {
+      return [
+        header,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final crossAxisCount = constraints.maxWidth >= 600 ? 2 : 1;
+            if (crossAxisCount == 1) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final related in items)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _relatedTile(related),
+                    ),
+                ],
+              );
+            }
+
+            return Wrap(
+              spacing: 16,
+              runSpacing: 24,
+              children: [
+                for (final related in items)
+                  SizedBox(
+                    width: ((constraints.maxWidth - 16) / 2).floorToDouble(),
+                    child: _relatedTile(related),
+                  ),
+              ],
+            );
+          },
+        ),
+        showMore,
+      ];
+    }
+
+    return [
+      header,
       for (final related in items)
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _relatedTile(related),
         ),
-      if (continuation != null)
-        Center(
-          child: TextButton(
-            onPressed: _loadingRelated ? null : () => _loadMoreRelated(videoId, continuation),
-            child: Text(_loadingRelated ? 'Loading…' : 'Show more'),
-          ),
-        ),
+      showMore,
     ];
   }
 
@@ -276,7 +382,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
 /// this route is popped. On a fake engine (tests) the surface is a placeholder,
 /// which is the point of the engine being an interface.
 class _PlayerSurface extends ConsumerWidget {
-  const _PlayerSurface({required this.playback, this.rounded = true});
+  const _PlayerSurface({required this.playback, this.rounded = true, this.actualAspectRatio});
 
   final PlaybackState playback;
 
@@ -284,12 +390,18 @@ class _PlayerSurface extends ConsumerWidget {
   /// corner reads as a mistake rather than as a card.
   final bool rounded;
 
+  /// The decoded aspect ratio of the stream. When non-null, centers and constrains
+  /// the video texture to this ratio inside the outer player box while keeping
+  /// controls and scrim full-width.
+  final double? actualAspectRatio;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final engine = ref.read(playbackEngineProvider);
     final fullscreen = ref.watch(playerViewProvider.select((view) => view.fullscreen));
+    final ratio = actualAspectRatio ?? ref.watch(_aspectRatioProvider).value ?? (16 / 9);
 
     final content = ColoredBox(
       color: theme.tokens.scrim,
@@ -304,22 +416,24 @@ class _PlayerSurface extends ConsumerWidget {
           // instead, so this box goes empty rather than asking for a second
           // `Video` on the same texture id. The box itself stays, which is what
           // keeps the page from reflowing behind the fullscreen layer.
-          if (!fullscreen) engine.videoSurface(),
-          if (playback.isLoading)
-            Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
+          if (!fullscreen)
+            Center(
+              child: AspectRatio(
+                aspectRatio: ratio,
+                child: engine.videoSurface(),
+              ),
+            ),
+          if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           // A premiere is not a failure, so it does not get the failure screen.
-          if (playback.isUpcoming)
-            _PremiereSlate(playback: playback)
-          else if (playback.error != null)
-            _Unavailable(playback: playback),
-          if (playback.error == null && !playback.isLoading && !fullscreen)
-            PlayerControls(engine: engine),
+          if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
+
+          if (playback.error == null && !playback.isLoading && !fullscreen) PlayerControls(engine: engine),
         ],
       ),
     );
 
     if (!rounded) return content;
-    return ClipRRect(borderRadius: BorderRadius.circular(12), child: content);
+    return ClipRRect(borderRadius: BorderRadius.circular(11), clipBehavior: Clip.antiAliasWithSaveLayer, child: content);
   }
 }
 
@@ -356,8 +470,7 @@ class _PremiereSlate extends ConsumerWidget {
         // The thumbnail YouTube shows in place of the video. `contain` rather
         // than `cover`: a 16:9 thumbnail in a 16:9 box is the same either way,
         // and anything else loses its edges rather than its bars.
-        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
-          Image.network(thumbnailUrl, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty) Image.network(thumbnailUrl, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
         // Enough scrim at the bottom to read the text off any thumbnail, and
         // none at the top — the same shape as the control bar's.
         DecoratedBox(
@@ -652,9 +765,11 @@ class _Actions extends ConsumerWidget {
       await RpcClient.instance.call('action.addToWatchLater', {'videoId': item.id});
       messenger.showSnackBar(const SnackBar(content: Text('Saved to Watch Later')));
     } on RpcException catch (e) {
-      messenger.showSnackBar(SnackBar(
-        content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to save to Watch Later' : e.message),
-      ));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to save to Watch Later' : e.message),
+        ),
+      );
     } on Object catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }

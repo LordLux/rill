@@ -16,6 +16,7 @@ class FakeEngine implements PlaybackEngine {
   final _playing = StreamController<bool>.broadcast();
   final _buffering = StreamController<bool>.broadcast();
   final _buffer = StreamController<Duration>.broadcast();
+  final _width = StreamController<int?>.broadcast();
   final _height = StreamController<int?>.broadcast();
   final _volume = StreamController<double>.broadcast();
   final _completed = StreamController<bool>.broadcast();
@@ -37,6 +38,7 @@ class FakeEngine implements PlaybackEngine {
   bool _playingValue = false;
   bool _bufferingValue = false;
   Duration _bufferValue = Duration.zero;
+  int? _widthValue;
   int? _heightValue;
   double _volumeValue = 100;
 
@@ -50,6 +52,8 @@ class FakeEngine implements PlaybackEngine {
   Stream<bool> get bufferingStream => _buffering.stream;
   @override
   Stream<Duration> get bufferStream => _buffer.stream;
+  @override
+  Stream<int?> get widthStream => _width.stream;
   @override
   Stream<int?> get heightStream => _height.stream;
   @override
@@ -67,6 +71,8 @@ class FakeEngine implements PlaybackEngine {
   bool get buffering => _bufferingValue;
   @override
   Duration get buffer => _bufferValue;
+  @override
+  int? get width => _widthValue;
   @override
   int? get height => _heightValue;
   @override
@@ -99,6 +105,7 @@ class FakeEngine implements PlaybackEngine {
     emitPosition(Duration.zero);
     _durationValue = Duration.zero;
     _duration.add(_durationValue);
+    setWidth(null);
     setHeight(null);
 
     final gate = openGate;
@@ -109,6 +116,7 @@ class FakeEngine implements PlaybackEngine {
     // The real engine clears this and lets mpv report what it actually decodes.
     // Here the variant is taken at its word, which is enough for "the menu marks
     // what is playing" without pretending to model a mid-stream downgrade.
+    setWidth(variant.height * 16 ~/ 9); // Best guess for fake
     setHeight(variant.height);
     setPlaying(play);
   }
@@ -170,6 +178,7 @@ class FakeEngine implements PlaybackEngine {
     await _playing.close();
     await _buffering.close();
     await _buffer.close();
+    await _width.close();
     await _height.close();
     await _volume.close();
     await _completed.close();
@@ -185,6 +194,11 @@ class FakeEngine implements PlaybackEngine {
   void emitBuffer(Duration value) {
     _bufferValue = value;
     _buffer.add(value);
+  }
+
+  void setWidth(int? value) {
+    _widthValue = value;
+    _width.add(value);
   }
 
   void setHeight(int? value) {
