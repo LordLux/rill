@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/domain/video_detail.dart';
 
 void main() {
   test('Contract test against exported corpus', () {
@@ -27,6 +29,15 @@ void main() {
         // Validate that nothing threw and we have a valid FeedItem
         expect(item, isNotNull);
       }
+    }
+    
+    // Test VideoDetail against video-detail.json
+    final videoDetailFile = File(join(corpusDir.path, 'video-detail.json'));
+    if (videoDetailFile.existsSync()) {
+      final raw = jsonDecode(videoDetailFile.readAsStringSync()) as Map<String, dynamic>;
+      final detail = VideoDetail.fromJson(raw);
+      expect(detail, isNotNull);
+      expect(detail.id, isNotNull);
     }
   });
 }

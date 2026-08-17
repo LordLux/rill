@@ -15,8 +15,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/playback_source.dart';
-import '../widgets/silky_scroll_absorber.dart';
+import '../captions_controller.dart';
 import '../playback_controller.dart';
+import '../video_info.dart';
+import '../widgets/silky_scroll_absorber.dart';
 
 const Key playerSettingsButtonKey = ValueKey('player-settings-button');
 const Key playerQualityButtonKey = ValueKey('player-quality-button');
@@ -46,7 +48,7 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 /// bar, so it is not reached *through* the root and has nothing to go back to —
 /// which is why [PlayerMenuController.back] answers false for it and its header
 /// carries no chevron. [moreOptions] is the only real subpage.
-enum SettingsPage { root, moreOptions, quality }
+enum SettingsPage { root, moreOptions, quality, captions }
 
 @immutable
 class PlayerMenuState {
@@ -106,10 +108,10 @@ class PlayerMenuController extends Notifier<PlayerMenuState> {
   /// The subpage's back arrow. Returns whether there was anywhere to go, so a
   /// caller can tell "went back" from "nothing to do".
   ///
-  /// Only [SettingsPage.moreOptions] is under anything. Quality is its own top
-  /// level — see [SettingsPage].
+  /// [SettingsPage.moreOptions] and [SettingsPage.captions] live under the root.
+  /// Quality is its own top level — see [SettingsPage].
   bool back() {
-    if (state.page != SettingsPage.moreOptions) return false;
+    if (state.page == SettingsPage.root || state.page == SettingsPage.quality) return false;
     state = const PlayerMenuState(open: true, page: SettingsPage.root);
     return true;
   }
@@ -284,6 +286,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.root => const _RootPage(),
         SettingsPage.moreOptions => const _MoreOptionsPage(),
         SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
+        SettingsPage.captions => const _CaptionsPage(),
       },
     );
 
@@ -368,7 +371,6 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
 const List<({IconData icon, String label})> _rootPlaceholders = [
   (icon: Icons.bedtime_outlined, label: 'Sleep timer'),
   (icon: Icons.multitrack_audio, label: 'Audio track'),
-  (icon: Icons.subtitles_outlined, label: 'Subtitle track / CC'),
   (icon: Icons.slow_motion_video, label: 'Playback speed'),
 ];
 
@@ -410,7 +412,53 @@ class _RootPage extends ConsumerWidget {
         SizedBox(height: 3),
         Divider(height: 9, indent: 14, endIndent: 14, color: scheme.outlineVariant),
         SizedBox(height: 2),
+        _MenuRow(
+          icon: Icons.subtitles_outlined,
+          label: 'Captions',
+          trailing: Icons.chevron_right,
+          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captions),
+        ),
+        SizedBox(height: 2),
         for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
+      ],
+    );
+  }
+}
+
+class _CaptionsPage extends ConsumerWidget {
+  const _CaptionsPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(captionsProvider);
+    final videoId = ref.watch(playbackProvider.select((p) => p.item?.id));
+    final info = videoId != null ? ref.watch(videoInfoProvider(videoId)).value : null;
+    final tracks = info?.captionTracks ?? [];
+
+    return _MenuBody(
+      header: _MenuHeader(
+        title: 'Captions',
+        onBack: () => ref.read(playerMenuProvider.notifier).back(),
+      ),
+      children: [
+        _MenuRow(
+          icon: Icons.subtitles_off,
+          label: 'Off',
+          selected: !state.enabled,
+          onTap: () {
+            ref.read(captionsProvider.notifier).setTrack(null);
+            ref.read(playerMenuProvider.notifier).toggle();
+          },
+        ),
+        for (final track in tracks)
+          _MenuRow(
+            label: track.label,
+            selected: state.enabled && state.selectedTrack?.vssId == track.vssId,
+            onTap: () {
+              ref.read(captionsProvider.notifier).setTrack(track);
+              ref.read(playerMenuProvider.notifier).toggle();
+            },
+          ),
       ],
     );
   }
@@ -619,12 +667,13 @@ const Key playerQualityAutoKey = ValueKey('player-quality-auto');
 
 /// A row on the root page: icon, label, optional trailing value and chevron.
 class _MenuRow extends StatelessWidget {
-  const _MenuRow({super.key, required this.icon, required this.label, this.trailing, required this.onTap});
+  const _MenuRow({super.key, this.icon, required this.label, this.trailing, required this.onTap, this.selected = false});
 
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final IconData? trailing;
   final VoidCallback? onTap;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -639,20 +688,28 @@ class _MenuRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: foreground),
+            if (selected)
+              Icon(Icons.check, size: 18, color: foreground)
+            else if (icon != null)
+              Icon(icon, size: 18, color: foreground)
+            else
+              const SizedBox(width: 18),
             const SizedBox(width: 14),
             Expanded(
               child: Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, color: foreground),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-            SizedBox(
-              width: 24,
-              child: trailing == null ? null : Icon(trailing, size: 18, color: enabled ? scheme.onSurfaceVariant : foreground),
-            ),
+            if (trailing != null) ...[
+              const SizedBox(width: 8),
+              Icon(trailing, size: 18, color: foreground),
+            ],
           ],
         ),
       ),

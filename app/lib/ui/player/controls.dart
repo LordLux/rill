@@ -22,9 +22,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
 import '../../theme/tokens.dart';
+import '../captions_controller.dart';
+import '../video_info.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
+import 'captions_overlay.dart';
 import 'settings_menu.dart';
 import 'shortcuts.dart' show volumeStep;
 import 'view_mode.dart';
@@ -278,6 +281,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               key: const ValueKey('player-busy'),
               child: _BusySpinner(engine: widget.engine),
             ),
+            CaptionsOverlay(controlsVisible: _visible),
             // **Mounted unconditionally now that it fades.** The `if` used to
             // be here, and an `if` cannot animate an exit: the panel was gone
             // from the tree on the same frame it was told to close, with nothing
@@ -375,6 +379,18 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                 ),
                               ),
                               const SizedBox(height: 2),
+                              IconButton(
+                                icon: ref.watch(captionsProvider.select((c) => c.enabled))
+                                    ? const Icon(Icons.closed_caption)
+                                    : const Icon(Icons.closed_caption_outlined),
+                                color: ref.watch(captionsProvider.select((c) => c.enabled))
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.white,
+                                onPressed: (ref.watch(playbackProvider.select((p) => p.item?.id)) != null && ref.watch(videoInfoProvider(ref.watch(playbackProvider.select((p) => p.item!.id)))).value?.captionTracks.isNotEmpty == true)
+                                    ? () => ref.read(captionsProvider.notifier).toggle()
+                                    : null,
+                                tooltip: 'Captions',
+                              ),
                               KeyedSubtree(
                                 key: settingsMenuAnchorKey,
                                 child: _MenuButton(
@@ -543,16 +559,18 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  // Captions. Present and **disabled** — they are their own task
-                  // and there is nothing behind this yet. A disabled control
-                  // says "later"; a live one that does nothing says "broken".
-                  // (This replaces the reserved empty gap, which left the
-                  // right-hand cluster looking as though it had lost a button.)
-                  const _ControlIcon(
+                  _ControlIcon(
                     iconKey: playerCaptionsKey,
-                    icon: Icons.closed_caption_outlined,
+                    icon: ref.watch(captionsProvider.select((c) => c.enabled))
+                        ? Icons.closed_caption
+                        : Icons.closed_caption_outlined,
+                    color: ref.watch(captionsProvider.select((c) => c.enabled))
+                        ? Theme.of(context).colorScheme.primary
+                        : tokens.onScrim,
                     label: 'Captions',
-                    onPressed: null,
+                    onPressed: (ref.watch(playbackProvider.select((p) => p.item?.id)) != null && ref.watch(videoInfoProvider(ref.watch(playbackProvider.select((p) => p.item!.id)))).value?.captionTracks.isNotEmpty == true)
+                        ? () => ref.read(captionsProvider.notifier).toggle()
+                        : null,
                   ),
                   // **Quality, then the gear** — specific before general. It is
                   // the one picker anybody changes mid-video, so a row two taps
@@ -738,12 +756,13 @@ extension on Widget {
 }
 
 class _ControlIcon extends StatelessWidget {
-  const _ControlIcon({required this.iconKey, required this.icon, required this.label, required this.onPressed});
+  const _ControlIcon({required this.iconKey, required this.icon, required this.label, required this.onPressed, this.color});
 
   final Key iconKey;
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -755,7 +774,7 @@ class _ControlIcon extends StatelessWidget {
       // in front of the user, the first time the controls are drawn.
       mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
       icon: Icon(icon, semanticLabel: label),
-      color: tokens.onScrim,
+      color: color ?? tokens.onScrim,
       disabledColor: tokens.onScrim.withValues(alpha: 0.35),
       onPressed: onPressed,
     );

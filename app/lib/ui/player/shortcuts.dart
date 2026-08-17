@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../playback_controller.dart';
 import '../player_shell.dart';
+import '../captions_controller.dart';
 import 'settings_menu.dart';
 import 'view_mode.dart';
 
@@ -20,12 +21,15 @@ enum PlayerAction {
   fullscreen,
   theatre,
   escape,
+  seekToStart,
+  seekToEnd,
   seekToDecile,
   frameBackward,
   frameForward,
   previous,
   next,
   miniPlayer,
+  toggleCaptions,
 }
 
 /// One resolved key press. [seconds] carries ∓5 or ∓10; [decile] carries 0–9.
@@ -105,10 +109,11 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   if (key == LogicalKeyboardKey.keyF) return const PlayerShortcut(PlayerAction.fullscreen);
   if (key == LogicalKeyboardKey.keyT) return const PlayerShortcut(PlayerAction.theatre);
   if (key == LogicalKeyboardKey.keyI) return const PlayerShortcut(PlayerAction.miniPlayer);
+  if (key == LogicalKeyboardKey.keyC) return const PlayerShortcut(PlayerAction.toggleCaptions);
   if (key == LogicalKeyboardKey.escape) return const PlayerShortcut(PlayerAction.escape);
 
-  // TODO add end and home for seeking to the start and end of the video
-
+  if (key == LogicalKeyboardKey.home) return const PlayerShortcut(PlayerAction.seekToStart);
+  if (key == LogicalKeyboardKey.end) return const PlayerShortcut(PlayerAction.seekToEnd);
   // `,` and `.` step one frame; with Shift they step one second.
   //
   // **Both spellings of each key, and that is not belt-and-braces.** Flutter
@@ -238,6 +243,10 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         // The one shortcut that can decline. With neither mode on, `Esc` is
         // somebody else's key.
         return view.escape();
+      case PlayerAction.seekToStart:
+        playback.seekToFraction(0);
+      case PlayerAction.seekToEnd:
+        playback.seekToFraction(1);
       case PlayerAction.seekToDecile:
         playback.seekToFraction((shortcut.decile ?? 0) / 10);
       case PlayerAction.frameBackward:
@@ -250,6 +259,8 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         playback.next();
       case PlayerAction.miniPlayer:
         toMiniPlayerIn(ProviderScope.containerOf(context, listen: false));
+      case PlayerAction.toggleCaptions:
+        ref.read(captionsProvider.notifier).toggle();
     }
     return true;
   }

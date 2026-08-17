@@ -46,6 +46,9 @@ export interface VideoDeps {
   resolve: Session;
 }
 
+const missingCaptionsCache = new Map<string, number>();
+const CAPTION_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * The `/player` duration, or `null` if this video will not give us one.
  *
@@ -57,20 +60,41 @@ export interface VideoDeps {
 async function fromPlayer(
   deps: VideoDeps,
   videoId: string,
-): Promise<{ durationSeconds: number | null; premiereAtMs: number | null }> {
+): Promise<{ durationSeconds: number | null; premiereAtMs: number | null; captionTracks: any[] }> {
   try {
     const response = await getPlayerResponse(deps.resolve, videoId, 'ANDROID_VR');
+    let captionTracks = response.captionTracks || [];
+
+    // Fallback for when ANDROID_VR returns zero tracks
+    const now = Date.now();
+    const cachedExpiry = missingCaptionsCache.get(videoId);
+    const isCachedNegative = cachedExpiry !== undefined && now < cachedExpiry;
+
+    if (captionTracks.length === 0 || isCachedNegative) {
+      if (!isCachedNegative) {
+        log.info(`${videoId}: ANDROID_VR returned 0 caption tracks, trying WEB fallback`);
+      }
+      
+      const webResponse = await getPlayerResponse(deps.resolve, videoId, 'WEB');
+      captionTracks = webResponse.captionTracks || [];
+
+      if (captionTracks.length === 0) {
+        // Genuinely captionless, cache the negative result for an hour
+        missingCaptionsCache.set(videoId, now + CAPTION_CACHE_TTL_MS);
+      } else {
+        // We found captions on WEB that ANDROID_VR missed
+        missingCaptionsCache.delete(videoId);
+      }
+    }
+
     return {
       durationSeconds: response.durationSeconds,
-      // The premiere's start time, from the response that actually knows it.
-      // `/next` carries the prose ("Premieres Aug 22, 2026") and not always a
-      // timestamp; `/player` carries the timestamp. Read out of a response this
-      // call already makes, so a premiere costs no extra round trip.
       premiereAtMs: response.scheduledStartMs,
+      captionTracks,
     };
   } catch (error) {
     log.warn(`${videoId}: /player gave no duration (${messageOf(error)})`);
-    return { durationSeconds: null, premiereAtMs: null };
+    return { durationSeconds: null, premiereAtMs: null, captionTracks: [] };
   }
 }
 
@@ -102,6 +126,7 @@ export async function getVideoInfo(deps: VideoDeps, videoId: string): Promise<Vi
     // place the parser does not know about would otherwise produce a detail
     // nothing can act on, silently.
     id: detail.id || videoId,
+    captionTracks: player.captionTracks,
   };
 }
 
