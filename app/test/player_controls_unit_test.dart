@@ -221,7 +221,7 @@ void main() {
 
   group('the queue at its ends', () {
     test('previous and next stop rather than wrapping', () {
-      var queue = const QueueState()
+      var queue = QueueState()
           .appended(item('a'))
           .appended(item('b'))
           .appended(item('c'));
@@ -242,7 +242,7 @@ void main() {
     });
 
     test('an empty queue has neither end', () {
-      const queue = QueueState();
+      final queue = QueueState();
       expect(queue.hasPrevious, isFalse);
       expect(queue.hasNext, isFalse);
       expect(queue.reversed().currentIndex, isNull);

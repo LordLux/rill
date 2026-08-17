@@ -12,6 +12,7 @@ import 'theme/app_theme.dart';
 import 'ui/audio_delay_probe.dart';
 import 'ui/debug_player.dart';
 import 'ui/hover_preview.dart';
+import 'ui/page_wrapper.dart';
 import 'ui/pages/feed.dart';
 import 'ui/playback_controller.dart';
 import 'ui/player/controls_probe.dart';
@@ -56,8 +57,13 @@ Future<void> main() async {
     logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
   );
 
+  final drawerOpen = await readDrawerOpen();
+
   final container = ProviderContainer(
-    overrides: [playbackEngineProvider.overrideWithValue(engine)],
+    overrides: [
+      playbackEngineProvider.overrideWithValue(engine),
+      drawerStateProvider.overrideWith(() => DrawerStateController(initial: drawerOpen)),
+    ],
   );
 
   runApp(

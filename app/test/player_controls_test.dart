@@ -25,6 +25,7 @@ import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/pages/watch.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/controls.dart';
+import 'package:rill/ui/player/settings_menu.dart';
 import 'package:rill/ui/player/shortcuts.dart';
 import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
@@ -57,6 +58,17 @@ void disposeContainer() {
 
 /// Step outside the fake-async zone for as long as a real sidecar round trip
 /// needs. Same reason as `player_shell_test.dart`.
+/// Open the ladder.
+///
+/// One tap again: quality has its own button on the bar, beside the gear. It was
+/// briefly a row two taps inside the settings menu, and this helper is what kept
+/// that from being a dozen edits in each direction — which is the reason to keep
+/// it now that the ladder is one tap away, rather than to inline it back.
+Future<void> openQuality(WidgetTester tester) async {
+  await tester.tap(find.byKey(playerQualityButtonKey));
+  await tester.pumpAndSettle();
+}
+
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
   await tester.pumpAndSettle();
@@ -624,9 +636,8 @@ void main() {
 
     expect(engine.opened.single.height, 2160, reason: 'the ladder is taken best-first by default');
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
-    expect(find.byKey(playerQualityMenuKey), findsOneWidget);
+    await openQuality(tester);
+    expect(find.byKey(playerSettingsMenuKey), findsOneWidget);
     // Present and dead, on purpose (§3): the stepper it would drive is out of
     // scope, and the row is here so the menu keeps its shape when it lands.
     expect(find.byKey(playerQualityAutoKey), findsOneWidget);
@@ -674,8 +685,7 @@ void main() {
 
   testWidgets('the Auto row does nothing when clicked', (tester) async {
     await pumpWatching(tester);
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
 
     // Disabled, not merely inert: there is no `InkWell` under this row, so it
     // does not even take the ripple. That is also why the tap below is allowed
@@ -691,7 +701,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(engine.opened, hasLength(openedBefore), reason: 'no reopen');
-    expect(find.byKey(playerQualityMenuKey), findsOneWidget,
+    expect(find.byKey(playerSettingsMenuKey), findsOneWidget,
         reason: 'and the menu does not close, because nothing was chosen');
     expect(engine.playing, playingBefore,
         reason: 'nor does the click fall through to the video and pause it');
@@ -704,8 +714,7 @@ void main() {
     engine.setPlaying(false);
     await tester.pump();
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
     await settleReal(tester);
@@ -717,8 +726,7 @@ void main() {
 
   testWidgets('the chosen height is remembered for the rest of the session', (tester) async {
     await pumpWatching(tester);
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
     await settleReal(tester);
@@ -733,17 +741,29 @@ void main() {
     disposeContainer();
   });
 
-  testWidgets('the quality button shows the height mpv is actually decoding', (tester) async {
+  testWidgets('the quality panel shows the height mpv is actually decoding', (tester) async {
     await pumpWatching(tester);
     await tester.pump();
 
-    // Requested 2160; mpv says it is serving 1080. The button reports mpv.
+    // Requested 2160; mpv says it is serving 1080. The readout reports mpv.
+    //
+    // The number has moved twice — the quality button's face, then a row in the
+    // settings menu, now the quality panel's header — and the claim being pinned
+    // has not moved at all: it is the *decoded* height, not the requested one.
+    // Asserting on the claim rather than on the widget is why this test survived
+    // both moves.
     engine.setHeight(1080);
     await tester.pumpAndSettle();
 
+    await openQuality(tester);
+
     expect(
-      find.descendant(of: find.byKey(playerQualityButtonKey), matching: find.text('1080p')),
+      find.byKey(playerQualityHeaderKey),
       findsOneWidget,
+    );
+    expect(
+      tester.widget<Text>(find.byKey(playerQualityHeaderKey)).data,
+      '1080p',
       reason: 'the requested height would have said 2160p, confidently and wrongly',
     );
     disposeContainer();
@@ -1002,8 +1022,7 @@ void main() {
     final gate = Completer<void>();
     engine.openGate = gate.future;
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -1038,8 +1057,7 @@ void main() {
     final gate = Completer<void>();
     engine.openGate = gate.future;
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
 
@@ -1072,8 +1090,7 @@ void main() {
     final gate = Completer<void>();
     engine.openGate = gate.future;
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
 
@@ -1128,8 +1145,7 @@ void main() {
       await tester.pump();
     }
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
     await tick();
@@ -1166,8 +1182,7 @@ void main() {
 
     final gate = Completer<void>();
     engine.openGate = gate.future;
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
     engine.emitPosition(Duration.zero);
@@ -1204,8 +1219,7 @@ void main() {
     final gate = Completer<void>();
     engine.openGate = gate.future;
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
 
@@ -1244,8 +1258,7 @@ void main() {
     final firstOpen = Completer<void>();
     engine.openGate = firstOpen.future;
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('1080p60'));
     await tester.pump();
 
@@ -1329,8 +1342,7 @@ void main() {
       await tester.pump();
     }
 
-    await tester.tap(find.byKey(playerQualityButtonKey));
-    await tester.pumpAndSettle();
+    await openQuality(tester);
     await tester.tap(find.text('720p'));
     await tester.pump();
     await tick();

@@ -36,7 +36,7 @@ QueueState queueOf(List<String> ids, {int? current}) =>
 void main() {
   group('append', () {
     test('adding to an empty queue makes it current — that is what starts playback', () {
-      final state = const QueueState().appended(video('a'));
+      final state = QueueState().appended(video('a'));
       expect(describe(state), '[a]');
       expect(state.currentIndex, 0);
     });
@@ -54,7 +54,7 @@ void main() {
     });
 
     test('on an empty queue it is just an append, and starts playback', () {
-      expect(describe(const QueueState().insertedNext(video('x'))), '[x]');
+      expect(describe(QueueState().insertedNext(video('x'))), '[x]');
     });
 
     test('is not the same as appending — the distinction is the point', () {
@@ -70,7 +70,7 @@ void main() {
     });
 
     test('on an empty queue it simply starts', () {
-      expect(describe(const QueueState().playingNow(video('x'))), '[x]');
+      expect(describe(QueueState().playingNow(video('x'))), '[x]');
     });
   });
 
@@ -105,6 +105,79 @@ void main() {
       final base = queueOf(['a', 'b'], current: 0);
       expect(describe(base.removedAt(7)), describe(base));
       expect(describe(base.removedAt(-1)), describe(base));
+    });
+  });
+
+  /// Removing by entry rather than by index (see [QueueEntry]).
+  ///
+  /// The queue panel applies a removal ~340 ms after the click that asked for
+  /// it, so every one of these is the shape of a real race: the list moved
+  /// between the decision and the deed. An index would answer each of them with
+  /// the wrong video and no error.
+  group('remove by entry', () {
+    test('two entries holding the same video are not the same entry', () {
+      final state = queueOf(['a', 'a'], current: 0);
+      expect(
+        state.entries[0] == state.entries[1],
+        isFalse,
+        reason: 'value equality here would make the two copies interchangeable, '
+            'which is the whole bug this type exists to prevent',
+      );
+    });
+
+    test('the second copy of a duplicated video is the one that goes', () {
+      final state = queueOf(['a', 'b', 'a'], current: 0);
+      final second = state.entries[2];
+      final after = state.removedEntry(second);
+
+      expect(describe(after), '[a] b');
+      expect(after.entries.first, same(state.entries.first), reason: 'the survivor kept its identity');
+    });
+
+    test('an entry still names its video after the list moved under it', () {
+      final state = queueOf(['a', 'b', 'c', 'd'], current: 0);
+      final c = state.entries[2];
+
+      // Everything an impatient user can do in the 340 ms before c's slide ends.
+      final moved = state.removedAt(1).reordered(0, 2);
+      expect(describe(moved), 'c d [a]');
+
+      expect(describe(moved.removedEntry(c)), 'd [a]');
+    });
+
+    test('three fast clicks remove the three videos that were clicked', () {
+      final state = queueOf(['a', 'b', 'c', 'd', 'e', 'f'], current: 0);
+      // The user's own example: row 3, then row 5, then row 4 — faster than any
+      // of them finishes animating, so all three resolve against the *first*
+      // list they saw.
+      final third = state.entries[2];
+      final fifth = state.entries[4];
+      final fourth = state.entries[3];
+
+      // And they land in whatever order the animations happen to finish in.
+      final after = state.removedEntry(third).removedEntry(fifth).removedEntry(fourth);
+
+      expect(describe(after), '[a] b f');
+    });
+
+    test('an entry that has already gone is a no-op, not a wrong removal', () {
+      final state = queueOf(['a', 'b', 'c'], current: 0);
+      final b = state.entries[1];
+      final once = state.removedEntry(b);
+
+      expect(describe(once.removedEntry(b)), describe(once));
+    });
+
+    test('clearing keeps the current entry rather than minting a new one', () {
+      final state = queueOf(['a', 'b', 'c'], current: 0);
+      final kept = state.entries.first;
+
+      expect(
+        state.clearUpcoming().entries.first,
+        same(kept),
+        reason: 'a re-minted entry reads to the panel as an arrival, and the row '
+            'that never moved would play its slide-in entrance',
+      );
     });
   });
 
@@ -158,7 +231,7 @@ void main() {
     });
 
     test('advancing an empty queue is a no-op, not a cursor pointing at nothing', () {
-      expect(const QueueState().advanced().currentIndex, isNull);
+      expect(QueueState().advanced().currentIndex, isNull);
     });
   });
 
@@ -166,7 +239,69 @@ void main() {
     test('is what the preloader watches', () {
       expect(queueOf(['a', 'b', 'c'], current: 0).next?.id, 'b');
       expect(queueOf(['a'], current: 0).next, isNull);
-      expect(const QueueState().next, isNull);
+      expect(QueueState().next, isNull);
+    });
+  });
+
+  group('cleared', () {
+    test('clearing an active queue empties items and resets currentIndex to null', () {
+      final state = queueOf(['a', 'b', 'c'], current: 1).cleared();
+      expect(state.items, isEmpty);
+      expect(state.currentIndex, isNull);
+    });
+
+    test('clearing an empty queue remains empty', () {
+      final state = QueueState().cleared();
+      expect(state.items, isEmpty);
+      expect(state.currentIndex, isNull);
+    });
+  });
+
+  group('clearUpcoming', () {
+    test('clears other queued items but keeps currently playing video', () {
+      final state = queueOf(['a', 'b', 'c'], current: 1).clearUpcoming();
+      expect(describe(state), '[b]');
+      expect(state.currentIndex, 0);
+    });
+
+    test('keeps the entries it is given — what arrived during the sweep', () {
+      final base = queueOf(['a', 'b', 'c', 'd', 'e'], current: 0);
+      final state = base.clearUpcoming(keep: {base.entries[3], base.entries[4]});
+      expect(describe(state), '[a] d e');
+      expect(state.currentIndex, 0);
+    });
+
+    test('naming the current entry does not duplicate it', () {
+      final base = queueOf(['a', 'b'], current: 1);
+      final state = base.clearUpcoming(keep: {base.entries[0], base.entries[1]});
+      expect(describe(state), 'a [b]', reason: 'kept in place, not moved to the front');
+    });
+
+    test('an entry kept from in front of the cursor keeps the cursor on its video', () {
+      // "Play next" lands *after* the current entry rather than at the back, so
+      // a survivor is not always at the end — the count-based version kept the
+      // wrong ones here.
+      final base = queueOf(['a', 'b', 'c'], current: 0);
+      final state = base.clearUpcoming(keep: {base.entries[1]});
+      expect(describe(state), '[a] b');
+      expect(state.current?.id, 'a');
+    });
+
+    test('a queue that shrank as much as it grew still keeps the new entry', () {
+      // The count heuristic netted to zero here and discarded `d` outright.
+      final base = queueOf(['a', 'b', 'c'], current: 0);
+      final grown = base.appended(video('d'));
+      final shrunk = grown.removedEntry(grown.entries[1]);
+      expect(shrunk.entries, hasLength(3), reason: 'same size as it started');
+
+      final state = shrunk.clearUpcoming(keep: {shrunk.entries.last});
+      expect(describe(state), '[a] d');
+    });
+
+    test('on empty queue returns empty QueueState', () {
+      final state = QueueState().clearUpcoming();
+      expect(state.items, isEmpty);
+      expect(state.currentIndex, isNull);
     });
   });
 }

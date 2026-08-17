@@ -145,6 +145,20 @@ is for.
 
 All execute against the authenticated `WEB` session.
 
+**The surface is write-only, for now, and three pieces of UI are shaped around that.**
+Nothing here, for now, reads state back, nothing undoes, and nothing enumerates:
+
+| Missing | What the UI does instead |
+| --- | --- |
+| No way to ask whether a video is *already* in Watch Later | The pill means "you saved it just now", never "is saved" — it starts unlatched on every video, including ones saved last week |
+| No inverse for `action.addToWatchLater` | A latched pill says removing is not wired up rather than quietly re-adding |
+| No `playlist.list` (only `playlist.get`, for a playlist you can already name) | The save dialog ships one real row and placeholders, with a line saying so |
+
+When these land, all three should be revisited together — they are one gap, and
+each workaround is a lie the UI is currently telling carefully. `videoDetail`
+gaining `inWatchLater` / `playlistIds` would settle the first, an
+`action.removeFromWatchLater` the second, a `playlist.list` the third.
+
 ### 3.5 Playback
 
 | Method | Params | Result |

@@ -5,13 +5,11 @@
 /// surface of its own — it draws *over* whichever one the caller mounted, so a
 /// mode change moves the controls and leaves the texture alone.
 ///
-/// **Two constraints shape the whole file.** Everything the scrubber reads comes
-/// off `player.stream.*` and never `getProperty` (hard invariant 9, F15: a
-/// blocking FFI read on the UI isolate sat on mpv's core lock for 6.4 s). And
-/// nothing here may use a tooltip, a `PopupMenuButton` or any other route: at
-/// the fullscreen mount point this widget is *above* the `Navigator`, so there
-/// is no `Overlay` and no `Navigator` to host one. The quality menu is therefore
-/// a panel in this `Stack` rather than a popup.
+/// **Two constraints shape the whole file.** Everything read comes off
+/// `player.stream.*`, never `getProperty` (hard invariant 9). And nothing here
+/// may use a tooltip, a `PopupMenuButton` or any other route — at the fullscreen
+/// mount point this is above the `Navigator`, with no `Overlay` to host one, so
+/// the quality menu is a panel in this `Stack` rather than a popup.
 library;
 
 import 'dart:async';
@@ -23,13 +21,18 @@ import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
-import '../../domain/playback_source.dart';
 import '../../theme/tokens.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
+import 'settings_menu.dart';
 import 'shortcuts.dart' show volumeStep;
 import 'view_mode.dart';
+
+/// `describeVariant` and `distinctQualities` moved to `settings_menu.dart` with
+/// the menu that is their only caller. Re-exported so `controls_probe.dart` and
+/// anything else that reached for them here still can.
+export 'settings_menu.dart' show describeVariant, distinctQualities;
 
 /// How long the pointer must be still before the controls go away.
 const Duration autoHideDelay = Duration(seconds: 1);
@@ -43,9 +46,6 @@ const Duration doubleClickWindow = kDoubleTapTimeout;
 /// The bar, for tests that need to read its opacity rather than infer it.
 const Key playerControlsBarKey = ValueKey('player-controls-bar');
 const Key playerScrubberKey = ValueKey('player-scrubber');
-const Key playerQualityButtonKey = ValueKey('player-quality-button');
-const Key playerQualityMenuKey = ValueKey('player-quality-menu');
-const Key playerQualityAutoKey = ValueKey('player-quality-auto');
 const Key playerSwitchCoverKey = ValueKey('player-switch-cover');
 const Key playerBusySpinnerKey = ValueKey('player-busy-spinner');
 
@@ -68,24 +68,28 @@ const Key playerNextKey = ValueKey('player-next');
 const Key playerPlayPauseKey = ValueKey('player-play-pause');
 const Key playerMuteKey = ValueKey('player-mute');
 const Key playerVolumeSliderKey = ValueKey('player-volume-slider');
+const Key playerVerticalVolumeKey = ValueKey('player-vertical-volume');
+const Key playerVerticalVolumeSliderKey = ValueKey('player-vertical-volume-slider');
 const Key playerCaptionsKey = ValueKey('player-captions');
 const Key playerMiniPlayerKey = ValueKey('player-mini-player');
 const Key playerTheatreKey = ValueKey('player-theatre');
 const Key playerFullscreenKey = ValueKey('player-fullscreen');
 
 class PlayerControls extends ConsumerStatefulWidget {
-  const PlayerControls({super.key, required this.engine});
+  const PlayerControls({super.key, required this.engine, this.actualAspectRatio});
 
   final PlaybackEngine engine;
+  final double? actualAspectRatio;
 
   @override
   ConsumerState<PlayerControls> createState() => _PlayerControlsState();
 }
 
 class _PlayerControlsState extends ConsumerState<PlayerControls> {
+  bool get _isVertical => widget.actualAspectRatio != null && widget.actualAspectRatio! < 1.0;
+
   bool _visible = true;
   bool _playing = false;
-  bool _qualityOpen = false;
   Timer? _hideTimer;
   StreamSubscription<bool>? _playingSubscription;
 
@@ -129,12 +133,12 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   /// The auto-hide rule, in one place.
   ///
   /// Hides only while **playing**, only after [autoHideDelay], and never while
-  /// the quality menu is open — a menu that vanishes from under the pointer is
+  /// the settings menu is open — a menu that vanishes from under the pointer is
   /// worse than one that overstays.
   void _restartHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = null;
-    if (!_playing || _qualityOpen) {
+    if (!_playing || ref.read(playerMenuProvider).open) {
       if (!_visible) setState(() => _visible = true);
       return;
     }
@@ -149,22 +153,37 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     _restartHideTimer();
   }
 
+  /// The gear, from either layout.
+  ///
+  /// `_wake` after rather than before: the toggle is what decides whether the
+  /// hide timer may run at all, and waking first would start a countdown the
+  /// open menu is about to have to cancel.
+  void _toggleMenu() => _toggleMenuAt(SettingsPage.root);
+
+  void _toggleQuality() => _toggleMenuAt(SettingsPage.quality);
+
+  void _toggleMenuAt(SettingsPage page) {
+    ref.read(playerMenuProvider.notifier).toggleAt(page);
+    _wake();
+  }
+
   /// Click, and the double-click that may or may not be arriving.
   ///
-  /// Click toggles play/pause and double-click toggles fullscreen, which
-  /// conflict. The obvious fix — hold every click for the ~250 ms double-click
-  /// window to see whether a second follows — is what `GestureDetector`'s own
-  /// `onTap` + `onDoubleTap` pair does, and it makes **every** pause feel
-  /// broken: the video keeps playing for a quarter of a second after the user
-  /// has already clicked it.
-  ///
-  /// So the first click acts immediately, and a second click within the window
-  /// *undoes* it and goes fullscreen instead. The undo restores the recorded
-  /// pre-click play state rather than toggling again, because two toggles are
-  /// only a no-op if the first one has finished landing (see
-  /// `PlaybackController.setPlaying`).
+  /// The first click acts immediately and a second within the window *undoes*
+  /// it and goes fullscreen — holding every click for the double-click window
+  /// (what `onTap` + `onDoubleTap` does) makes every pause feel broken. The undo
+  /// restores the recorded pre-click state rather than toggling again, because
+  /// two toggles only cancel if the first has finished landing.
   void _onTap() {
     _wake();
+
+    // The menu is closed by the window-wide listener in `player_shell.dart`,
+    // which runs on the same pointer-down — so by the time a tap resolves here
+    // it is already gone, and swallowing this click as "the one that dismissed
+    // the menu" would eat a play/pause the user is entitled to. That is the
+    // whole point of the click-through: outside the panel, the click means what
+    // it would have meant with no menu open.
+
     final playback = ref.read(playbackProvider.notifier);
 
     if (_doubleClickWindow?.isActive ?? false) {
@@ -188,19 +207,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   /// Plain scroll is deliberately left alone: over a player embedded in a
   /// scrolling page, a bare wheel has to scroll the page.
   ///
-  /// **Claimed through the `pointerSignalResolver` rather than merely read**,
-  /// which is the contract for handling a pointer signal at all — the resolver
-  /// exists so exactly one handler acts on each one, and it hands the event to
-  /// the first registrant. This is that one: signals dispatch leaf-first and the
-  /// watch page's `ListView` is an ancestor.
+  /// Claimed through the `pointerSignalResolver` rather than merely read, which
+  /// is the contract for handling a pointer signal at all.
   ///
-  /// **What that is *not* load-bearing for, measured rather than assumed:** the
-  /// page does not scroll under a shift-scroll even without this. Flutter's
-  /// `Scrollable` flips its axis while a shift key is down and then reads
-  /// `scrollDelta.dx`, which a vertical wheel leaves at zero — so removing the
-  /// registration changes nothing observable here, and the test that asserts the
-  /// page stayed put passes either way. Registering is still right: it stops
-  /// being a coincidence the moment anything horizontal is in the ancestry.
+  /// Measured: the page does not scroll under shift-scroll either way, because
+  /// `Scrollable` flips its axis while shift is down and then reads a `dx` a
+  /// vertical wheel leaves at zero. Registering stops that being a coincidence
+  /// the moment anything horizontal is in the ancestry.
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     if (!HardwareKeyboard.instance.isShiftPressed) return;
@@ -218,6 +231,15 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     final theme = Theme.of(context);
     final tokens = theme.tokens;
 
+    // The menu can close from outside this widget — `Esc` in `shortcuts.dart`,
+    // a click anywhere else via `player_shell.dart`. Both move the provider and
+    // neither can reach in here, so the countdown the open menu suspended has to
+    // be restarted by watching the state rather than by the closer remembering
+    // to say so.
+    ref.listen(playerMenuProvider.select((menu) => menu.open), (previous, next) {
+      if (previous == true && next == false) _restartHideTimer();
+    });
+
     return Listener(
       onPointerSignal: _onPointerSignal,
       child: MouseRegion(
@@ -230,21 +252,10 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // **The quality-switch cover.**
-            //
-            // A switch reopens the media inside mpv, and mpv starts the new
-            // stream at zero and only then takes the seek back to where the user
-            // was. Uncovered, that reads as: black, then a flash of the video's
-            // *first frame* — which on most uploads is the thumbnail — then the
-            // picture resuming in the right place. The middle third is the part
-            // that looks broken, and it is not a thumbnail being drawn by
-            // anything here: it is one real frame of the new stream, from a
-            // position nobody asked for.
-            //
-            // Opaque black over the surface until the position comes back past
-            // where it left (`isSwitchingQuality`, which the controller holds
-            // until exactly that — see `PlaybackController.switchQuality`).
-            // Above the video and below the bar, so the controls stay usable.
+            // The quality-switch cover (architecture §2.7): a reopened media
+            // plays one real frame from position zero before the seek back
+            // lands, and that flash is what reads as broken. Held until the
+            // position returns, above the video and below the bar.
             if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality))) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
             // The click surface, beneath the bar so the bar's own buttons win
             // the hit test and its background absorbs rather than falls through.
@@ -258,41 +269,43 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // play/pause would take the control away exactly when the player is
             // least responsive.
             //
-            // **Keyed, and it does not work without the key.** This is the only
-            // child of this `Stack` that owns `State`, and the cover above it
-            // appears and disappears — which changes the children list at index
-            // 0. Flutter's list diff scans forward while widgets match, scans
-            // backward from the end, and then rematches everything in between
-            // **by key alone**; unkeyed children in that middle range are
-            // discarded and inflated fresh. The cover toggling breaks the
-            // forward scan at index 0 and the quality menu breaks the backward
-            // scan, which puts the spinner squarely in that range: without a key
-            // its `State` was destroyed and its grace timer cancelled at the
-            // exact moment a switch started, so the spinner it exists to show
-            // could never appear. Traced, not guessed — `initState` ran a second
-            // time before the first `dispose`.
+            // **Keyed, and it does not work without the key.** The cover
+            // toggling breaks the child list's forward scan and the menu breaks
+            // the backward one, so this lands in the middle range Flutter
+            // rematches by key alone — unkeyed, its `State` was destroyed and
+            // its grace timer cancelled at the exact moment a switch started.
             IgnorePointer(
               key: const ValueKey('player-busy'),
               child: _BusySpinner(engine: widget.engine),
             ),
-            if (_qualityOpen)
-              Positioned(
-                right: 12,
-                // `top` as well as `bottom`, so the menu is bounded by the
-                // player box rather than by a guess: a 22-rung ladder in a 16:9
-                // box on a 900 px window would otherwise run off the top and be
-                // silently clipped by the `Stack`.
-                top: 8,
-                bottom: 96,
-                child: _QualityMenu(
-                  key: playerQualityMenuKey,
+            // **Mounted unconditionally now that it fades.** The `if` used to
+            // be here, and an `if` cannot animate an exit: the panel was gone
+            // from the tree on the same frame it was told to close, with nothing
+            // left to fade. `SettingsMenuFade` owns the mount instead and holds
+            // it for the length of the fade. While closed it is a zero-width
+            // box — two render objects and no hit target.
+            Positioned(
+              right: _isVertical ? 64 : 7,
+              // `top` as well as `bottom`, so the menu is bounded by the
+              // player box rather than by a guess: a 22-rung ladder in a 16:9
+              // box on a 900 px window would otherwise run off the top and be
+              // silently clipped by the `Stack`. The panel's own 400 cap is
+              // the *other* limit; whichever is smaller wins, which is what
+              // keeps a tall menu out of a short player.
+              top: 8,
+              bottom: _isVertical ? 56 : 58,
+              child: SettingsMenuFade(
+                visible: ref.watch(playerMenuProvider.select((menu) => menu.open)),
+                child: PlayerSettingsMenu(
+                  key: playerSettingsMenuKey,
                   onPicked: (variant) {
-                    setState(() => _qualityOpen = false);
+                    ref.read(playerMenuProvider.notifier).close();
                     _restartHideTimer();
                     unawaited(ref.read(playbackProvider.notifier).switchQuality(variant));
                   },
                 ),
               ),
+            ),
             // The fullscreen header: what is playing, since fullscreen hides the
             // page that would otherwise say. Fades with the bar rather than on
             // its own timer — one visibility, so they cannot disagree.
@@ -311,6 +324,75 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     duration: _fadeDuration(_visible),
                     curve: _visible ? Curves.decelerate : Curves.easeInExpo,
                     child: IgnorePointer(child: _FullscreenHeader(tokens: tokens)),
+                  ),
+                ),
+              ),
+
+            // Vertical video player controls
+            if (_isVertical)
+              Positioned(
+                right: 6,
+                bottom: 52,
+                child: AnimatedOpacity(
+                  opacity: _visible ? 1 : 0,
+                  duration: _fadeDuration(_visible),
+                  curve: Curves.easeIn,
+                  child: AnimatedSlide(
+                    offset: Offset.zero.translate(_visible ? 0 : 0.15, 0),
+                    duration: _fadeDuration(_visible),
+                    curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                    child: IgnorePointer(
+                      ignoring: !_visible,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: tokens.scrim.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(52),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _VerticalVolume(
+                                key: playerVerticalVolumeKey,
+                                engine: widget.engine,
+                                onChanged: _wake,
+                              ),
+                              const SizedBox(height: 2),
+                              KeyedSubtree(
+                                key: qualityButtonAnchorKey,
+                                child: _MenuButton(
+                                  key: playerQualityButtonKey,
+                                  icon: Icons.hd_outlined,
+                                  busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
+                                  open: ref.watch(
+                                    playerMenuProvider.select(
+                                      (menu) => menu.open && menu.page == SettingsPage.quality,
+                                    ),
+                                  ),
+                                  onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty)) ? null : _toggleQuality,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              KeyedSubtree(
+                                key: settingsMenuAnchorKey,
+                                child: _MenuButton(
+                                  key: playerSettingsButtonKey,
+                                  icon: Icons.settings,
+                                  open: ref.watch(
+                                    playerMenuProvider.select(
+                                      (menu) => menu.open && menu.page != SettingsPage.quality,
+                                    ),
+                                  ),
+                                  onPressed: _toggleMenu,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -340,15 +422,15 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             colors: [
-                              tokens.scrim.withValues(alpha: .95),
                               tokens.scrim.withValues(alpha: .75),
+                              tokens.scrim.withValues(alpha: .5),
                               tokens.scrim.withValues(alpha: 0),
                             ],
                           ),
                         ),
                         child: Material(
                           type: MaterialType.transparency,
-                          child: _buildBar(context),
+                          child: _isVertical ? _buildVerticalBar(context) : _buildBar(context),
                         ),
                       ),
                     ),
@@ -403,14 +485,18 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   StreamBuilder<bool>(
                     stream: widget.engine.playingStream,
                     initialData: widget.engine.playing,
-                    builder: (context, snapshot) => _ControlIcon(
-                      iconKey: playerPlayPauseKey,
-                      icon: (snapshot.data ?? false) ? Icons.pause : Icons.play_arrow,
-                      onPressed: () {
-                        _wake();
-                        unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                      },
-                    ),
+                    builder: (context, snapshot) {
+                      final playing = snapshot.data ?? false;
+                      return _ControlIcon(
+                        iconKey: playerPlayPauseKey,
+                        icon: playing ? Icons.pause : Icons.play_arrow,
+                        label: playing ? 'Pause' : 'Play',
+                        onPressed: () {
+                          _wake();
+                          unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
+                        },
+                      );
+                    },
                   ),
                   // **Absent, not disabled, when there is nowhere to go.** The
                   // queue stops rather than wrapping, and on an ordinary video
@@ -424,6 +510,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     _ControlIcon(
                       iconKey: playerPreviousKey,
                       icon: Icons.skip_previous,
+                      label: 'Previous video',
                       onPressed: () {
                         _wake();
                         ref.read(playbackProvider.notifier).previous();
@@ -433,6 +520,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     _ControlIcon(
                       iconKey: playerNextKey,
                       icon: Icons.skip_next,
+                      label: 'Next video',
                       onPressed: () {
                         _wake();
                         ref.read(playbackProvider.notifier).next();
@@ -440,23 +528,11 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     ),
                   _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
                   const SizedBox(width: 8),
-                  // **One flex child between the clusters, not two.**
-                  //
-                  // This was `Flexible(clock)` followed by a `Spacer()`, and the
-                  // pair is why the right-hand cluster sat ~300 px short of the
-                  // right edge. Both are flex children with flex 1, so `Row`
-                  // hands each *half* the free space — but `Flexible` is loose,
-                  // so the clock uses ~80 px of its half and returns the rest.
-                  // Returned space is not given to the `Spacer`, which has
-                  // already been sized; it falls to the end of the row under the
-                  // default `MainAxisAlignment.start`. The gap was the clock's
-                  // unspent allowance, sitting at the far right.
-                  //
-                  // One `Expanded` holding a left-aligned clock has no share to
-                  // return, and the cluster after it is genuinely flush right.
-                  // It also keeps what the old comment wanted: at a narrow width
-                  // the clock is the thing that gives up characters, because it
-                  // is the only child that can be squeezed.
+                  // **One flex child between the clusters, not two**
+                  // (architecture §2.7). A loose `Flexible` clock plus a
+                  // `Spacer` leaves the clock's unspent half at the far right.
+                  // `Expanded` has no share to return, and the clock stays the
+                  // one child that gives up characters when width runs out.
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerLeft,
@@ -467,16 +543,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  _QualityButton(
-                    key: playerQualityButtonKey,
-                    engine: widget.engine,
-                    playback: playback,
-                    open: _qualityOpen,
-                    onPressed: () {
-                      setState(() => _qualityOpen = !_qualityOpen);
-                      _restartHideTimer();
-                    },
-                  ),
                   // Captions. Present and **disabled** — they are their own task
                   // and there is nothing behind this yet. A disabled control
                   // says "later"; a live one that does nothing says "broken".
@@ -485,11 +551,47 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   const _ControlIcon(
                     iconKey: playerCaptionsKey,
                     icon: Icons.closed_caption_outlined,
+                    label: 'Captions',
                     onPressed: null,
+                  ),
+                  // **Quality, then the gear** — specific before general. It is
+                  // the one picker anybody changes mid-video, so a row two taps
+                  // deep inside the settings menu was the wrong depth for it.
+                  //
+                  // `KeyedSubtree` because each button needs two keys: the
+                  // `ValueKey` the tests find it by, and the `GlobalKey` the
+                  // click-outside measures it by. See `settingsMenuAnchorKey`.
+                  KeyedSubtree(
+                    key: qualityButtonAnchorKey,
+                    child: _MenuButton(
+                      key: playerQualityButtonKey,
+                      icon: Icons.hd_outlined,
+                      busy: playback.isSwitchingQuality,
+                      open: ref.watch(
+                        playerMenuProvider.select(
+                          (menu) => menu.open && menu.page == SettingsPage.quality,
+                        ),
+                      ),
+                      onPressed: playback.variants.isEmpty ? null : _toggleQuality,
+                    ),
+                  ),
+                  KeyedSubtree(
+                    key: settingsMenuAnchorKey,
+                    child: _MenuButton(
+                      key: playerSettingsButtonKey,
+                      icon: Icons.settings,
+                      open: ref.watch(
+                        playerMenuProvider.select(
+                          (menu) => menu.open && menu.page != SettingsPage.quality,
+                        ),
+                      ),
+                      onPressed: _toggleMenu,
+                    ),
                   ),
                   _ControlIcon(
                     iconKey: playerMiniPlayerKey,
                     icon: Icons.branding_watermark_outlined,
+                    label: 'Miniplayer',
                     onPressed: () {
                       _wake();
                       toMiniPlayer(ref);
@@ -505,6 +607,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   _ControlIcon(
                     iconKey: playerTheatreKey,
                     icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
+                    label: view.theatre ? 'Default view' : 'Theatre mode',
                     onPressed: () {
                       _wake();
                       ref.read(playerViewProvider.notifier).toggleTheatre();
@@ -513,6 +616,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   _ControlIcon(
                     iconKey: playerFullscreenKey,
                     icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                    label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
                     onPressed: () {
                       _wake();
                       ref.read(playerViewProvider.notifier).toggleFullscreen();
@@ -525,6 +629,94 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
           },
         ),
       ],
+    ).withScrimForeground(tokens);
+  }
+
+  Widget _buildVerticalBar(BuildContext context) {
+    final tokens = Theme.of(context).tokens;
+    final queue = ref.watch(queueProvider);
+    final view = ref.watch(playerViewProvider);
+    final playback = ref.watch(playbackProvider);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 2, 6, 6),
+      child: Row(
+        children: [
+          StreamBuilder<bool>(
+            stream: widget.engine.playingStream,
+            initialData: widget.engine.playing,
+            builder: (context, snapshot) {
+              final playing = snapshot.data ?? false;
+              return _ControlIcon(
+                iconKey: playerPlayPauseKey,
+                icon: playing ? Icons.pause : Icons.play_arrow,
+                label: playing ? 'Pause' : 'Play',
+                onPressed: () {
+                  _wake();
+                  unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
+                },
+              );
+            },
+          ),
+          if (queue.hasPrevious)
+            _ControlIcon(
+              iconKey: playerPreviousKey,
+              icon: Icons.skip_previous,
+              label: 'Previous video',
+              onPressed: () {
+                _wake();
+                ref.read(playbackProvider.notifier).previous();
+              },
+            ),
+          if (queue.hasNext)
+            _ControlIcon(
+              iconKey: playerNextKey,
+              icon: Icons.skip_next,
+              label: 'Next video',
+              onPressed: () {
+                _wake();
+                ref.read(playbackProvider.notifier).next();
+              },
+            ),
+          const SizedBox(width: 4),
+          _Clock(
+            engine: widget.engine,
+            dragging: _dragging,
+            hold: playback.hold,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _Scrubber(
+              key: playerScrubberKey,
+              engine: widget.engine,
+              dragging: _dragging,
+              hold: playback.hold,
+              onDrag: (value) {
+                setState(() => _dragging = value);
+                _wake();
+              },
+              onDragEnd: (value) {
+                setState(() => _dragging = null);
+                unawaited(
+                  ref.read(playbackProvider.notifier).seek(Duration(milliseconds: value.round())),
+                );
+                _restartHideTimer();
+              },
+            ),
+          ),
+          const SizedBox(width: 4),
+          _ControlIcon(
+            iconKey: playerFullscreenKey,
+            icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+            label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            onPressed: () {
+              _wake();
+              ref.read(playerViewProvider.notifier).toggleFullscreen();
+            },
+          ),
+          SizedBox(width: 4),
+        ],
+      ),
     ).withScrimForeground(tokens);
   }
 }
@@ -546,10 +738,11 @@ extension on Widget {
 }
 
 class _ControlIcon extends StatelessWidget {
-  const _ControlIcon({required this.iconKey, required this.icon, required this.onPressed});
+  const _ControlIcon({required this.iconKey, required this.icon, required this.label, required this.onPressed});
 
   final Key iconKey;
   final IconData icon;
+  final String label;
   final VoidCallback? onPressed;
 
   @override
@@ -561,7 +754,7 @@ class _ControlIcon extends StatelessWidget {
       // `Navigator`, and a tooltip there throws "No Overlay widget found" —
       // in front of the user, the first time the controls are drawn.
       mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      icon: Icon(icon),
+      icon: Icon(icon, semanticLabel: label),
       color: tokens.onScrim,
       disabledColor: tokens.onScrim.withValues(alpha: 0.35),
       onPressed: onPressed,
@@ -592,8 +785,8 @@ class _FullscreenHeader extends ConsumerWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              tokens.scrim.withValues(alpha: .95),
               tokens.scrim.withValues(alpha: .75),
+              tokens.scrim.withValues(alpha: .5),
               tokens.scrim.withValues(alpha: 0),
             ],
           ),
@@ -635,15 +828,12 @@ class _FullscreenHeader extends ConsumerWidget {
 /// starved cache), a quality switch in flight, and the initial load. They are
 /// the same thing to a viewer and there is no reason for them to look different.
 ///
-/// It lives here rather than in the watch page so it appears at **both** mount
-/// points — the 16:9 box and the fullscreen layer. The watch page's own
-/// `isLoading` spinner covers the window before these controls are mounted at
-/// all, which is why including `isLoading` here does not double up.
+/// Here rather than in the watch page so it appears at **both** mount points.
+/// The page's own `isLoading` spinner covers the window before these controls
+/// mount at all, so including `isLoading` here does not double up.
 ///
-/// **Known gap, from F18:** a resume after a long pause costs 0.5–2.3 s and
-/// never touches `core-idle` or `paused-for-cache`, so nothing here fires for
-/// it. There is no signal to hang it on; inventing a timer would be guessing at
-/// what mpv is doing rather than reading it.
+/// **Known gap (F18):** a resume after a long pause costs 0.5–2.3 s and touches
+/// neither `core-idle` nor `paused-for-cache`, so nothing fires for it.
 class _BusySpinner extends ConsumerStatefulWidget {
   const _BusySpinner({required this.engine});
 
@@ -771,11 +961,15 @@ class _Scrubber extends StatelessWidget {
             final value = (dragging ?? position).clamp(0.0, max);
             final buffered = (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
 
+            final pad = SliderTheme.of(context).padding ?? const EdgeInsets.symmetric(horizontal: 12.0);
+
             return SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 4,
+                trackShape: const _RillSliderTrackShape(),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                padding: pad / 1.5,
               ),
               child: Slider(
                 value: value,
@@ -833,16 +1027,12 @@ class _Clock extends StatelessWidget {
 
 /// The speaker, and a slider that is only there when the pointer is.
 ///
-/// **It takes room in the row rather than floating over it.** The slider opens
-/// *between* the mute button and the clock, so the clock and everything after it
-/// shift right to make space — which is why this is an `AnimatedSize` in the
-/// `Row` and not an overlay. An overlay would sit on top of the clock, and a
-/// clock you cannot read while changing the volume is a worse trade than a
-/// clock that moves.
+/// **It takes room in the row rather than floating over it** — an `AnimatedSize`
+/// in the `Row`, not an overlay, because a clock you cannot read while changing
+/// the volume is a worse trade than a clock that moves.
 ///
-/// The slider stays mounted at width zero rather than being swapped out, so the
-/// open and close are one continuous motion instead of a widget appearing at the
-/// end of a growing gap.
+/// The slider stays mounted at width zero rather than being swapped out, so open
+/// and close are one continuous motion.
 class _Volume extends ConsumerStatefulWidget {
   const _Volume({required this.engine, required this.compact, required this.onChanged});
 
@@ -909,6 +1099,7 @@ class _VolumeState extends ConsumerState<_Volume> {
               _ControlIcon(
                 iconKey: playerMuteKey,
                 icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
+                label: volume == 0 ? 'Unmute' : 'Mute',
                 onPressed: () {
                   widget.onChanged();
                   unawaited(ref.read(playbackProvider.notifier).toggleMute());
@@ -947,59 +1138,98 @@ class _VolumeState extends ConsumerState<_Volume> {
   }
 }
 
-/// The quality button, labelled with what is **actually** decoding.
-///
-/// mpv's reported height, not the one that was requested: a variant can be asked
-/// for and something else served, and a menu that reports the request is
-/// confident exactly when it is wrong. Falls back to the requested height only
-/// until the first frame, when mpv has nothing to report yet.
-class _QualityButton extends StatelessWidget {
-  const _QualityButton({
-    super.key,
-    required this.engine,
-    required this.playback,
-    required this.open,
-    required this.onPressed,
-  });
+/// The speaker, with a slider that expands vertically upward on hover for vertical videos.
+class _VerticalVolume extends ConsumerStatefulWidget {
+  const _VerticalVolume({super.key, required this.engine, required this.onChanged});
 
   final PlaybackEngine engine;
-  final PlaybackState playback;
-  final bool open;
-  final VoidCallback onPressed;
+  final VoidCallback onChanged;
+
+  @override
+  ConsumerState<_VerticalVolume> createState() => _VerticalVolumeState();
+}
+
+class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
+  bool _open = false;
+  Timer? _closeTimer;
+
+  @override
+  void dispose() {
+    _closeTimer?.cancel();
+    super.dispose();
+  }
+
+  void _enter() {
+    _closeTimer?.cancel();
+    _closeTimer = null;
+    widget.onChanged();
+    if (!_open) setState(() => _open = true);
+  }
+
+  void _exit() {
+    _closeTimer?.cancel();
+    _closeTimer = Timer(volumeSliderHideDelay, () {
+      if (!mounted) return;
+      setState(() => _open = false);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final tokens = theme.tokens;
-    final variants = playback.variants;
-
-    return StreamBuilder<int?>(
-      stream: engine.heightStream,
-      initialData: engine.height,
+    return StreamBuilder<double>(
+      stream: widget.engine.volumeStream,
+      initialData: widget.engine.volume,
       builder: (context, snapshot) {
-        final actual = snapshot.data ?? playback.variant?.height;
-        return TextButton(
-          onPressed: variants.isEmpty ? null : onPressed,
-          style: TextButton.styleFrom(
-            foregroundColor: tokens.onScrim,
-            disabledForegroundColor: tokens.onScrim.withValues(alpha: 0.35),
-            backgroundColor: open ? tokens.onScrim.withValues(alpha: 0.15) : Colors.transparent,
-            enabledMouseCursor: SystemMouseCursors.click,
-            disabledMouseCursor: SystemMouseCursors.basic,
-          ),
-          child: Row(
+        final volume = (snapshot.data ?? 100).clamp(0.0, 100.0);
+
+        return MouseRegion(
+          onEnter: (_) => _enter(),
+          onExit: (_) => _exit(),
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (playback.isSwitchingQuality)
-                SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: tokens.onScrim),
-                )
-              else
-                const Icon(Icons.settings, size: 16),
-              const SizedBox(width: 6),
-              Text(actual == null ? 'Quality' : '${actual}p', style: const TextStyle(fontSize: 12)),
+              ClipRect(
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 140),
+                  curve: Curves.easeOut,
+                  child: SizedBox(
+                    key: playerVerticalVolumeSliderKey,
+                    height: _open ? 100 : 0,
+                    width: 36,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 9),
+                      child: RotatedBox(
+                        quarterTurns: 3,
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                          child: Slider(
+                            value: volume,
+                            max: 100,
+                            onChanged: (next) {
+                              widget.onChanged();
+                              unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _ControlIcon(
+                iconKey: playerMuteKey,
+                icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
+                label: volume == 0 ? 'Unmute' : 'Mute',
+                onPressed: () {
+                  widget.onChanged();
+                  unawaited(ref.read(playbackProvider.notifier).toggleMute());
+                },
+              ),
             ],
           ),
         );
@@ -1008,126 +1238,54 @@ class _QualityButton extends StatelessWidget {
   }
 }
 
-/// The ladder, as a panel in the controls `Stack`.
+/// The gear, and the quality button beside it.
 ///
-/// Not a `PopupMenuButton` and not a `DropdownButton`: both push a route, and at
-/// the fullscreen mount point there is no `Navigator` above this widget to push
-/// onto.
-class _QualityMenu extends ConsumerWidget {
-  const _QualityMenu({super.key, required this.onPicked});
+/// One widget for both: they differ only in glyph and in which page they open,
+/// and the *open* highlight has to work identically or the pair reads as two
+/// unrelated controls that happen to sit together.
+///
+/// The spinner belongs to the quality button: a switch in flight is a fact about
+/// that control, and the only other sign of one is the black cover, which alone
+/// reads as a stall rather than as something the user asked for.
+class _MenuButton extends StatelessWidget {
+  const _MenuButton({
+    super.key,
+    required this.icon,
+    required this.open,
+    required this.onPressed,
+    this.busy = false,
+  });
 
-  final ValueChanged<PlaybackVariant> onPicked;
+  final IconData icon;
+  final bool open;
+
+  /// Null draws it disabled — the quality button with an empty ladder.
+  final VoidCallback? onPressed;
+
+  final bool busy;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    final playback = ref.watch(playbackProvider);
-    final variants = distinctQualities(playback.variants);
-    final current = playback.variant;
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).tokens;
 
-    // Bottom-aligned inside whatever height the `Positioned` allows, so the menu
-    // grows upward from the button and stops at the top of the player.
-    return Align(
-      alignment: Alignment.bottomRight,
-      child: Material(
-        elevation: 8,
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(8),
-        clipBehavior: Clip.antiAlias,
-        // An explicit width, not a minimum: the `Positioned` below pins three
-        // edges and leaves the fourth unbounded, and a shrink-wrapping
-        // `ListView` given unbounded cross-axis space is an assertion, not a
-        // narrow menu.
-        child: SizedBox(
-          width: 180,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final variant in variants)
-                InkWell(
-                  onTap: () => onPicked(variant),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.check,
-                          size: 16,
-                          // Matched on what the row *says*, not on identity: the
-                          // open variant may be the second 1080p60 of three, and
-                          // ticking nothing because the menu is showing the
-                          // first would be a menu with no current entry at all.
-                          //
-                          // Transparent rather than absent: a tick that appears
-                          // and disappears shifts every label sideways, so the
-                          // marked row is the one that does not move.
-                          color: current != null && variant.height == current.height && variant.fps == current.fps ? scheme.primary : Colors.transparent,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          describeVariant(variant),
-                          style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              // **Last, and deliberately dead** (task §3). Automatic stepping on
-              // frame drops needs a threshold over a window, hysteresis, and a
-              // way to tell a decode limit from a momentary stall — it is out of
-              // scope, and the picker exists partly to find out what this
-              // machine actually does before any of that is designed.
-              //
-              // At the *bottom* rather than the top: the ladder above it is
-              // ordered best-first, so a row that means "let the player decide"
-              // reads as the end of the list rather than as a rung above 2160p.
-              // It is *disabled* rather than merely inert — a row that can be
-              // clicked and does nothing reads as a bug.
-              Divider(height: 1, color: scheme.outlineVariant),
-              Opacity(
-                key: playerQualityAutoKey,
-                opacity: 0.4,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.check, size: 16, color: Colors.transparent),
-                      const SizedBox(width: 8),
-                      Text('Auto', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+    return IconButton(
+      onPressed: onPressed,
+      mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      iconSize: 20,
+      style: IconButton.styleFrom(
+        foregroundColor: tokens.onScrim,
+        disabledForegroundColor: tokens.onScrim.withValues(alpha: 0.35),
+        backgroundColor: open ? tokens.onScrim.withValues(alpha: 0.15) : Colors.transparent,
       ),
+      icon: busy
+          ? SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: tokens.onScrim),
+            )
+          : Icon(icon),
     );
   }
-}
-
-/// `1080p60`, or `1080p` at 30. The codec is deliberately absent: `transport`
-/// and the ladder tier are telemetry the UI must not be able to read off (§3.5),
-/// and a codec name in a quality menu is an invitation to treat it as a choice.
-String describeVariant(PlaybackVariant variant) => variant.fps > 30 ? '${variant.height}p${variant.fps}' : '${variant.height}p';
-
-/// One row per height+fps, best-ranked first.
-///
-/// **Measured, not anticipated:** a real ladder for `aqz-KE-bpKQ` is 22 rungs —
-/// 2160p60 twice, 1440p60 twice, 1080p60 three times, and so on down — because
-/// the same resolution ships in several codecs. Listed raw that is a menu of
-/// twenty-two entries with four distinct labels repeated, where picking between
-/// two rows reading "1080p60" is a coin flip the user cannot inform.
-///
-/// So the *menu* collapses them and the ladder does not: `variants` stays
-/// exactly as the sidecar ranked it (§3.5 — the sidecar ranks, the client
-/// picks), and the first of each pair is the one the ranking already preferred.
-List<PlaybackVariant> distinctQualities(List<PlaybackVariant> variants) {
-  final seen = <String>{};
-  return [
-    for (final variant in variants)
-      if (seen.add('${variant.height}x${variant.fps}')) variant,
-  ];
 }
 
 String formatClock(Duration d) {
@@ -1135,4 +1293,104 @@ String formatClock(Duration d) {
   final minutes = d.inMinutes.remainder(60).toString().padLeft(hours > 0 ? 2 : 1, '0');
   final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
   return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+}
+
+class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
+  const _RillSliderTrackShape();
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 0,
+  }) {
+    assert(sliderTheme.disabledActiveTrackColor != null);
+    assert(sliderTheme.disabledInactiveTrackColor != null);
+    assert(sliderTheme.activeTrackColor != null);
+    assert(sliderTheme.inactiveTrackColor != null);
+    assert(sliderTheme.thumbShape != null);
+    if (sliderTheme.trackHeight == null || sliderTheme.trackHeight! <= 0) return;
+
+    final ColorTween activeTrackColorTween = ColorTween(
+      begin: sliderTheme.disabledActiveTrackColor,
+      end: sliderTheme.activeTrackColor,
+    );
+    final ColorTween inactiveTrackColorTween = ColorTween(
+      begin: sliderTheme.disabledInactiveTrackColor,
+      end: sliderTheme.inactiveTrackColor,
+    );
+    final Paint activePaint = Paint()..color = activeTrackColorTween.evaluate(enableAnimation)!;
+    final Paint inactivePaint = Paint()..color = inactiveTrackColorTween.evaluate(enableAnimation)!;
+
+    final Rect trackRect = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+    );
+
+    final Paint leftTrackPaint;
+    final Paint rightTrackPaint;
+    switch (textDirection) {
+      case TextDirection.ltr:
+        leftTrackPaint = activePaint;
+        rightTrackPaint = inactivePaint;
+        break;
+      case TextDirection.rtl:
+        leftTrackPaint = inactivePaint;
+        rightTrackPaint = activePaint;
+        break;
+    }
+
+    // Draw active track
+    final Rect leftTrackSegment = Rect.fromLTRB(trackRect.left, trackRect.top, thumbCenter.dx, trackRect.bottom);
+    if (!leftTrackSegment.isEmpty) {
+      context.canvas.drawRect(leftTrackSegment, leftTrackPaint);
+    }
+
+    // Draw secondary track (buffered)
+    if (secondaryOffset != null) {
+      final bufferRight = math.max(thumbCenter.dx, secondaryOffset.dx);
+      final Paint secondaryPaint = Paint()..color = sliderTheme.secondaryActiveTrackColor ?? sliderTheme.activeTrackColor!.withValues(alpha: 0.5);
+      final Rect secondaryTrackSegment = Rect.fromLTRB(
+        thumbCenter.dx,
+        trackRect.top,
+        bufferRight,
+        trackRect.bottom,
+      );
+      if (!secondaryTrackSegment.isEmpty) {
+        context.canvas.drawRect(secondaryTrackSegment, secondaryPaint);
+      }
+
+      // Draw inactive track (remaining)
+      final Rect rightTrackSegment = Rect.fromLTRB(
+        bufferRight,
+        trackRect.top,
+        trackRect.right,
+        trackRect.bottom,
+      );
+      if (!rightTrackSegment.isEmpty) {
+        context.canvas.drawRect(rightTrackSegment, rightTrackPaint);
+      }
+    } else {
+      final Rect rightTrackSegment = Rect.fromLTRB(
+        thumbCenter.dx,
+        trackRect.top,
+        trackRect.right,
+        trackRect.bottom,
+      );
+      if (!rightTrackSegment.isEmpty) {
+        context.canvas.drawRect(rightTrackSegment, rightTrackPaint);
+      }
+    }
+  }
 }

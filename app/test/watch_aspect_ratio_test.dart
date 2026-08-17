@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,8 +6,8 @@ import 'package:rill/domain/playback_source.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/pages/watch.dart';
 import 'package:rill/ui/playback_controller.dart';
+import 'package:rill/ui/player/controls.dart';
 import 'package:rill/ui/player_shell.dart';
-import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
 
@@ -225,6 +224,12 @@ void main() {
         closeTo(9 / 16, 0.05),
         reason: 'the inner video surface must match the 9:16 aspect ratio',
       );
+
+      // Vertical videos should use the vertical controls with the floating side rail
+      expect(find.byKey(playerVerticalVolumeKey), findsOneWidget);
+      expect(find.byKey(playerFullscreenKey), findsOneWidget);
+      expect(find.byKey(playerScrubberKey), findsOneWidget);
+
       disposeContainer();
     });
 
@@ -245,6 +250,51 @@ void main() {
         closeTo(2560 / 1080, 0.05),
         reason: 'the video surface must scale to the ultrawide aspect ratio',
       );
+      disposeContainer();
+    });
+
+    testWidgets('holds the previous ratio while the next video loads', (tester) async {
+      const windowSize = Size(1500, 850);
+      await pumpWatchWithDimensions(
+        tester,
+        windowSize: windowSize,
+        videoWidth: 1080,
+        videoHeight: 1920,
+      );
+
+      final surface = find.byKey(FakeEngine.surfaceKey);
+      expect(tester.getSize(surface).aspectRatio, closeTo(9 / 16, 0.05));
+
+      // The load window, exactly as `open` produces it: both dimensions cleared,
+      // and nothing reported again until the next video's first frame decodes.
+      engine.setWidth(null);
+      engine.setHeight(null);
+      await tester.pump();
+      // Well past the 300 ms morph — a snap back to 16:9 would have finished.
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getSize(surface).aspectRatio,
+        closeTo(9 / 16, 0.05),
+        reason: 'the box must hold 9:16 through the load rather than passing through 16:9',
+      );
+
+      // Width lands one event ahead of height. That pair is half of one ratio and
+      // half of another, and must not be drawn either.
+      engine.setWidth(1920);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(
+        tester.getSize(surface).aspectRatio,
+        closeTo(9 / 16, 0.05),
+        reason: 'a width without its height is not a ratio',
+      );
+
+      // The next video is decoding: now it morphs.
+      engine.setHeight(1080);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(surface).aspectRatio, closeTo(16 / 9, 0.05));
       disposeContainer();
     });
 

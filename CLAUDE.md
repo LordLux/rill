@@ -8,6 +8,11 @@ Read `docs/architecture.md` and `docs/protocol.md` before writing code. They are
 decisions-only; rejected alternatives are fenced in an appendix. **Do not revive
 a rejected alternative** — if one looks necessary, say so and stop.
 
+Flutter UI decisions live in `architecture.md` §2.6–§2.8 — hover previews,
+player controls, and the watch page's sharp edges (mount points, overlays,
+tooltips, queue identity, aspect ratio). Code comments there are deliberately
+short and point at those sections; put the reasoning in the doc, not inline.
+
 ---
 
 ## Hard invariants

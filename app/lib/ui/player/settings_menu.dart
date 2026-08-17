@@ -1,0 +1,756 @@
+/// The player's settings menu: its state, and the panel that draws it.
+///
+/// **A panel in the controls `Stack`, never a route** — at the fullscreen mount
+/// point the controls are above the `Navigator`, so anything that pushes has
+/// nothing to push onto (architecture §2.8).
+///
+/// Open/closed is a provider because two things outside `controls.dart` need it:
+/// `Esc` in `shortcuts.dart`, and the click-outside in `player_shell.dart`.
+library;
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silky_scroll/silky_scroll.dart';
+
+import '../../domain/playback_source.dart';
+import '../widgets/silky_scroll_absorber.dart';
+import '../playback_controller.dart';
+
+const Key playerSettingsButtonKey = ValueKey('player-settings-button');
+const Key playerQualityButtonKey = ValueKey('player-quality-button');
+const Key playerSettingsMenuKey = ValueKey('player-settings-menu');
+const Key playerSettingsMoreRowKey = ValueKey('player-settings-more-row');
+const Key playerSettingsBackKey = ValueKey('player-settings-back');
+
+/// The decoded height, on the quality page's header.
+const Key playerQualityHeaderKey = ValueKey('player-quality-header');
+
+/// The tallest the panel may get, subpage included.
+const double settingsMenuMaxHeight = 400;
+
+/// How long the panel takes to resize between pages.
+const Duration settingsMenuMorph = Duration(milliseconds: 180);
+
+/// How long the panel takes to appear and to go away.
+///
+/// Shorter than the page morph on purpose. The morph is the panel *doing*
+/// something and is worth watching; opening is just the panel arriving, and a
+/// slow arrival is a control that feels like it did not hear the click.
+const Duration settingsMenuFade = Duration(milliseconds: 120);
+
+/// Which page the panel is showing.
+///
+/// **[quality] is a top level, not a subpage.** It has its own button on the
+/// bar, so it is not reached *through* the root and has nothing to go back to —
+/// which is why [PlayerMenuController.back] answers false for it and its header
+/// carries no chevron. [moreOptions] is the only real subpage.
+enum SettingsPage { root, moreOptions, quality }
+
+@immutable
+class PlayerMenuState {
+  const PlayerMenuState({this.open = false, this.page = SettingsPage.root});
+
+  final bool open;
+  final SettingsPage page;
+
+  @override
+  bool operator ==(Object other) => other is PlayerMenuState && other.open == open && other.page == page;
+
+  @override
+  int get hashCode => Object.hash(open, page);
+}
+
+class PlayerMenuController extends Notifier<PlayerMenuState> {
+  @override
+  PlayerMenuState build() {
+    // Losing the video takes the menu with it. Otherwise a menu opened on the
+    // last video in a queue outlives the thing every one of its rows is about.
+    ref.listen(playbackProvider.select((playback) => playback.item == null), (previous, next) {
+      if (next) close();
+    });
+    return const PlayerMenuState();
+  }
+
+  /// One press of one of the two buttons on the bar.
+  ///
+  /// **Closes only when it is already showing that page.** The gear pressed over
+  /// an open quality panel means "show me the settings", not "go away"; the same
+  /// press over the settings list means the second thing. Modelling it as
+  /// toggle-per-page rather than one open flag is what keeps the two buttons
+  /// from having to know about each other.
+  void toggleAt(SettingsPage page) {
+    if (state.open && state.page == page) {
+      close();
+      return;
+    }
+    state = PlayerMenuState(open: true, page: page);
+  }
+
+  void toggle() => toggleAt(SettingsPage.root);
+
+  /// Always at the root — see [close] for why the reset lives here.
+  void open() => state = const PlayerMenuState(open: true);
+
+  /// **Closing does not reset the page; opening does.** The panel is still on
+  /// screen and still watching this state for the length of [settingsMenuFade],
+  /// so resetting here flashes the root list past on the way out.
+  void close() {
+    if (!state.open) return;
+    state = PlayerMenuState(open: false, page: state.page);
+  }
+
+  void go(SettingsPage page) => state = PlayerMenuState(open: true, page: page);
+
+  /// The subpage's back arrow. Returns whether there was anywhere to go, so a
+  /// caller can tell "went back" from "nothing to do".
+  ///
+  /// Only [SettingsPage.moreOptions] is under anything. Quality is its own top
+  /// level — see [SettingsPage].
+  bool back() {
+    if (state.page != SettingsPage.moreOptions) return false;
+    state = const PlayerMenuState(open: true, page: SettingsPage.root);
+    return true;
+  }
+}
+
+final playerMenuProvider = NotifierProvider<PlayerMenuController, PlayerMenuState>(PlayerMenuController.new);
+
+/// Where the panel is on screen, for the window-wide click-outside.
+///
+/// **A key rather than a flag set on pointer-down.** The alternative — the panel
+/// noting "that one was mine" and the ancestor listener checking it — works only
+/// because pointer events dispatch innermost-first, which is true and is exactly
+/// the kind of true that stops being true after somebody reorders a `Stack`.
+/// Asking the panel's own `RenderBox` whether it contains the point does not
+/// depend on dispatch order at all. See [pointerIsOnSettingsMenu].
+final GlobalKey settingsMenuPanelKey = GlobalKey();
+
+/// The gear counts as part of the menu's surface, which is what makes a second
+/// click close it rather than reopen it: otherwise the click-outside listener
+/// closes on pointer-down and `toggle()` reopens on pointer-up.
+///
+/// Only one is ever mounted — the bar's buttons and the vertical column's are
+/// opposite sides of the same `_isVertical`.
+final GlobalKey settingsMenuAnchorKey = GlobalKey();
+
+/// The quality button, the menu's other anchor.
+///
+/// It opens the same panel at a different page, so it earns the same exemption
+/// for the same reason: pressing it while its own page is up has to close, and
+/// it cannot if the press already closed on the way down.
+final GlobalKey qualityButtonAnchorKey = GlobalKey();
+
+/// Whether a global pointer position landed on the menu — the panel, or either
+/// of the buttons that open it.
+///
+/// False when none is mounted, which is the case the caller wants anyway: with
+/// no menu up there is no click-outside to detect.
+bool pointerIsOnSettingsMenu(Offset globalPosition) => _hits(settingsMenuPanelKey, globalPosition) || _hits(settingsMenuAnchorKey, globalPosition) || _hits(qualityButtonAnchorKey, globalPosition);
+
+bool _hits(GlobalKey key, Offset globalPosition) {
+  final box = key.currentContext?.findRenderObject();
+  if (box is! RenderBox || !box.hasSize) return false;
+  return (box.localToGlobal(Offset.zero) & box.size).contains(globalPosition);
+}
+
+/// Mounts [child] while [visible], and keeps it mounted — faded out and
+/// pointer-dead — for exactly as long as the fade takes.
+///
+/// **One child instance, ever** — which is why this exists rather than an
+/// `AnimatedSwitcher`. That holds the outgoing child alongside the incoming one,
+/// so a second open mid-fade puts two panels in the tree both carrying
+/// [settingsMenuPanelKey], and one `GlobalKey` on two widgets throws.
+/// Double-clicking the gear is not an exotic input.
+class SettingsMenuFade extends StatefulWidget {
+  const SettingsMenuFade({super.key, required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  @override
+  State<SettingsMenuFade> createState() => _SettingsMenuFadeState();
+}
+
+class _SettingsMenuFadeState extends State<SettingsMenuFade> {
+  late bool _present = widget.visible;
+  Timer? _unmount;
+
+  @override
+  void didUpdateWidget(SettingsMenuFade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible == oldWidget.visible) return;
+    _unmount?.cancel();
+    _unmount = null;
+    if (widget.visible) {
+      setState(() => _present = true);
+    } else {
+      _unmount = Timer(settingsMenuFade, () {
+        if (mounted) setState(() => _present = false);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _unmount?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_present) return const SizedBox.shrink();
+
+    return IgnorePointer(
+      // Dead the instant it starts leaving. The panel is still painted for
+      // another tenth of a second, and a row that answers a click while it is
+      // disappearing is a row nobody meant to press.
+      ignoring: !widget.visible,
+      // **`TweenAnimationBuilder` with an explicit `begin`, not
+      // `AnimatedOpacity`.** An implicit opacity animates only when its value
+      // *changes*, so on the frame the panel is first built it is simply already
+      // at 1 — the open would have no fade at all and only the close would.
+      // A tween with `begin: 0` runs on that first build too.
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: widget.visible ? 1 : 0),
+        duration: settingsMenuFade,
+        curve: Curves.easeOut,
+        child: widget.child,
+        builder: (context, opacity, child) => Opacity(opacity: opacity, child: child),
+      ),
+    );
+  }
+}
+
+/// The panel.
+///
+/// **It changes size rather than swapping panels.** A subpage is not a different
+/// menu, it is the same object showing something else, and the height it settles
+/// at is the height of what it is showing — capped at
+/// [settingsMenuMaxHeight] and again at whatever the player box allows, so a
+/// 22-rung ladder in a short window scrolls instead of running off the top.
+class PlayerSettingsMenu extends ConsumerStatefulWidget {
+  const PlayerSettingsMenu({super.key, required this.onPicked});
+
+  /// A quality was chosen. The caller closes the menu and wakes the controls —
+  /// this widget does not reach for either.
+  final ValueChanged<PlaybackVariant> onPicked;
+
+  @override
+  ConsumerState<PlayerSettingsMenu> createState() => _PlayerSettingsMenuState();
+}
+
+class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
+  /// The page this widget last drew, so a change can be told from a rebuild —
+  /// and so the *direction* of the change is known before the transition starts.
+  SettingsPage _shown = SettingsPage.root;
+
+  /// +1 going deeper, -1 coming back, 0 sideways. Drives which edge each page
+  /// enters and leaves by.
+  double _direction = 0;
+
+  /// How far a page travels, as a fraction of the panel's width.
+  ///
+  /// **A quarter, not the whole way.** A full-width slide is what a route
+  /// transition does, and this is not a route — the panel is 248 px of chrome
+  /// hanging off a button, and content flying the entire width of it reads as
+  /// something much bigger than a menu changing pages. A short move plus the
+  /// cross-fade says the same thing at the right volume.
+  static const double _travel = 0.25;
+
+  /// Root and Quality are both top levels — quality has its own button and is
+  /// not reached through the root — so moving between them is sideways and gets
+  /// no slide at all. Only *More options* is under anything.
+  static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions ? 1 : 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final page = ref.watch(playerMenuProvider.select((menu) => menu.page));
+
+    if (page != _shown) {
+      // Derived, not stored state — the rebuild that reads it is already
+      // happening, so this wants no `setState`.
+      _direction = (_depthOf(page) - _depthOf(_shown)).toDouble();
+      _shown = page;
+    }
+
+    // Keyed off the enum rather than by hand, so the key the transition compares
+    // against below cannot drift from the key the page was built with.
+    final Widget child = KeyedSubtree(
+      key: ValueKey(page.name),
+      child: switch (page) {
+        SettingsPage.root => const _RootPage(),
+        SettingsPage.moreOptions => const _MoreOptionsPage(),
+        SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
+      },
+    );
+
+    return Align(
+      // Bottom-aligned inside whatever height the `Positioned` allows, so the
+      // panel grows upward from the button it belongs to.
+      alignment: Alignment.bottomRight,
+      // **The whole panel goes on the hover stack, not just its list.** The
+      // `SilkySingleChildScrollView` below covers the rows; the sticky header,
+      // the padding and the panel's edges are outside it, and a wheel over those
+      // reached the page. See `SilkyScrollAbsorber`.
+      child: SilkyScrollAbsorber(
+        child: GestureDetector(
+          onTap: () {}, // Absorb taps so they don't fall through to the video
+          child: Material(
+            key: settingsMenuPanelKey,
+            elevation: 8,
+            color: scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: AnimatedSize(
+              duration: settingsMenuMorph,
+              curve: Curves.easeOutCubic,
+              // From the bottom-right corner, which is the corner pinned to the
+              // button — so growing a taller page pushes the top edge up and leaves
+              // the anchor where it was.
+              alignment: Alignment.bottomRight,
+              child: AnimatedSwitcher(
+                duration: settingsMenuMorph,
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                // **The box follows the incoming page, not the larger of the two.**
+                // The default `Stack` takes its biggest child's size, so coming
+                // back from the tall ladder it would hold that height and snap down
+                // at the end, leaving the `AnimatedSize` to morph after the slide
+                // instead of with it. Positioning the outgoing children takes them
+                // out of the sizing; no `bottom`, so they overflow rather than
+                // being squashed into the new page's box on the way out.
+                layoutBuilder: (currentChild, previousChildren) => Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (final previous in previousChildren) Positioned(top: 0, left: 0, right: 0, child: previous),
+                    ?currentChild,
+                  ],
+                ),
+                transitionBuilder: (child, animation) {
+                  // **`transitionBuilder` is called for both directions and is not
+                  // told which**, so the child's own key is what distinguishes them.
+                  // It matters: on a push the new page has to come from the right
+                  // *and the old one leave to the left*. Reusing one tween — the
+                  // obvious reading of the API, since the outgoing animation runs in
+                  // reverse — sends the old page back out the way the new one came
+                  // in, which is the gesture for a pop played over a push.
+                  final entering = child.key == ValueKey(_shown.name);
+                  final from = (entering ? _direction : -_direction) * _travel;
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(begin: Offset(from, 0), end: Offset.zero).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: child,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The rows that have nowhere to go yet.
+///
+/// Present and **disabled**, the same call the captions button and the premiere
+/// slate's *Notify me* make: a row that says "later" is honest, and a row that
+/// opens an empty subpage is a bug report waiting to be filed. Nothing here has
+/// anything behind it — *Playback speed* included, because the engine has no
+/// rate control to drive it and wiring one is a `data/playback/engine.dart`
+/// change rather than a menu change.
+const List<({IconData icon, String label})> _rootPlaceholders = [
+  (icon: Icons.bedtime_outlined, label: 'Sleep timer'),
+  (icon: Icons.multitrack_audio, label: 'Audio track'),
+  (icon: Icons.subtitles_outlined, label: 'Subtitle track / CC'),
+  (icon: Icons.slow_motion_video, label: 'Playback speed'),
+];
+
+const List<({IconData icon, String label})> _morePlaceholders = [
+  (icon: Icons.speaker_outlined, label: 'Audio channel'),
+  (icon: Icons.push_pin_outlined, label: 'Sticky player'),
+  (icon: Icons.notes_outlined, label: 'Annotations'),
+  (icon: Icons.brightness_medium_outlined, label: 'Ambient mode'),
+];
+
+/// The width the panel settles at.
+///
+/// **One width for every page, rather than each page asking for its own.** The
+/// panel morphs its height between pages because the pages genuinely differ in
+/// length; letting the width move too made the whole thing appear to breathe
+/// sideways on every navigation, which reads as the menu being unsure of itself.
+const double _menuWidth = 248;
+
+class _RootPage extends ConsumerWidget {
+  const _RootPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return _MenuBody(
+      children: [
+        // **First, above the divider, and it is the only live row.** Everything
+        // under the divider is a setting; this is a door to more of them, and
+        // the divider is what says so — the group is "one of these is not like
+        // the others" rather than a heading nobody reads.
+        _MenuRow(
+          key: playerSettingsMoreRowKey,
+          icon: Icons.tune,
+          label: 'More options',
+          trailing: Icons.chevron_right,
+          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.moreOptions),
+        ),
+        SizedBox(height: 3),
+        Divider(height: 9, indent: 14, endIndent: 14, color: scheme.outlineVariant),
+        SizedBox(height: 2),
+        for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
+      ],
+    );
+  }
+}
+
+class _MoreOptionsPage extends ConsumerWidget {
+  const _MoreOptionsPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return _MenuBody(
+      header: _MenuHeader(
+        title: 'More options',
+        onBack: () => ref.read(playerMenuProvider.notifier).back(),
+      ),
+      children: [
+        for (final row in _morePlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
+      ],
+    );
+  }
+}
+
+class _QualityPage extends ConsumerWidget {
+  const _QualityPage({required this.onPicked});
+
+  final ValueChanged<PlaybackVariant> onPicked;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final playback = ref.watch(playbackProvider);
+    final engine = ref.watch(playbackEngineProvider);
+    final variants = distinctQualities(playback.variants);
+    final current = playback.variant;
+
+    return _MenuBody(
+      // **No back arrow: there is nothing above this.** Quality has its own bar
+      // button, so a chevron would offer a journey nobody made. The header
+      // carries the *decoded* height instead — mpv can be asked for one height
+      // and serve another, so a control reporting the request is confident
+      // exactly when it is wrong.
+      header: StreamBuilder<int?>(
+        stream: engine.heightStream,
+        initialData: engine.height,
+        builder: (context, snapshot) {
+          final actual = snapshot.data ?? current?.height;
+          return _MenuHeader(
+            title: 'Quality',
+            // Height only, no fps: it is mpv's number, and mpv reports a height.
+            value: actual == null ? null : '${actual}p', //TODO add fps when it is not 30
+            valueKey: playerQualityHeaderKey,
+          );
+        },
+      ),
+      children: [
+        for (final variant in variants)
+          _QualityRow(
+            variant: variant,
+            // Matched on what the row *says*, not on identity: the open variant
+            // may be the second 1080p60 of three, and ticking nothing because
+            // the menu is showing the first would be a menu with no current
+            // entry at all.
+            selected: current != null && variant.height == current.height && variant.fps == current.fps,
+            onTap: () => onPicked(variant),
+          ),
+        // **Last, and deliberately dead** (task §3): automatic stepping needs a
+        // threshold over a window and hysteresis, and is out of scope. At the
+        // bottom because the ladder above is best-first, so "let the player
+        // decide" reads as the end of the list rather than a rung above 2160p.
+        Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        Opacity(
+          key: playerQualityAutoKey,
+          opacity: 0.4,
+          child: const _QualityRow(variant: null, selected: false, onTap: null, label: 'Auto'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The shape every page has: an optional sticky header, then a scrollable list,
+/// inside one fixed width and under one height cap.
+///
+/// Factored out because the three pages disagreed about their own padding the
+/// first time they were written separately, and a menu whose rows sit at three
+/// different insets depending on which page you are on is a menu that looks
+/// broken without anything being wrong.
+class _MenuBody extends StatelessWidget {
+  const _MenuBody({this.header, required this.children});
+
+  final Widget? header;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: _menuWidth,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: settingsMenuMaxHeight),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // **Sticky by construction: it is outside the scroll view.** A
+            // header pinned *inside* one is a sliver and a stack of extra
+            // machinery; a header that is simply not in the scrollable cannot
+            // scroll away.
+            ?header,
+            Flexible(
+              // **The `Silky…` prefix is the whole fix** for a wheel over the
+              // menu also scrolling the page: only a `SilkyScroll` joins the
+              // library's hover stack (architecture §2.8), and a plain
+              // `SingleChildScrollView` is invisible to it.
+              //
+              // `pointerSignalResolver` cannot do this job — `SilkyScroll`
+              // handles a vertical wheel in its own `Listener` and only
+              // registers there for horizontal ownership — so it silently
+              // half-works, which is why the attempt is recorded.
+              child: SilkySingleChildScrollView(
+                // The breathing room at both ends of every list: 12 here plus a
+                // row's own 10 puts the first and last line 22 off the panel
+                // edge. It is inside the scrollable rather than around it, so a
+                // long ladder scrolls *through* the gap instead of stopping
+                // short of one.
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: children,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuHeader extends StatelessWidget {
+  const _MenuHeader({required this.title, this.onBack, this.value, this.valueKey});
+
+  final String title;
+  final VoidCallback? onBack;
+  final String? value;
+  final Key? valueKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    Widget content = Padding(
+      // 16 above, 10 below: the root page's first row sits 16 from the panel
+      // edge (6 scroll padding + 10), so a header taking only its own 10 started
+      // 6 higher than every other page. Inside the padding rather than a gap
+      // above the `InkWell`, so the whole header stays tappable.
+      padding: EdgeInsets.fromLTRB(onBack == null ? 14 : 8, 10, 14, 10),
+      child: Row(
+        children: [
+          if (onBack != null) ...[
+            Icon(Icons.chevron_left, size: 20, color: scheme.onSurface),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
+            ),
+          ),
+          if (value != null)
+            Text(
+              value!,
+              key: valueKey,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+        ],
+      ),
+    );
+
+    if (onBack != null) {
+      content = Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 6),
+        child: InkWell(key: playerSettingsBackKey, onTap: onBack, child: content),
+      );
+    } else {
+      content = Padding(
+        padding: const EdgeInsets.only(top: 3, bottom: 3),
+        child: content,
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        content,
+        Divider(height: 1, color: scheme.outlineVariant),
+      ],
+    );
+  }
+}
+
+/// Kept from the old menu so the tests that name it still mean something.
+const Key playerQualityAutoKey = ValueKey('player-quality-auto');
+
+/// A row on the root page: icon, label, optional trailing value and chevron.
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({super.key, required this.icon, required this.label, this.trailing, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final IconData? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = onTap != null;
+    final foreground = enabled ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.38);
+
+    return InkWell(
+      onTap: onTap,
+      mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: foreground),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, color: foreground),
+              ),
+            ),
+            SizedBox(
+              width: 24,
+              child: trailing == null ? null : Icon(trailing, size: 18, color: enabled ? scheme.onSurfaceVariant : foreground),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A rung, with the badge the resolution earns.
+///
+/// `4K` and `HD` are derived from the height here rather than sent by the
+/// sidecar — they are a *rendering* of a number the DTO already carries, and a
+/// badge field on `PlaybackVariant` would be the UI asking the protocol to hold
+/// its opinions for it.
+class _QualityRow extends StatelessWidget {
+  const _QualityRow({required this.variant, required this.selected, required this.onTap, this.label});
+
+  final PlaybackVariant? variant;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  /// For the rows that are not a variant at all — currently only *Auto*.
+  final String? label;
+
+  static String? _badge(int height) {
+    if (height >= 8640) return '16K';
+    if (height >= 4320) return '8K';
+    if (height >= 2160) return '4K';
+    if (height >= 720) return 'HD';
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final badge = variant == null ? null : _badge(variant!.height);
+
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check,
+            size: 16,
+            // Transparent rather than absent: a tick that appears and
+            // disappears shifts every label sideways, so the marked row is the
+            // one that does not move.
+            color: selected ? scheme.primary : Colors.transparent,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label ?? describeVariant(variant!),
+            style: TextStyle(fontSize: 13, color: scheme.onSurface),
+          ),
+          if (badge != null) ...[
+            const SizedBox(width: 4),
+            // Raised and small, the way the resolution list in the mock wears
+            // it — a qualifier on the number, not a second column.
+            Transform.translate(
+              offset: const Offset(0, -5),
+              child: Text(
+                badge,
+                style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    // **No `InkWell` at all when there is nothing to tap**, rather than one with
+    // a null `onTap`. The two look identical until a pointer arrives: a disabled
+    // `InkWell` is still a hit target, so it takes the click that would
+    // otherwise have reached the video, and *Auto* would silently absorb clicks
+    // for a feature it does not implement. `player_controls_test.dart` pins this
+    // by asserting there is no `InkWell` under the row at all — the miss is the
+    // assertion.
+    if (onTap == null) return row;
+    return InkWell(onTap: onTap, child: row);
+  }
+}
+
+/// `1080p60`, or `1080p` at 30. The codec is deliberately absent: `transport`
+/// and the ladder tier are telemetry the UI must not be able to read off (§3.5),
+/// and a codec name in a quality menu is an invitation to treat it as a choice.
+String describeVariant(PlaybackVariant variant) => variant.fps > 30 ? '${variant.height}p${variant.fps}' : '${variant.height}p';
+
+/// One row per height+fps, best-ranked first.
+///
+/// **Measured:** a real ladder for `aqz-KE-bpKQ` is 22 rungs with four distinct
+/// labels, because the same resolution ships in several codecs — picking between
+/// two rows reading "1080p60" is a coin flip the user cannot inform.
+///
+/// The *menu* collapses them and the ladder does not: `variants` stays as the
+/// sidecar ranked it (§3.5), and the first of each pair is its preference.
+List<PlaybackVariant> distinctQualities(List<PlaybackVariant> variants) {
+  final seen = <String>{};
+  return [
+    for (final variant in variants)
+      if (seen.add('${variant.height}x${variant.fps}')) variant,
+  ];
+}

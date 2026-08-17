@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../playback_controller.dart';
 import '../player_shell.dart';
+import 'settings_menu.dart';
 import 'view_mode.dart';
 
 enum PlayerAction {
@@ -38,10 +39,10 @@ class PlayerShortcut {
 
   @override
   bool operator ==(Object other) =>
-      other is PlayerShortcut &&
-      other.action == action &&
-      other.seconds == seconds &&
-      other.decile == decile;
+    other is PlayerShortcut &&
+    other.action == action &&
+    other.seconds == seconds &&
+    other.decile == decile;
 
   @override
   int get hashCode => Object.hash(action, seconds, decile);
@@ -52,17 +53,13 @@ class PlayerShortcut {
 
 /// Whether a text field owns the keyboard right now.
 ///
-/// **This is the whole of "typing `f` in the search box must not go
-/// fullscreen".** It has to be an explicit check rather than a consequence of
-/// where the handler is mounted: character input reaches a `TextField` over the
-/// text-input channel, not through the key-event chain, so `EditableText` leaves
-/// a plain `f` *unhandled* and it propagates to every ancestor handler in the
-/// app. A shortcut layer that assumes the focused field will swallow its own
-/// letters is a shortcut layer that types into the search box and goes
-/// fullscreen at the same time.
+/// **The whole of "typing `f` in the search box must not go fullscreen"**, and
+/// it has to be explicit: character input reaches a `TextField` over the
+/// text-input channel, so `EditableText` leaves a plain `f` unhandled and it
+/// propagates to every ancestor handler.
 ///
 /// The focused node is the one inside `EditableText`, so the field is found by
-/// walking up from it rather than by inspecting the node itself.
+/// walking up from it rather than by inspecting the node.
 bool textEntryHasFocus() {
   final context = FocusManager.instance.primaryFocus?.context;
   if (context == null) return false;
@@ -95,28 +92,13 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   // are the sort of letters a later feature wants, and because these move to a
   // *different video* — the one action here that cannot be undone by pressing
   // the same key again.
-  if (key == LogicalKeyboardKey.keyP && shift) {
-    return const PlayerShortcut(PlayerAction.previous);
-  }
-  if (key == LogicalKeyboardKey.keyN && shift) {
-    return const PlayerShortcut(PlayerAction.next);
-  }
-
-  if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.keyK) {
-    return const PlayerShortcut(PlayerAction.playPause);
-  }
-  if (key == LogicalKeyboardKey.arrowLeft) {
-    return const PlayerShortcut(PlayerAction.seekBackward, seconds: 5);
-  }
-  if (key == LogicalKeyboardKey.arrowRight) {
-    return const PlayerShortcut(PlayerAction.seekForward, seconds: 5);
-  }
-  if (key == LogicalKeyboardKey.keyJ) {
-    return const PlayerShortcut(PlayerAction.seekBackward, seconds: 10);
-  }
-  if (key == LogicalKeyboardKey.keyL) {
-    return const PlayerShortcut(PlayerAction.seekForward, seconds: 10);
-  }
+  if (key == LogicalKeyboardKey.keyP && shift) return const PlayerShortcut(PlayerAction.previous);
+  if (key == LogicalKeyboardKey.keyN && shift) return const PlayerShortcut(PlayerAction.next);
+  if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.keyK) return const PlayerShortcut(PlayerAction.playPause);
+  if (key == LogicalKeyboardKey.arrowLeft) return const PlayerShortcut(PlayerAction.seekBackward, seconds: 5);
+  if (key == LogicalKeyboardKey.arrowRight) return const PlayerShortcut(PlayerAction.seekForward, seconds: 5);
+  if (key == LogicalKeyboardKey.keyJ) return const PlayerShortcut(PlayerAction.seekBackward, seconds: 10);
+  if (key == LogicalKeyboardKey.keyL) return const PlayerShortcut(PlayerAction.seekForward, seconds: 10);
   if (key == LogicalKeyboardKey.arrowUp) return const PlayerShortcut(PlayerAction.volumeUp);
   if (key == LogicalKeyboardKey.arrowDown) return const PlayerShortcut(PlayerAction.volumeDown);
   if (key == LogicalKeyboardKey.keyM) return const PlayerShortcut(PlayerAction.mute);
@@ -124,6 +106,8 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   if (key == LogicalKeyboardKey.keyT) return const PlayerShortcut(PlayerAction.theatre);
   if (key == LogicalKeyboardKey.keyI) return const PlayerShortcut(PlayerAction.miniPlayer);
   if (key == LogicalKeyboardKey.escape) return const PlayerShortcut(PlayerAction.escape);
+
+  // TODO add end and home for seeking to the start and end of the video
 
   // `,` and `.` step one frame; with Shift they step one second.
   //
@@ -134,16 +118,11 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   // the Shift row of the table work on some keyboards and silently not on
   // others — and `<` cannot be typed without Shift, so the two branches below
   // cannot disagree about which one a press meant.
-  if (key == LogicalKeyboardKey.comma || key == LogicalKeyboardKey.less) {
-    return shift
-        ? const PlayerShortcut(PlayerAction.seekBackward, seconds: 1)
-        : const PlayerShortcut(PlayerAction.frameBackward);
-  }
-  if (key == LogicalKeyboardKey.period || key == LogicalKeyboardKey.greater) {
-    return shift
-        ? const PlayerShortcut(PlayerAction.seekForward, seconds: 1)
-        : const PlayerShortcut(PlayerAction.frameForward);
-  }
+  if (key == LogicalKeyboardKey.comma || key == LogicalKeyboardKey.less) //
+    return shift ? const PlayerShortcut(PlayerAction.seekBackward, seconds: 1) : const PlayerShortcut(PlayerAction.frameBackward);
+
+  if (key == LogicalKeyboardKey.period || key == LogicalKeyboardKey.greater) //
+    return shift ? const PlayerShortcut(PlayerAction.seekForward, seconds: 1) : const PlayerShortcut(PlayerAction.frameForward);
 
   final decile = _decileOf(key);
   if (decile != null) return PlayerShortcut(PlayerAction.seekToDecile, decile: decile);
@@ -247,6 +226,15 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
       case PlayerAction.theatre:
         view.toggleTheatre();
       case PlayerAction.escape:
+        // **The menu first, and all of it at once.** `Esc` on an open subpage
+        // closes the whole thing rather than stepping back a page — the back
+        // arrow is what walks the stack, and a key that took two presses to
+        // dismiss one panel would be a key doing the arrow's job badly.
+        // `close()` resets the page too, so the next open starts at the root.
+        if (ref.read(playerMenuProvider).open) {
+          ref.read(playerMenuProvider.notifier).close();
+          return true;
+        }
         // The one shortcut that can decline. With neither mode on, `Esc` is
         // somebody else's key.
         return view.escape();

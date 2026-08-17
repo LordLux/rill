@@ -477,6 +477,97 @@ Tile action buttons (Watch Later, Add to queue) come from
 `ThumbnailHoverOverlayToggleActionsView` and the associated
 `AddToPlaylistCommand` / `PlaylistEditEndpoint` in the feed payload.
 
+### 2.8 Watch page, queue panel, and the UI's sharp edges
+
+The rules below were each paid for once. The code points here rather than
+carrying the argument inline.
+
+**One texture, three mount points.** The player lives in a provider on the
+`ProviderScope`, above the `Navigator`, so popping the watch route cannot destroy
+it — that is what makes the mini-player and background audio properties of the
+structure rather than features. The watch page, the mini-player and the
+fullscreen layer each mount the *same* `Video` widget; moving between them
+creates and frees nothing. Only one may be mounted at a time.
+
+**Nothing above the `Navigator` has an `Overlay`.** The mini-player and the
+fullscreen layer are drawn there, so a `tooltip:` on any of their buttons throws
+"No Overlay widget found" the first time it is drawn. The fullscreen layer
+carries an `Overlay` of its own precisely because Material's `Slider` renders its
+value indicator through an `OverlayPortal` — without it, the scrubber and the
+volume slider take the whole layer down.
+
+**A tooltip inside a list that reflows needs a non-zero `waitDuration`.** When a
+row is removed the rows below rise past a stationary cursor, so `MouseTracker`
+reports a hover *enter* from inside `handleDrawFrame`, after layout has begun. At
+the default zero wait `RawTooltip` opens synchronously from that enter, and
+opening one mounts an `OverlayPortal` into an `Overlay` that sits under a
+different `LayoutBuilder` than the one mid-layout:
+
+    A _RenderLayoutBuilder was mutated in _RenderLayoutBuilder.performLayout.
+
+Any non-zero delay routes the show through a timer, which fires between frames.
+Dismissal already worked this way (`exitDuration`, 100 ms), which is why only the
+enter ever threw. The same shape exists wherever tooltipped controls sit in a
+list that can reflow under the pointer — the feed's hover actions included.
+
+**A queue entry is an identity, not a position.** `QueueEntry` has no `==`, so
+two entries holding the same video are two different entries. The panel applies a
+removal ~340 ms after the click that asked for it, and in that window the list
+moves: three quick clicks on rows 3, 5 and 4 all resolve against a list that is
+shifting under them. Removing by entry cannot hit the wrong video; removing by
+index does it silently. The same identity keys the panel's per-row animation
+controllers and keys, which removes the old index-diffing entirely — that diff
+compared video ids, and `[a, a, b]` minus index 0 diffs as "removed at 1".
+Mutations carry entries forward rather than re-minting them, or every survivor of
+a clear would read to the panel as a new arrival and play its entrance.
+
+**An undecoded frame size is not 16:9.** `PlaybackEngine.open` clears `width` and
+`height`, and mpv reports them again only once the first frame of the next video
+has decoded — so between two videos there is a window, as long as the load takes,
+in which the engine knows nothing. Answering with the reference aspect there made
+the player snap back to 16:9 mid-transition and morph twice for one change,
+showing a shape neither video has. The last real ratio is held until the next
+real one arrives; 16:9 is only the answer before anything has decoded.
+
+**`silky_scroll` already owns "which scrollable does the wheel belong to".** Every
+`SilkyScroll` pushes itself onto `SilkyScrollGlobalManager.keyStack` from its own
+`MouseRegion` and ignores wheel events it is not the top of. A hover flag of our
+own would be a second, blunter answer to a question the library is already
+answering, and the two would have to be kept agreeing forever.
+`SilkyScrollAbsorber` extends the same mechanism to the parts of a floating panel
+that are not themselves scrollables — headers, padding, edges — by taking a seat
+on that stack, and steps aside when the panel's own list has nowhere to go, so a
+wheel over a panel that visibly cannot move still scrolls the page.
+
+**Lazily-created `AnimationController`s in the queue panel are deliberate.** The
+nullable backing field plus `??=` getter (`__squeezeCtrl` and friends) exists so
+a `State` object that predates the field survives a hot reload — `initState` does
+not re-run for it, and an eagerly-initialised `late final` would throw on the
+first frame after the reload instead. They are disposed normally. This is dev
+ergonomics for a file that is iterated on almost entirely by hot reload; it has
+been flagged as non-idiomatic twice, so it is written down rather than argued
+again.
+
+**The queue does not open as a modal sheet.** `showQueuePanel` — a bottom sheet
+wrapping the panel in a fixed-height box — was deleted: a cleared queue draws
+nothing while the sheet stays up as an empty rectangle. The queue belongs under
+the mini-player, opened by a button on it and expanding in place, which puts it
+in `player_shell.dart` rather than behind a route.
+
+**The drawer's stored state is read before `runApp`.** `SharedPreferences` has no
+synchronous read, so a provider that defaults and then restores is several frames
+late — long enough for the drawer's `AnimatedContainer` to slide 240 → 72 in
+front of the user on every launch. `main` reads it and seeds
+`drawerStateProvider` with an override; the default is only reached where nothing
+overrode it, which is tests.
+
+**The watch page's layout branches at 16:9, not at portrait.** A 16:9 video is
+the widest one whose full-column height still fits the viewport, so it is the
+exact point where "as wide as the column" and "as tall as the space" agree — the
+two branches meet to the pixel there, which is what makes the boundary invisible.
+Which *controls* to draw is a separate question answered by portrait; one flag
+answering both is what broke square video.
+
 ---
 
 ## 3. Phasing

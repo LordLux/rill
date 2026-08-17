@@ -7,9 +7,10 @@ import 'pages/watch.dart';
 import 'playback_controller.dart';
 import 'player/controls.dart';
 import 'player/shortcuts.dart';
+import 'player/settings_menu.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
-import 'widgets/queue_panel.dart';
+
 
 /// The watch route's name. The mini-player hides while this is on top.
 const String watchRouteName = 'watch';
@@ -62,35 +63,20 @@ final routeTrackerProvider = Provider<RouteTracker>((ref) {
   return RouteTracker((name) => ref.read(currentRouteProvider.notifier).set(name));
 });
 
-/// Play [item] and show it.
-///
-/// Both halves matter and they are independent: moving the queue's cursor is
-/// what starts playback, and pushing the route is what shows it. A related tile
-/// tapped from the watch page does the first and skips the second — which is
-/// how "replaces the current video without pushing a second watch route" (§3)
-/// falls out rather than being special-cased.
+/// Play [item] and show it — two independent halves. Moving the cursor starts
+/// playback; pushing the route shows it. A related tile does only the first.
 void openWatch(WidgetRef ref, VideoItem item) => openWatchIn(_containerOf(ref), item);
 
 /// Bring the watch page up, if it is not already the top route.
 ///
-/// A plain `push`, and that is the whole of task §3's "`maintainState` default,
-/// so the feed's scroll survives".
-///
-/// Note where that flag actually lives: `maintainState` is a property of the
-/// route being *covered*, not of the one covering it, so what keeps the feed
-/// alive is the feed route's own default — setting it on this route would do
-/// nothing at all. What this function has to get right is narrower and easier to
-/// break: `push`, not `pushReplacement`, and not into a nested navigator. Either
-/// of those unmounts the feed, and the user comes back from a video to the top
-/// of a grid they had paged four continuations into. `player_shell_test.dart`
-/// pins the end result rather than the flag.
+/// `push`, never `pushReplacement` and never into a nested navigator: either
+/// unmounts the feed, and the user comes back to the top of a grid they had
+/// paged four continuations into. (`maintainState` belongs to the route being
+/// *covered*, so setting it here would do nothing.)
 void showWatchPage(WidgetRef ref) => showWatchPageIn(_containerOf(ref));
 
-/// The container-taking forms, which is what everything above actually needs.
-///
-/// Split out so the navigation can be driven from a test without inventing a
-/// `WidgetRef` — a `WidgetRef` is a widget's handle on a container, and these
-/// two functions only ever wanted the container.
+/// The container-taking forms — split out so navigation can be driven from a
+/// test without inventing a `WidgetRef`.
 void openWatchIn(ProviderContainer container, VideoItem item) {
   container.read(queueProvider.notifier).play(item);
   showWatchPageIn(container);
@@ -99,17 +85,12 @@ void openWatchIn(ProviderContainer container, VideoItem item) {
 /// Leave the watch page and let the mini-player take over — the `i` key and the
 /// mini-player button.
 ///
-/// **A pop, not a mode.** The mini-player is already what the shell draws
-/// whenever something is playing and the watch route is not on top, so this needs
-/// no state of its own: going back to wherever the user came from *is* the
-/// feature. That also means it lands on the previous page rather than on a fixed
-/// one, which is what "return to the previous page" has to mean once there is
-/// more than one place a video can be opened from.
+/// **A pop, not a mode** — the shell already draws the mini-player whenever
+/// something is playing off the watch route, so this needs no state of its own
+/// and lands on whichever page the video was opened from.
 ///
-/// Fullscreen is dropped first. Popping while borderless would leave the window
-/// covering the monitor with a feed in it — the same stranding
-/// `PlayerViewController` guards against, and cheaper to prevent here than to
-/// unpick afterwards.
+/// Fullscreen is dropped first, or popping leaves a borderless window covering
+/// the monitor with a feed in it.
 void toMiniPlayer(WidgetRef ref) => toMiniPlayerIn(_containerOf(ref));
 
 void toMiniPlayerIn(ProviderContainer container) {
@@ -131,18 +112,13 @@ void showWatchPageIn(ProviderContainer container) {
 ProviderContainer _containerOf(WidgetRef ref) =>
     ProviderScope.containerOf(ref.context, listen: false);
 
-/// Everything that outlives a route.
+/// Everything that outlives a route: the mini-player, and the fullscreen layer.
 ///
 /// Mounted through `MaterialApp.builder`, so its child **is** the `Navigator`
-/// (task §1). The player itself lives further up still — in a provider on the
-/// `ProviderScope` — and this is what draws around it: the mini-player, and the
-/// queue panel that both it and the watch page open.
-///
-/// A player inside the watch route would be destroyed on pop, which is what
-/// makes a mini-player and background playback impossible. Nothing here stops
-/// playback on a route change or a window blur, and that is the whole of
-/// requirement #6: background audio is a property of where the player lives, not
-/// a feature bolted on afterwards.
+/// (task §1). The player itself lives higher still, in a provider on the
+/// `ProviderScope` — architecture §2.8. Nothing here stops playback on a route
+/// change or a window blur; background audio falls out of where the player
+/// lives rather than being a feature.
 class PlayerShell extends ConsumerWidget {
   const PlayerShell({super.key, required this.child});
 
@@ -157,26 +133,36 @@ class PlayerShell extends ConsumerWidget {
     final showMini = playback.item != null && !onWatchPage && !fullscreen;
 
     return PlayerShortcuts(
-      child: Stack(
-        children: [
-          Positioned.fill(child: child),
-          // The fullscreen mount point.
-          //
-          // The **same** surface the watch page draws, moved here rather than
-          // rebuilt — the third mount point after the watch page and the
-          // mini-player, and the same mechanism: the texture belongs to the
-          // engine, so a `Video` widget appearing here and disappearing there
-          // creates and frees nothing. That is what makes "do not destroy and
-          // recreate the video output on a mode change" a property of the
-          // structure rather than something to be careful about.
-          if (fullscreen) const Positioned.fill(child: _FullscreenPlayer()),
-          if (showMini)
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: MiniPlayer(),
-            ),
-        ],
+      // The settings menu's click-outside, as an **ancestor** rather than a
+      // barrier on top. A translucent `Listener` over the app would swallow
+      // every click it closed the menu on; an ancestor is on the hit-test path
+      // of every descendant, so it sees the click and the target still gets it.
+      child: Listener(
+        onPointerDown: (event) {
+          if (!ref.read(playerMenuProvider).open) return;
+          // The gear counts as "on the menu" too, or pressing it while open
+          // would close here and reopen on the tap. See `settingsMenuAnchorKey`.
+          if (pointerIsOnSettingsMenu(event.position)) return;
+          ref.read(playerMenuProvider.notifier).close();
+        },
+        child: Stack(
+          children: [
+            Positioned.fill(child: child),
+            // The third mount point for the one texture (architecture §2.8):
+            // the same surface the watch page draws, moved rather than rebuilt.
+            if (fullscreen) const Positioned.fill(child: _FullscreenPlayer()),
+            if (showMini)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: Align(
+                  alignment: Alignment.bottomRight,
+                  child: MiniPlayer(),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -197,15 +183,10 @@ class _FullscreenPlayer extends ConsumerWidget {
 
     return ColoredBox(
       color: theme.tokens.scrim,
-      // An `Overlay` of its own, and it is not decoration.
-      //
-      // This subtree is above the `Navigator`, so it inherits none — and
-      // Material's `Slider` renders its value indicator through an
-      // `OverlayPortal`, which throws "No Overlay widget found" without one.
-      // Measured: both the scrubber and the volume slider took the whole
-      // fullscreen layer down the first time it was entered. The same absence
-      // is why nothing here carries a tooltip (see `MiniPlayer`), and one
-      // `Overlay` answers both.
+      // Its own `Overlay`, and not decoration: this subtree is above the
+      // `Navigator` so it inherits none, and `Slider`'s value indicator needs
+      // one. Architecture §2.8 — the same absence is why nothing here has a
+      // tooltip.
       child: Overlay(
         initialEntries: [
           OverlayEntry(
@@ -225,15 +206,11 @@ class _FullscreenPlayer extends ConsumerWidget {
 
 /// The collapsed player: live video, title, transport controls, progress.
 ///
-/// It shows the **same surface** the watch page does, not a thumbnail. That is
-/// the visible payoff of §1's structure: the texture belongs to the engine on
-/// the `ProviderScope`, so the `Video` widget here is a `Texture` id reference
-/// that any subtree may hold, and moving between the two mount points creates
-/// and frees nothing (`VideoController` registers its release on
-/// `Player.dispose`, and `setSize` is never called from layout).
+/// Shows the **same surface** the watch page does, not a thumbnail — one
+/// texture, one mount point at a time (architecture §2.8). It draws only when
+/// the watch route is not on top, so the two are exclusive by construction.
 ///
-/// One texture, one mount point at a time: the mini-player draws only when the
-/// watch route is not on top, so the two are mutually exclusive by construction.
+/// TODO: a chevron here opens `EmbeddedQueuePanel` underneath this card, expanding in place.
 class MiniPlayer extends ConsumerWidget {
   const MiniPlayer({super.key});
 
@@ -252,8 +229,8 @@ class MiniPlayer extends ConsumerWidget {
       color: scheme.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 380,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
         child: InkWell(
           onTap: () => showWatchPage(ref),
           child: Column(
@@ -293,13 +270,9 @@ class MiniPlayer extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  // No `tooltip:` on any of these, and the queue panel is opened
-                  // through the navigator's own context rather than this one.
-                  // Both for the same reason: this widget is *above* the
-                  // `Navigator`, so there is no `Overlay` and no `Navigator`
-                  // above it to host a tooltip or a modal route. A tooltip here
-                  // throws "No Overlay widget found" the first time the
-                  // mini-player is drawn — which is to say, in front of the user.
+                  // No `tooltip:` on any of these — this widget is above the
+                  // `Navigator`, so there is no `Overlay` to host one and it
+                  // throws the first time the mini-player is drawn.
                   StreamBuilder<bool>(
                     stream: engine.playingStream,
                     initialData: engine.playing,
@@ -314,29 +287,18 @@ class MiniPlayer extends ConsumerWidget {
                   ),
                   IconButton(
                     mouseCursor: SystemMouseCursors.click,
-                    icon: Icon(Icons.queue_music, color: scheme.onSurface),
-                    onPressed: () {
-                      final navigatorContext = rootNavigatorKey.currentContext;
-                      if (navigatorContext != null) showQueuePanel(navigatorContext);
-                    },
-                  ),
-                  IconButton(
-                    mouseCursor: SystemMouseCursors.click,
                     icon: Icon(Icons.close, color: scheme.onSurfaceVariant),
                     onPressed: () => ref.read(playbackProvider.notifier).stop(),
                   ),
                 ],
               ),
-              // Position from the stream, never a property read (invariant 9) —
-              // and the quality-switch hold ahead of it, for the same reason the
-              // scrubber prefers it: a reopened media reports zero until the
-              // seek back lands, and this bar would drop to the start with it.
+              // From the stream, never a property read (invariant 9), with the
+              // quality-switch hold ahead of it — a reopened media reports zero
+              // for both position and duration until the seek back lands.
               StreamBuilder<Duration>(
                 stream: engine.positionStream,
                 initialData: engine.position,
                 builder: (context, snapshot) {
-                  // Duration from the hold as well as position — a reopened
-                  // media reports zero for both, and this bar divides by it.
                   final hold = playback.hold;
                   final duration = hold?.duration ?? engine.duration;
                   final position = hold?.position ?? snapshot.data ?? Duration.zero;

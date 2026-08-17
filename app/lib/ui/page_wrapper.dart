@@ -1,8 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'widgets/topbar.dart';
 
-class PageWrapper extends StatefulWidget {
+const String drawerPrefsKey = 'left_drawer_open';
+
+/// Whether the inline drawer is open
+class DrawerStateController extends Notifier<bool> {
+  DrawerStateController({this.initial = true});
+
+  final bool initial;
+
+  @override
+  bool build() => initial;
+
+  Future<void> toggle() async {
+    state = !state;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(drawerPrefsKey, state);
+  }
+}
+
+final drawerStateProvider = NotifierProvider<DrawerStateController, bool>(
+  DrawerStateController.new,
+);
+
+/// The stored drawer state, for seeding [drawerStateProvider] before `runApp`
+Future<bool> readDrawerOpen() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool(drawerPrefsKey) ?? true;
+}
+
+class PageWrapper extends ConsumerStatefulWidget {
   final Widget body;
   final Widget title;
   final List<Widget>? actions;
@@ -10,16 +40,16 @@ class PageWrapper extends StatefulWidget {
   const PageWrapper({super.key, required this.body, required this.title, this.actions});
 
   @override
-  State<PageWrapper> createState() => _PageWrapperState();
+  ConsumerState<PageWrapper> createState() => _PageWrapperState();
 }
 
-class _PageWrapperState extends State<PageWrapper> {
-  bool _isDrawerOpen = true;
-
-  void _toggleDrawer() => setState(() => _isDrawerOpen = !_isDrawerOpen);
+class _PageWrapperState extends ConsumerState<PageWrapper> {
+  void _toggleDrawer() => ref.read(drawerStateProvider.notifier).toggle();
 
   @override
   Widget build(BuildContext context) {
+    final isDrawerOpen = ref.watch(drawerStateProvider);
+
     return Scaffold(
       appBar: TopBar(
         title: widget.title,
@@ -35,7 +65,7 @@ class _PageWrapperState extends State<PageWrapper> {
             curve: Curves.easeInOut,
             // 240px wide when open, 72px wide (mini drawer) when closed.
             // Change 72 to 0 if you want it completely hidden when closed!
-            width: _isDrawerOpen ? 240 : 72,
+            width: isDrawerOpen ? 240 : 72,
             child: Material(
               color: Theme.of(context).scaffoldBackgroundColor,
               child: ListView(
@@ -44,7 +74,7 @@ class _PageWrapperState extends State<PageWrapper> {
                     key: const ValueKey('home'),
                     icon: Icons.home,
                     label: 'Home',
-                    isOpen: _isDrawerOpen,
+                    isOpen: isDrawerOpen,
                     isSelected: true, // Example of selected state
                     onTap: () {},
                   ),
@@ -56,10 +86,10 @@ class _PageWrapperState extends State<PageWrapper> {
                     key: const ValueKey('subscriptions'),
                     icon: Icons.subscriptions_outlined,
                     label: 'Subscriptions',
-                    isOpen: _isDrawerOpen,
+                    isOpen: isDrawerOpen,
                     onTap: () {},
                   ),
-                  if (_isDrawerOpen) ...[
+                  if (isDrawerOpen) ...[
                     const Divider(height: 32),
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 24, vertical: 8),
@@ -67,10 +97,17 @@ class _PageWrapperState extends State<PageWrapper> {
                     ),
                   ],
                   _DrawerItem(
+                    key: const ValueKey('playlists'),
+                    icon: Icons.playlist_play,
+                    label: 'Playlists',
+                    isOpen: isDrawerOpen,
+                    onTap: () {},
+                  ),
+                  _DrawerItem(
                     key: const ValueKey('history'),
                     icon: Icons.history,
                     label: 'History',
-                    isOpen: _isDrawerOpen,
+                    isOpen: isDrawerOpen,
                     onTap: () {},
                   ),
                 ],

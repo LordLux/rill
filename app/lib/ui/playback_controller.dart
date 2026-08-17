@@ -24,14 +24,9 @@ final playbackEngineProvider = Provider<PlaybackEngine>((ref) {
 
 /// Where the video is, while the engine cannot say.
 ///
-/// **Position and duration together, in one object, deliberately.** A quality
-/// switch reopens the media, and `MediaKitEngine.open` resets *both* — for the
-/// seconds F19 measures, mpv is faithfully reporting a stream nobody asked for.
-/// Holding only the position is worse than holding neither: the scrubber's range
-/// collapses to `max(0, 1) = 1 ms`, a held position of 3:00 clamps to it, and the
-/// thumb pins to the **far right** until the real duration arrives. That was a
-/// real bug, shipped and caught in review, and it is the reason these are not two
-/// nullable fields that something can set half of.
+/// **One object, not two nullable fields** (architecture §2.7): holding only the
+/// position collapses the scrubber's range to 1 ms and pins the thumb to the far
+/// right until the real duration arrives.
 @immutable
 class PlaybackHold {
   const PlaybackHold({required this.position, required this.duration});
@@ -92,16 +87,11 @@ class PlaybackState {
 
   /// Where the video is while the engine cannot say — see [PlaybackHold].
   ///
-  /// Everything that *displays* a position or a duration prefers this while it
-  /// is set, and so does `playback.report` — otherwise a switch posts a position
-  /// of zero to the account's history, which is the load-bearing call this
-  /// project keeps warning about being silently wrong.
+  /// Everything that displays a position prefers this while set, and so does
+  /// `playback.report`, or a switch posts 0:00 to the account's history.
   ///
-  /// **Not a freeze.** A seek during the hold moves it, because the user
-  /// scrubbing knows better than the held value does — see [seek].
-  ///
-  /// Null whenever the engine's own values are trustworthy, which is nearly
-  /// always.
+  /// **Not a freeze**: a seek during the hold moves it (see [seek]). Null
+  /// whenever the engine's own values are trustworthy, which is nearly always.
   final PlaybackHold? hold;
 
   final String? error;
@@ -261,15 +251,18 @@ class PlaybackController extends Notifier<PlaybackState> {
 
     // One place decides what plays. Every caller moves the queue's cursor.
     //
-    // Keyed on the cursor *and* the id, because neither alone is enough: the
-    // index alone reopens the current video when an earlier entry is removed and
-    // everything shifts down, and the id alone never fires when the next item is
-    // the same video twice in a row. So both, and then a check for whether this
-    // is already the video playing healthily.
-    ref.listen(queueProvider.select((q) => (q.currentIndex, q.current?.id)), (_, _) {
+    // Keyed on the queue's `version`, which increments *only* when the playhead
+    // logically moves to a new track (e.g. advance, playNow). This prevents
+    // queue reshuffles or clear operations from accidentally restarting the
+    // current video.
+    ref.listen(queueProvider.select((q) => q.version), (_, _) {
       final item = ref.read(queueProvider).current;
-      if (item == null) return;
-      if (item.id == state.item?.id && state.sessionId != null && state.error == null) return;
+      if (item == null) {
+        _endSession(reportState: 'ended');
+        _engine.pause();
+        state = const PlaybackState();
+        return;
+      }
       unawaited(open(item));
     });
 
@@ -307,6 +300,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       sessionId: null,
       isLoading: true,
       isSwitchingQuality: false,
+      hold: null,
       error: null,
       errorCode: null,
       errorRetry: null,
@@ -423,13 +417,10 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// One report. A null `reportState` means "whatever the engine is doing".
   ///
-  /// Position comes from the engine's cached stream value — never a property
-  /// read (hard invariant 9, F15) — **except while a quality switch holds one**,
-  /// where the engine is faithfully reporting a reopened media's zero and the
-  /// held value is the true one. This is not cosmetic the way the scrubber is:
-  /// a report of zero mid-watch tells YouTube the viewer went back to the start,
-  /// and the only place that surfaces is a homepage slowly ceasing to resemble
-  /// the account.
+  /// Position comes from the engine's cached stream value, never a property read
+  /// (invariant 9) — **except while a quality switch holds one**. Not cosmetic
+  /// the way the scrubber is: a report of zero tells YouTube the viewer went
+  /// back to the start, and that only ever surfaces as a drifting homepage.
   Future<void> _report(String? reportState, {String? sessionId, int? positionMs}) async {
     final id = sessionId ?? state.sessionId;
     if (id == null) return;
@@ -547,22 +538,13 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// Switch quality without reopening the *video*.
   ///
-  /// **No RPC.** §3.5: "The client picks one and may switch without reopening —
-  /// all variants come from a single `/player` response", so this issues no
-  /// `playback.open` and the session, the history entry and the report cadence
-  /// all carry on untouched. Asking the sidecar again would mint a second
-  /// session for one watch and put the video in the account's history twice.
+  /// **No RPC** (§3.5): asking the sidecar again would mint a second session for
+  /// one watch and double the history entry. It does cost a media reopen inside
+  /// mpv — capture position and play state, open the new URLs, seek back.
   ///
-  /// What it does cost is a media reopen inside mpv: the position and play state
-  /// are captured, the new pair of URLs is opened, and the position is seeked
-  /// back. That is the visible stall, and it is measured — F19.
-  ///
-  /// **`isSwitchingQuality` stays true until the picture is back**, not until the
-  /// calls have been issued. Those are very different moments — F19 measured the
-  /// issuing at 306–743 ms and the picture returning at a median of 4.1 s — and
-  /// the flag is what holds the black cover over the surface. Cleared at the
-  /// first position at or past where the user was, which is the same definition
-  /// F19 measured the stall against.
+  /// **`isSwitchingQuality` stays true until the picture is back**, not until
+  /// the calls are issued: F19 measured those at 306–743 ms against a median
+  /// 4.1 s. It is what holds the black cover over the surface.
   Future<void> switchQuality(PlaybackVariant variant) async {
     if (state.variant == variant) return;
     // **Incremented, not merely read.** Two picks in quick succession — 1080 then
@@ -592,16 +574,13 @@ class PlaybackController extends Notifier<PlaybackState> {
       await engine.open(variant, play: wasPlaying);
       if (generation != _generation || _disposed) return;
 
-      // **Subscribed before the seek is issued, not after.** `firstWhere`
-      // attaches when it is called, and `positionStream` is a broadcast stream
-      // that drops what nobody is listening to — ask for it afterwards and the
-      // seek's own position event has already gone by, so the cover would sit
-      // there until the timeout. There is nothing to wait for at position zero:
-      // the new stream starts there, which is where the user already is.
-      // **Where the user is *now*, not where they were when the switch began.**
-      // The reopen takes seconds (F19), and `seek` moves the hold during it — so
-      // a scrub mid-switch has already named a newer target. Seeking to the
-      // captured local would drag the user back to the timestamp they just left.
+      // **Subscribed before the seek is issued**: `positionStream` is a
+      // broadcast stream, so attaching afterwards misses the seek's own event
+      // and the cover sits there until the timeout.
+      //
+      // **The target is where the user is *now*** — the reopen takes seconds and
+      // `seek` moves the hold during it, so a scrub mid-switch has named a newer
+      // one. The captured local would drag them back to where they just left.
       final target = state.hold?.position ?? position;
       final picture =
           target > Duration.zero ? _waitForPicture(engine, target, wasPlaying) : null;
@@ -638,24 +617,17 @@ class PlaybackController extends Notifier<PlaybackState> {
   ///
   /// **Past [resumeAt] while playing, merely at it while paused, and the
   /// difference is 5 seconds of wrong picture.** mpv reports `time-pos` at the
-  /// seek target as soon as it has *accepted* the seek, long before the stream
-  /// is decoding there: measured 2026-08-12, one switch reported the target at
-  /// 448 ms and did not actually move past it until 5343 ms. A cover keyed on
-  /// "at or past" therefore lifts in the middle of the stall it exists to hide,
-  /// which is the thumbnail flash all over again. Strictly past is the same
-  /// predicate F18 and F19 measure resumes with, and it is only available while
-  /// playing — a paused switch never advances, so there "at" is all there is.
+  /// target as soon as it *accepts* the seek — measured 2026-08-12: reported at
+  /// 448 ms, actually moved past it at 5343 ms — so an "at or past" test lifts
+  /// the cover in the middle of the stall it exists to hide. A paused switch
+  /// never advances, so there "at" is all there is.
   ///
-  /// **Bounded, and the bound is the point.** This flag paints an opaque cover
-  /// over the video, so a stream that never reaches the position — a switch at
-  /// the very end, a variant that stalls — must not leave a black rectangle
-  /// where the player was. F19's worst measured resume was 12.0 s; 25 s is well
-  /// clear of it and still short enough that the failure is a brief flash of the
-  /// wrong frame rather than a dead player.
-  /// **The target is re-read on every event, not captured.** A scrub or a `J`
-  /// during the switch moves [PlaybackState.hold], and the wait must follow it or a
-  /// backward seek leaves the cover up until the timeout: it would still be
-  /// waiting to pass a point the user has just chosen to be behind.
+  /// **Bounded**, or a stream that never reaches the position leaves a black
+  /// rectangle where the player was. F19's worst resume was 12.0 s.
+  ///
+  /// **The target is re-read per event, not captured**: a scrub during the
+  /// switch moves the hold, and a backward seek would otherwise leave the cover
+  /// up waiting to pass a point the user chose to be behind.
   Future<void> _waitForPicture(
     PlaybackEngine engine,
     Duration resumeAt,
