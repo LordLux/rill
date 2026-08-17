@@ -242,6 +242,8 @@ nowhere.
   non-empty adaptive ladder — not just on `LOGIN_REQUIRED`, because no one has
   ever seen a server-issued id expire and so nobody knows what shape that
   failure takes. A SABR-only response is not an identity refusal.
+- **`build_runner` crashes on AOT compilation with `media_kit` (dart:ffi):** 
+  Running `dart run build_runner build` or `flutter pub run build_runner build` crashes with `type 'InvalidType' is not a subtype of type 'FunctionType' in type cast` inside `_FfiUseSiteTransformer._verifyAndReplaceNativeCallable`. This is a known Dart SDK issue where the AOT kernel generator crashes when encountering FFI use sites (imported via `media_kit` or our own code). The crash occurs because `build_runner` now bootstraps its own `.dart_tool/build/entrypoint/build.dart` script using AOT. To work around this for models like `VideoDetail` and `CaptionTrack`, they were reverted to hand-written `fromJson`/`toJson` classes instead of `freezed` classes, which avoids needing to run `build_runner` to stabilize the build.
 - **When `app/pubspec.yaml` is first created**, pin
   `media_kit_libs_windows_video: 1.0.11` exactly (not caret). A bump lands
   modern FFmpeg and reintroduces the F13 seek freeze. See §2.4.
