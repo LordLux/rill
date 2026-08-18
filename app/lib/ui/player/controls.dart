@@ -379,17 +379,26 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              IconButton(
-                                icon: ref.watch(captionsProvider.select((c) => c.enabled))
-                                    ? const Icon(Icons.closed_caption)
-                                    : const Icon(Icons.closed_caption_outlined),
-                                color: ref.watch(captionsProvider.select((c) => c.enabled))
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.white,
-                                onPressed: (ref.watch(playbackProvider.select((p) => p.item?.id)) != null && ref.watch(videoInfoProvider(ref.watch(playbackProvider.select((p) => p.item!.id)))).value?.captionTracks.isNotEmpty == true)
-                                    ? () => ref.read(captionsProvider.notifier).toggle()
-                                    : null,
-                                tooltip: 'Captions',
+                              Consumer(
+                                builder: (context, ref, child) {
+                                  final videoId = ref.watch(playbackProvider.select((p) => p.item?.id));
+                                  final info = videoId != null ? ref.watch(videoInfoProvider(videoId)).value : null;
+                                  final hasCaptions = info?.captionTracks.isNotEmpty == true;
+                                  
+                                  return IconButton(
+                                    key: playerCaptionsKey,
+                                    icon: ref.watch(captionsProvider.select((c) => c.enabled))
+                                        ? const Icon(Icons.closed_caption)
+                                        : const Icon(Icons.closed_caption_outlined),
+                                    color: ref.watch(captionsProvider.select((c) => c.enabled))
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.white,
+                                    onPressed: hasCaptions
+                                        ? () => ref.read(captionsProvider.notifier).toggle()
+                                        : null,
+                                    tooltip: 'Captions',
+                                  );
+                                },
                               ),
                               KeyedSubtree(
                                 key: settingsMenuAnchorKey,
@@ -559,23 +568,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  _ControlIcon(
-                    iconKey: playerCaptionsKey,
-                    icon: ref.watch(captionsProvider.select((c) => c.enabled))
-                        ? Icons.closed_caption
-                        : Icons.closed_caption_outlined,
-                    color: ref.watch(captionsProvider.select((c) => c.enabled))
-                        ? Theme.of(context).colorScheme.primary
-                        : tokens.onScrim,
-                    label: 'Captions',
-                    onPressed: (ref.watch(playbackProvider.select((p) => p.item?.id)) != null && ref.watch(videoInfoProvider(ref.watch(playbackProvider.select((p) => p.item!.id)))).value?.captionTracks.isNotEmpty == true)
-                        ? () => ref.read(captionsProvider.notifier).toggle()
-                        : null,
-                  ),
-                  // **Quality, then the gear** — specific before general. It is
-                  // the one picker anybody changes mid-video, so a row two taps
-                  // deep inside the settings menu was the wrong depth for it.
-                  //
                   // `KeyedSubtree` because each button needs two keys: the
                   // `ValueKey` the tests find it by, and the `GlobalKey` the
                   // click-outside measures it by. See `settingsMenuAnchorKey`.
