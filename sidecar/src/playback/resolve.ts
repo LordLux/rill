@@ -37,13 +37,14 @@ import { ytDlpBinary } from '../capabilities.ts';
 import { RpcError, hasCode } from '../errors.ts';
 import { logger } from '../log.ts';
 import { getPlayer, type Player } from '../innertube/player.ts';
-import { getPlayerResponse } from '../innertube/player-response.ts';
+import { getPlayerResponse, forgetPlayerResponse } from '../innertube/player-response.ts';
 import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
 import { isSabrOnly } from './sabr-detect.ts';
 import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
 import { openPlaybackSession } from './sessions.ts';
+import { isPoisonedMint, MAX_REMINTS, POISONED_FEXP_FLAGS } from './bucket.ts';
 
 const log = logger('playback');
 
@@ -343,7 +344,11 @@ export async function tierPlainAdaptive(
       `audio itag ${bestAudio.itag} (${audioCodec})`,
   );
 
-  return assemble({ variants, response, transport: 'plain' });
+  const source = assemble({ variants, response, transport: 'plain' });
+  if (isPoisonedMint(source)) {
+    throw new RpcError('UPSTREAM_ERROR', `${videoId}: ${client} adaptive formats are in a poisoned bucket`);
+  }
+  return source;
 }
 
 /**
@@ -446,17 +451,51 @@ export async function fetchWithVisitorRetry(
  * the one in hand stopped convincing YouTube.
  */
 export async function tierAndroidVr(
-  deps: PlaybackDeps,
+  deps: PlaybackDeps & { remintResolveSession?: () => Promise<Session> },
   videoId: string,
   poToken: string | null,
 ): Promise<PlaybackSource> {
-  const response = await fetchWithVisitorRetry(
-    videoId,
-    (refresh) => getPlayerResponse(deps.session, videoId, 'ANDROID_VR', { refresh }),
-    () => refreshVisitorId(deps.session),
-  );
+  let currentDeps = deps;
+  for (let attempt = 1; attempt <= MAX_REMINTS + 1; attempt++) {
+    const response = await fetchWithVisitorRetry(
+      videoId,
+      (refresh) => getPlayerResponse(currentDeps.session, videoId, 'ANDROID_VR', { refresh }),
+      () => refreshVisitorId(currentDeps.session),
+    );
 
-  return tierPlainAdaptive(deps, videoId, 'ANDROID_VR', poToken, response);
+    let source: PlaybackSource | null = null;
+    let poisonedError: unknown = null;
+    try {
+      source = await tierPlainAdaptive(currentDeps, videoId, 'ANDROID_VR', poToken, response);
+    } catch (error) {
+      if (error instanceof RpcError && error.message.includes('poisoned bucket')) {
+        poisonedError = error;
+      } else {
+        throw error;
+      }
+    }
+
+    if (source) {
+      return source;
+    }
+
+    if (attempt <= MAX_REMINTS) {
+      log.info(
+        `${videoId}: mint is in a poisoned bucket (fexp ${POISONED_FEXP_FLAGS.join('/')}) — ` +
+          `re-minting the resolve session, attempt ${attempt} of ${MAX_REMINTS}`,
+      );
+      if (currentDeps.remintResolveSession) {
+        currentDeps = { ...currentDeps, session: await currentDeps.remintResolveSession() };
+        forgetPlayerResponse(videoId);
+      }
+    }
+  }
+
+  throw new RpcError(
+    'UPSTREAM_ERROR',
+    `${videoId}: ANDROID_VR mint is in a poisoned bucket (fexp ${POISONED_FEXP_FLAGS.join('/')}) ` +
+      `and refused to clear after ${MAX_REMINTS} re-mints.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
