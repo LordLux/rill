@@ -74,8 +74,7 @@ async function fromPlayer(
       if (!isCachedNegative) {
         log.info(`${videoId}: ANDROID_VR returned 0 caption tracks, trying WEB fallback`);
       }
-      
-      const webResponse = await getPlayerResponse(deps.resolve, videoId, 'WEB');
+      const webResponse = await getPlayerResponse(deps.session, videoId, 'WEB');
       captionTracks = webResponse.captionTracks || [];
 
       if (captionTracks.length === 0) {

@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../captions_controller.dart';
-import '../playback_controller.dart';
-import 'controls.dart';
 import 'settings_menu.dart';
 
 class CaptionsOverlay extends ConsumerWidget {
@@ -15,17 +13,14 @@ class CaptionsOverlay extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(captionsProvider);
     final isMenuOpen = ref.watch(playerMenuProvider.select((m) => m.open));
-    // Usually controls are visible when menu is open or mouse moves.
-    // We can shift it up slightly if controls are visible.
 
-    if (!state.enabled || state.currentCue == null) {
-      return const SizedBox.shrink();
-    }
+    if (!state.enabled || state.currentCue == null) return const SizedBox.shrink();
 
     final text = state.currentCue!.text;
 
-    return Positioned(
-      bottom: controlsVisible || isMenuOpen ? 70.0 : 40.0,
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 200),
+      bottom: controlsVisible || isMenuOpen ? 70.0 : 30.0,
       left: 20.0,
       right: 20.0,
       child: IgnorePointer(
@@ -36,7 +31,7 @@ class CaptionsOverlay extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
+                color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(4.0),
               ),
               child: Text(

@@ -313,9 +313,9 @@ async function handleRequest(request: RpcRequest) {
       // in the whole resolution module graph, and doing that first made a
       // rejected request pay for a ladder it was never going to use.
       const videoId = requireString(params, 'videoId', 'playback.open');
-      const { openPlaybackPastBucket } = await import('../playback/bucket.ts');
+      const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
-      const result = await openPlaybackPastBucket(
+      const result = await openPlayback(
         { session, remintResolveSession },
         { videoId, preload: params?.preload === true },
       );

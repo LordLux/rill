@@ -2,8 +2,8 @@ import { createSession } from './src/innertube/session.ts';
 import { playerPayload } from './src/innertube/session.ts';
 
 const videos = [
-  'L-BgxLtMxh0',
-  'dQw4w9WgXcQ',
+  'L-BgxLtMxh0', // Styled Subtitles for YouTube Videos showcase
+  'dQw4w9WgXcQ', // Never Gonna Give You Up
   'jNQXAC9IVRw', // Me at the zoo
   '9bZkp7q19f0', // Gangnam style
   'kffacxfA7G4', // Baby
