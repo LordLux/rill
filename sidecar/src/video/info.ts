@@ -80,6 +80,14 @@ async function fromPlayer(
  * Both halves are issued together. They are independent requests to different
  * sessions, and awaiting them in sequence would put the `/player` round trip
  * behind the `/next` one for no reason.
+ *
+ * **Captions are not here, and that is a decision rather than an omission.** The
+ * track list is on the `/player` response this already has, so reading it would
+ * be free — but a list is only useful once the `ANDROID_VR` → `MWEB` fallback has
+ * run (`captions/service.ts`), and that fallback is a second `/player` call. On
+ * the ~29% of videos with no captions it would fire on every open, for a
+ * measured rescue rate of zero, and §3.3's one-`/player`-call property would be
+ * gone. `captions.list` owns it; the watch page calls both at once.
  */
 export async function getVideoInfo(deps: VideoDeps, videoId: string): Promise<VideoDetail> {
   const [raw, player] = await Promise.all([

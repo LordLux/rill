@@ -256,6 +256,37 @@ nowhere.
 - **`playback.report` is load-bearing.** If watch events stop landing, the
   recommender stops training and the homepage drifts from the real one, which
   defeats the point of the app. Report every 10–30 s plus on state changes.
+- **`build_runner` works. Never re-add `animated_vector_gen`.** That package is
+  the whole reason codegen appeared to be broken, and the error names nothing
+  that points at it: `dart compile kernel` crashes inside the FFI use-site
+  transformer with `type 'InvalidType' is not a subtype of type 'FunctionType'`
+  and a `_verifyAndReplaceNativeCallable` stack, which reads like an FFI bug in
+  media_kit or in this app's own code. It is neither, and it blocks **every**
+  generator rather than one. build_runner compiles a build script importing every
+  builder in the graph, using the plain Dart VM; `animated_vector_gen` →
+  `animated_vector_annotations` → `flutter`, and that package re-exports
+  `dart:ui`, so the build script drags the Flutter framework into a compiler that
+  has no `dart:ui` and every use site in it resolves to `InvalidType`. Bisected
+  2026-08-18: freezed, json_serializable, source_gen and build_runner's own
+  entrypoint each compile clean alone; that one alone fails. `--force-jit` does
+  **not** help — it still runs `dart compile kernel`. The pin is removed with a
+  comment in `app/pubspec.yaml`; it generated nothing (no `@ShapeshifterAsset`
+  exists), so nothing was lost.
+- **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
+  draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
+  `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:
+  `sub-add` costs 12–36 ms and **does not rebuild the video texture**, so a
+  caption toggle is free where a quality switch costs 0.55–12 s (F19). A quality
+  switch *does* drop the track, and `MediaKitEngine.open(retainSubtitle: true)`
+  is what puts it back — with a control proving a reopen without the flag loses
+  it.
+- **`fmt=ytt` answers HTTP 404, and a `WEB` caption URL answers 200 with no
+  body.** Two things that look like bugs and are not. YTT is not a fetchable
+  format: its styling model *is* the `pens` / `wsWinStyles` / `wpWinPositions`
+  arrays already in every `json3` document. And a `WEB` `/player` signs its
+  `timedtext` URLs with `exp=xpe`, which makes every one of them return an empty
+  body — so the empty-list fallback asks **`MWEB`**, whose URLs work. A `WEB`
+  fallback would fill a language picker in which nothing renders.
 
 ## Current state
 

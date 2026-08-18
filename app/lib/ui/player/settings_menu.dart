@@ -16,6 +16,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/playback_source.dart';
 import '../widgets/silky_scroll_absorber.dart';
+import '../captions_controller.dart';
 import '../playback_controller.dart';
 
 const Key playerSettingsButtonKey = ValueKey('player-settings-button');
@@ -26,6 +27,11 @@ const Key playerSettingsBackKey = ValueKey('player-settings-back');
 
 /// The decoded height, on the quality page's header.
 const Key playerQualityHeaderKey = ValueKey('player-quality-header');
+
+/// The caption page and its Off row — `player_captions_test.dart` finds them by
+/// these rather than by label, so wording changes do not break the suite.
+const Key playerCaptionsMenuKey = ValueKey('player-captions-menu');
+const Key playerCaptionsOffKey = ValueKey('player-captions-off');
 
 /// The tallest the panel may get, subpage included.
 const double settingsMenuMaxHeight = 400;
@@ -46,7 +52,13 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 /// bar, so it is not reached *through* the root and has nothing to go back to —
 /// which is why [PlayerMenuController.back] answers false for it and its header
 /// carries no chevron. [moreOptions] is the only real subpage.
-enum SettingsPage { root, moreOptions, quality }
+/// The panel's pages.
+///
+/// `captions` is a third *top level*, not a child of `root`: it has its own bar
+/// button beside quality's, so reaching it through the gear would be a second
+/// route to a place that already has a door. [_depthOf] and [back] both encode
+/// that — only `moreOptions` is under anything.
+enum SettingsPage { root, moreOptions, quality, captions }
 
 @immutable
 class PlayerMenuState {
@@ -142,12 +154,24 @@ final GlobalKey settingsMenuAnchorKey = GlobalKey();
 /// it cannot if the press already closed on the way down.
 final GlobalKey qualityButtonAnchorKey = GlobalKey();
 
+/// The CC button, the menu's third anchor, for the same reason as the second.
+///
+/// Unlike the other two this one is **not always mounted** — it is absent on a
+/// video with no caption tracks — and [_hits] answers false for an unmounted
+/// key, which is the right answer: a button that is not there cannot have been
+/// clicked.
+final GlobalKey captionsButtonAnchorKey = GlobalKey();
+
 /// Whether a global pointer position landed on the menu — the panel, or either
 /// of the buttons that open it.
 ///
 /// False when none is mounted, which is the case the caller wants anyway: with
 /// no menu up there is no click-outside to detect.
-bool pointerIsOnSettingsMenu(Offset globalPosition) => _hits(settingsMenuPanelKey, globalPosition) || _hits(settingsMenuAnchorKey, globalPosition) || _hits(qualityButtonAnchorKey, globalPosition);
+bool pointerIsOnSettingsMenu(Offset globalPosition) =>
+    _hits(settingsMenuPanelKey, globalPosition) ||
+    _hits(settingsMenuAnchorKey, globalPosition) ||
+    _hits(qualityButtonAnchorKey, globalPosition) ||
+    _hits(captionsButtonAnchorKey, globalPosition);
 
 bool _hits(GlobalKey key, Offset globalPosition) {
   final box = key.currentContext?.findRenderObject();
@@ -284,6 +308,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.root => const _RootPage(),
         SettingsPage.moreOptions => const _MoreOptionsPage(),
         SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
+        SettingsPage.captions => const _CaptionsPage(),
       },
     );
 
@@ -433,6 +458,105 @@ class _MoreOptionsPage extends ConsumerWidget {
   }
 }
 
+/// Track list with the current one ticked, plus Off.
+///
+/// **Off is a row rather than a switch**, and it is first. The list is one
+/// question — "which words, if any" — and a toggle beside a list makes it two,
+/// with a state where the toggle says on and no track is ticked. Ticking Off is
+/// the same gesture as ticking a language.
+///
+/// The page is never reachable with an empty list: the bar button that opens it
+/// is not drawn at all when the video has no tracks (`protocol.md` §3.8 — an
+/// empty list is settled, not pending). The empty branch below is for the video
+/// changing underneath an already-open panel.
+class _CaptionsPage extends ConsumerWidget {
+  const _CaptionsPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final captions = ref.watch(captionsProvider);
+    final controller = ref.read(captionsProvider.notifier);
+
+    return _MenuBody(
+      key: playerCaptionsMenuKey,
+      // No back arrow, for the same reason quality has none: this is a top
+      // level with its own button. The header carries the current language so
+      // the answer is readable without scanning the list for a tick.
+      header: _MenuHeader(
+        title: 'Subtitles',
+        value: captions.selected?.label ?? 'Off',
+      ),
+      children: [
+        if (captions.tracks.isEmpty)
+          _MenuRow(
+            icon: Icons.closed_caption_disabled_outlined,
+            label: captions.error != null ? 'Unavailable' : 'None for this video',
+            onTap: null,
+          )
+        else ...[
+          _CaptionRow(
+            key: playerCaptionsOffKey,
+            label: 'Off',
+            selected: !captions.isOn,
+            onTap: () => controller.select(null),
+          ),
+          Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+          for (final track in captions.tracks)
+            _CaptionRow(
+              label: track.label,
+              selected: captions.selectedId == track.id,
+              onTap: () => controller.select(track.id),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+/// A tick and a label — deliberately the same shape as `_QualityRow`.
+///
+/// Not shared with it: `_QualityRow` carries a resolution badge and a nullable
+/// variant, and generalising the two into one widget would mean a row that knows
+/// about both. Two small widgets that look alike beat one that has to ask which
+/// menu it is in.
+class _CaptionRow extends StatelessWidget {
+  const _CaptionRow({super.key, required this.label, required this.selected, required this.onTap});
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check,
+            size: 16,
+            // Transparent rather than absent, so the marked row is the one that
+            // does not move — same reasoning as `_QualityRow`.
+            color: selected ? scheme.primary : Colors.transparent,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return row;
+    return InkWell(onTap: onTap, child: row);
+  }
+}
+
 class _QualityPage extends ConsumerWidget {
   const _QualityPage({required this.onPicked});
 
@@ -499,7 +623,7 @@ class _QualityPage extends ConsumerWidget {
 /// different insets depending on which page you are on is a menu that looks
 /// broken without anything being wrong.
 class _MenuBody extends StatelessWidget {
-  const _MenuBody({this.header, required this.children});
+  const _MenuBody({super.key, this.header, required this.children});
 
   final Widget? header;
   final List<Widget> children;

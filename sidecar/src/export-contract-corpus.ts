@@ -3,7 +3,8 @@ import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFeed } from './parser/feed.ts';
-import type { Chip, FeedItem } from './types.ts';
+import { parseVideoDetail } from './parser/video.ts';
+import type { Chip, FeedItem, VideoDetail } from './types.ts';
 import { logger } from './log.ts';
 
 const log = logger('corpus');
@@ -97,6 +98,37 @@ function sanitiseContinuation(continuation: string | null, index: number): strin
   return continuation === null ? null : `CONTINUATION_TOKEN_${index + 1}`;
 }
 
+/**
+ * A `VideoDetail`, sanitised, so the Flutter contract test has one to check.
+ *
+ * `VideoDetail` was the one DTO the corpus did not cover, and it is the one
+ * where being uncovered costs most: it is the payload the watch page is built
+ * out of, and a field added here and not mirrored in `app/lib/domain` is dropped
+ * by `fromJson` in silence — nothing throws, the field is simply absent.
+ *
+ * `related` keeps the same per-item sanitisation the feeds get, so the tiles a
+ * watch page ships are audited by exactly the rule that audits a home feed
+ * rather than by a second copy of it.
+ */
+function sanitiseVideoDetail(detail: VideoDetail): VideoDetail {
+  return {
+    ...detail,
+    id: 'vid_001',
+    title: 'Sanitised Title 1',
+    // A description is free text from an arbitrary uploader — links, handles,
+    // and on a personalised page sometimes the viewer's own locale formatting.
+    // Replaced wholesale rather than truncated.
+    description: 'Sanitised Description 1',
+    channelName: 'Sanitised Channel 1',
+    channelId: 'chan_001',
+    channelAvatarUrl: 'https://fake.url/avatar1.jpg',
+    subscriberText: detail.subscriberText === null ? null : 'Sanitised Subscribers 1',
+    likeText: detail.likeText === null ? null : 'Sanitised Likes 1',
+    related: detail.related.map(sanitiseItem),
+    relatedContinuation: sanitiseContinuation(detail.relatedContinuation, 0),
+  };
+}
+
 async function main() {
   await mkdir(CORPUS, { recursive: true });
   const files = (await readdir(FIXTURES)).filter(
@@ -117,6 +149,20 @@ async function main() {
 
     await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
     log.info(`exported sanitised ${file}`);
+  }
+
+  // The watch fixture twice: once as the sidebar feed above, once as the
+  // `VideoDetail` the watch page actually renders. Same capture, two DTOs, and
+  // the second one had no corpus coverage at all until now.
+  const watch = join(FIXTURES, 'watch.json');
+  if (files.includes('watch.json')) {
+    const detail = parseVideoDetail(JSON.parse(await readFile(watch, 'utf8')), 'video-detail');
+    await writeFile(
+      join(CORPUS, 'video-detail.json'),
+      JSON.stringify(sanitiseVideoDetail(detail), null, 2),
+      'utf8',
+    );
+    log.info('exported sanitised video-detail.json');
   }
 }
 

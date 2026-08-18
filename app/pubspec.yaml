@@ -42,7 +42,24 @@ dev_dependencies:
   build_runner: ^2.15.1
   freezed: ^3.2.6-dev.1
   json_serializable: ^6.14.1
-  animated_vector_gen: ^0.2.3
+  # animated_vector_gen: DO NOT RE-ADD without reading this.
+  #
+  # It is what breaks `build_runner`, and the failure names nothing that points
+  # at it: `dart compile kernel` crashes inside the FFI use-site transformer
+  # with `type 'InvalidType' is not a subtype of type 'FunctionType'`, which
+  # reads like an FFI bug in media_kit or in this app. It is neither.
+  #
+  # build_runner compiles a build script importing every builder in the graph,
+  # and it compiles it with the plain Dart VM. `animated_vector_gen` →
+  # `animated_vector_annotations` → `flutter`, and that package re-exports
+  # `dart:ui` — so the build script drags the Flutter framework into a compiler
+  # that has no `dart:ui`, every use site in it resolves to `InvalidType`, and
+  # the first one the FFI transformer touches crashes the compile. Bisected
+  # 2026-08-18: freezed, json_serializable, source_gen and build_runner's own
+  # entrypoint each compile clean on their own; this one alone fails.
+  #
+  # Removing it makes every generator work again. It generated nothing — no
+  # `@ShapeshifterAsset` exists in the tree. Re-adding it disables ALL codegen.
 
 dependency_overrides:
   source_gen: ^4.1.2

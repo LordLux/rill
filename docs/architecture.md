@@ -568,6 +568,62 @@ two branches meet to the pixel there, which is what makes the boundary invisible
 Which *controls* to draw is a separate question answered by portrait; one flag
 answering both is what broke square video.
 
+### 2.9 Captions render through libass, not Flutter
+
+**Decided 2026-08-18.** The sidecar converts every caption format to ASS and
+hands mpv a subtitle track. Flutter draws no captions.
+
+**The alternative was a Flutter overlay, and it was tried and rolled back.** It
+works for plain text and cannot ever work for **YTT** — YouTube's own caption
+format, which carries per-word timing, absolute positioning, colours, fonts,
+edge effects and karaoke. libass renders exactly that class of styling natively;
+a Flutter overlay would mean writing a subtitle layout engine and then throwing
+it away when YTT lands. Choosing ASS now makes YTT an additional converter behind
+an interface that already exists.
+
+The pipeline is `fetch → parse → cues → group (ASR only) → ASS`, with one
+intermediate model (`sidecar/src/captions/cues.ts`) as its waist. Every styling
+field on that model is optional and unset by the `json3` parser; they exist so
+YTT extends the pipeline rather than replacing it.
+
+**libass is present in the artefact, not merely in the version number.** Hard
+invariant 8 applies, so the check was a string-table scan of
+`app/build/windows/x64/runner/Release/libmpv-2.dll` — the DLL the build actually
+loads, F12/F15's mpv v0.36.0-403 / FFmpeg n6.0 from Sept 2023. It carries libass
+statically alongside HarfBuzz and FriBidi (`ass_render.c`, `ass_shaper.c`,
+`Shaper: FriBidi 1.0.13 … HarfBuzz-ng`, `[Events]`, `ScriptType`), plus
+`sub-add`, `sub-remove`, `sub-visibility`, `sub-scale`, `sub-pos` and
+`secondary-sid`. So positioning and inline overrides are reachable on this pin;
+YTT is not blocked by the artefact.
+
+**Delivery is `SubtitleTrack.data`, media_kit's own path.** It writes the
+document to a temp file and issues `sub-add <uri> select`, which adds a track
+without touching the media — no reopen, so a caption change costs nothing where
+a quality switch costs 0.55–12 s (F19). Two consequences worth knowing: the temp
+file media_kit creates has **no extension**, so format detection is by content
+and an ASS document must start `[Script Info]`; and media_kit registers the file
+for deletion on `Player.dispose` rather than on track change, so a long session
+that switches languages repeatedly leaves one small file per switch until exit.
+
+**A quality switch drops the subtitle track**, because it reopens the media
+(F19). The controller reattaches after the switch rather than relying on mpv to
+carry it, and that is the only place captions and quality interact.
+
+**ASR tracks are a rolling window, not a cue list.** Measured on real tracks
+2026-08-18: an auto-generated track transmits heavily overlapping events — one
+starting at 18800 ms declares 7160 ms while the next starts at 21800 ms — plus a
+window-definition event whose duration covers the whole video and `aAppend` roll
+markers carrying a lone newline. Emitted verbatim that is three or four cues on
+screen at once, a caption pinned for the entire runtime, and a blank line between
+every real one. The grouping rule that resolves it is in `captions/cues.ts`.
+
+**`fmt=ytt` answers HTTP 404.** YTT is not a fourth format to fetch. Its styling
+model *is* the `pens` / `wsWinStyles` / `wpWinPositions` arrays already at the
+top of every `json3` document — empty for a plain track, populated for a styled
+one. A YTT parser is therefore an extension of `captions/json3.ts`, resolving the
+per-event `pPenId` / `wsWinStyleId` / `wpWinPosId` references into a `CueStyle`,
+and nothing else in the chain changes.
+
 ---
 
 ## 3. Phasing

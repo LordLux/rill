@@ -33,14 +33,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.2"
-  animated_vector_gen:
-    dependency: "direct dev"
-    description:
-      name: animated_vector_gen
-      sha256: "0cd28e67ced86265ff737987baaf0572348547bfae30e2415bd543c961a8ff3d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.3"
   archive:
     dependency: transitive
     description:
@@ -153,14 +145,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.2"
-  code_builder:
-    dependency: transitive
-    description:
-      name: code_builder
-      sha256: "6a6cab2ba4680d6423f34a9b972a4c9a94ebe1b62ecec4e1a1f2cba91fd1319d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.11.1"
   collection:
     dependency: transitive
     description:

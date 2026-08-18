@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart';
 
 import '../data/playback/engine.dart';
 import '../data/rpc/client.dart';
+import '../domain/caption_track.dart';
 import '../domain/playback_source.dart';
 
 /// Resolve a video to something playable. `playback.open {preload: true}`.
@@ -26,6 +27,12 @@ typedef PreviewSessionOpener = Future<String?> Function(String videoId);
 typedef PreviewReporter = Future<void> Function(String sessionId, int positionMs, String state);
 typedef PreviewSessionCloser = Future<void> Function(String sessionId);
 
+/// The hovered video's caption tracks, from the cached `/player` only.
+typedef PreviewCaptionLister = Future<List<CaptionTrack>> Function(String videoId);
+
+/// One track as an ASS document, fetched only when the CC button is pressed.
+typedef PreviewCaptionFetcher = Future<String> Function(String videoId, String trackId);
+
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
@@ -38,6 +45,34 @@ Future<PlaybackSource> _resolveOverRpc(String videoId) async {
     'preload': true,
   });
   return PlaybackSource.fromJson(response as Map<String, dynamic>);
+}
+
+/// The track list for a hovered video, from the cached tier-1 `/player` only.
+///
+/// `allowFallback: false` is the whole point (`protocol.md` §3.8): the preload
+/// that resolved this preview already fetched and cached that response, so this
+/// costs no request to YouTube — while the full list may cost a second
+/// `/player`, and a pointer sweeping a grid would spend one per tile. The price
+/// is that the CC toggle is absent on the minority of videos only the fallback
+/// would have found tracks for, which on a muted thumbnail preview is the right
+/// side to err on.
+Future<List<CaptionTrack>> _captionsOverRpc(String videoId) async {
+  final response = await RpcClient.instance.call('captions.list', {
+    'videoId': videoId,
+    'allowFallback': false,
+  });
+  return [
+    for (final entry in (response as Map)['tracks'] as List<dynamic>)
+      CaptionTrack.fromJson((entry as Map).cast<String, Object?>()),
+  ];
+}
+
+Future<String> _captionContentOverRpc(String videoId, String trackId) async {
+  final response = await RpcClient.instance.call('captions.get', {
+    'videoId': videoId,
+    'trackId': trackId,
+  });
+  return CaptionTrackContent.fromJson((response as Map).cast<String, Object?>()).content;
 }
 
 Future<String?> _openSessionOverRpc(String videoId) async {
@@ -71,11 +106,23 @@ class PreviewSession {
     required this.engine,
     required this.muted,
     required this.visible,
+    this.captionTrack,
+    this.captionsOn = false,
   });
 
   final String videoId;
   final PlaybackEngine engine;
   final bool muted;
+
+  /// The track the CC button would turn on, or null when the video has none —
+  /// in which case the button is not drawn at all.
+  ///
+  /// One track, not a list: a thumbnail-sized preview is no place for a language
+  /// picker, so the toggle offers the video's first track and the watch page is
+  /// where a language is chosen.
+  final CaptionTrack? captionTrack;
+
+  final bool captionsOn;
 
   /// Whether mpv has produced a frame yet. The tile keeps its thumbnail until it has, so a
   /// slow open never shows a black rectangle.
@@ -86,6 +133,8 @@ class PreviewSession {
         engine: engine,
         muted: muted ?? this.muted,
         visible: visible ?? this.visible,
+        captionTrack: captionTrack,
+        captionsOn: captionsOn,
       );
 }
 
@@ -104,11 +153,15 @@ class HoverPreview {
     PreviewSessionOpener? openSession,
     PreviewReporter? report,
     PreviewSessionCloser? closeSession,
+    PreviewCaptionLister? captionList,
+    PreviewCaptionFetcher? captionContent,
     this.delay = hoverDelay,
   })  : _resolve = resolve ?? _resolveOverRpc,
         _openSession = openSession ?? _openSessionOverRpc,
         _report = report ?? _reportOverRpc,
-        _closeSession = closeSession ?? _closeOverRpc {
+        _closeSession = closeSession ?? _closeOverRpc,
+        _captionList = captionList ?? _captionsOverRpc,
+        _captionContent = captionContent ?? _captionContentOverRpc {
     // Not just a guard on `enter`: the user can hit play in the mini-player with the pointer
     // already resting on a tile, and two decoders at once is what F16 says this cannot afford.
     _shellSubscription = shell.playingStream.listen((playing) {
@@ -159,7 +212,14 @@ class HoverPreview {
   String? _pendingId;
   String? _activeId;
   PreviewSink? _sink;
+  final PreviewCaptionLister _captionList;
+  final PreviewCaptionFetcher _captionContent;
+
   bool _muted = true;
+
+  /// The hovered video's first caption track, once the free list has answered.
+  CaptionTrack? _captionTrack;
+  bool _captionsOn = false;
 
   /// The reportable session, once the preview has outlived [watchThreshold].
   String? _sessionId;
@@ -203,6 +263,50 @@ class HoverPreview {
     stop();
   }
 
+  /// Turn the preview's captions on or off.
+  ///
+  /// **A preview is muted by default, so this is the control that makes one
+  /// legible** — which is why it earns a place in a cluster deliberately kept to
+  /// two buttons. It costs one `timedtext` fetch on the *first* press for a
+  /// video and nothing after that (the sidecar caches the rendered ASS), and
+  /// nothing at all if it is never pressed: the list that decides whether to
+  /// draw the button is read from a `/player` response the preload already
+  /// cached. Hovering a grid of tiles issues no extra request to YouTube.
+  Future<void> toggleCaptions() async {
+    final engine = _engine;
+    final track = _captionTrack;
+    final videoId = _activeId;
+    if (engine == null || track == null || videoId == null) return;
+
+    final generation = _generation;
+    if (_captionsOn) {
+      _captionsOn = false;
+      _push();
+      unawaited(engine.setSubtitle(null));
+      return;
+    }
+
+    // Icon first, like the mute toggle: the fetch can take a moment and a button
+    // that waits for it before redrawing reads as an unresponsive one.
+    _captionsOn = true;
+    _push();
+    try {
+      final ass = await _captionContent(videoId, track.id);
+      // A pointer that moved on took the engine with it. Attaching now would put
+      // this video's words over whichever preview is running instead.
+      if (generation != _generation || !_captionsOn) return;
+      await engine.setSubtitle(ass);
+    } on Object catch (error) {
+      // Silent, like every other preview failure: the answer to "no captions on
+      // a thumbnail" is the thumbnail, never an error state on a tile nobody
+      // clicked.
+      stderr.writeln('preview $videoId: captions unavailable ($error)');
+      if (generation != _generation) return;
+      _captionsOn = false;
+      _push();
+    }
+  }
+
   /// Mute or unmute the running preview. The tile's one hover control.
   Future<void> toggleMute() async {
     final engine = _engine;
@@ -242,7 +346,22 @@ class HoverPreview {
     _activeId = videoId;
     _sink = sink;
     _muted = true;
+    _captionTrack = null;
+    _captionsOn = false;
     _engineOwner = generation;
+
+    // Off the critical path on purpose: the preview opens whether or not this
+    // ever answers, and the CC button simply appears when it does.
+    unawaited(() async {
+      try {
+        final tracks = await _captionList(videoId);
+        if (generation != _generation || tracks.isEmpty) return;
+        _captionTrack = tracks.first;
+        _push();
+      } on Object catch (error) {
+        stderr.writeln('preview $videoId: caption list unavailable ($error)');
+      }
+    }());
 
     // Muted before opening, and **not awaited**. Measured 2026-08-11: `setVolume` on a freshly
     // constructed engine never completes — media_kit resolves it against a platform that is only
@@ -379,6 +498,8 @@ class HoverPreview {
     _sink = null;
     _activeId = null;
     _muted = true;
+    _captionTrack = null;
+    _captionsOn = false;
 
     if (_engine != null) unawaited(_engine!.stop());
 
@@ -406,6 +527,8 @@ class HoverPreview {
       engine: engine,
       muted: _muted,
       visible: sink.value?.visible ?? false,
+      captionTrack: _captionTrack,
+      captionsOn: _captionsOn,
     );
   }
 

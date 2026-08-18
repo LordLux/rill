@@ -1,10 +1,13 @@
 /// The player's keyboard shortcuts, and the guard that keeps them out of text.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../captions_controller.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
 import 'settings_menu.dart';
@@ -26,6 +29,7 @@ enum PlayerAction {
   previous,
   next,
   miniPlayer,
+  captions,
 }
 
 /// One resolved key press. [seconds] carries ∓5 or ∓10; [decile] carries 0–9.
@@ -105,6 +109,10 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   if (key == LogicalKeyboardKey.keyF) return const PlayerShortcut(PlayerAction.fullscreen);
   if (key == LogicalKeyboardKey.keyT) return const PlayerShortcut(PlayerAction.theatre);
   if (key == LogicalKeyboardKey.keyI) return const PlayerShortcut(PlayerAction.miniPlayer);
+  // `C`, the same key youtube.com uses. Subject to [textEntryHasFocus] like
+  // every other letter here — typing "c" in the search box must not turn on
+  // subtitles behind it.
+  if (key == LogicalKeyboardKey.keyC) return const PlayerShortcut(PlayerAction.captions);
   if (key == LogicalKeyboardKey.escape) return const PlayerShortcut(PlayerAction.escape);
 
   // TODO add end and home for seeking to the start and end of the video
@@ -250,6 +258,13 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         playback.next();
       case PlayerAction.miniPlayer:
         toMiniPlayerIn(ProviderScope.containerOf(context, listen: false));
+      case PlayerAction.captions:
+        // Declines when the video has no tracks, rather than swallowing the key
+        // — the same shape as `escape`. `toggle()` is already a no-op on an
+        // empty list; returning false here also leaves `c` to the rest of the
+        // app on a video that cannot have captions.
+        if (!ref.read(captionsProvider).hasTracks) return false;
+        unawaited(ref.read(captionsProvider.notifier).toggle());
     }
     return true;
   }

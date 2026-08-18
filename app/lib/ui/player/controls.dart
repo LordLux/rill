@@ -22,6 +22,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
 import '../../theme/tokens.dart';
+import '../captions_controller.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
@@ -161,6 +162,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   void _toggleMenu() => _toggleMenuAt(SettingsPage.root);
 
   void _toggleQuality() => _toggleMenuAt(SettingsPage.quality);
+  void _toggleCaptions() => _toggleMenuAt(SettingsPage.captions);
+
+  /// Whether a page belongs to the gear rather than to one of the two buttons
+  /// with their own door. Listed positively so a fourth page defaults to *not*
+  /// lighting the gear up, which is the safe direction.
+  static bool _isGearPage(SettingsPage page) =>
+      page == SettingsPage.root || page == SettingsPage.moreOptions;
 
   void _toggleMenuAt(SettingsPage page) {
     ref.read(playerMenuProvider.notifier).toggleAt(page);
@@ -360,6 +368,25 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                 onChanged: _wake,
                               ),
                               const SizedBox(height: 2),
+                              if (ref.watch(captionsProvider.select((c) => c.hasTracks))) ...[
+                                KeyedSubtree(
+                                  key: captionsButtonAnchorKey,
+                                  child: _MenuButton(
+                                    key: playerCaptionsKey,
+                                    icon: ref.watch(captionsProvider.select((c) => c.isOn))
+                                        ? Icons.closed_caption
+                                        : Icons.closed_caption_outlined,
+                                    busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
+                                    open: ref.watch(
+                                      playerMenuProvider.select(
+                                        (menu) => menu.open && menu.page == SettingsPage.captions,
+                                      ),
+                                    ),
+                                    onPressed: _toggleCaptions,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                              ],
                               KeyedSubtree(
                                 key: qualityButtonAnchorKey,
                                 child: _MenuButton(
@@ -382,7 +409,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                   icon: Icons.settings,
                                   open: ref.watch(
                                     playerMenuProvider.select(
-                                      (menu) => menu.open && menu.page != SettingsPage.quality,
+                                      (menu) => menu.open && _isGearPage(menu.page),
                                     ),
                                   ),
                                   onPressed: _toggleMenu,
@@ -449,6 +476,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     final queue = ref.watch(queueProvider);
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
+    final captions = ref.watch(captionsProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -543,17 +571,34 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  // Captions. Present and **disabled** — they are their own task
-                  // and there is nothing behind this yet. A disabled control
-                  // says "later"; a live one that does nothing says "broken".
-                  // (This replaces the reserved empty gap, which left the
-                  // right-hand cluster looking as though it had lost a button.)
-                  const _ControlIcon(
-                    iconKey: playerCaptionsKey,
-                    icon: Icons.closed_caption_outlined,
-                    label: 'Captions',
-                    onPressed: null,
-                  ),
+                  // **Captions, and absent entirely when the video has none.**
+                  // Not disabled: an empty track list is a settled answer once
+                  // `captions.list` has answered (`protocol.md` §3.8 — the
+                  // `MWEB` fallback has already run), so a greyed button would
+                  // promise something that is never coming for this video. The
+                  // gap left in Task 16 was the placeholder for this.
+                  //
+                  // Filled when captions are on, outlined when off — the one
+                  // other control here that reports state rather than action is
+                  // theatre, and for the same reason: "on" is the fact worth
+                  // reading at a glance.
+                  if (captions.hasTracks)
+                    KeyedSubtree(
+                      key: captionsButtonAnchorKey,
+                      child: _MenuButton(
+                        key: playerCaptionsKey,
+                        icon: captions.isOn
+                            ? Icons.closed_caption
+                            : Icons.closed_caption_outlined,
+                        busy: captions.isLoadingTrack,
+                        open: ref.watch(
+                          playerMenuProvider.select(
+                            (menu) => menu.open && menu.page == SettingsPage.captions,
+                          ),
+                        ),
+                        onPressed: _toggleCaptions,
+                      ),
+                    ),
                   // **Quality, then the gear** — specific before general. It is
                   // the one picker anybody changes mid-video, so a row two taps
                   // deep inside the settings menu was the wrong depth for it.
@@ -580,9 +625,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     child: _MenuButton(
                       key: playerSettingsButtonKey,
                       icon: Icons.settings,
+                      // The two pages that are *not* the gear's, named rather
+                      // than `!= quality`: adding the captions page to that
+                      // test would have lit the gear up whenever the caption
+                      // panel was open, which reads as two menus at once.
                       open: ref.watch(
                         playerMenuProvider.select(
-                          (menu) => menu.open && menu.page != SettingsPage.quality,
+                          (menu) => menu.open && _isGearPage(menu.page),
                         ),
                       ),
                       onPressed: _toggleMenu,

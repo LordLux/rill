@@ -95,6 +95,19 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // Channel subscriber counts are public, but no channel tile has reached the
   // corpus yet; require a synthetic value rather than guessing a policy.
   subscriberText: /^Sanitised Subscribers \d+$/,
+
+  // VideoDetail. A description is free text from an arbitrary uploader and a
+  // like count is public, but both are replaced rather than kept: the corpus is
+  // a shape reference, and neither adds a shape a synthetic value would not.
+  description: /^Sanitised Description \d+$/,
+  likeText: /^Sanitised Likes \d+$/,
+  relatedContinuation: /^CONTINUATION_TOKEN_\d+$/,
+
+  // Caption tracks. `languageCode` is a BCP-47-ish tag from a closed-ish
+  // vocabulary and identifies nobody, so it survives verbatim — but it is
+  // pinned to a tag shape rather than exempted, because "en" passing and an
+  // arbitrary string passing are different properties.
+  languageCode: /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$/,
 };
 
 /** Shapes that must never occur in the corpus, whatever field they sit in. */

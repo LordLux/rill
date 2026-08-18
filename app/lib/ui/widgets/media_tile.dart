@@ -297,9 +297,14 @@ class _MediaTileState extends State<MediaTile> {
     );
   }
 
-  /// The top-right hover cluster: the mute toggle while previewing, Watch Later and Add to
-  /// queue otherwise. Not both — three buttons over a 16:9 thumbnail is a toolbar. A CC button
-  /// belongs in the previewing branch once captions exist (§2.6).
+  /// The top-right hover cluster: mute and CC while previewing, Watch Later and Add to
+  /// queue otherwise. Not both — three buttons over a 16:9 thumbnail is a toolbar, and the
+  /// previewing branch stays at two for the same reason.
+  ///
+  /// CC is drawn only when the preview's video has a track, which the sidecar answers from a
+  /// `/player` response the preload already cached (`protocol.md` §3.8, `allowFallback: false`)
+  /// — so a pointer sweeping the grid costs no request. A preview is muted, which makes
+  /// captions the control that decides whether it is legible at all.
   Widget _hoverActions(RillTokens tokens, PreviewSession? session) {
     final playing = _isPreviewing(session) ? session! : null;
     final showsAnything = playing != null || widget.spec.canWatchLater || widget.spec.canAddToQueue;
@@ -320,6 +325,17 @@ class _MediaTileState extends State<MediaTile> {
                     tooltip: playing.muted ? 'Unmute preview' : 'Mute preview',
                     onPressed: () => unawaited(_preview!.toggleMute()),
                   ),
+                  if (playing.captionTrack != null) ...[
+                    const SizedBox(height: 8.0),
+                    _hoverButton(
+                      tokens: tokens,
+                      icon: playing.captionsOn
+                          ? Icons.closed_caption
+                          : Icons.closed_caption_outlined,
+                      tooltip: playing.captionsOn ? 'Hide captions' : 'Show captions',
+                      onPressed: () => unawaited(_preview!.toggleCaptions()),
+                    ),
+                  ],
                 ]
               : [
                   if (widget.spec.canWatchLater) ...[

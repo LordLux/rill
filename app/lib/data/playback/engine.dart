@@ -86,7 +86,28 @@ abstract class PlaybackEngine {
   /// created or freed when the route changes.
   Widget videoSurface({BoxFit fit = BoxFit.contain});
 
-  Future<void> open(PlaybackVariant variant, {bool play = true});
+  /// The ASS document currently attached, or null.
+  ///
+  /// Engine state rather than controller state, because it is a fact about what
+  /// mpv is holding — and because [open] has to know it in order to put it back
+  /// after a quality switch.
+  String? get subtitle;
+
+  /// Attach an ASS document as an external subtitle track, or detach with null.
+  ///
+  /// `sub-add … select`, which adds a track without touching the media: verified
+  /// against the bundled libmpv rather than assumed, because a caption toggle
+  /// that reopened the stream would cost the 0.55–12 s a quality switch costs
+  /// (F19) and captions would have to become a per-open choice.
+  /// See `architecture.md` §2.9.
+  Future<void> setSubtitle(String? ass);
+
+  /// [retainSubtitle] puts the attached track back after the media reopens.
+  ///
+  /// A quality switch reopens the media (F19) and mpv drops external subtitle
+  /// tracks with it. Opening a *different video* must not carry the previous
+  /// one's captions, so this is opt-in and only `switchQuality` passes it.
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false});
   Future<void> play();
   Future<void> pause();
   Future<void> playOrPause();
@@ -260,9 +281,43 @@ class MediaKitEngine implements PlaybackEngine {
   /// loaded and the demuxer reports a duration (F15). Guarded on the duration
   /// already being known, because a fast load has already fired the event and
   /// `firstWhere` on a stream that has passed waits forever.
+  String? _subtitle;
+
   @override
-  Future<void> open(PlaybackVariant variant, {bool play = true}) async {
+  String? get subtitle => _subtitle;
+
+  /// `SubtitleTrack.data` — mechanism (1) of the three in the task brief, and the
+  /// cheapest: no file we own, no server, no cleanup path of our own.
+  ///
+  /// Two things about media_kit's implementation are worth knowing and are not
+  /// documented by it. It writes the string to a **temp file with no extension**
+  /// (a bare UUID under `Directory.systemTemp`) and hands mpv the URI, so format
+  /// detection is by content — an ASS document has to start `[Script Info]`, and
+  /// `ass.ts` guarantees it does. And it registers that file for deletion on
+  /// `Player.dispose`, not on the next track change, so a session that switches
+  /// language repeatedly leaves one small file per switch until the app exits.
+  ///
+  /// `SubtitleTrack.no()` rather than a `sub-remove`: media_kit routes the
+  /// non-data case through `sid`, which is the property mpv uses to *select*
+  /// nothing, and leaves the loaded track alone. Turning captions back on
+  /// re-adds them, which costs a temp file and no round trip.
+  @override
+  Future<void> setSubtitle(String? ass) async {
+    _subtitle = ass;
+    if (ass == null) {
+      await _player.setSubtitleTrack(SubtitleTrack.no());
+      return;
+    }
+    await _player.setSubtitleTrack(SubtitleTrack.data(ass, title: 'Captions'));
+  }
+
+  @override
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {
     lastOpened = variant;
+    // Read before the open, applied after it. A reopen drops mpv's external
+    // subtitle tracks, and this is the only place that knows one was attached.
+    final retained = retainSubtitle ? _subtitle : null;
+    _subtitle = null;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffer = Duration.zero;
@@ -276,7 +331,10 @@ class MediaKitEngine implements PlaybackEngine {
     await _player.open(Media(variant.videoUrl), play: play);
 
     final audioUrl = variant.audioUrl;
-    if (audioUrl == null) return;
+    if (audioUrl == null) {
+      if (retained != null) await setSubtitle(retained);
+      return;
+    }
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -301,6 +359,10 @@ class MediaKitEngine implements PlaybackEngine {
       ]).timeout(const Duration(seconds: 20));
     }
     await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+    // After the audio, not before: both go through `sub-add`/`audio-add` against
+    // a freshly loaded file, and attaching a subtitle to a file whose duration is
+    // not known yet is the same race the audio wait above exists for.
+    if (retained != null) await setSubtitle(retained);
   }
 
   @override

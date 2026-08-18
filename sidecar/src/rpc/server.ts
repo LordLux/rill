@@ -332,6 +332,25 @@ async function handleRequest(request: RpcRequest) {
       const { getStoryboard } = await import('../video/storyboard.ts');
       const result = await getStoryboard(await getResolveSession(), videoId);
       emitResponse(id, result);
+    } else if (method === 'captions.list') {
+      // The resolve session only, like `video.storyboard`: the track list comes
+      // off the `ANDROID_VR` `/player` response ladder tier 1 already cached, so
+      // this must not wait on — or wake — the authenticated browse session.
+      const videoId = requireString(params, 'videoId', 'captions.list');
+      // `allowFallback: false` is the hover preview's mode — the free answer off
+      // the cached tier-1 response, never the fallback's second `/player`. Any
+      // value but an explicit `false` keeps the full behaviour, so a caller that
+      // omits it gets the complete list.
+      const allowFallback = params?.allowFallback !== false;
+      const { getCaptionList } = await import('../captions/service.ts');
+      const result = await getCaptionList(await getResolveSession(), videoId, { allowFallback });
+      emitResponse(id, result);
+    } else if (method === 'captions.get') {
+      const videoId = requireString(params, 'videoId', 'captions.get');
+      const trackId = requireString(params, 'trackId', 'captions.get');
+      const { getCaptionTrack } = await import('../captions/service.ts');
+      const result = await getCaptionTrack(await getResolveSession(), videoId, trackId);
+      emitResponse(id, result);
     } else if (method === 'video.related') {
       const videoId = requireString(params, 'videoId', 'video.related');
       const continuation = optionalString(params, 'continuation', 'video.related');
