@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" ?><timedtext><text t="1360" d="1680">[♪♪♪]</text><text t="18640" d="3240">♪ We&amp;#39;re no strangers to love ♪</text><text t="22640" d="4320">♪ You know the rules
+and so do I ♪</text><text t="27040" d="4000">♪ A full commitment&amp;#39;s
+what I&amp;#39;m thinking of ♪</text><text t="31120" d="3960">♪ You wouldn&amp;#39;t get this
+from any other guy ♪</text><text t="35160" d="4360">♪ I just wanna tell you
+how I&amp;#39;m feeling ♪</text><text t="40520" d="2400">♪ Gotta make you understand ♪</text><text t="43000" d="2120">♪ Never gonna give you up ♪</text><text t="45200" d="1880">♪ Never gonna let you down ♪</text><text t="47320" d="3800">♪ Never gonna run around
+and desert you ♪</text><text t="51480" d="2000">♪ Never gonna make you cry ♪</text><text t="53600" d="1920">♪ Never gonna say goodbye ♪</text><text t="55720" d="3640">♪ Never gonna tell a lie
+and hurt you ♪</text><text t="60800" d="4000">♪ We&amp;#39;ve known each other
+for so long ♪</text><text t="64880" d="4160">♪ Your heart&amp;#39;s been aching
+but you&amp;#39;re too shy to say it ♪</text><text t="69120" d="3840">♪ Inside we both know
+what&amp;#39;s been going ♪</text><text t="73360" d="3840">♪ We know the game
+and we&amp;#39;re gonna play it ♪</text><text t="77400" d="4640">♪ And if you ask me
+how I&amp;#39;m feeling ♪</text><text t="82400" d="2840">♪ Don&amp;#39;t tell me
+you&amp;#39;re too blind to see ♪</text><text t="85320" d="1960">♪ Never gonna give you up ♪</text><text t="87360" d="1960">♪ Never gonna let you down ♪</text><text t="89440" d="4280">♪ Never gonna run around
+and desert you ♪</text><text t="93800" d="1800">♪ Never gonna make you cry ♪</text><text t="95760" d="2240">♪ Never gonna say goodbye ♪</text><text t="98080" d="3960">♪ Never gonna tell a lie
+and hurt you ♪</text><text t="102200" d="1920">♪ Never gonna give you up ♪</text><text t="104280" d="2080">♪ Never gonna let you down ♪</text><text t="106480" d="3600">♪ Never gonna run around
+and desert you ♪</text><text t="110760" d="1960">♪ Never gonna make you cry ♪</text><text t="112800" d="1880">♪ Never gonna say goodbye ♪</text><text t="114960" d="3800">♪ Never gonna tell a lie
+and hurt you ♪</text><text t="119840" d="3120">♪ (Ooh, give you up) ♪</text><text t="123720" d="3640">♪ (Ooh, give you up) ♪</text><text t="128480" d="1640">♪ Never gonna give,
+never gonna give ♪</text><text t="130240" d="1320">♪ (Give you up) ♪</text><text t="132480" d="1760">♪ Never gonna give,
+never gonna give ♪</text><text t="134360" d="1560">♪ (Give you up) ♪</text><text t="136760" d="4320">♪ We&amp;#39;ve known each other
+for so long ♪</text><text t="141200" d="4000">♪ Your heart&amp;#39;s been aching
+but you&amp;#39;re too shy to say it ♪</text><text t="145280" d="3840">♪ Inside we both know
+what&amp;#39;s been going ♪</text><text t="149520" d="3680">♪ We know the game
+and we&amp;#39;re gonna play it ♪</text><text t="153360" d="4680">♪ I just wanna tell you
+how I&amp;#39;m feeling ♪</text><text t="158640" d="2680">♪ Gotta make you understand ♪</text><text t="161400" d="1960">♪ Never gonna give you up ♪</text><text t="163440" d="2200">♪ Never gonna let you down ♪</text><text t="165720" d="4000">♪ Never gonna run around
+and desert you ♪</text><text t="169800" d="1840">♪ Never gonna make you cry ♪</text><text t="171800" d="2160">♪ Never gonna say goodbye ♪</text><text t="174040" d="3560">♪ Never gonna tell a lie
+and hurt you ♪</text><text t="178200" d="2040">♪ Never gonna give you up ♪</text><text t="180320" d="2120">♪ Never gonna let you down ♪</text><text t="182520" d="4120">♪ Never gonna run around
+and desert you ♪</text><text t="186720" d="2000">♪ Never gonna make you cry ♪</text><text t="188840" d="1880">♪ Never gonna say goodbye ♪</text><text t="190840" d="4360">♪ Never gonna tell a lie
+and hurt you ♪</text><text t="195280" d="1840">♪ Never gonna give you up ♪</text><text t="197200" d="2040">♪ Never gonna let you down ♪</text><text t="199400" d="3720">♪ Never gonna run around
+and desert you ♪</text><text t="203360" d="2240">♪ Never gonna make you cry ♪</text><text t="205680" d="2160">♪ Never gonna say goodbye ♪</text><text t="207920" d="3400">♪ Never gonna tell a lie
+and hurt you ♪</text></timedtext>
