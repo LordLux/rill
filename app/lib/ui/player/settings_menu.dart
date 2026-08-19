@@ -404,13 +404,28 @@ const List<({IconData icon, String label})> _morePlaceholders = [
   (icon: Icons.brightness_medium_outlined, label: 'Ambient mode'),
 ];
 
-/// The width the panel settles at.
+/// The width the panel settles at when nothing needs more.
 ///
-/// **One width for every page, rather than each page asking for its own.** The
-/// panel morphs its height between pages because the pages genuinely differ in
-/// length; letting the width move too made the whole thing appear to breathe
-/// sideways on every navigation, which reads as the menu being unsure of itself.
+/// **One width for every page that fits in it.** The panel morphs its height
+/// between pages because the pages genuinely differ in length; letting the width
+/// float freely made the whole thing appear to breathe sideways on every
+/// navigation, which reads as the menu being unsure of itself. So this is a
+/// *floor*, not a fixed size — a page whose content does not fit grows past it
+/// (see [_menuMaxWidth]) and every page that does fit still agrees on one width.
 const double _menuWidth = 248;
+
+/// How far the panel may grow to fit its content.
+///
+/// A caption row can carry a long language name, a sub-name and a badge —
+/// "English (United Kingdom)" with *Styled* is already past the floor — and
+/// truncating the language is worse than a wider menu, because the truncated
+/// part is the bit that tells two rows apart.
+///
+/// Capped rather than unbounded so a pathological label cannot turn the menu
+/// into a sheet; past this the label ellipsises as before. The real player width
+/// caps it again — `ConstrainedBox` enforces against the incoming constraints —
+/// so this never overflows a narrow window.
+const double _menuMaxWidth = 380;
 
 class _RootPage extends ConsumerWidget {
   const _RootPage();
@@ -469,11 +484,28 @@ class _MoreOptionsPage extends ConsumerWidget {
 /// is not drawn at all when the video has no tracks (`protocol.md` §3.8 — an
 /// empty list is settled, not pending). The empty branch below is for the video
 /// changing underneath an already-open panel.
-class _CaptionsPage extends ConsumerWidget {
+class _CaptionsPage extends ConsumerStatefulWidget {
   const _CaptionsPage();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_CaptionsPage> createState() => _CaptionsPageState();
+}
+
+class _CaptionsPageState extends ConsumerState<_CaptionsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Opening this page is what pays for the `Styled` badge: a caption document
+    // per track. Deliberately here rather than on the video-open path — see
+    // `CaptionsController.loadStyled`. Fired once per mount, and a no-op when
+    // the answers are already cached.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(ref.read(captionsProvider.notifier).loadStyled());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final captions = ref.watch(captionsProvider);
     final controller = ref.read(captionsProvider.notifier);
@@ -495,19 +527,28 @@ class _CaptionsPage extends ConsumerWidget {
             onTap: null,
           )
         else ...[
+          for (final track in captions.tracks)
+            _CaptionRow(
+              label: track.label,
+              // Null for `plain`, for "not asked yet", and for a category this
+              // build does not know — see `CaptionTrack.styleBadge`. A row that
+              // flickers a badge in as the answers land would be worse than one
+              // that never had it.
+              badge: track.styleBadge,
+              trackName: track.trackName,
+              selected: captions.selectedId == track.id,
+              onTap: () => controller.select(track.id),
+            ),
+          // **Last, under a divider, exactly where quality puts *Auto*.** The
+          // languages above are the choices; turning them off is the end of the
+          // list rather than a language above the first one.
+          Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
           _CaptionRow(
             key: playerCaptionsOffKey,
             label: 'Off',
             selected: !captions.isOn,
             onTap: () => controller.select(null),
           ),
-          Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
-          for (final track in captions.tracks)
-            _CaptionRow(
-              label: track.label,
-              selected: captions.selectedId == track.id,
-              onTap: () => controller.select(track.id),
-            ),
         ],
       ],
     );
@@ -521,10 +562,24 @@ class _CaptionsPage extends ConsumerWidget {
 /// about both. Two small widgets that look alike beat one that has to ask which
 /// menu it is in.
 class _CaptionRow extends StatelessWidget {
-  const _CaptionRow({super.key, required this.label, required this.selected, required this.onTap});
+  const _CaptionRow({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.badge,
+    this.trackName = '',
+  });
 
   final String label;
   final bool selected;
+
+  /// *Styled* or *Karaoke*, already decided — see `CaptionTrack.styleBadge`.
+  /// Null draws nothing, which covers plain, not-yet-asked and unrecognised.
+  final String? badge;
+
+  /// YouTube's sub-name, or `''`. Worn like a quality row's `4K`.
+  final String trackName;
   final VoidCallback? onTap;
 
   @override
@@ -542,13 +597,49 @@ class _CaptionRow extends StatelessWidget {
             color: selected ? scheme.primary : Colors.transparent,
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13, color: scheme.onSurface),
-            ),
+          // `Expanded`, so the badges sit against the right edge rather than
+          // hugging the label. Under `IntrinsicWidth` it still reports the
+          // label's full width, which is what lets the panel grow to fit.
+          Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 13, color: scheme.onSurface),
           ),
+          // **The derived qualifier wears what a resolution wears** — raised,
+          // small, muted — because it is the same kind of thing as `4K`: not
+          // part of the track's name, but something read off it.
+          // `_QualityRow._badge` is the other half of that pairing.
+          if (badge != null) ...[
+            const SizedBox(width: 4),
+            Transform.translate(
+              offset: const Offset(0, -5),
+              child: Text(
+                badge!,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+          // The sub-name gets the chip, because it *is* part of the name — a
+          // second label rather than a note about the first, and a chip reads as
+          // its own thing where a superscript reads as an annotation.
+          if (trackName.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                trackName,
+                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -630,10 +721,27 @@ class _MenuBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: _menuWidth,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: settingsMenuMaxHeight),
+    return ConstrainedBox(
+      // A floor and a ceiling rather than a fixed width. `enforce` against the
+      // incoming constraints happens for free, so a player narrower than
+      // [_menuMaxWidth] clamps this without anyone measuring the window.
+      constraints: const BoxConstraints(
+        minWidth: _menuWidth,
+        maxWidth: _menuMaxWidth,
+        maxHeight: settingsMenuMaxHeight,
+      ),
+      // **Measured, not calculated.** The alternative is adding up a label's
+      // `TextPainter` width plus the icon, the gaps, the sub-name and the badge
+      // — a second copy of the row's layout, in a different file, that goes
+      // wrong the first time anyone adds a widget to the row and reports it by
+      // truncating text rather than by failing. `IntrinsicWidth` asks the rows
+      // themselves, so a new element is accounted for by existing.
+      //
+      // The cost is a second layout pass over the page's rows, on a menu of at
+      // most a couple of dozen; the panel's `AnimatedSize` is what turns the
+      // resulting width change into a movement instead of a jump, and it is
+      // anchored bottom-**right**, so a wider panel grows to the left.
+      child: IntrinsicWidth(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -786,7 +894,7 @@ class _MenuRow extends StatelessWidget {
 
 /// A rung, with the badge the resolution earns.
 ///
-/// `4K` and `HD` are derived from the height here rather than sent by the
+/// `16K`, `8K`, `4K` and `HD` are derived from the height here rather than sent by the
 /// sidecar — they are a *rendering* of a number the DTO already carries, and a
 /// badge field on `PlaybackVariant` would be the UI asking the protocol to hold
 /// its opinions for it.

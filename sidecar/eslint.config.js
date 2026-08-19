@@ -28,6 +28,8 @@ export default tseslint.config(
     rules: { 'no-restricted-properties': 'off' },
   },
   {
-    ignores: ['node_modules/**', 'fixtures/**'],
+    // `scratch/` is ad-hoc probes against the live API — not shipped, not
+    // imported, and console output is the whole point of one.
+    ignores: ['node_modules/**', 'fixtures/**', 'scratch/**'],
   },
 );

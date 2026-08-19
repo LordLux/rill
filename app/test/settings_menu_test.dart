@@ -7,12 +7,15 @@ library;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/domain/caption_track.dart';
 import 'package:rill/domain/playback_source.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import 'package:rill/theme/app_theme.dart';
+import 'package:rill/ui/captions_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/settings_menu.dart';
 
@@ -171,7 +174,15 @@ void main() {
       await tester.pumpAndSettle();
       final moreSize = tester.getSize(find.byKey(settingsMenuPanelKey));
 
-      expect(moreSize.width, rootSize.width, reason: 'one width for every page');
+      // **No longer "one width for every page" unconditionally.** The panel
+      // sizes to its widest row above a shared floor, so two pages match only
+      // while both fit in it — which every page authored in this file does under
+      // a normal UI font, and none does under the test font, whose glyphs are
+      // one em wide. Asserting equality here would pin the test font rather than
+      // the design. What the floor guarantees is asserted directly below, and
+      // the growth rule has its own group.
+      expect(moreSize.width, greaterThanOrEqualTo(248));
+      expect(rootSize.width, greaterThanOrEqualTo(248));
       // No claim about the height *changing*: these two pages happen to be the
       // same length, and whether they are is a content decision. The panel's
       // resize is pinned on the root/quality pair instead, where the difference
@@ -350,9 +361,18 @@ void main() {
   });
 
   group('page transitions', () {
-    /// Where a page's content sits relative to where it settles.
+    /// Where a page's content sits, **measured from the panel's own left edge**.
+    ///
+    /// Relative rather than absolute because the panel is no longer one fixed
+    /// width: it sizes to its widest row and is anchored on the right, so a page
+    /// whose content needs more room puts its left edge somewhere else on
+    /// screen. An absolute reading then moves for a reason that has nothing to
+    /// do with the slide these tests are about — and it does so only under a
+    /// font wide enough to push a page past the floor, which is exactly the kind
+    /// of failure that shows up on one machine and not another.
     double offsetOf(WidgetTester tester, String text) =>
-        tester.getTopLeft(find.text(text)).dx;
+        tester.getTopLeft(find.text(text)).dx -
+        tester.getRect(find.byKey(settingsMenuPanelKey)).left;
 
     testWidgets('a push brings the new page in from the right and takes the old out left',
         (tester) async {
@@ -408,19 +428,26 @@ void main() {
       menu.go(SettingsPage.quality);
       await tester.pumpWidget(host());
       await tester.pumpAndSettle();
-      final qualityAtRest = offsetOf(tester, '480p');
 
       menu.go(SettingsPage.root);
       await tester.pumpAndSettle();
-      final rootAtRest = offsetOf(tester, 'Sleep timer');
 
       menu.go(SettingsPage.quality);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 70));
 
       expect(find.text('Sleep timer'), findsOneWidget, reason: 'both are live, it is a fade');
-      expect(offsetOf(tester, 'Sleep timer'), rootAtRest, reason: 'the old page does not travel');
-      expect(offsetOf(tester, '480p'), qualityAtRest, reason: 'nor does the new one');
+
+      // **The slide itself, not where the glyphs land.** Since the panel sizes
+      // to its content it can also be morphing *width* through this frame, and
+      // that moves a right-anchored page's contents sideways for a reason that
+      // is not a slide. Reading the `SlideTransition` asks the question the test
+      // is named for: both pages are at zero offset, so neither travelled.
+      final slides = tester.widgetList<SlideTransition>(find.byType(SlideTransition));
+      expect(slides, isNotEmpty, reason: 'both pages are wrapped, moving or not');
+      for (final slide in slides) {
+        expect(slide.position.value, Offset.zero);
+      }
       await tester.pumpAndSettle();
     });
 
@@ -606,4 +633,127 @@ void main() {
       expect(pointerIsOnSettingsMenu(const Offset(20, 20)), isFalse);
     });
   });
+
+  /// The panel widens to fit a caption row rather than truncating it.
+  ///
+  /// Measured through the real widget rather than argued about: the width comes
+  /// from `IntrinsicWidth` asking the rows, so the only way to know a badge and
+  /// a sub-name are counted is to put them on a row and read the panel back.
+  group('the panel grows to fit its widest row', () {
+    Future<void> pumpCaptions(WidgetTester tester, List<CaptionTrack> tracks) async {
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          playbackProvider.overrideWith(FakePlayback.new),
+          playbackEngineProvider.overrideWithValue(FakeEngine()),
+          captionsProvider.overrideWith(() => _FixedCaptions(tracks)),
+        ],
+      );
+      container.read(playerMenuProvider.notifier).go(SettingsPage.captions);
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+    }
+
+    CaptionTrack track(String label, {String badge = '', String name = ''}) => CaptionTrack(
+          id: '.$label',
+          languageCode: 'en',
+          label: label,
+          isAutoGenerated: false,
+          trackName: name,
+          styled: badge.isEmpty ? 'plain' : badge,
+        );
+
+    testWidgets('Off is the last row, under a divider, as Auto is on quality',
+        (tester) async {
+      await pumpCaptions(tester, [track('English'), track('German')]);
+      final off = tester.getTopLeft(find.byKey(playerCaptionsOffKey)).dy;
+      for (final label in ['English', 'German']) {
+        expect(tester.getTopLeft(find.text(label)).dy, lessThan(off),
+            reason: '$label is a choice; Off comes after all of them');
+      }
+      // `.last` — the header carries one of its own, and the one this is about
+      // is the rule between the languages and Off.
+      final divider = tester.getTopLeft(find.byType(Divider).last).dy;
+      expect(divider, lessThan(off));
+      expect(tester.getTopLeft(find.text('German')).dy, lessThan(divider));
+    });
+
+    testWidgets('short labels leave it at the shared width', (tester) async {
+      await pumpCaptions(tester, [track('English'), track('German')]);
+      expect(tester.getSize(find.byKey(settingsMenuPanelKey)).width, 248);
+    });
+
+    testWidgets('a long label widens it, and the label is not truncated', (tester) async {
+      // 'English (Ireland)' plus a badge sits between the floor and the ceiling
+      // under the test font, which is what makes the two bounds below real
+      // assertions rather than either one being trivially satisfied.
+      await pumpCaptions(tester, [
+        track('English'),
+        track('English (Ireland)', badge: 'styled'),
+      ]);
+      final width = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+      expect(width, greaterThan(248), reason: 'the row does not fit in the floor width');
+      expect(width, lessThanOrEqualTo(380));
+
+      // The claim that matters: the text is laid out at its full width, so no
+      // ellipsis is reached. `didExceedMaxLines` is false when it all fits.
+      final text = tester.renderObject<RenderParagraph>(find.text('English (Ireland)'));
+      expect(text.didExceedMaxLines, isFalse);
+    });
+
+    testWidgets('MUTATION: the badge and the sub-name are counted, not just the label',
+        (tester) async {
+      // The failure this guards is a *manual* width calculation that adds up the
+      // label and forgets what sits beside it — the panel then looks right until
+      // a track carries a badge, and truncates the language rather than growing.
+      await pumpCaptions(tester, [track('English (Ireland)')]);
+      final bare = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled')]);
+      final badged = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled', name: 'X')]);
+      final both = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      expect(badged, greaterThan(bare), reason: 'the badge takes room');
+      expect(both, greaterThan(badged), reason: 'so does the sub-name');
+      // All three inside the band, so neither bound is doing the work: at the
+      // floor every reading would be 248, at the ceiling every reading 380, and
+      // the test would pass while measuring nothing.
+      expect(bare, greaterThan(248));
+      expect(both, lessThan(380));
+    });
+
+    testWidgets('a pathological label stops at the ceiling and ellipsises', (tester) async {
+      await pumpCaptions(tester, [track('E' * 200, badge: 'styled')]);
+      expect(tester.getSize(find.byKey(settingsMenuPanelKey)).width, 380);
+      expect(tester.renderObject<RenderParagraph>(find.text('E' * 200)).didExceedMaxLines, isTrue);
+    });
+
+    testWidgets('it grows leftward — the right edge does not move', (tester) async {
+      // The panel hangs off a button at its bottom-right, so that corner is the
+      // anchor. A wider panel that moved it would drag the menu off its control.
+      await pumpCaptions(tester, [track('English')]);
+      final narrow = tester.getRect(find.byKey(settingsMenuPanelKey));
+
+      await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled')]);
+      final wide = tester.getRect(find.byKey(settingsMenuPanelKey));
+
+      expect(wide.right, narrow.right);
+      expect(wide.left, lessThan(narrow.left));
+    });
+  });
+}
+
+/// A `CaptionsController` that never talks to a sidecar.
+class _FixedCaptions extends CaptionsController {
+  _FixedCaptions(this._tracks);
+
+  final List<CaptionTrack> _tracks;
+
+  @override
+  CaptionsState build() => CaptionsState(tracks: _tracks);
+
+  @override
+  Future<void> loadStyled() async {}
 }

@@ -127,6 +127,47 @@ abstract class PlaybackEngine {
   Future<void> dispose();
 }
 
+/// Why captions need two settings, and what happens with neither.
+///
+/// **media_kit ships with libass off, and draws subtitles in Flutter instead.**
+/// `PlayerConfiguration.libass` defaults to `false`, and media_kit turns that
+/// into `sub-ass=no` *and* `sub-visibility=no` on the mpv side — so mpv strips
+/// every ASS tag and then draws nothing. It observes the resulting plain text on
+/// mpv's `sub-text` property and hands it to `SubtitleView`, a Flutter widget
+/// that `Video` mounts by default (`SubtitleViewConfiguration.visible` is
+/// `true`) and paints with a Flutter `TextStyle`.
+///
+/// So captions *appeared* to work while every override the sidecar emits was
+/// being discarded: no bold, no italic, no font, no size, no colour, no
+/// position. Diagnosed 2026-08-19 from a screenshot of `L-BgxLtMxh0` in which
+/// two cues the document puts at opposite ends of the frame were stacked at the
+/// bottom in document order — which is `SubtitleView` rendering
+/// `player.state.subtitle`, a *list* of strings, and not a layout libass would
+/// ever produce.
+///
+/// It also means Task 17's "stacked duplicates" were never libass colliding two
+/// events. They were two list entries. The sidecar-side merge is still right —
+/// it is what a single caption composited from two pens actually is — but the
+/// symptom that motivated it had this cause.
+///
+/// The two settings have to agree, and each alone is wrong:
+///
+///  - `libass: true` alone leaves `SubtitleView` painting a plain-text copy over
+///    the styled one, which is the same caption twice in two fonts.
+///  - `visible: false` alone leaves `sub-visibility=no`, which is no captions.
+///
+/// `architecture.md` §2.9 is the decision this restores; it said "Flutter draws
+/// no captions" and, until this, the shipped widget did.
+/// Off, so the only thing drawing captions is libass. Half of the pair.
+const kNoFlutterSubtitles = SubtitleViewConfiguration(visible: false);
+
+/// On, so mpv renders them at all. The other half.
+///
+/// Kept beside its partner and named, rather than written inline at the one call
+/// site, because the two are only correct together and a reader who finds one
+/// needs to find the other.
+const kLibassEnabled = true;
+
 /// The real engine: one `media_kit` [Player] for the whole app.
 ///
 /// Owned by the shell above the `Navigator` (task §1), so a route pop cannot
@@ -137,10 +178,12 @@ class MediaKitEngine implements PlaybackEngine {
   /// exposes, because `demuxer-cache-state` describes one demuxer and an
   /// external audio track is a second one. It is off in the app.
   MediaKitEngine({MPVLogLevel? logLevel}) {
+    // `libass: true` is not optional, and its default is the reason captions
+    // rendered as plain text for two tasks. See [kNoFlutterSubtitles].
     _player = Player(
       configuration: logLevel == null
-          ? const PlayerConfiguration()
-          : PlayerConfiguration(logLevel: logLevel),
+          ? const PlayerConfiguration(libass: kLibassEnabled)
+          : PlayerConfiguration(libass: kLibassEnabled, logLevel: logLevel),
     );
     _video = VideoController(_player);
 
@@ -209,11 +252,16 @@ class MediaKitEngine implements PlaybackEngine {
   /// media_kit_video mounts `AdaptiveVideoControls` by default, and on Windows
   /// that is a full second transport bar — its own scrubber, clock and volume
   /// slider painted over ours, both live and both responding to clicks.
+  ///
+  /// The subtitle view is off for the same reason and it is the other half of
+  /// [kNoFlutterSubtitles] — it is a *second* renderer for the same
+  /// captions, and the one that was winning.
   @override
   Widget videoSurface({BoxFit fit = BoxFit.contain}) {
     return Video(
       controller: _video,
       controls: NoVideoControls,
+      subtitleViewConfiguration: kNoFlutterSubtitles,
       fit: fit,
       fill: const Color(0x00000000), // Colors.transparent
     );

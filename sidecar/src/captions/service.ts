@@ -37,7 +37,7 @@ import { getPlayerEntry } from '../innertube/player-response.ts';
 import type { PlayerClient, Session } from '../innertube/session.ts';
 import { parseCaptionTracks, type CaptionTrackSource } from '../parser/captions.ts';
 import { RpcError } from '../errors.ts';
-import type { CaptionListResult, CaptionTrackContent } from '../types.ts';
+import type { CaptionListResult, CaptionStyling, CaptionTrackContent } from '../types.ts';
 import { groupAsrCues, normalizeCues } from './cues.ts';
 import { parseJson3 } from './json3.ts';
 import { renderAss } from './ass.ts';
@@ -67,11 +67,14 @@ export function forgetCaptions(videoId?: string): void {
   if (videoId === undefined) {
     negativeCache.clear();
     assCache.clear();
+    styledCache.clear();
     return;
   }
   negativeCache.delete(videoId);
-  for (const key of [...assCache.keys()]) {
-    if (key.startsWith(`${videoId}\n`)) assCache.delete(key);
+  for (const cache of [assCache, styledCache]) {
+    for (const key of [...cache.keys()]) {
+      if (key.startsWith(`${videoId}\n`)) cache.delete(key);
+    }
   }
 }
 
@@ -142,13 +145,168 @@ export async function listCaptionTracks(
   return { sources: fallback, usedFallback: true };
 }
 
-/** `captions.list` — the flat DTOs, and nothing that can be mistaken for a URL. */
+/**
+ * Which badge a document earns.
+ *
+ * **Styling is `pens`, and deliberately not "any of the three arrays".**
+ * Measured on `dQw4w9WgXcQ`'s six tracks: `pens` was empty on all of them, while
+ * the auto-generated one had one populated `wsWinStyles` and one populated
+ * `wpWinPositions` — its rolling window. Every ASR track has those, so the loose
+ * predicate answers "styled" for the plainest tracks in the app.
+ *
+ * **Karaoke is the narrower claim and only wins when nothing wider is true** —
+ * it is a subset of styled, so a track that karaokes *and* changes font is
+ * styled. [isKaraokeOnly] is both halves of that.
+ */
+export function classifyDocument(raw: unknown): CaptionStyling {
+  const doc = raw as StyleDoc;
+  const pens = (Array.isArray(doc?.pens) ? doc.pens : []).filter(isPopulated);
+  if (pens.length === 0) return 'plain';
+  return isKaraokeOnly(doc, pens) ? 'karaoke' : 'styled';
+}
+
+interface StyleDoc {
+  pens?: Record<string, unknown>[];
+  wpWinPositions?: Record<string, unknown>[];
+  events?: { segs?: { utf8?: unknown; pPenId?: unknown }[] }[];
+}
+
+function isPopulated(entry: unknown): entry is Record<string, unknown> {
+  return entry !== null && typeof entry === 'object' && Object.keys(entry).length > 0;
+}
+
+/**
+ * Zero-width spaces, which YouTube sprinkles between segments.
+ *
+ * Stripped before anything is compared, and it is not cosmetic: the separators
+ * sit *at the split*, so the same karaoke line concatenates to a different
+ * string on every step and grouping by raw text finds no repeats at all. That is
+ * what a first attempt at [isKaraokeOnly] did, and it reported zero karaoke on
+ * the one document that visibly has it.
+ */
+function withoutZeroWidth(text: string): string {
+  return text.split(ZERO_WIDTH_SPACE).join('');
+}
+
+/** Written as an escape: the character itself is invisible in a source file. */
+const ZERO_WIDTH_SPACE = '\u200B';
+
+/** Everything a caption can carry that karaoke does not need. */
+function hasStylingBeyondColour(doc: StyleDoc, pens: Record<string, unknown>[]): boolean {
+  const beyond = pens.some(
+    (pen) =>
+      'fsFontStyle' in pen ||
+      'ofOffset' in pen ||
+      'bAttr' in pen ||
+      'iAttr' in pen ||
+      'uAttr' in pen ||
+      (typeof pen['szPenSize'] === 'number' && pen['szPenSize'] !== 100) ||
+      (typeof pen['boBackAlpha'] === 'number' && pen['boBackAlpha'] > 0),
+  );
+  if (beyond) return true;
+
+  // Any window but the default bottom-centre one is placement, which is a
+  // feature in its own right — see the ASR note above for why an unpopulated
+  // window array is not evidence of anything.
+  return (Array.isArray(doc.wpWinPositions) ? doc.wpWinPositions : [])
+    .filter(isPopulated)
+    .some((w) => w['apPoint'] !== 7 || w['ahHorPos'] !== 50 || w['avVerPos'] !== 100);
+}
+
+/**
+ * Whether karaoke is the *only* thing this track does.
+ *
+ * **Karaoke is a subset of styled, so the badge has to be the narrower claim
+ * only when nothing wider is true.** A first cut answered `karaoke` for any
+ * `pPenId` on a `seg`, which badged all three test documents — per-segment pens
+ * are also how a track colours one word, or sweeps a gradient across 23 000
+ * pens, neither of which is karaoke.
+ *
+ * The pattern that *is* karaoke is temporal, not a field: the same line is
+ * re-emitted with the split between two pens moving forward. Measured
+ * 2026-08-19 across the three, this finds exactly the two cues in `L-BgxLtMxh0`
+ * that visibly karaoke and nothing in the other two — including the
+ * 42 000-segment gradient, which repeats text but never moves a boundary.
+ *
+ * Two increases rather than one, because a single step could be a line that
+ * happens to be re-split once.
+ */
+function isKaraokeOnly(doc: StyleDoc, pens: Record<string, unknown>[]): boolean {
+  if (hasStylingBeyondColour(doc, pens)) return false;
+
+  const sweeps = new Map<string, number>();
+  const previous = new Map<string, number>();
+  for (const event of Array.isArray(doc.events) ? doc.events : []) {
+    const segs = Array.isArray(event?.segs) ? event.segs : [];
+    if (segs.length < 2 || !segs.some((seg) => typeof seg.pPenId === 'number')) continue;
+
+    const line = withoutZeroWidth(segs.map((seg) => String(seg.utf8 ?? '')).join(''));
+    const head = withoutZeroWidth(String(segs[0]?.utf8 ?? '')).length;
+    const before = previous.get(line);
+    if (before !== undefined && head > before) {
+      sweeps.set(line, (sweeps.get(line) ?? 0) + 1);
+      if ((sweeps.get(line) ?? 0) >= 2) return true;
+    }
+    previous.set(line, head);
+  }
+  return false;
+}
+
+/** `styled` answers, keyed `videoId\ntrackId`. One fetch per track per session. */
+const styledCache = new Map<string, CaptionStyling>();
+
+/**
+ * Fill in `styled` for a list of tracks, fetching whatever is not cached.
+ *
+ * **Measured cost, 2026-08-19**: `dQw4w9WgXcQ`'s six real tracks are 69 KB and
+ * **73 ms** fetched together — they parallelise, so it is one round trip's
+ * latency and not six. That is affordable *for a menu*, and not for a video open,
+ * which is why the caller opts in rather than this being the default: `protocol.md`
+ * §3.8 keeps `captions.list` off the open path on purpose, and making it fetch
+ * every track would put ~70 KB and N requests on every video the user watches for
+ * a badge most of them will never see.
+ *
+ * Failures are swallowed to `null`. A badge is not worth failing a menu over.
+ */
+async function fillStyled(videoId: string, sources: CaptionTrackSource[]): Promise<void> {
+  await Promise.all(
+    sources.map(async (source) => {
+      const key = `${videoId}\n${source.track.id}`;
+      const cached = styledCache.get(key);
+      if (cached !== undefined) {
+        source.track.styled = cached;
+        return;
+      }
+      try {
+        const url = new URL(source.baseUrl);
+        url.searchParams.set('fmt', FETCH_FORMAT);
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const body = await response.text();
+        if (body.trim() === '') return;
+        const styled = classifyDocument(JSON.parse(body));
+        styledCache.set(key, styled);
+        source.track.styled = styled;
+      } catch {
+        // Leaves `styled: null` — "not known", which is a state the DTO has.
+      }
+    }),
+  );
+}
+
+/**
+ * `captions.list` — the flat DTOs, and nothing that can be mistaken for a URL.
+ *
+ * `includeStyled` costs a `timedtext` GET per track; see [fillStyled] for what
+ * that measures at and why it is not the default.
+ */
 export async function getCaptionList(
   session: Session,
   videoId: string,
-  options: { allowFallback?: boolean } = {},
+  options: { allowFallback?: boolean; includeStyled?: boolean } = {},
 ): Promise<CaptionListResult> {
   const { sources } = await listCaptionTracks(session, videoId, options);
+  if (options.includeStyled === true) await fillStyled(videoId, sources);
   return { tracks: sources.map((source) => source.track) };
 }
 

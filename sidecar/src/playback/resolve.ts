@@ -471,6 +471,9 @@ export async function tierAndroidVr(
  * speculatively is not wanted. Until it exists this rung always declines, which
  * is exactly what an unimplemented tier should do.
  */
+// Unreferenced until Phase 2 lands. Deleting it is exactly what the comment
+// above says not to do, so the rule is silenced rather than the seam removed.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function tierSabrDash(videoId: string): Promise<PlaybackSource> {
   throw new RpcError(
     'STREAM_REQUIRES_SABR',

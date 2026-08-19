@@ -38,6 +38,12 @@ export interface RgbaColor {
 export type CueEdgeStyle = 'none' | 'outline' | 'dropShadow' | 'raised' | 'depressed';
 
 /**
+ * The player's default caption size, as a percentage — the identity value for
+ * [CueStyle.fontSizePercent]. Named because "100" appears in three files.
+ */
+export const DEFAULT_FONT_SIZE_PERCENT = 100;
+
+/**
  * Optional presentation for one cue. Every field is `null` when the source
  * format does not say — which for json3 is all of them.
  *
@@ -57,9 +63,29 @@ export interface CueStyle {
   textColor: RgbaColor | null;
   backgroundColor: RgbaColor | null;
   edgeColor: RgbaColor | null;
-  edgeStyle: CueEdgeStyle | null;
+  /**
+   * **A set, not a value** — this is the one field Task 17's model got wrong,
+   * and the reason is the duplication bug.
+   *
+   * YouTube composites a styled caption from *two* events with identical text
+   * and timing: one whose pen has `foForeAlpha: 0` — invisible glyphs, so it
+   * contributes only its drop shadow — and one opaque pen carrying the glyphs
+   * and an outline. Measured on `L-BgxLtMxh0`: 240 of its 257 cue groups are
+   * exactly that pair, `etEdgeType` 4 against 3. The faithful render is one
+   * line with a shadow *and* an outline, and a single-valued field cannot say
+   * that, so `json3.ts` merges the layers and hands the union over.
+   *
+   * `null` is "the source did not say". A non-empty array is what it said;
+   * `['none']` is an explicit no-edge.
+   */
+  edgeStyles: CueEdgeStyle[] | null;
   fontFamily: string | null;
-  /** Percentage of the player's default caption size, as YTT expresses it. */
+  /**
+   * Percentage of the player's default caption size — 100 is the default size.
+   *
+   * **Not YTT's `szPenSize`.** That number runs on its own damped curve and the
+   * parser resolves it before it gets here; see `json3.ts`.
+   */
   fontSizePercent: number | null;
   bold: boolean | null;
   italic: boolean | null;
@@ -70,14 +96,33 @@ export interface CueStyle {
  * One run of text within a cue.
  *
  * A manual track is one segment; an ASR track is one per word. The split is kept
- * rather than flattened because `offsetMs` is the input a karaoke renderer needs
- * (`\k`), and it is the only thing in the whole pipeline that cannot be
- * recovered afterwards. Nothing reads it today.
+ * rather than flattened because it carries two things that cannot be recovered
+ * afterwards: `offsetMs`, and — the reason karaoke works — [style].
  */
 export interface CueSegment {
   text: string;
   /** Milliseconds after the cue's own start. `null` when the format has no word timing. */
   offsetMs: number | null;
+  /**
+   * Presentation for this run alone, or `null` to inherit the cue's.
+   *
+   * **This is how YouTube transmits karaoke, and it is not `\k`.** A highlight is
+   * a run of ordinary events over the whole line, each splitting it at a later
+   * point, with a different pen either side:
+   *
+   * ```
+   * 16991  seg pen=21 "Ba"       seg pen=22 "sic karaoke timing."
+   * 17191  seg pen=21 "Basic "   seg pen=22 "karaoke timing."
+   * ```
+   *
+   * So the stepping falls out of the event sequence and needs no timing tag at
+   * all — `\k` would be a second, redundant mechanism. Measured on
+   * `L-BgxLtMxh0` 2026-08-19.
+   *
+   * Edges are deliberately *not* here: they are unioned across the composited
+   * layers and set once for the line. See `json3.ts`.
+   */
+  style: CueStyle | null;
 }
 
 export interface Cue {
@@ -180,9 +225,9 @@ export function groupAsrCues(cues: Cue[]): Cue[] {
         // so joining blindly doubles it on some pairs and not others.
         segments: [
           ...previous.segments,
-          ...(needsSpace(previous, cue) ? [{ text: ' ', offsetMs: null }] : []),
+          ...(needsSpace(previous, cue) ? [{ text: ' ', offsetMs: null, style: null }] : []),
           ...cue.segments.map((segment) => ({
-            text: segment.text,
+            ...segment,
             offsetMs: segment.offsetMs === null ? null : segment.offsetMs + shift,
           })),
         ],

@@ -205,6 +205,16 @@ from the new build inside the bundled `.exe` — before trusting any device
 measurement. Otherwise the run measures the previous sidecar and says so
 nowhere.
 
+**It bit again on 2026-08-19, and it does not look like a stale binary.** It
+looks like a half-finished feature: captions rendered position and outline but no
+colour or font, because the bundled sidecar predated the change that reads
+per-segment pens, while `sidecar/dist/` had it. Two things now make it cheaper to
+spot. The client logs `rill: sidecar <path> (built <mtime>)` at startup — compare
+that timestamp against `sidecar/dist/sidecar.exe`. And `grep -a` for a symbol
+only the new code has (`layerAlpha`, `includeStyled`) inside **both** binaries;
+if the bundled one is busy, the app is running and holding it, which is itself
+the answer.
+
 ---
 
 ## Notes that will bite otherwise
@@ -287,6 +297,34 @@ nowhere.
   `timedtext` URLs with `exp=xpe`, which makes every one of them return an empty
   body — so the empty-list fallback asks **`MWEB`**, whose URLs work. A `WEB`
   fallback would fill a language picker in which nothing renders.
+- **media_kit does not use libass unless you tell it to, and mounts a second
+  caption renderer if you don't stop it.** `PlayerConfiguration.libass` defaults
+  to `false` → `sub-ass=no` *and* `sub-visibility=no`, so mpv strips every tag
+  and draws nothing; `Video` then paints mpv's plain `sub-text` with a Flutter
+  `TextStyle`. Both settings live in `engine.dart` (`kLibassEnabled`,
+  `kNoFlutterSubtitles`) and each alone is wrong — one draws captions twice, the
+  other draws none. **This is invisible on a plain track**, which is why it
+  survived two tasks: it only shows when a track carries styling.
+- **A styled caption is more than one event, and merging them is the whole of
+  Task 18.** YouTube composites it: an invisible-glyph pen contributing a drop
+  shadow over a visible pen contributing the outline — 240 of `L-BgxLtMxh0`'s 257
+  cue groups. Emitted verbatim that is two lines stacked, which is what the bug
+  looked like. `CueStyle.edgeStyles` is a *set* for this reason. Where two
+  *visible* pens conflict, both are emitted instead, which is safe because
+  **`\pos` suppresses libass's collision avoidance** (measured). §2.9 has the
+  rest, including two ASS tags that look like they work and do not: an inline
+  `\c` takes six digits and no alpha, and a caption background is
+  `BorderStyle: 3` filled from `\3c`.
+- **`bun run check` is the gate, and rendering is checkable offline.** libmpv
+  is a DLL and Bun has FFI, so an ASS document can be rendered to frames through
+  **the artefact the app actually loads** rather than reasoned about — which is
+  how the `\pos` collision question, the `\an` anchor mapping and the missing-font
+  fallback were settled. That build's FFmpeg has no PNG encoder and no `color`
+  lavfi source: feed it raw frames (`demuxer=rawvideo`) and take `jpg` out.
+- **Do not use a bash heredoc for anything containing backslashes.** The Bash
+  tool eats one level, so `\an1` reaches the file as a BEL byte and libass
+  silently ignores the override — a probe that then "measures" the default style
+  and looks like a real result. Write such files with the Write tool.
 
 ## Current state
 

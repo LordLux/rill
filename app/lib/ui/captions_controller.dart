@@ -183,6 +183,39 @@ class CaptionsController extends Notifier<CaptionsState> {
     if (resume != null) await select(resume.id);
   }
 
+  /// Fill in `styled` for the current video's tracks, for the menu's badge.
+  ///
+  /// **Not part of [_load], and that is the whole point.** The flag needs the
+  /// caption *document*, one fetch per track — measured at 69 KB and 73 ms for
+  /// six real tracks, which parallelise, so it is one round trip's latency. That
+  /// is a menu's budget. Putting it on the open path would spend it on every
+  /// video for a badge most of them never show, and §3.8 keeps `captions.list`
+  /// off that path deliberately.
+  ///
+  /// Idempotent and cheap to call again: the sidecar caches the answer per track,
+  /// and this returns immediately once every track has one.
+  Future<void> loadStyled() async {
+    final videoId = ref.read(playbackProvider).item?.id;
+    if (videoId == null || state.tracks.isEmpty) return;
+    if (state.tracks.every((track) => track.styled != null)) return;
+
+    final generation = _generation;
+    try {
+      final result = await RpcClient.instance.call('captions.list', {
+        'videoId': videoId,
+        'includeStyled': true,
+      });
+      final tracks = [
+        for (final entry in (result as Map)['tracks'] as List<dynamic>)
+          CaptionTrack.fromJson((entry as Map).cast<String, Object?>()),
+      ];
+      if (_stale(generation)) return;
+      state = state.copyWith(tracks: tracks);
+    } on Object {
+      // A badge is not worth an error state. The rows stay unbadged.
+    }
+  }
+
   /// The track to turn on automatically, or null to stay off.
   ///
   /// Only ever the language the user already chose this session. Never a

@@ -596,6 +596,27 @@ statically alongside HarfBuzz and FriBidi (`ass_render.c`, `ass_shaper.c`,
 `secondary-sid`. So positioning and inline overrides are reachable on this pin;
 YTT is not blocked by the artefact.
 
+**Two media_kit defaults have to be overridden, and neither is optional.**
+Found 2026-08-19, after Task 18: the section's first sentence was true of the
+pipeline and false of the running app. `PlayerConfiguration.libass` defaults to
+**`false`**, which media_kit turns into `sub-ass=no` *and* `sub-visibility=no` —
+mpv strips every ASS tag and then draws nothing — and `Video` mounts a Flutter
+`SubtitleView` by default, which paints mpv's now-plain `sub-text` in a Flutter
+`TextStyle`. So Flutter *was* drawing the captions, from text with all styling
+removed, for the whole of Tasks 17 and 18.
+
+It is invisible until a track carries styling: plain captions look correct.
+`app/lib/data/playback/engine.dart` holds both settings, named and adjacent,
+because each alone is wrong — `libass: true` on its own draws every caption twice
+in two fonts, and `visible: false` on its own draws none. Reproduced against the
+bundled libmpv: rendering the same document with `sub-ass=no` yields exactly the
+reported frame, two windowed cues stacked bottom-centre in document order.
+
+A consequence worth recording: **Task 17's "stacked duplicates" were not libass
+colliding two events.** They were two entries in `player.state.subtitle`, which
+is a list. The merge rule §2.9 describes is still correct — a caption composited
+from two pens *is* one caption — but the symptom that motivated it had this cause.
+
 **Delivery is `SubtitleTrack.data`, media_kit's own path.** It writes the
 document to a temp file and issues `sub-add <uri> select`, which adds a track
 without touching the media — no reopen, so a caption change costs nothing where
@@ -620,9 +641,107 @@ every real one. The grouping rule that resolves it is in `captions/cues.ts`.
 **`fmt=ytt` answers HTTP 404.** YTT is not a fourth format to fetch. Its styling
 model *is* the `pens` / `wsWinStyles` / `wpWinPositions` arrays already at the
 top of every `json3` document — empty for a plain track, populated for a styled
-one. A YTT parser is therefore an extension of `captions/json3.ts`, resolving the
-per-event `pPenId` / `wsWinStyleId` / `wpWinPosId` references into a `CueStyle`,
-and nothing else in the chain changes.
+one. So the styling parser is an extension of `captions/json3.ts`, resolving the
+per-event `pPenId` / `wsWinStyleId` / `wpWinPosId` references into a `CueStyle`.
+
+**Built 2026-08-19, and it was not only that file.** This section used to end
+"and nothing else in the chain changes"; two things in the chain did.
+
+**A styled caption is composited from more than one event, so `edgeStyle` had to
+become a set.** YouTube emits the same text twice at the same time with
+different pens: one with `foForeAlpha: 0`, whose glyphs are invisible and which
+therefore contributes only its `etEdgeType: 4` drop shadow, over one with
+visible glyphs and an `etEdgeType: 3` outline. Measured on `L-BgxLtMxh0`, 240 of
+its 257 cue groups are exactly that pair. On screen it is *one* caption with a
+shadow **and** an outline, which a single-valued field cannot express — hence
+`CueStyle.edgeStyles`. The parser merges the layers; ASS emits `\bord` and
+`\shad` on one line. **This is the fix for the stacked-duplicates bug**, which
+was two events at one position rendering as two lines.
+
+Where the layers genuinely conflict — two *visible* pens with different fills,
+as in that document's chromatic-aberration cue — they cannot merge and are
+emitted as they arrived. That is sound because they are positioned: measured
+against the bundled libmpv, **`\pos` suppresses libass's collision avoidance**.
+Positioned duplicates superimpose; unpositioned ones stack, which is what the
+bug looked like.
+
+**Positions are mapped into the caption area, not the raw frame.** YTT's
+`ahHorPos` / `avVerPos` are percentages of the video, and `avVerPos: 100` — the
+default window of every manual track — taken literally puts a caption's baseline
+flush against the bottom edge, under the player's own controls. The generated
+`Style` already reserves a 60 px margin for that reason, so `\pos` is computed
+inside the same box. The property that makes it the right inset rather than an
+arbitrary one: a cue at the default window lands on exactly the pixel an
+*unpositioned* cue lands on, so turning styling on moves nothing that did not
+ask to move.
+
+**Two ASS details that look like they work and do not.** `\c` and friends take
+six hex digits and no alpha; alpha rides on `\1a` / `\3a` / `\4a`. An eight-digit
+value renders correctly while it is opaque and silently comes out opaque and the
+wrong hue once it is not. And a caption *background* is `BorderStyle: 3`, a
+`Style` property with no override tag, so the renderer emits a second `Boxed`
+style — under which libass fills the box from the outline colour, `\3c`, not from
+`\4c`. Both measured; neither errors or logs.
+
+**Honouring the ASR window moves auto-generated captions, and that is a product
+decision.** An ASR track's window is `apPoint: 6`, `ahHorPos: 20`,
+`avVerPos: 100` — bottom-left at 20% — and a line does not name it directly:
+it carries `wWinId`, and the position lives on the window-definition event. So
+auto-captions were previously centred and are now left-anchored at 20% of the
+width. Faithful, and what youtube.com does; but on a short line it is visibly
+left of centre. `docs/tasks/18-caption-styling.md` §4 is where that trade is
+recorded.
+
+**Karaoke is per-segment pens, and needs no `\k`.** A `pPenId` sits on a `seg` as
+well as on an event, and YouTube animates a highlight by emitting the whole line
+repeatedly with the split moved:
+
+```
+16991  seg pen=21 "Ba"       seg pen=22 "sic karaoke timing."
+17191  seg pen=21 "Basic "   seg pen=22 "karaoke timing."
+```
+
+So the stepping is already in the timings and `\k` would be a second, redundant
+mechanism — which is why §5 of the task brief scoped karaoke out "unless it falls
+out for free", and it did. `CueSegment.style` carries the run's pen and `ass.ts`
+emits an override block per run.
+
+Two consequences that are not obvious. **Edges are collected to the line**, not
+left on the run: a segment pen restates its layer's edge, and a per-run `\bord`
+could otherwise cancel the shadow the layer union just established. And **layer
+visibility becomes a property of the segments** — the karaoke cues carry no
+event pen at all and three layers of segment pens, two fully transparent, so a
+merge reading only the event level sees three visible layers, calls them a
+conflict and emits the line three times.
+
+### Known limits of the libass route
+
+Measured against `L-BgxLtMxh0`, which exercises all of them. None is a bug and
+none is worth approximating:
+
+- **Vertical text** (`pdPrintDir: 2`). libass has no writing mode. The only
+  approximation is one character per `\N`, which then needs its own font size and
+  line spacing to fit the frame — a layout engine, not a conversion, and §2.9
+  chose ASS precisely to avoid writing one.
+- **Packed text.** Downstream of the above rather than separate: the cue is two
+  windows, at 100% and 97% of the height, and the lower one is vertical. Rendered
+  horizontally they overlap. **The geometry is already faithful; the content is
+  not.**
+- **Sub- and superscript** (`ofOffset`). No ASS tag, and the YouTube web player
+  does not render them either — so an approximation would be less faithful than
+  omitting them, not more.
+- **Colour emoji render in one colour.** libass rasterises the glyph outline and
+  fills it with the text colour; a font's own colour layers are not used.
+  Measured 2026-08-19 against the bundled libmpv rather than inferred: the same
+  emoji rendered under `\c` red, green and gold came out red, green and gold.
+  (The binary carries FreeType's `CBDT`/`sbix`/`COLR` machinery but no `CPAL`,
+  the palette `COLR` needs.) It matters less than it sounds — YouTube assigns the
+  emoji run its own pen, so `✨` arrives gold and renders gold; what is lost is
+  the two-tone gradient, not the hue. Fixing it needs a newer libass, and the
+  `media_kit_libs_windows_video` pin is load-bearing for F13.
+
+Each is counted per document and logged, so a track leaning on one is visible in
+the log rather than silently plain.
 
 ---
 

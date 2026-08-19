@@ -342,8 +342,16 @@ async function handleRequest(request: RpcRequest) {
       // value but an explicit `false` keeps the full behaviour, so a caller that
       // omits it gets the complete list.
       const allowFallback = params?.allowFallback !== false;
+      // Opt-in, and the caption menu is the only caller that opts in. It costs a
+      // `timedtext` GET per track — 69 KB and 73 ms for six, measured — which is
+      // a menu's budget and not a video open's. §3.8 keeps this call off the
+      // open path, and defaulting it on would put that cost on every video.
+      const includeStyled = params?.includeStyled === true;
       const { getCaptionList } = await import('../captions/service.ts');
-      const result = await getCaptionList(await getResolveSession(), videoId, { allowFallback });
+      const result = await getCaptionList(await getResolveSession(), videoId, {
+        allowFallback,
+        includeStyled,
+      });
       emitResponse(id, result);
     } else if (method === 'captions.get') {
       const videoId = requireString(params, 'videoId', 'captions.get');

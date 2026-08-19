@@ -81,8 +81,9 @@ if (process.env['YT_DUMP_ASS']) {
   const fs = await import('fs');
   const list = await listCaptionTracks(session, videoId);
   const sources = list.sources;
-  if (sources.length > 0) {
-    const track = await getCaptionTrack(session, videoId, sources[0].track.id!);
+  const first = sources[0];
+  if (first !== undefined) {
+    const track = await getCaptionTrack(session, videoId, first.track.id);
     const file = process.env['YT_DUMP_ASS'];
     fs.writeFileSync(file, track.content);
     log.info(`\nwrote first caption track to ${file}`);
