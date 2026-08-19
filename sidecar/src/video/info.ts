@@ -13,10 +13,10 @@
  * `playback.open` resolves from**, not a second call. That is the whole reason
  * `innertube/player-response.ts` exists, and it only works if both consumers ask
  * as the same client: the cache is keyed `client:videoId`. Ladder tier 1 asks as
- * `ANDROID_VR`, so this does too, over the same anonymous resolve session.
+ * `VISIONOS`, so this does too, over the same anonymous resolve session.
  *
  * **That is a deliberate reading of §2.3.** The table there assigns `WEB` to
- * "browse" and `ANDROID_VR` to "stream resolution"; a `/player` call for a
+ * "browse" and `VISIONOS` to "stream resolution"; a `/player` call for a
  * duration is resolution-shaped, not browse-shaped, and asking as `WEB` here
  * would buy a SABR-only response (F3) nothing reads, on a second round trip, for
  * a number both responses carry identically. `/next` stays on the authenticated
@@ -59,7 +59,7 @@ async function fromPlayer(
   videoId: string,
 ): Promise<{ durationSeconds: number | null; premiereAtMs: number | null }> {
   try {
-    const response = await getPlayerResponse(deps.resolve, videoId, 'ANDROID_VR');
+    const response = await getPlayerResponse(deps.resolve, videoId, 'VISIONOS');
     return {
       durationSeconds: response.durationSeconds,
       // The premiere's start time, from the response that actually knows it.
@@ -83,7 +83,7 @@ async function fromPlayer(
  *
  * **Captions are not here, and that is a decision rather than an omission.** The
  * track list is on the `/player` response this already has, so reading it would
- * be free — but a list is only useful once the `ANDROID_VR` → `MWEB` fallback has
+ * be free — but a list is only useful once the `VISIONOS` → `MWEB` fallback has
  * run (`captions/service.ts`), and that fallback is a second `/player` call. On
  * the ~29% of videos with no captions it would fire on every open, for a
  * measured rescue rate of zero, and §3.3's one-`/player`-call property would be

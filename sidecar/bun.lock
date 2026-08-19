@@ -5,7 +5,7 @@
     "": {
       "name": "nativeyoutube-sidecar",
       "dependencies": {
-        "youtubei.js": "^17.0.1",
+        "youtubei.js": "^18.0.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.14.0",
@@ -177,7 +177,7 @@
 
     "lodash.merge": ["lodash.merge@4.6.2", "", {}, "sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ=="],
 
-    "meriyah": ["meriyah@6.1.4", "", {}, "sha512-Sz8FzjzI0kN13GK/6MVEsVzMZEPvOhnmmI1lU5+/1cGOiK3QUahntrNNtdVeihrO7t9JpoH75iMNXg6R6uWflQ=="],
+    "meriyah": ["meriyah@7.3.2", "", {}, "sha512-uFPXbsoxaEd7PafMz3K/n/Z3kXz7iZBJtYU0VQB/kcV7i33+JghLTKweabLir480FUsyLz6gUIj4LW7kCQ35TA=="],
 
     "minimatch": ["minimatch@3.1.5", "", { "dependencies": { "brace-expansion": "^1.1.7" } }, "sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w=="],
 
@@ -235,7 +235,7 @@
 
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
 
-    "youtubei.js": ["youtubei.js@17.2.0", "", { "dependencies": { "@bufbuild/protobuf": "^2.0.0", "fflate": "^0.8.2", "meriyah": "^6.1.4" } }, "sha512-XLNsgRKO1h7t4i9tIMWSQSeWdD7Ujkk5v1m5YCaumaHMhu/xuLqtO3M0Hq7CXNup9HlJ1NGrT1Y+HLIHnL6Ujg=="],
+    "youtubei.js": ["youtubei.js@18.0.0", "", { "dependencies": { "@bufbuild/protobuf": "^2.0.0", "fflate": "^0.8.2", "meriyah": "^7.3.1" } }, "sha512-7Tztl5QzNL4nIhiAxa4P/0C8cDDsUe0j4iaUeNiaA+ZfSe/l+HkHxXyoWlQXNW7IPi2n6AW23ysVMJLDh+AwWQ=="],
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 

@@ -355,7 +355,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         decoration: BoxDecoration(
                           color: tokens.scrim.withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(52),
-                          border: Border.all(color: Colors.white12),
+                          // ignore: rill_lints/no_color_literals
+                          border: Border.all(color: const Color(0x1FFFFFFF)),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),

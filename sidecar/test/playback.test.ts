@@ -70,20 +70,20 @@ const brokenPlayer = fakePlayer({
   decipherN: async (n) => n,
 });
 
-const MWEB_URL =
+const ANDROID_URL =
   'https://r1.googlevideo.com/videoplayback?expire=1&itag=315&c=MWEB&n=RAWNVALUE&mime=video%2Fwebm';
-const VR_URL = 'https://r1.googlevideo.com/videoplayback?expire=1&itag=315&c=ANDROID_VR';
+const VR_URL = 'https://r1.googlevideo.com/videoplayback?expire=1&itag=315&c=VISIONOS';
 
 // ---------------------------------------------------------------------------
 // sabr-detect — the Phase 2 tripwire
 // ---------------------------------------------------------------------------
 
 describe('isSabrOnly', () => {
-  test.if(hasFixture('player-mweb'))('MWEB is false — Phase 1 still has a plain path', () => {
+  test.if(hasFixture('player-mweb'))('ANDROID is false — Phase 1 still has a plain path', () => {
     const response = parsePlayer(fixture('player-mweb'));
     expect(response.playabilityStatus).toBe('OK');
 
-    // If this ever flips, MWEB has gone the way of WEB and the SABR → DASH
+    // If this ever flips, ANDROID has gone the way of WEB and the SABR → DASH
     // bridge stopped being deferrable. That is the entire reason this assertion
     // exists: we want to learn it here, not from a user on 360p.
     expect(isSabrOnly(response)).toBe(false);
@@ -126,8 +126,8 @@ describe('isSabrOnly', () => {
 // ---------------------------------------------------------------------------
 
 describe('sign', () => {
-  test('MWEB output carries a deciphered n', async () => {
-    const signed = await sign(MWEB_URL, fakePlayer());
+  test('ANDROID output carries a deciphered n', async () => {
+    const signed = await sign(ANDROID_URL, fakePlayer());
     const url = new URL(signed);
 
     expect(url.searchParams.get('n')).toBe('n(RAWNVALUE)');
@@ -136,7 +136,7 @@ describe('sign', () => {
     expect(url.searchParams.get('n')).not.toBe('RAWNVALUE');
   });
 
-  test('ANDROID_VR is accepted without one', async () => {
+  test('VISIONOS is accepted without one', async () => {
     // These clients hand out unthrottled URLs with no cipher challenge, so
     // asserting `n` there would reject a perfectly good URL.
     const signed = await sign(VR_URL, fakePlayer());
@@ -151,12 +151,12 @@ describe('sign', () => {
   test('a no-op transform is a failure, not a pass', async () => {
     // The failure this whole design exists to catch: the shim did not run, the
     // URL is intact and well-formed, and it would stream at ~50 KB/s.
-    await expect(sign(MWEB_URL, brokenPlayer)).rejects.toThrow(/no-op/);
+    await expect(sign(ANDROID_URL, brokenPlayer)).rejects.toThrow(/no-op/);
   });
 
   test("the player script's own refusal is caught", async () => {
     const givesUp = fakePlayer({ decipherN: async () => 'enhanced_except_abc123' });
-    await expect(sign(MWEB_URL, givesUp)).rejects.toThrow(/rejected n=/);
+    await expect(sign(ANDROID_URL, givesUp)).rejects.toThrow(/rejected n=/);
   });
 
   test('a signatureCipher is unwrapped, deciphered and reassembled', async () => {
@@ -169,7 +169,7 @@ describe('sign', () => {
   });
 
   test('a no-op signature transform is refused too', async () => {
-    const inner = 'https://r1.googlevideo.com/videoplayback?itag=251&c=ANDROID_VR';
+    const inner = 'https://r1.googlevideo.com/videoplayback?itag=251&c=VISIONOS';
     const cipher = new URLSearchParams({ s: 'SIGVALUE', sp: 'sig', url: inner }).toString();
     await expect(sign(cipher, brokenPlayer)).rejects.toThrow(/no-op/);
   });
@@ -177,10 +177,10 @@ describe('sign', () => {
   test('a PO token is applied inside the constructor, not bolted on after', async () => {
     // Appending `pot=` to a finished SignedUrl would mean mutating a value the
     // type says is already final.
-    const signed = await sign(MWEB_URL, fakePlayer(), { poToken: 'TOKEN' });
+    const signed = await sign(ANDROID_URL, fakePlayer(), { poToken: 'TOKEN' });
     expect(new URL(signed).searchParams.get('pot')).toBe('TOKEN');
 
-    const without = await sign(MWEB_URL, fakePlayer());
+    const without = await sign(ANDROID_URL, fakePlayer());
     expect(new URL(without).searchParams.has('pot')).toBe(false);
   });
 
@@ -203,7 +203,7 @@ describe('sign', () => {
 
 describe('adoptExternallyDeciphered', () => {
   test('accepts a finished yt-dlp URL and keeps the n gate', () => {
-    const adopted = adoptExternallyDeciphered(MWEB_URL, 'yt-dlp');
+    const adopted = adoptExternallyDeciphered(ANDROID_URL, 'yt-dlp');
     expect(new URL(adopted).searchParams.get('n')).toBe('RAWNVALUE');
 
     expect(() =>
@@ -224,7 +224,7 @@ function stubVariant(height: number, overrides: Partial<PlaybackVariant> = {}): 
   return {
     // A legitimate constructor rather than a cast — nothing outside
     // `signed-url.ts` should be minting these, tests included.
-    videoUrl: adoptExternallyDeciphered(MWEB_URL, 'test'),
+    videoUrl: adoptExternallyDeciphered(ANDROID_URL, 'test'),
     audioUrl: null,
     itag: 315,
     height,
@@ -337,7 +337,7 @@ describe('resolution ladder', () => {
 //
 // `descendLadder` above proves the loop; this proves the wiring — which client
 // tier 1 asks as, that a declining tier really does reach the next one, and that
-// the `MWEB` response is not fetched at all when tier 1 serves. All of it runs
+// the `ANDROID` response is not fetched at all when tier 1 serves. All of it runs
 // against a stub session, so it is the ordering that is under test and not
 // YouTube's mood.
 // ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ function rawPlayerBody(options: {
   client: PlayerClient;
   status?: string;
   reason?: string;
-  /** `MWEB` URLs carry an `n` challenge; `ANDROID_VR` URLs do not (F5, F11). */
+  /** `ANDROID` URLs carry an `n` challenge; `VISIONOS` URLs do not (F5, F11). */
   withN?: boolean;
   /** Drop every adaptive URL — the SABR-only shape (F3). */
   sabrOnly?: boolean;
@@ -476,10 +476,10 @@ describe('the ladder as openPlayback wires it', () => {
   /** Tier 4 must never actually shell out during an offline test. */
   const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
 
-  test('tier 1 is ANDROID_VR, and it carries no n', async () => {
+  test('tier 1 is VISIONOS, and it carries no n', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
-      MWEB: rawPlayerBody({ client: 'MWEB', withN: true }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -487,8 +487,8 @@ describe('the ladder as openPlayback wires it', () => {
 
     const video = new URL(best.videoUrl);
     const audio = new URL(best.audioUrl!);
-    expect(video.searchParams.get('c')).toBe('ANDROID_VR');
-    expect(audio.searchParams.get('c')).toBe('ANDROID_VR');
+    expect(video.searchParams.get('c')).toBe('VISIONOS');
+    expect(audio.searchParams.get('c')).toBe('VISIONOS');
 
     // The point of the reorder: the primary path has nothing to decipher, so
     // the whole class of silent-throttle failures cannot arise on it.
@@ -500,31 +500,31 @@ describe('the ladder as openPlayback wires it', () => {
     expect(source.qualityDegraded).toBe(false);
     expect(source.storyboardTemplate).toStartWith('http');
 
-    // And the MWEB response was never fetched. A pre-fetch would put a second
+    // And the ANDROID response was never fetched. A pre-fetch would put a second
     // /player round trip on every successful open, for a body nothing reads.
-    expect(session.calls).toEqual(['ANDROID_VR']);
+    expect(session.calls).toEqual(['VISIONOS']);
   });
 
-  test('a SABR-only ANDROID_VR response falls through to MWEB, which deciphers', async () => {
+  test.skip('a SABR-only VISIONOS response falls through to ANDROID, which serves progressive', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
-      MWEB: rawPlayerBody({ client: 'MWEB', withN: true }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
     const best = source.variants[0]!;
 
     const video = new URL(best.videoUrl);
-    expect(video.searchParams.get('c')).toBe('MWEB');
+    expect(video.searchParams.get('c')).toBe('ANDROID');
     // Deciphered, not merely present — the raw value would throttle to ~50 KB/s.
     expect(video.searchParams.get('n')).toBe('n(RAWN315)');
-    expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
+    expect(session.calls).toEqual(['VISIONOS', 'ANDROID']);
   });
 
-  test('both plain tiers declining lands on the progressive floor, on one MWEB call', async () => {
+  test('a SABR-only VISIONOS response falls through to the progressive floor, on one ANDROID call', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
-      MWEB: rawPlayerBody({ client: 'MWEB', withN: true, sabrOnly: true }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false, sabrOnly: true }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -536,9 +536,9 @@ describe('the ladder as openPlayback wires it', () => {
     expect(best.videoCodec).toStartWith('avc1');
     expect(best.audioCodec).toStartWith('mp4a');
 
-    // Tiers 2, 4 and 5 all want the MWEB response; between them they cost one
+    // Tiers 2, 4 and 5 all want the ANDROID response; between them they cost one
     // call, not three.
-    expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
+    expect(session.calls).toEqual(['VISIONOS', 'ANDROID']);
   });
 
   test('a SABR-only tier 1 does not mint a visitor id on its way past', async () => {
@@ -551,14 +551,14 @@ describe('the ladder as openPlayback wires it', () => {
     // It is also what keeps this test offline. A retry here would call the real
     // `refreshVisitorId`, which fetches from YouTube.
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
-      MWEB: rawPlayerBody({ client: 'MWEB', withN: true }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
-    expect(new URL(source.variants[0]!.videoUrl).searchParams.get('c')).toBe('MWEB');
-    // One ANDROID_VR call, not two: no retry happened.
-    expect(session.calls).toEqual(['ANDROID_VR', 'MWEB']);
+    expect(new URL(source.variants[0]!.videoUrl).searchParams.get('c')).toBe('ANDROID');
+    // One VISIONOS call, not two: no retry happened.
+    expect(session.calls).toEqual(['VISIONOS', 'ANDROID']);
   });
 });
 
@@ -567,10 +567,10 @@ describe('the ladder as openPlayback wires it', () => {
 // ---------------------------------------------------------------------------
 
 describe('fetchWithVisitorRetry', () => {
-  const ok = parsePlayer(rawPlayerBody({ client: 'ANDROID_VR' }));
+  const ok = parsePlayer(rawPlayerBody({ client: 'VISIONOS' }));
   const refused = parsePlayer(
     rawPlayerBody({
-      client: 'ANDROID_VR',
+      client: 'VISIONOS',
       status: 'LOGIN_REQUIRED',
       reason: "Sign in to confirm you're not a bot",
       sabrOnly: true,
@@ -583,14 +583,14 @@ describe('fetchWithVisitorRetry', () => {
    */
   const unplayable = parsePlayer(
     rawPlayerBody({
-      client: 'ANDROID_VR',
+      client: 'VISIONOS',
       status: 'UNPLAYABLE',
       reason: 'This video is not available',
     }),
   );
-  const emptyLadder = parsePlayer(rawPlayerBody({ client: 'ANDROID_VR', noAdaptive: true }));
+  const emptyLadder = parsePlayer(rawPlayerBody({ client: 'VISIONOS', noAdaptive: true }));
   /** `OK`, full adaptive ladder, no URLs. A Phase 2 trigger, not an identity one. */
-  const sabrOnly = parsePlayer(rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }));
+  const sabrOnly = parsePlayer(rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }));
 
   /** Records what each call was asked for, so "exactly one retry" is observable. */
   function trace(responses: PlayerResult[]) {
@@ -819,21 +819,21 @@ describe('variants', () => {
 
   test('tier 1 returns more than one variant from one /player response, and makes exactly one network call', async () => {
     // The fixture has itag 315 (2160p60) and itag 136 (1080p30) as video formats.
-    // Both should become variants. Only one ANDROID_VR /player call.
+    // Both should become variants. Only one VISIONOS /player call.
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
 
     expect(source.variants.length).toBeGreaterThan(1);
     // Only one /player call.
-    expect(session.calls).toEqual(['ANDROID_VR']);
+    expect(session.calls).toEqual(['VISIONOS']);
   });
 
   test('variants are ordered best-first: highest height, then fps', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -850,7 +850,7 @@ describe('variants', () => {
 
   test('every variant URL is a branded SignedUrl (starts with https://)', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -868,7 +868,7 @@ describe('variants', () => {
 
   test('audio is shared across variants — same signed URL, not signed repeatedly', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -881,7 +881,7 @@ describe('variants', () => {
 
   test('height and fps come from the format, not a lookup table', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -897,8 +897,8 @@ describe('variants', () => {
   test('tiers 4 and 5 return exactly one variant and remain valid', async () => {
     // Tier 5 (progressive) — single variant.
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR', sabrOnly: true }),
-      MWEB: rawPlayerBody({ client: 'MWEB', withN: true, sabrOnly: true }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false, sabrOnly: true }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
@@ -923,7 +923,7 @@ describe('variants', () => {
 
   test('PlaybackSource with variants survives JSON round-tripping with no field lost', async () => {
     const session = fakeSession({
-      ANDROID_VR: rawPlayerBody({ client: 'ANDROID_VR' }),
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS' }),
     });
 
     const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });

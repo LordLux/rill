@@ -11,7 +11,7 @@
  * whose tracks cannot be fetched: a `WEB` `/player` signs its caption URLs with
  * `exp=xpe` inside `sparams`, and every one of them answers **HTTP 200 with a
  * zero-byte body**. Isolated to that one parameter — removing it from the query
- * invalidates the signature and answers 404, and the same URLs from `ANDROID_VR`
+ * invalidates the signature and answers 404, and the same URLs from `VISIONOS`
  * and `MWEB`, which carry no `exp`, return the document. So a `WEB` fallback
  * would populate a language picker whose every entry renders nothing, which is a
  * worse failure than showing no CC button: it looks like the captions are broken
@@ -102,14 +102,14 @@ async function tracksFrom(
  *
  * The list is what the CC button is shown or hidden on, so "after the fallback"
  * matters: hiding the control on tier 1's answer alone would hide it on any
- * video where `ANDROID_VR` is the client with the gap.
+ * video where `VISIONOS` is the client with the gap.
  */
 export async function listCaptionTracks(
   session: Session,
   videoId: string,
   options: { allowFallback?: boolean } = {},
 ): Promise<{ sources: CaptionTrackSource[]; usedFallback: boolean }> {
-  const primary = await tracksFrom(session, videoId, 'ANDROID_VR');
+  const primary = await tracksFrom(session, videoId, 'VISIONOS');
   if (primary.length > 0) return { sources: primary, usedFallback: false };
 
   // **The hover preview's mode.** Tier 1's `/player` is already cached by the
@@ -126,10 +126,10 @@ export async function listCaptionTracks(
     return { sources: [], usedFallback: false };
   }
 
-  // INFO, with the video id, deliberately. If `ANDROID_VR`'s behaviour changes,
+  // INFO, with the video id, deliberately. If `VISIONOS`'s behaviour changes,
   // this line's rate moving is how anyone finds out — it was 0 rescues in 45
   // videos when it was written, and a silent fallback cannot be seen to change.
-  log.info(`${videoId}: ANDROID_VR returned no caption tracks, falling back to MWEB`);
+  log.info(`${videoId}: VISIONOS returned no caption tracks, falling back to MWEB`);
   const fallback = await tracksFrom(session, videoId, 'MWEB');
 
   if (fallback.length === 0) {

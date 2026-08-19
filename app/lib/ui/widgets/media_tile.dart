@@ -118,7 +118,9 @@ TileSpec? specFor(FeedItem item) {
         premiereAtMs: v.premiereAtMs,
         avatarUrl: v.channelAvatarUrl,
         primaryLine: v.channelName,
-        secondaryLine: (v.viewCountText != null || v.publishedText != null) ? '${v.viewCountText ?? ''}${v.publishedText != null ? ' • ${v.publishedText}' : ''}'.trim() : null,
+        secondaryLine: (v.viewCountText != null || v.publishedText != null)
+          ? '${v.viewCountText ?? ''}${v.viewCountText != null && v.publishedText != null ? ' • ' : ''}${v.publishedText ?? ''}'.trim()
+          : null,
       );
     },
     mix: (m) => TileSpec(

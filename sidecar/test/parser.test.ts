@@ -49,7 +49,7 @@ const history = HAS_CAPTURES ? fixture('history') : null;
 
 /** Every feed-shaped fixture this capture produced, for corpus-wide invariants. */
 const CORPUS: Record<string, unknown> = Object.fromEntries(
-  ['home', 'home-continuation', 'subscriptions', 'history', 'watch-later', 'search', 'mix', 'playlist']
+  ['home', 'home-continuation', 'subscriptions', 'history', 'watch-later', 'search', 'search-playlists', 'mix', 'playlist']
     .filter(hasFixture)
     .map((name) => [name, fixture(name)]),
 );
@@ -279,7 +279,9 @@ describe.if(HAS_CAPTURES)('parseFeed — history', () => {
     // A rewatched video is a real repeat entry; de-duplicating would lose it.
     expect(items.length).toBeGreaterThan(new Set(items.map((item) => item.id)).size);
     // Every entry comes from a tile, and no tile is emitted twice.
-    expect(items.length).toBeLessThanOrEqual(countKey(history, 'lockupViewModel'));
+    expect(items.length).toBeLessThanOrEqual(
+      countKey(history, 'lockupViewModel') + countKey(history, 'videoRenderer')
+    );
   });
 
   test('shelf-scoped chips are collected with their browse params', () => {

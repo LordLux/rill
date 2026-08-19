@@ -1241,7 +1241,7 @@ class _ShareDialogState extends State<_ShareDialog> {
   // ignore: rill_lints/no_color_literals
   final redditColor = const Color(0xFFFF4500);
   // ignore: rill_lints/no_color_literals
-  final messagesColor = Colors.white;
+  final messagesColor = const Color(0xFFFFFFFF);
   // ignore: rill_lints/no_color_literals
   final telegramColor = const Color(0xFF0088CC);
 
@@ -1541,7 +1541,8 @@ class _ShareTargetState extends State<_ShareTarget> {
     final scheme = Theme.of(context).colorScheme;
     final isHoverState = _isHovered && widget.hoverColor != null;
     final bg = isHoverState ? widget.hoverColor! : scheme.surfaceContainerHighest;
-    final iconColor = isHoverState ? Colors.white : scheme.onSurface;
+    // ignore: rill_lints/no_color_literals
+    final iconColor = isHoverState ? const Color(0xFFFFFFFF) : scheme.onSurface;
 
     return SizedBox(
       width: 60,

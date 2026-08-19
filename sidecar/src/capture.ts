@@ -255,9 +255,9 @@ async function main(): Promise<void> {
   await capture(
     'player-vr',
     '/player',
-    { videoId: PLAYER_VIDEO, client: 'ANDROID_VR' },
-    () => anonymous.execute('/player', playerPayload(anonymous, PLAYER_VIDEO, 'ANDROID_VR')),
-    'ANDROID_VR',
+    { videoId: PLAYER_VIDEO, client: 'VISIONOS' },
+    () => anonymous.execute('/player', playerPayload(anonymous, PLAYER_VIDEO, 'VISIONOS')),
+    'VISIONOS',
   );
 
   // --- Manifest ------------------------------------------------------------

@@ -133,6 +133,7 @@ const CONTAINERS = [
  * into, so excluding menus here does not cost us their hover actions.
  */
 const IGNORED = [
+  'sponsorshipschannelupsell',
   // Chrome that sits between tiles. These appear on every capture, so warning
   // about them would bury the one line that actually means YouTube changed
   // something.

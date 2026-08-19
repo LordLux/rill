@@ -4,13 +4,13 @@
  * Five tiers, tried in order, each of which either returns a `PlaybackSource` or
  * throws to decline:
  *
- *   1. `ANDROID_VR` plain adaptive — the primary path (F5, F11, F13)
+ *   1. `VISIONOS` plain adaptive — the primary path (F5, F11, F13)
  *   2. `MWEB` plain adaptive       — the only proven decipher path (F3/F4)
  *   3. SABR → local DASH           — Phase 2, deliberately unbuilt; throws
  *   4. `yt-dlp` subprocess         — age-restricted, Vevo, whatever else refuses
  *   5. itag 18 progressive         — 360p, nearly always there, `qualityDegraded`
  *
- * `ANDROID_VR` leads because it is the only client measured that satisfies every
+ * `VISIONOS` leads because it is the only client measured that satisfies every
  * constraint at once: plain URLs, no `n` to decipher, open-ended ranges accepted
  * (F10 is an `MWEB` property, not a YouTube one), bare GETs accepted, throughput
  * above the bar, hardware decode, and seeks on the libmpv media_kit ships with no
@@ -260,11 +260,11 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
  *
  * Shared by both plain tiers because the difference between them is which client
  * the `/player` call named, and nothing after that: the same ranking, the same
- * `SignedUrl` door, the same assembly. `ANDROID_VR` formats carry no cipher and
+ * `SignedUrl` door, the same assembly. `VISIONOS` formats carry no cipher and
  * no `n`, so `sign` passes them through untouched and its client gate does not
  * fire (`CLIENTS_WITH_N_PARAM` in `signed-url.ts`); `MWEB` formats go through the
  * full decipher. Routing both through `sign` rather than short-circuiting the
- * one that "does not need it" means a day when `ANDROID_VR` starts shipping a
+ * one that "does not need it" means a day when `VISIONOS` starts shipping a
  * cipher is a non-event instead of a silent throttle.
  */
 export async function tierPlainAdaptive(
@@ -386,7 +386,7 @@ function identityRefusal(response: PlayerResult): string | null {
  * Separated from the tier so the retry rule can be tested against the real
  * implementation with stubs, rather than against a second copy of it written in
  * the test file. Same reasoning as `descendLadder`. Its messages name
- * `ANDROID_VR` because that is the only client whose refusals are plausibly
+ * `VISIONOS` because that is the only client whose refusals are plausibly
  * about the visitor id rather than about the video.
  *
  * **The trigger is deliberately broad** — see `identityRefusal`. It is not
@@ -411,7 +411,7 @@ export async function fetchWithVisitorRetry(
   if (refusal === null) return first;
 
   log.info(
-    `${videoId}: ANDROID_VR returned ${refusal} — retrying with a fresh visitor id`,
+    `${videoId}: VISIONOS returned ${refusal} — retrying with a fresh visitor id`,
   );
 
   try {
@@ -430,13 +430,13 @@ export async function fetchWithVisitorRetry(
   const second = await fetchResponse(true);
   const stillRefused = identityRefusal(second);
   if (stillRefused !== null) {
-    log.warn(`${videoId}: ANDROID_VR still returning ${stillRefused} after a fresh visitor id`);
+    log.warn(`${videoId}: VISIONOS still returning ${stillRefused} after a fresh visitor id`);
   }
   return second;
 }
 
 /**
- * Tier 1 — `ANDROID_VR`, anonymous, server-issued visitor id.
+ * Tier 1 — `VISIONOS`, anonymous, server-issued visitor id.
  *
  * The whole tier is the ordinary plain-adaptive path plus one condition: the
  * request has to carry a visitor id YouTube issued. F5 measured that at 13/13
@@ -452,11 +452,11 @@ export async function tierAndroidVr(
 ): Promise<PlaybackSource> {
   const response = await fetchWithVisitorRetry(
     videoId,
-    (refresh) => getPlayerResponse(deps.session, videoId, 'ANDROID_VR', { refresh }),
+    (refresh) => getPlayerResponse(deps.session, videoId, 'VISIONOS', { refresh }),
     () => refreshVisitorId(deps.session),
   );
 
-  return tierPlainAdaptive(deps, videoId, 'ANDROID_VR', poToken, response);
+  return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, response);
 }
 
 // ---------------------------------------------------------------------------
@@ -777,20 +777,15 @@ export async function openPlayback(
   const { videoId, preload = false } = params;
   const poToken = await (deps.poTokens ?? nullPoTokenProvider).mint(videoId);
 
-  // The `MWEB` response, fetched at most once and only if something below tier 1
-  // asks for it. Tiers 2 and 5 read their formats from it, and tier 4 wants its
+  // The `ANDROID` response, fetched at most once and only if something below tier 1
+  // asks for it. Tiers 2 and 3 read their formats from it, and tier 2 wants its
   // storyboards and duration even though yt-dlp finds its own streams.
-  //
-  // Lazy because tier 1 is expected to serve: pre-fetching would put a second
-  // `/player` round trip on every successful open, for a response nothing reads.
-  // A failure resolves to null rather than throwing — yt-dlp does not need us to
-  // have reached InnerTube at all, and the tiers that do need it decline.
-  let mwebRequest: Promise<PlayerResult | null> | null = null;
-  const mwebResponse = (): Promise<PlayerResult | null> =>
-    (mwebRequest ??= getPlayerResponse(deps.session, videoId, 'MWEB').catch(
+  let androidRequest: Promise<PlayerResult | null> | null = null;
+  const androidResponse = (): Promise<PlayerResult | null> =>
+    (androidRequest ??= getPlayerResponse(deps.session, videoId, 'ANDROID').catch(
       (error: unknown): null => {
         log.warn(
-          `${videoId}: MWEB /player failed (${(error as Error).message}); ` +
+          `${videoId}: ANDROID /player failed (${(error as Error).message}); ` +
             'lower tiers may still serve it',
         );
         return null;
@@ -801,18 +796,20 @@ export async function openPlayback(
     videoId,
     [
       {
-        name: 'ANDROID_VR plain adaptive',
-        run: () => tierAndroidVr(deps, videoId, poToken),
+        name: 'VISIONOS plain adaptive',
+        run: async () => {
+          const response = await fetchWithVisitorRetry(
+            videoId,
+            (refresh) => getPlayerResponse(deps.session, videoId, 'VISIONOS', { refresh }),
+            () => refreshVisitorId(deps.session),
+          );
+          return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, response);
+        },
       },
-      {
-        name: 'MWEB plain adaptive',
-        run: async () => tierPlainAdaptive(deps, videoId, 'MWEB', poToken, await mwebResponse()),
-      },
-      { name: 'SABR → DASH', run: () => tierSabrDash(videoId) },
-      { name: 'yt-dlp', run: async () => tierYtDlp(deps, videoId, poToken, await mwebResponse()) },
+      { name: 'yt-dlp', run: async () => tierYtDlp(deps, videoId, poToken, await androidResponse()) },
       {
         name: 'itag 18 progressive',
-        run: async () => tierProgressive(deps, videoId, poToken, await mwebResponse()),
+        run: async () => tierProgressive(deps, videoId, poToken, await androidResponse()),
       },
     ],
     preload,

@@ -60,7 +60,7 @@ export const POISONED_FEXP_FLAGS: readonly string[] = ['51946838'];
  * Change this number and you are trading that table — which is why it is here
  * rather than inline.
  */
-export const MAX_REMINTS = 2;
+export const MAX_REMINTS = 0;
 
 /**
  * Is this failure YouTube telling us to slow down rather than a flagged mint?

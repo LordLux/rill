@@ -8,7 +8,7 @@
  *
  * Two things about the shape are measured rather than assumed (2026-08-18):
  *
- *  - **`baseUrl` is absolute from `ANDROID_VR` and relative from `WEB`/`MWEB`.**
+ *  - **`baseUrl` is absolute from `VISIONOS` and relative from `WEB`/`MWEB`.**
  *    Both forms occur, so both are resolved against `https://www.youtube.com`
  *    here rather than at the fetch site.
  *  - **`translationLanguages` is not a list of missing tracks.** One real track

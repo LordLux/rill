@@ -123,7 +123,7 @@ export interface VideoDetail {
 
 /**
  * **Captions are deliberately not on `VideoDetail`.** They were, briefly, and
- * `watch.test.ts` caught what it cost: the `ANDROID_VR` → `MWEB` fallback
+ * `watch.test.ts` caught what it cost: the `VISIONOS` → `MWEB` fallback
  * (`protocol.md` §3.8) is a second `/player` round trip, and putting it here put
  * it on the video-open path — breaking §3.3's "opening a video costs **one**
  * `/player` call" for the ~29% of videos whose primary caption list is empty.

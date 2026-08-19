@@ -334,7 +334,7 @@ async function handleRequest(request: RpcRequest) {
       emitResponse(id, result);
     } else if (method === 'captions.list') {
       // The resolve session only, like `video.storyboard`: the track list comes
-      // off the `ANDROID_VR` `/player` response ladder tier 1 already cached, so
+      // off the `VISIONOS` `/player` response ladder tier 1 already cached, so
       // this must not wait on — or wake — the authenticated browse session.
       const videoId = requireString(params, 'videoId', 'captions.list');
       // `allowFallback: false` is the hover preview's mode — the free answer off

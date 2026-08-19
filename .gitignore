@@ -29,6 +29,8 @@ build/
 *.exe
 # Interrupted bun build leftovers
 *.bun-build
+/*.ass
+/???????????.json
 
 # Editor / OS
 .agents/
