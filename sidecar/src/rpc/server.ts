@@ -4,6 +4,8 @@ import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { announceCapabilities } from '../capabilities.ts';
 import { PLAYBACK_REPORT_STATES } from '../types.ts';
+import type { CaptionMetrics, CaptionOffset, CaptionStyle } from '../types.ts';
+import type { RgbaColor } from '../captions/cues.ts';
 
 const log = logger('rpc');
 
@@ -357,9 +359,18 @@ async function handleRequest(request: RpcRequest) {
     } else if (method === 'captions.get') {
       const videoId = requireString(params, 'videoId', 'captions.get');
       const trackId = requireString(params, 'trackId', 'captions.get');
+      // Task 19. All three are optional and all three change the *document*
+      // rather than anything about the fetch — `protocol.md` §3.8. They are
+      // applied here and not through mpv properties because
+      // `sub-ass-override=force` overrides the ASS `Style` and not the inline
+      // tags task 18 emits, so the property route works on plain tracks and
+      // silently does nothing on styled ones. See `captions/style.ts`.
       const { getCaptionTrack } = await import('../captions/service.ts');
       const result = await getCaptionTrack(await getResolveSession(), videoId, trackId, {
         signal: abortController.signal,
+        style: captionStyleParam(params),
+        offset: captionOffsetParam(params),
+        metrics: captionMetricsParam(params),
       });
       emitResponse(id, result);
     } else if (method === 'video.related') {
@@ -447,4 +458,105 @@ export function startRpcServer() {
   rl.on('close', () => {
     process.exit(0);
   });
+}
+
+// ---------------------------------------------------------------------------
+// `captions.get`'s task-19 parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Three optional parameters, validated the same way the rest of this file
+ * validates: shape-checked here so a malformed one is a `BAD_REQUEST` naming the
+ * field, rather than a document rendered with a `NaN` in a `\pos`.
+ *
+ * A `NaN` matters more here than it looks. `\pos(NaN,1020)` is not a parse error
+ * in ASS — libass drops the tag and the cue reverts to the default position, so
+ * a broken drag would present as "the caption sometimes ignores where I put it".
+ */
+function captionStyleParam(
+  params: Record<string, unknown> | undefined,
+): CaptionStyle | null {
+  const raw = params?.['style'];
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') {
+    throw new RpcError('BAD_REQUEST', "captions.get: 'style' must be an object if present");
+  }
+  const record = raw as Record<string, unknown>;
+  const edge = record['edgeStyle'];
+  if (edge != null && edge !== 'none' && edge !== 'outline' && edge !== 'dropShadow') {
+    throw new RpcError(
+      'BAD_REQUEST',
+      "captions.get: 'style.edgeStyle' must be none, outline or dropShadow",
+    );
+  }
+  return {
+    fontFamily: typeof record['fontFamily'] === 'string' ? record['fontFamily'] : null,
+    fontSizePercent: finiteOrNull(record['fontSizePercent']),
+    textColor: colorOrNull(record['textColor'], 'style.textColor'),
+    background: colorOrNull(record['background'], 'style.background'),
+    window: colorOrNull(record['window'], 'style.window'),
+    edgeStyle: (edge ?? null) as CaptionStyle['edgeStyle'],
+  };
+}
+
+function captionOffsetParam(
+  params: Record<string, unknown> | undefined,
+): CaptionOffset | null {
+  const raw = params?.['offset'];
+  if (raw === undefined || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const dx = finiteOrNull(record['dx']);
+  const dy = finiteOrNull(record['dy']);
+  if (dx === null || dy === null) {
+    throw new RpcError('BAD_REQUEST', "captions.get: 'offset' needs finite 'dx' and 'dy'");
+  }
+  return { dx, dy };
+}
+
+function captionMetricsParam(
+  params: Record<string, unknown> | undefined,
+): CaptionMetrics | null {
+  const raw = params?.['metrics'];
+  if (raw === undefined || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const table = record['advances'];
+  if (table === null || typeof table !== 'object') {
+    throw new RpcError('BAD_REQUEST', "captions.get: 'metrics.advances' must be an object");
+  }
+  const advances: Record<string, number> = {};
+  for (const [character, width] of Object.entries(table as Record<string, unknown>)) {
+    const value = finiteOrNull(width);
+    // A single unusable entry is dropped rather than failing the request: the
+    // fallback for an absent character is already the widest advance, which is
+    // the safe direction, and a caption should not fail to render because one
+    // glyph measured badly.
+    if (value !== null && value >= 0) advances[character] = value;
+  }
+  const fallback = finiteOrNull(record['fallbackAdvance']);
+  return {
+    advances,
+    fallbackAdvance:
+      fallback !== null && fallback > 0
+        ? fallback
+        : Math.max(0, ...Object.values(advances)),
+  };
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function colorOrNull(value: unknown, name: string): RgbaColor | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object') {
+    throw new RpcError('BAD_REQUEST', `captions.get: '${name}' must be an object if present`);
+  }
+  const record = value as Record<string, unknown>;
+  const channel = (key: string) => Math.max(0, Math.min(255, finiteOrNull(record[key]) ?? 0));
+  return {
+    r: channel('r'),
+    g: channel('g'),
+    b: channel('b'),
+    a: Math.max(0, Math.min(1, finiteOrNull(record['a']) ?? 1)),
+  };
 }

@@ -254,7 +254,17 @@ rl.on('line', (line) => {
         },
       }) + '\n');
     } else if (req.method === 'captions.get') {
-      captionGets.push({ videoId: req.params?.videoId, trackId: req.params?.trackId });
+      // Task 19's three optional parameters are recorded rather than acted on:
+      // what the app *put on the wire* is the claim under test, and the sidecar's
+      // own handling of them is asserted in `sidecar/test/captions.test.ts`
+      // against the real renderer.
+      captionGets.push({
+        videoId: req.params?.videoId,
+        trackId: req.params?.trackId,
+        style: req.params?.style ?? null,
+        offset: req.params?.offset ?? null,
+        hasMetrics: req.params?.metrics !== undefined,
+      });
       const trackId = req.params?.trackId;
       const language = trackId === 'a.de' ? 'de' : 'en';
       process.stdout.write(JSON.stringify({
@@ -274,6 +284,22 @@ rl.on('line', (line) => {
             '',
           ].join('\n'),
           cueCount: 1,
+          // The geometry the client needs to place its hit rectangle. The real
+          // numbers `ass.ts` uses, so a test measuring against these measures
+          // against the document the app would actually be handed.
+          layout: {
+            fontFamily: 'Arial',
+            fontSize: 48,
+            playResX: 1920,
+            playResY: 1080,
+            margin: 60,
+            outlineWidth: 2.5,
+            boxPadding: 6,
+            defaultAlignment: 2,
+            defaultX: 960,
+            defaultY: 1020,
+            lineSpacing: 1.2,
+          },
         },
       }) + '\n');
     } else if (req.method === 'test.captionLog') {

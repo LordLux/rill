@@ -157,6 +157,23 @@ export interface VideoDetail {
  */
 export type CaptionStyling = 'plain' | 'styled' | 'karaoke';
 
+/**
+ * Task 19's caption style, drag offset, hit-rect geometry and width table.
+ *
+ * Defined in `captions/style.ts` — where the reasons live — and re-exported here
+ * because they are part of the Flutter contract and this file is where that
+ * contract reads as a whole.
+ */
+export type {
+  CaptionEdgeStyle,
+  CaptionLayout,
+  CaptionMetrics,
+  CaptionOffset,
+  CaptionStyle,
+} from './captions/style.ts';
+import type { CaptionLayout } from './captions/style.ts';
+
+
 export interface CaptionTrack {
   /**
    * YouTube's `vssId` — the stable key, and the only field that distinguishes
@@ -229,7 +246,20 @@ export interface CaptionTrackContent {
   content: string;
   /** Lines in the document. Telemetry — the client renders nothing from it. */
   cueCount: number;
+  /**
+   * The geometry this document was written with — Task 19.
+   *
+   * The client needs it to put an invisible hit rectangle over a caption whose
+   * real rectangle nothing publishes: libass composites into the video texture
+   * and mpv exposes only the plain text. Eight numbers per *track*, not per cue,
+   * and sent rather than duplicated as constants in Flutter, because two copies
+   * of a layout constant are two things that have to agree and eventually will
+   * not. `architecture.md` §2.9.
+   */
+  layout: CaptionLayout;
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Player

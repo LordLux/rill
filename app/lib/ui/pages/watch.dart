@@ -21,6 +21,7 @@ import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
 import '../playback_controller.dart';
+import '../player/caption_drag_layer.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
@@ -39,6 +40,16 @@ const Key premiereNotifyKey = ValueKey('premiere-notify');
 /// An undecoded pair is the absence of a value, not 16:9, so the last real ratio
 /// stands until the next one arrives — architecture §2.8. [_referenceAspect] is
 /// only the answer before anything has decoded.
+/// Public alias, for the one mount point outside this file that needs it.
+///
+/// Fullscreen lives in `player_shell.dart` and draws the same texture (§2.8), so
+/// its caption handle needs the same ratio the watch page letterboxes against.
+/// Exported rather than duplicated, because two providers computing one ratio
+/// would eventually disagree about it during a switch.
+final fullscreenAspectRatioProvider = Provider<double>(
+  (ref) => ref.watch(_aspectRatioProvider).value ?? _referenceAspect,
+);
+
 final _aspectRatioProvider = StreamProvider.autoDispose<double>((ref) async* {
   final engine = ref.watch(playbackEngineProvider);
 
@@ -458,6 +469,13 @@ class _PlayerSurface extends ConsumerWidget {
           if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
 
           if (playback.error == null && !playback.isLoading && !fullscreen) PlayerControls(engine: engine, actualAspectRatio: ratio),
+
+          // **Above the controls, and only as big as the caption.** It has to be
+          // on top or the controls' full-surface tap would win the pointer, and
+          // it is a `Positioned` box the size of one caption so it intercepts
+          // nothing else. Task 19 — `player/caption_drag_layer.dart`.
+          if (playback.error == null && !playback.isLoading && !fullscreen)
+            CaptionDragLayer(aspectRatio: ratio),
         ],
       ),
     );

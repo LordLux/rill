@@ -800,6 +800,148 @@ That number is what rules out the split renderer:
   rendering engine. Recorded here because someone will propose Flutter rendering
   again, and this is the answer: the objection is the engine, not the idea.
 
+### Dragging a caption, and the style menu — built 2026-08-20
+
+Four things had to be settled before any of it worked, and three of them are
+measurements against the bundled libass rather than readings of the ASS spec.
+`sidecar/scratch/probe-task19.ts` re-runs the whole thing end to end against real
+YouTube tracks and reports every claim below as OK or FAIL.
+
+**A caption is up to three events, one per layer, and that is not tidiness.**
+ASS makes the background a `BorderStyle` on the `Style`, and `BorderStyle: 3` —
+the box — *replaces* the outline rather than sitting behind it: `\bord` becomes
+the box's padding and no outline is drawn at all. So a document that puts the box
+on the text event cannot draw an edge style, and since the background is now on
+by default (YouTube draws one, and it is the drag handle), every *Character edge
+style* the menu offers and every edge a styled track authored would have silently
+stopped working. Splitting them fixes it: the box is its own event with invisible
+glyphs (`\1a&HFF&`), sized by the same text at the same `\pos`, on the layer
+below; the text event keeps `BorderStyle: 1` and its outline; the window is a
+third event lower still, `BorderStyle: 4`, drawing a rectangle round the whole
+block from `\4c` with its own per-line box made transparent. Verified by
+rendering, not by reading: `scratch/probe-layers.ts` confirms the box draws with
+no glyphs, that the text above keeps its outline, and that on a two-line cue the
+window fills the gap between the lines and extends past the per-line boxes.
+
+This is the same compositing YouTube transmits and that Task 18 spent its length
+*undoing*, which is worth being explicit about. The difference is what the two
+events are: YouTube's duplicates were two halves of one line's styling, which
+belong merged; these are a backdrop and a line, which belong apart. **A document
+that draws neither backdrop emits neither, and no layer numbers**, so a track
+with the background turned off is byte-identical to what Task 17 rendered —
+asserted in `captions.test.ts`.
+
+**Position is a delta, not a coordinate.** The drag is stored as a fraction of
+the frame and added to whatever position the source gives — none, an ASR rolling
+window, or a per-cue styled position — so one rule covers every kind of track and
+nothing has to ask which kind it is holding. A zero delta emits nothing new. This
+keeps the `styled` classification **cosmetic** (it drives a picker badge) rather
+than load-bearing, which matters: two of the three predicates tried for it during
+Task 18 were wrong, and a misclassification that costs a wrong badge is a very
+different thing from one that picks a renderer.
+
+**The no-overflow rule needs a width neither side has.** libass does not help — a
+positioned line wider than the frame runs straight off the edge, no clamp and no
+wrap — so the clamp is ours, and it needs the rendered width of text. The sidecar
+holds every cue's text and has no font engine; Flutter has the font engine and,
+under the decision above, never sees a cue it is not currently displaying. Three
+measurements resolve it:
+
+- **mpv publishes the current cue's text for free.** `sub-text` stays populated
+  while libass is drawing (measured 2026-08-20 with `sub-ass=yes` and
+  `sub-visibility=yes`, the shipping configuration), and media_kit already
+  observes it. So the hit rectangle, the hover cursor and the drag ghost need no
+  protocol at all.
+- **A width table beats any single pixels-per-character number, decisively.**
+  Advances at Arial 48 through the bundled libass run from 8.3 px (`'`) to
+  40.5 px (`W`) — a 4.9× range. A scalar calibrated on a representative sentence
+  under-estimates an all-capitals caption by **26%** and a run of `M` by 46%;
+  the alphabet mean over-estimates lowercase by ~20% and still under-estimates
+  capitals by 12%. Under-estimating is the one direction that lets text clip off
+  the edge of the player. Summing per-character advances lands within **+1–2%**
+  on every real caption line tried, always on the safe side.
+  `scratch/measure-advances.ts` is the harness; 74 numbers cross the wire.
+- **ASS `Fontsize` is not an em size.** libass scales the face so that its
+  *ascent + descent* equals `Fontsize`, so Arial's advances at `Fontsize: 48`
+  come out at 0.895× what an em-sized 48 px `TextPainter` gives — and 2048/2288,
+  Arial's units-per-em over its ascent-plus-descent, is exactly that. Measuring
+  at the nominal size would over-estimate every caption by ~11.7%: safe, but
+  enough to visibly stop a drag short of a corner. `caption_geometry.dart`
+  derives the equivalent Flutter size from the face's own metrics rather than
+  hard-coding a ratio for one font.
+
+So Flutter measures, once per font and size, and the table is sent with the drag
+commit. The sidecar applies it to the cue texts it already holds. **One
+instrument, one outward bias, applied in the two places a position is decided** —
+and no cue list on the wire, which would have re-created the "two representations
+of one caption" shape this project has already been bitten by.
+
+`captions.get` therefore gained a `layout` field in its result (eight numbers per
+*track*, sent rather than duplicated as constants in Flutter) and three optional
+parameters — `style`, `offset`, `metrics`. `protocol.md` §3.8 has the shapes.
+
+**A width table can be missing, and it cannot be missing when it matters.** The
+client learns the font from `layout` on the *first* `captions.get` for a track,
+which by definition carries no offset because the offset resets when the track
+changes; every later request has both. What is left is an older client or a
+restored offset that outlived its measurement, and `captions/style.ts` carries a
+measured Arial-48 fallback for those rather than failing the request.
+
+**The style menu applies during generation, and it has to.** mpv's live
+properties act on the ASS `Style`, and `sub-ass-override=force` — the switch that
+is supposed to make them win — overrides the `Style` too, **not** the inline
+override tags Task 18 emits a styled track as. A user setting a font colour would
+see it apply to plain tracks and silently do nothing on styled ones. So the
+sidecar folds the overrides in as it writes the document, suppressing the
+authored tag rather than racing it. One mechanism, every track type, no control
+that is a no-op on some tracks. It costs a re-render plus a `sub-add` per change;
+slider input is debounced trailing 120 ms and discrete controls commit at once.
+
+**A font colour on a karaoke track replaces the line's base colour only.** The
+sung and unsung runs are two inline colours; replacing both flattens the
+highlight, so the caption would look broken while the setting looked like it
+worked. A run whose colour differs from the line's base is left exactly as
+authored. It generalises past karaoke without detecting it: on a plain track every
+run is the base and everything changes, and on a track that colours one word for
+emphasis the emphasis survives. Measured on `L-BgxLtMxh0`: all 291 authored inline
+colours survive a drag and a colour override.
+
+### What a re-render costs, and whether the outlier is a category
+
+Measured 2026-08-20, `convert()` split into its parts:
+
+| Document | Cues | Segments | Size | `JSON.parse` | → cues | `renderAss` | full | cached |
+|---|---|---|---|---|---|---|---|---|
+| `1S7uIQmkRzk` | 99 | 417 | 70 KB | 0.2 ms | 1.9 ms | 1.3 ms | 3.4 ms | **1.3 ms** |
+| `L-BgxLtMxh0` | 265 | 317 | 127 KB | 0.4 ms | 2.3 ms | 1.0 ms | 3.7 ms | **1.0 ms** |
+| `8Oos6D4_Bjo` | 230 | 46 320 | 3.1 MB | 8.7 ms | 17.2 ms | 32.8 ms | 58.8 ms | **32.8 ms** |
+
+So the service caches **parsed cues** rather than rendered documents — Task 18's
+cache was right when a track rendered exactly one way and would make every drag
+refetch and re-parse. That takes an ordinary style change to ~1.2 ms of render,
+and the 3 MB outlier from 59 ms to 33 ms. With `sub-add` at 12–36 ms and one RPC
+round trip, a style change is **~15–40 ms** on ordinary content.
+
+**The outlier is an outlier, not a category.** Sampled 2026-08-20 across six
+search queries, 219 caption tracks:
+
+| | |
+|---|---|
+| p50 | 29 KB |
+| p90 | 60 KB |
+| p99 | 405 KB |
+| max | 1240 KB |
+| over 1 MB | **1 of 219** |
+| any per-segment styling | **1 of 219** |
+
+And the driver is not size but *segments per cue*: `renderAss` emits a run per
+segment, and the 3 MB document has 201 of them per cue against 4.2 and 1.2 for the
+two ordinary ones. Segment-level pens are what produce that, and exactly one track
+in 219 has any. The largest track in the real sample is a 1.2 MB ASR document at
+4.7 segments per cue — big, but plain, and it renders in the ordinary band. **No
+fast path beyond the cue cache is warranted**; if that changes, the number to
+watch is segments per cue, not bytes.
+
 ---
 
 ## 3. Phasing

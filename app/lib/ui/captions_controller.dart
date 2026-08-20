@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 
 import '../data/rpc/client.dart';
+import '../domain/caption_style.dart';
 import '../domain/caption_track.dart';
+import 'player/caption_geometry.dart';
 import 'playback_controller.dart';
 
 /// `copyWith` sentinel — hard invariant 10.
@@ -23,6 +25,10 @@ class CaptionsState {
     this.isLoadingTracks = false,
     this.isLoadingTrack = false,
     this.error,
+    this.style = CaptionStyle.none,
+    this.offset = CaptionOffset.zero,
+    this.layout,
+    this.metrics,
   });
 
   /// Every track for the current video, **after** the sidecar's `ANDROID_VR` →
@@ -46,6 +52,31 @@ class CaptionsState {
   /// the caption page, not over the video.
   final String? error;
 
+  /// The caption style menu's current state.
+  ///
+  /// **A session preference, like [CaptionsController.preferredLanguage]** —
+  /// someone who turned the background off wants it off on the next video too.
+  /// It survives a video change and a track change; only *Reset* clears it.
+  final CaptionStyle style;
+
+  /// Where the user dragged the caption, as a fraction of the frame.
+  ///
+  /// **Not a preference.** It resets when the track changes and when the video
+  /// changes, because a position chosen to dodge one video's burned-in subtitle
+  /// means nothing on the next. It does survive turning captions off and on,
+  /// which is the one continuity a user notices.
+  final CaptionOffset offset;
+
+  /// The geometry the current document was generated with, or null before one.
+  final CaptionLayout? layout;
+
+  /// The width table measured against [layout], for the hit rect and the clamp.
+  ///
+  /// Measured once per layout rather than per frame — it is 74 `TextPainter`
+  /// layouts — and re-measured whenever the font or size changes, because that
+  /// is what makes it wrong.
+  final CaptionMetrics? metrics;
+
   bool get hasTracks => tracks.isNotEmpty;
   bool get isOn => selectedId != null;
 
@@ -62,6 +93,10 @@ class CaptionsState {
     bool? isLoadingTracks,
     bool? isLoadingTrack,
     Object? error = _unchanged,
+    CaptionStyle? style,
+    CaptionOffset? offset,
+    Object? layout = _unchanged,
+    Object? metrics = _unchanged,
   }) {
     return CaptionsState(
       tracks: tracks ?? this.tracks,
@@ -69,6 +104,10 @@ class CaptionsState {
       isLoadingTracks: isLoadingTracks ?? this.isLoadingTracks,
       isLoadingTrack: isLoadingTrack ?? this.isLoadingTrack,
       error: identical(error, _unchanged) ? this.error : error as String?,
+      style: style ?? this.style,
+      offset: offset ?? this.offset,
+      layout: identical(layout, _unchanged) ? this.layout : layout as CaptionLayout?,
+      metrics: identical(metrics, _unchanged) ? this.metrics : metrics as CaptionMetrics?,
     );
   }
 
@@ -79,11 +118,15 @@ class CaptionsState {
       other.isLoadingTracks == isLoadingTracks &&
       other.isLoadingTrack == isLoadingTrack &&
       other.error == error &&
+      other.style == style &&
+      other.offset == offset &&
+      other.layout == layout &&
+      identical(other.metrics, metrics) &&
       _sameTracks(other.tracks, tracks);
 
   @override
-  int get hashCode =>
-      Object.hash(selectedId, isLoadingTracks, isLoadingTrack, error, tracks.length);
+  int get hashCode => Object.hash(
+      selectedId, isLoadingTracks, isLoadingTrack, error, tracks.length, style, offset, layout);
 
   static bool _sameTracks(List<CaptionTrack> a, List<CaptionTrack> b) {
     if (a.length != b.length) return false;
@@ -123,11 +166,28 @@ class CaptionsController extends Notifier<CaptionsState> {
   @visibleForTesting
   bool preferOn = false;
 
+  /// The style menu's state, held on the controller rather than read off
+  /// [state] — for the same reason [preferredLanguage] is.
+  ///
+  /// It is a *session preference* and outlives every `CaptionsState` the
+  /// controller builds, and `_load` runs from `build()`, before there is a state
+  /// to read. Riverpod throws on that ("tried to read the state of an
+  /// uninitialized provider") rather than returning a default, so a preference
+  /// that lives only in state is a preference the first load cannot see.
+  /// [CaptionsState.style] mirrors this for the UI.
+  @visibleForTesting
+  CaptionStyle preferredStyle = CaptionStyle.none;
+
   int _generation = 0;
   bool _disposed = false;
   int? _loadReqId;
   int? _loadStyledReqId;
   int? _selectReqId;
+  Timer? _styleDebounce;
+
+  /// Trailing debounce for slider input. Long enough to collapse a drag into a
+  /// handful of commits, short enough that letting go feels immediate.
+  static const Duration _styleDebounceDelay = Duration(milliseconds: 120);
 
   void _cancel(int? id) {
     if (id != null) RpcClient.instance.cancel(id);
@@ -135,7 +195,10 @@ class CaptionsController extends Notifier<CaptionsState> {
 
   @override
   CaptionsState build() {
-    ref.onDispose(() => _disposed = true);
+    ref.onDispose(() {
+      _disposed = true;
+      _styleDebounce?.cancel();
+    });
 
     ref.listen(playbackProvider.select((playback) => playback.item?.id), (previous, next) {
       if (previous == next) return;
@@ -166,12 +229,14 @@ class CaptionsController extends Notifier<CaptionsState> {
     // the new list arrives shows the wrong words over the right picture.
     unawaited(ref.read(playbackEngineProvider).setSubtitle(null));
 
+    // The style is a session preference and survives; the offset and the
+    // measured geometry belong to the document that is going away.
     if (videoId == null) {
-      state = const CaptionsState();
+      state = CaptionsState(style: preferredStyle);
       return;
     }
 
-    state = const CaptionsState(isLoadingTracks: true);
+    state = CaptionsState(style: preferredStyle, isLoadingTracks: true);
 
     List<CaptionTrack> tracks;
     try {
@@ -269,6 +334,9 @@ class CaptionsController extends Notifier<CaptionsState> {
 
     if (trackId == null) {
       preferOn = false;
+      // The offset survives an Off/On round trip — that is the one continuity a
+      // user notices, and §2 of the task brief asks for it explicitly. It is the
+      // *track* changing that resets it, below.
       state = state.copyWith(selectedId: null, isLoadingTrack: false, error: null);
       await engine.setSubtitle(null);
       return;
@@ -277,10 +345,44 @@ class CaptionsController extends Notifier<CaptionsState> {
     final videoId = ref.read(playbackProvider).item?.id;
     if (videoId == null) return;
 
-    state = state.copyWith(selectedId: trackId, isLoadingTrack: true, error: null);
+    // A different track is a different caption, and a position chosen for one
+    // has no meaning on the other — a manual track and an auto-generated one do
+    // not even put their lines in the same place.
+    final changingTrack = state.selectedId != null && state.selectedId != trackId;
+    state = state.copyWith(
+      selectedId: trackId,
+      isLoadingTrack: true,
+      error: null,
+      offset: changingTrack ? CaptionOffset.zero : null,
+    );
 
+    await _fetch(videoId, trackId, generation);
+  }
+
+  /// `captions.get` with the current style, offset and width table, then attach.
+  ///
+  /// **Every one of those is applied by the sidecar, during generation.** The
+  /// mpv properties that look like they would do it act on the ASS `Style`, and
+  /// `sub-ass-override=force` overrides the `Style` too — not the inline tags a
+  /// styled track is made of. See `captions/style.ts` for the measurement.
+  ///
+  /// It costs a re-render and a `sub-add` per change: measured 2026-08-20 at
+  /// 1.0–1.3 ms of render on ordinary documents and `sub-add`'s 12–36 ms, so
+  /// ~15–40 ms end to end. `sub-add` does **not** rebuild the video texture, so
+  /// the picture never blinks. Slider input is debounced in [setStyle].
+  Future<void> _fetch(String videoId, String trackId, int generation) async {
+    final engine = ref.read(playbackEngineProvider);
     try {
-      final req = RpcClient.instance.callCancelable('captions.get', {'videoId': videoId, 'trackId': trackId});
+      final req = RpcClient.instance.callCancelable('captions.get', {
+        'videoId': videoId,
+        'trackId': trackId,
+        if (!preferredStyle.isDefault) 'style': preferredStyle.toJson(),
+        if (!state.offset.isZero) 'offset': state.offset.toJson(),
+        // Only alongside an offset, because that is the only thing it changes:
+        // the clamp. Sending it otherwise would mint a cache entry per client
+        // for a table that made no difference to the document.
+        if (!state.offset.isZero && state.metrics != null) 'metrics': state.metrics!.toJson(),
+      });
       _selectReqId = req.id;
       final result = await req.response;
       final content = CaptionTrackContent.fromJson((result as Map).cast<String, Object?>());
@@ -291,7 +393,11 @@ class CaptionsController extends Notifier<CaptionsState> {
 
       preferOn = true;
       preferredLanguage = content.languageCode;
-      state = state.copyWith(isLoadingTrack: false);
+      state = state.copyWith(
+        isLoadingTrack: false,
+        layout: content.layout,
+        metrics: _metricsFor(content.layout),
+      );
     } on Object catch (e) {
       if (_stale(generation)) return;
       // Back to Off rather than leaving a track ticked that is not showing. A
@@ -299,6 +405,70 @@ class CaptionsController extends Notifier<CaptionsState> {
       // that gets reported as "captions are broken" with nothing to go on.
       state = state.copyWith(selectedId: null, isLoadingTrack: false, error: e.toString());
     }
+  }
+
+  /// The width table for a layout, re-measured only when the layout moves.
+  ///
+  /// 74 `TextPainter` layouts, so it is cheap but not free, and the font and size
+  /// are the only things that change it. Returning the existing table when they
+  /// have not is what keeps a slider drag from re-measuring on every commit.
+  CaptionMetrics? _metricsFor(CaptionLayout? layout) {
+    if (layout == null) return null;
+    final held = state.layout;
+    if (held != null &&
+        state.metrics != null &&
+        held.fontFamily == layout.fontFamily &&
+        held.fontSize == layout.fontSize) {
+      return state.metrics;
+    }
+    return measureAdvances(layout);
+  }
+
+  /// Apply a style from the menu, regenerating the document.
+  ///
+  /// **Debounced, trailing.** A colour or opacity slider fires per frame, and
+  /// each change is a round trip and a `sub-add`; without this a drag of the
+  /// opacity slider would queue sixty of them. Discrete controls — font family,
+  /// edge style — pass `immediate` and commit at once, because a debounce there
+  /// is only a delay.
+  Future<void> setStyle(CaptionStyle style, {bool immediate = false}) async {
+    if (style == preferredStyle) return;
+    preferredStyle = style;
+    state = state.copyWith(style: style);
+    _styleDebounce?.cancel();
+    if (immediate) return _reapply();
+    final completer = Completer<void>();
+    _styleDebounce = Timer(_styleDebounceDelay, () {
+      unawaited(_reapply().whenComplete(completer.complete));
+    });
+    return completer.future;
+  }
+
+  /// Commit a drag. Not debounced — it fires once, on release.
+  Future<void> setOffset(CaptionOffset offset) async {
+    if (offset == state.offset) return;
+    state = state.copyWith(offset: offset);
+    return _reapply();
+  }
+
+  /// The menu's *Reset*: everything it owns, including the drag.
+  Future<void> resetStyle() async {
+    if (preferredStyle.isDefault && state.offset.isZero) return;
+    _styleDebounce?.cancel();
+    preferredStyle = CaptionStyle.none;
+    state = state.copyWith(style: CaptionStyle.none, offset: CaptionOffset.zero);
+    return _reapply();
+  }
+
+  /// Re-render the selected track and re-attach it. A no-op when captions are off
+  /// — the style is still remembered and applies when they come back on.
+  Future<void> _reapply() async {
+    final trackId = state.selectedId;
+    final videoId = ref.read(playbackProvider).item?.id;
+    if (trackId == null || videoId == null) return;
+    final generation = ++_generation;
+    _cancel(_selectReqId);
+    await _fetch(videoId, trackId, generation);
   }
 
   /// The **C** key and the CC button: on to the best available track, or off.

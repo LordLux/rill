@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'caption_style.dart';
+
 part 'caption_track.freezed.dart';
 part 'caption_track.g.dart';
 
@@ -87,6 +89,20 @@ abstract class CaptionTrackContent with _$CaptionTrackContent {
     required String format,
     required String content,
     @Default(0) int cueCount,
+
+    /// The geometry this document was written with — Task 19.
+    ///
+    /// Needed to put an invisible hit rectangle over a caption whose real
+    /// rectangle nothing publishes: libass composites into the video texture and
+    /// mpv exposes only the plain text. Eight numbers per *track*, sent rather
+    /// than duplicated as constants here, because two copies of a layout
+    /// constant are two things that have to agree and eventually will not.
+    ///
+    /// Nullable so an older sidecar — the `bun run src/main.ts` fallback against
+    /// a stale checkout, or a release bundle that did not get rebuilt — still
+    /// renders captions, with the drag falling back to the defaults in
+    /// [CaptionLayout.fromJson].
+    CaptionLayout? layout,
   }) = _CaptionTrackContent;
 
   factory CaptionTrackContent.fromJson(Map<String, Object?> json) =>

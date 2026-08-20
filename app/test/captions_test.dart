@@ -126,8 +126,18 @@ void main() {
       // The document that landed is the one that was asked for, not merely some
       // document — the fake writes the track id into its only Dialogue line.
       expect(engine.subtitle, contains('.en'));
+      // Task 19 added three optional parameters to `captions.get`, and an
+      // untouched session sends none of them — which is itself the claim worth
+      // pinning here: turning the style menu and the drag on must not change the
+      // request a user who never opened either makes.
       expect((await captionLog()).gets, [
-        {'videoId': 'vid1', 'trackId': '.en'},
+        {
+          'videoId': 'vid1',
+          'trackId': '.en',
+          'style': null,
+          'offset': null,
+          'hasMetrics': false,
+        },
       ]);
     });
 

@@ -5,6 +5,7 @@ import '../domain/feed_item.dart';
 import '../theme/tokens.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
+import 'player/caption_drag_layer.dart';
 import 'player/controls.dart';
 import 'player/shortcuts.dart';
 import 'player/settings_menu.dart';
@@ -195,6 +196,11 @@ class _FullscreenPlayer extends ConsumerWidget {
               children: [
                 engine.videoSurface(),
                 PlayerControls(engine: engine),
+                // Fullscreen is the third mount point for the one texture
+                // (§2.8), so it needs the caption handle too — a caption
+                // draggable on the watch page and not in fullscreen would be
+                // the same feature behaving differently in two places.
+                CaptionDragLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
               ],
             ),
           ),

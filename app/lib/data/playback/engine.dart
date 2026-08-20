@@ -102,6 +102,21 @@ abstract class PlaybackEngine {
   /// See `architecture.md` §2.9.
   Future<void> setSubtitle(String? ass);
 
+  /// The plain text of the caption currently on screen, tags stripped.
+  ///
+  /// **The one thing about a caption that mpv does publish**, and Task 19 is
+  /// built on it. libass composites into the video texture and exposes no
+  /// geometry, so there is nothing to hit-test — but `sub-text` stays populated
+  /// while libass is drawing (measured 2026-08-20 with `sub-ass=yes` and
+  /// `sub-visibility=yes`, which is the shipping configuration), and knowing the
+  /// *words* is enough to estimate the rectangle they occupy.
+  ///
+  /// **Nothing renders this.** Drawing it would be the second caption renderer
+  /// that hid a bug for two tasks — see [kNoFlutterSubtitles]. It feeds the hit
+  /// rectangle, the hover cursor and the drag ghost, and the ghost is only ever
+  /// on screen while the real caption is being dragged.
+  Stream<String?> get subtitleTextStream;
+
   /// [retainSubtitle] puts the attached track back after the media reopens.
   ///
   /// A quality switch reopens the media (F19) and mpv drops external subtitle
@@ -358,6 +373,19 @@ class MediaKitEngine implements PlaybackEngine {
     }
     await _player.setSubtitleTrack(SubtitleTrack.data(ass, title: 'Captions'));
   }
+
+  /// media_kit's own view of mpv's `sub-text`, flattened to one string.
+  ///
+  /// It is a `List<String>` because mpv can report a cue as several lines; the
+  /// hit rectangle wants them joined the way ASS joins them, so `\N` becomes a
+  /// newline and [captionSize] counts the result. Empty entries — which is what
+  /// the stream carries between cues — become null, so "no caption" is one value
+  /// rather than three spellings of it.
+  @override
+  Stream<String?> get subtitleTextStream => _player.stream.subtitle.map((lines) {
+        final joined = lines.where((line) => line.isNotEmpty).join('\n').trim();
+        return joined.isEmpty ? null : joined;
+      });
 
   @override
   Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {

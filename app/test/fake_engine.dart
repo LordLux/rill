@@ -110,6 +110,16 @@ class FakeEngine implements PlaybackEngine {
     subtitles.add(ass);
   }
 
+  /// What a test pushes to stand in for mpv's `sub-text`.
+  ///
+  /// Broadcast, because the drag layer and a test can both be listening, and a
+  /// single-subscription stream would make the second listener an error rather
+  /// than a second listener.
+  final StreamController<String?> subtitleText = StreamController<String?>.broadcast();
+
+  @override
+  Stream<String?> get subtitleTextStream => subtitleText.stream;
+
   @override
   Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {
     opened.add(variant);

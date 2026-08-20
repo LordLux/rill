@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/domain/caption_style.dart';
 import 'package:rill/domain/caption_track.dart';
 import 'package:rill/domain/playback_source.dart';
 import 'package:silky_scroll/silky_scroll.dart';
@@ -671,11 +672,16 @@ void main() {
         expect(tester.getTopLeft(find.text(label)).dy, lessThan(off),
             reason: '$label is a choice; Off comes after all of them');
       }
-      // `.last` — the header carries one of its own, and the one this is about
-      // is the rule between the languages and Off.
-      final divider = tester.getTopLeft(find.byType(Divider).last).dy;
-      expect(divider, lessThan(off));
-      expect(tester.getTopLeft(find.text('German')).dy, lessThan(divider));
+      // The page carries three rules — under the header, above Off, and above
+      // the *Style* row — so this picks the one it is about by position rather
+      // than by index. `.last` used to work and stopped the moment task 19 added
+      // a row after Off, which is the kind of silent drift an index invites.
+      final german = tester.getTopLeft(find.text('German')).dy;
+      final between = tester
+          .widgetList<Divider>(find.byType(Divider))
+          .map((divider) => tester.getTopLeft(find.byWidget(divider)).dy)
+          .where((dy) => dy > german && dy < off);
+      expect(between, isNotEmpty, reason: 'a rule separates the languages from Off');
     });
 
     testWidgets('short labels leave it at the shared width', (tester) async {
@@ -730,6 +736,84 @@ void main() {
       expect(tester.renderObject<RenderParagraph>(find.text('E' * 200)).didExceedMaxLines, isTrue);
     });
 
+    testWidgets('the style page is reachable, and offers only the edges ASS can draw',
+        (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(playerCaptionStyleMenuKey), findsOneWidget);
+      // **Three, not five.** ASS has `\bord` and `\shad` and no bevel, so
+      // YouTube's *Raised* and *Depressed* are one result — offering both would
+      // be two entries that do the same thing. `architecture.md` §2.9 records it
+      // as knowingly dropped rather than quietly missed.
+      expect(find.text('Drop shadow'), findsOneWidget);
+      expect(find.text('Outline'), findsOneWidget);
+      expect(find.text('Raised'), findsNothing);
+      expect(find.text('Depressed'), findsNothing);
+    });
+
+    testWidgets('reset is disabled until there is something to reset', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      final ink = tester.widget<InkWell>(
+        find.descendant(
+          of: find.byKey(playerCaptionStyleResetKey),
+          matching: find.byType(InkWell),
+        ),
+      );
+      expect(ink.onTap, isNull,
+          reason: 'a fresh session has nothing to undo, and a live Reset would say otherwise');
+    });
+
+    testWidgets('a discrete control commits at once, without a debounce', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      // **The style page is the longest in the menu** — four sections and a
+      // reset, against a 400 px panel — so it scrolls, and the edge chips are
+      // below the fold. Scrolling to a control before using it is what a user
+      // does too.
+      await tester.ensureVisible(find.text('Outline'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Outline'));
+      await tester.pumpAndSettle();
+
+      final captions = container.read(captionsProvider.notifier) as _FixedCaptions;
+      expect(captions.applied.single.edgeStyle, CaptionEdgeStyle.outline);
+      expect(captions.appliedImmediately.single, isTrue,
+          reason: 'a chip has nothing to debounce — a delay there is only a delay');
+    });
+
+    testWidgets('a slider is debounced instead', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      // Any slider on the page; they all take the same path, and each frame of a
+      // drag is a re-render plus a `sub-add` on the other side of it.
+      await tester.ensureVisible(find.byType(Slider).first);
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(Slider).first, const Offset(30, 0));
+      await tester.pumpAndSettle();
+
+      final captions = container.read(captionsProvider.notifier) as _FixedCaptions;
+      expect(captions.appliedImmediately, isNotEmpty);
+      expect(captions.appliedImmediately.every((immediate) => !immediate), isTrue);
+    });
+
+    testWidgets('back returns to the track list, not to the root', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(playerSettingsBackKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(playerCaptionsMenuKey), findsOneWidget);
+    });
+
     testWidgets('it grows leftward — the right edge does not move', (tester) async {
       // The panel hangs off a button at its bottom-right, so that corner is the
       // anchor. A wider panel that moved it would drag the menu off its control.
@@ -751,9 +835,29 @@ class _FixedCaptions extends CaptionsController {
 
   final List<CaptionTrack> _tracks;
 
+  /// Every style the menu handed over, and whether it asked for it immediately.
+  ///
+  /// The debounce lives in the real controller, so a menu test cannot observe it
+  /// by counting round trips — what it *can* observe is which of the two the
+  /// control asked for, which is the decision the menu owns.
+  final List<CaptionStyle> applied = [];
+  final List<bool> appliedImmediately = [];
+
   @override
   CaptionsState build() => CaptionsState(tracks: _tracks);
 
   @override
   Future<void> loadStyled() async {}
+
+  @override
+  Future<void> setStyle(CaptionStyle style, {bool immediate = false}) async {
+    applied.add(style);
+    appliedImmediately.add(immediate);
+    state = state.copyWith(style: style);
+  }
+
+  @override
+  Future<void> resetStyle() async {
+    state = state.copyWith(style: CaptionStyle.none, offset: CaptionOffset.zero);
+  }
 }

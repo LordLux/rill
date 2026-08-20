@@ -16,6 +16,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/playback_source.dart';
 import '../widgets/silky_scroll_absorber.dart';
+import '../../domain/caption_style.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 
@@ -32,6 +33,11 @@ const Key playerQualityHeaderKey = ValueKey('player-quality-header');
 /// these rather than by label, so wording changes do not break the suite.
 const Key playerCaptionsMenuKey = ValueKey('player-captions-menu');
 const Key playerCaptionsOffKey = ValueKey('player-captions-off');
+
+/// The row into the style page, and the page's *Reset*.
+const Key playerCaptionStyleRowKey = ValueKey('player-caption-style');
+const Key playerCaptionStyleMenuKey = ValueKey('player-caption-style-menu');
+const Key playerCaptionStyleResetKey = ValueKey('player-caption-style-reset');
 
 /// The tallest the panel may get, subpage included.
 const double settingsMenuMaxHeight = 400;
@@ -58,7 +64,7 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 /// button beside quality's, so reaching it through the gear would be a second
 /// route to a place that already has a door. [_depthOf] and [back] both encode
 /// that — only `moreOptions` is under anything.
-enum SettingsPage { root, moreOptions, quality, captions }
+enum SettingsPage { root, moreOptions, quality, captions, captionStyle }
 
 @immutable
 class PlayerMenuState {
@@ -288,7 +294,8 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   /// Root and Quality are both top levels — quality has its own button and is
   /// not reached through the root — so moving between them is sideways and gets
   /// no slide at all. Only *More options* is under anything.
-  static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions ? 1 : 0;
+  static int _depthOf(SettingsPage page) =>
+      page == SettingsPage.moreOptions || page == SettingsPage.captionStyle ? 1 : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -311,6 +318,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.moreOptions => const _MoreOptionsPage(),
         SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
         SettingsPage.captions => const _CaptionsPage(),
+        SettingsPage.captionStyle => const CaptionStylePage(),
       },
     );
 
@@ -552,6 +560,25 @@ class _CaptionsPageState extends ConsumerState<_CaptionsPage> {
             onTap: () => controller.select(null),
           ),
         ],
+        // **Under the list, and reachable with captions off.** The style is a
+        // session preference (`CaptionsState.style`), so setting it up before
+        // turning captions on is a reasonable thing to do — and the page's
+        // *Reset* is the one control a user goes looking for when something
+        // looks wrong, which is exactly when captions might be off.
+        Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _MenuRow(
+          key: playerCaptionStyleRowKey,
+          icon: Icons.format_paint_outlined,
+          // **'Style', not 'Caption style'.** The panel takes the width of its
+          // widest row and holds it for every page (see [_menuWidth]); the
+          // longer label pushed the subtitle page past the shared floor, so the
+          // menu would have been visibly wider on this page than on every other
+          // one. The page it opens says 'Caption style' in its header, where
+          // there is room and no context to supply the noun.
+          label: 'Style',
+          trailing: Icons.chevron_right,
+          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captionStyle),
+        ),
       ],
     );
   }
@@ -989,4 +1016,356 @@ List<PlaybackVariant> distinctQualities(List<PlaybackVariant> variants) {
     for (final variant in variants)
       if (seen.add('${variant.height}x${variant.fps}')) variant,
   ];
+}
+
+/// The caption style menu — Task 19.
+///
+/// **Every control here works on every track, and that is the whole reason it
+/// is shaped this way.** The obvious implementation is mpv's live properties —
+/// `sub-color`, `sub-font`, `sub-back-color` — and they cannot be used: they act
+/// on the ASS `Style`, and `sub-ass-override=force`, the switch that is supposed
+/// to make them win, overrides the `Style` too and **not** the inline override
+/// tags a styled track is made of. A user setting a font colour would see it
+/// apply to plain tracks and silently do nothing on the styled ones, which is
+/// exactly the class of failure this project keeps finding. So every value here
+/// is sent to the sidecar and folded into the ASS document as it is generated:
+/// one mechanism, no track on which a control is a no-op. `captions/style.ts`
+/// carries the measurement.
+///
+/// Two of YouTube's entries are missing rather than faked. **Raised** and
+/// **Depressed** edge styles are one result in ASS (`\bord` and `\shad`, no
+/// bevel), and the background's **rounded corners** are not expressible at all —
+/// both ASS boxes are rectangles. Recorded in `architecture.md` §2.9 as
+/// knowingly dropped.
+///
+/// Public because `player_caption_style_test.dart` builds it directly; nothing
+/// else outside this file mounts it.
+class CaptionStylePage extends ConsumerWidget {
+  const CaptionStylePage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final captions = ref.watch(captionsProvider);
+    final controller = ref.read(captionsProvider.notifier);
+    final style = captions.style;
+
+    void apply(CaptionStyle next, {bool immediate = true}) {
+      unawaited(controller.setStyle(next, immediate: immediate));
+    }
+
+    return _MenuBody(
+      key: playerCaptionStyleMenuKey,
+      header: _MenuHeader(
+        title: 'Caption style',
+        onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captions),
+      ),
+      children: [
+        _StyleSection(label: 'Font'),
+        _StyleChoices<String?>(
+          value: style.fontFamily,
+          options: _fontOptions,
+          onPicked: (family) => apply(style.copyWith(fontFamily: family)),
+        ),
+        _StyleSlider(
+          label: 'Size',
+          value: style.fontSizePercent ?? 100,
+          min: 50,
+          max: 300,
+          format: (value) => '${value.round()}%',
+          // A slider fires per frame and every change is a round trip plus a
+          // `sub-add`; the controller debounces trailing so a drag commits a
+          // handful of times instead of sixty.
+          onChanged: (value) =>
+              apply(style.copyWith(fontSizePercent: value), immediate: false),
+        ),
+        _StyleColors(
+          label: 'Colour',
+          value: style.textColor,
+          onPicked: (colour) =>
+              apply(style.copyWith(textColor: colour?.withValues(alpha: style.textColor?.a ?? 1))),
+        ),
+        _StyleSlider(
+          label: 'Opacity',
+          value: (style.textColor?.a ?? 1) * 100,
+          min: 0,
+          max: 100,
+          format: (value) => '${value.round()}%',
+          onChanged: (value) => apply(
+            style.copyWith(
+              textColor: (style.textColor ?? captionWhite).withValues(alpha: value / 100),
+            ),
+            immediate: false,
+          ),
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _StyleSection(label: 'Background'),
+        _StyleColors(
+          label: 'Colour',
+          value: style.background,
+          onPicked: (colour) => apply(style.copyWith(
+            background:
+                colour?.withValues(alpha: style.background?.a ?? captionDefaultBackgroundOpacity),
+          )),
+        ),
+        _StyleSlider(
+          label: 'Opacity',
+          value: (style.background?.a ?? captionDefaultBackgroundOpacity) * 100,
+          min: 0,
+          max: 100,
+          format: (value) => '${value.round()}%',
+          onChanged: (value) => apply(
+            style.copyWith(
+              background: (style.background ?? captionBlack).withValues(alpha: value / 100),
+            ),
+            immediate: false,
+          ),
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        // The *window* is the rectangle around every caption on screen at once,
+        // as distinct from the per-line background above. YouTube draws both and
+        // ships this one at zero opacity, which is why it looks absent until
+        // someone turns it up.
+        _StyleSection(label: 'Window'),
+        _StyleColors(
+          label: 'Colour',
+          value: style.window,
+          onPicked: (colour) => apply(
+              style.copyWith(window: colour?.withValues(alpha: style.window?.a ?? 0.75))),
+        ),
+        _StyleSlider(
+          label: 'Opacity',
+          value: (style.window?.a ?? 0) * 100,
+          min: 0,
+          max: 100,
+          format: (value) => '${value.round()}%',
+          onChanged: (value) => apply(
+            style.copyWith(
+              window: (style.window ?? captionBlack).withValues(alpha: value / 100),
+            ),
+            immediate: false,
+          ),
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _StyleSection(label: 'Character edge'),
+        _StyleChoices<CaptionEdgeStyle?>(
+          value: style.edgeStyle,
+          options: _edgeOptions,
+          onPicked: (edge) => apply(style.copyWith(edgeStyle: edge)),
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        // **Resets the drag as well as the style**, which is why it lives here
+        // rather than beside the caption: those are the two things a user can
+        // put into a state they cannot easily undo by hand.
+        _MenuRow(
+          key: playerCaptionStyleResetKey,
+          icon: Icons.restart_alt,
+          label: 'Reset',
+          onTap: style.isDefault && captions.offset.isZero
+              ? null
+              : () => unawaited(controller.resetStyle()),
+        ),
+      ],
+    );
+  }
+}
+
+/// `null` is "the track decides", which is a real choice and the first one.
+const List<({String label, String? value})> _fontOptions = [
+  (label: 'Default', value: null),
+  (label: 'Arial', value: 'Arial'),
+  (label: 'Georgia', value: 'Georgia'),
+  (label: 'Courier New', value: 'Courier New'),
+  (label: 'Comic Sans MS', value: 'Comic Sans MS'),
+];
+
+/// Three, not five. See the class doc for the two that ASS cannot tell apart.
+const List<({String label, CaptionEdgeStyle? value})> _edgeOptions = [
+  (label: 'Default', value: null),
+  (label: 'None', value: CaptionEdgeStyle.none),
+  (label: 'Drop shadow', value: CaptionEdgeStyle.dropShadow),
+  (label: 'Outline', value: CaptionEdgeStyle.outline),
+];
+
+class _StyleSection extends StatelessWidget {
+  const _StyleSection({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          fontSize: 10,
+          letterSpacing: 0.8,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// A wrapping row of chips — the menu is 248 px wide and a `DropdownButton`
+/// inside a panel that is itself an overlay is a second overlay to position.
+class _StyleChoices<T> extends StatelessWidget {
+  const _StyleChoices({required this.value, required this.options, required this.onPicked});
+
+  final T value;
+  final List<({String label, T value})> options;
+  final ValueChanged<T> onPicked;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final option in options)
+            InkWell(
+              onTap: () => onPicked(option.value),
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: option.value == value ? scheme.primary : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  option.label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: option.value == value ? scheme.onPrimary : scheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Swatches, with the first one struck through for "leave it to the track".
+class _StyleColors extends StatelessWidget {
+  const _StyleColors({required this.label, required this.value, required this.onPicked});
+
+  final String label;
+  final Color? value;
+  final ValueChanged<Color?> onPicked;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // Compared on RGB alone: the opacity slider owns the alpha channel, and a
+    // swatch that stopped looking selected when the user moved the slider would
+    // read as the colour having been forgotten.
+    bool isPicked(Color? swatch) {
+      if (swatch == null || value == null) return swatch == null && value == null;
+      return swatch.r == value!.r && swatch.g == value!.g && swatch.b == value!.b;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 12, 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final swatch in captionPalette)
+                  InkWell(
+                    onTap: () => onPicked(swatch),
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: swatch ?? scheme.surfaceContainerHighest,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isPicked(swatch) ? scheme.primary : scheme.outlineVariant,
+                          width: isPicked(swatch) ? 2 : 1,
+                        ),
+                      ),
+                      child: swatch == null
+                          ? Icon(Icons.remove, size: 12, color: scheme.onSurfaceVariant)
+                          : null,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StyleSlider extends StatelessWidget {
+  const _StyleSlider({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.format,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final String Function(double) format;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(trackHeight: 2),
+              child: Slider(
+                value: value.clamp(min, max),
+                min: min,
+                max: max,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 38,
+            child: Text(
+              format(value),
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
