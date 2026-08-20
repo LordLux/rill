@@ -13,6 +13,7 @@ nodes/
 # which is a thing to attach to the report rather than to carry in the tree.
 scratch/out/
 scratch/frames/
+scratch/*.json
 
 # Phase 2 tripwire history — now kept per machine, not per checkout, in the
 # user state dir (%LOCALAPPDATA%\NativeYouTube on Windows). These two patterns

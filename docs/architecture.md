@@ -730,6 +730,19 @@ none is worth approximating:
 - **Sub- and superscript** (`ofOffset`). No ASS tag, and the YouTube web player
   does not render them either — so an approximation would be less faithful than
   omitting them, not more.
+- **Raised and depressed edge styles collapse into a drop shadow.** ASS has no
+  bevel: `\bord` and `\shad` are the only two knobs, and a bevel is neither. YTT
+  names four edge styles (`etEdgeType`) and libass can express two of them, so
+  raised and depressed both render as a shadow — which is what mpv's own WebVTT
+  converter does with the same CSS values. Offering them in a user style menu
+  means offering two entries that produce one result.
+- **A caption box cannot have rounded corners.** ASS has two boxes and both are
+  rectangles: `BorderStyle: 3` fits one to each line — YouTube's *background* —
+  and `BorderStyle: 4` adds a rectangle around the whole block, which is
+  YouTube's *window*. So the two-box model survives the conversion and the
+  rounding does not. Rounding would need vector drawing commands computed per
+  cue from text metrics libass has and we do not. **Knowingly dropped** as part
+  of the decision below, rather than missed.
 - **Colour emoji render in one colour.** libass rasterises the glyph outline and
   fills it with the text colour; a font's own colour layers are not used.
   Measured 2026-08-19 against the bundled libmpv rather than inferred: the same
@@ -742,6 +755,50 @@ none is worth approximating:
 
 Each is counted per document and logged, so a track leaning on one is visible in
 the log rather than silently plain.
+
+### Who draws a caption — decided 2026-08-20
+
+Draggable captions need three things libass will not hand over: a rounded box, the
+caption's on-screen rectangle for a hit target and a hover cursor, and text
+metrics. That reopened §2.9, and the answer is **unchanged — libass draws every
+caption, Flutter draws none.** Flutter measures the same string only to place an
+*invisible* hit rectangle; a few pixels of slop on a hit target is imperceptible,
+and rounded corners are given up (above).
+
+**The reason is a measurement, not a preference, and it is the opposite of the
+intuition.** Sampled 2026-08-20 across 34 ordinary videos off live search — 20 had
+captions, 23 tracks read:
+
+| | tracks | share |
+|---|---|---|
+| `plain` | 23 | **100%** |
+| `styled` | 0 | 0% |
+
+Every styled track in this project's corpus belongs to a caption-art demo
+(`L-BgxLtMxh0`, `1S7uIQmkRzk`, `8Oos6D4_Bjo`). Ordinary videos — including all six
+tracks of `dQw4w9WgXcQ` — are plain, and **every** auto-generated track is plain by
+construction, because ASR carries a rolling window and no pens.
+
+That number is what rules out the split renderer:
+
+- **B — Flutter draws plain tracks, libass keeps styled ones.** *Rejected.* The
+  split is not 50/50 and not even minority/majority: it is ~100/0. Flutter would
+  draw effectively every caption a user ever sees, and libass would be left
+  serving demo videos — so the styling pipeline this section describes would
+  become the path that almost never runs, while the risk of *two* things being
+  able to draw a caption would apply to the common case rather than an edge one.
+  That risk is not hypothetical: `PlayerConfiguration.libass` defaulting to
+  `false` let Flutter draw every caption from tag-stripped text for two entire
+  tasks without anyone noticing, precisely because a plain caption looks correct
+  either way.
+
+- **C — Flutter draws *all* captions, libass removed.** *Rejected for now, not
+  rejected.* It is the coherent version of the above and it would give exact
+  geometry, a rounded box and a real hit target. Its cost is that it rebuilds what
+  `captions/ass.ts` and libass already do between them: custom line metrics,
+  multi-pass painting, collision tracking, and scaling — a bespoke subtitle
+  rendering engine. Recorded here because someone will propose Flutter rendering
+  again, and this is the answer: the objection is the engine, not the idea.
 
 ---
 

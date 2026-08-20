@@ -125,6 +125,13 @@ class CaptionsController extends Notifier<CaptionsState> {
 
   int _generation = 0;
   bool _disposed = false;
+  int? _loadReqId;
+  int? _loadStyledReqId;
+  int? _selectReqId;
+
+  void _cancel(int? id) {
+    if (id != null) RpcClient.instance.cancel(id);
+  }
 
   @override
   CaptionsState build() {
@@ -147,6 +154,12 @@ class CaptionsController extends Notifier<CaptionsState> {
     // The generation counter is the same mechanism `PlaybackController` and the
     // feed use, for the same reason.
     final generation = ++_generation;
+    _cancel(_loadReqId);
+    _cancel(_loadStyledReqId);
+    _cancel(_selectReqId);
+    _loadReqId = null;
+    _loadStyledReqId = null;
+    _selectReqId = null;
 
     // Detach immediately. The previous video's captions are still attached to a
     // player that is about to hold a different video, and leaving them up until
@@ -162,7 +175,9 @@ class CaptionsController extends Notifier<CaptionsState> {
 
     List<CaptionTrack> tracks;
     try {
-      final result = await RpcClient.instance.call('captions.list', {'videoId': videoId});
+      final req = RpcClient.instance.callCancelable('captions.list', {'videoId': videoId});
+      _loadReqId = req.id;
+      final result = await req.response;
       tracks = [
         for (final entry in (result as Map)['tracks'] as List<dynamic>)
           CaptionTrack.fromJson((entry as Map).cast<String, Object?>()),
@@ -199,20 +214,29 @@ class CaptionsController extends Notifier<CaptionsState> {
     if (videoId == null || state.tracks.isEmpty) return;
     if (state.tracks.every((track) => track.styled != null)) return;
 
-    final generation = _generation;
+    _cancel(_loadStyledReqId);
+    final req = RpcClient.instance.callCancelable('captions.list', {
+      'videoId': videoId,
+      'includeStyled': true,
+    });
+    _loadStyledReqId = req.id;
+
     try {
-      final result = await RpcClient.instance.call('captions.list', {
-        'videoId': videoId,
-        'includeStyled': true,
-      });
+      final result = await req.response;
+      if (ref.read(playbackProvider).item?.id != videoId) return;
       final tracks = [
         for (final entry in (result as Map)['tracks'] as List<dynamic>)
           CaptionTrack.fromJson((entry as Map).cast<String, Object?>()),
       ];
-      if (_stale(generation)) return;
+      if (ref.read(playbackProvider).item?.id != videoId) return;
       state = state.copyWith(tracks: tracks);
-    } on Object {
-      // A badge is not worth an error state. The rows stay unbadged.
+    } on Object catch (e) {
+      if (e is RpcException && e.retry == RpcRetryMode.auto) {
+        if (ref.read(playbackProvider).item?.id != videoId) return;
+        Timer(const Duration(seconds: 2), () {
+          if (ref.read(playbackProvider).item?.id == videoId) unawaited(loadStyled());
+        });
+      }
     }
   }
 
@@ -239,6 +263,8 @@ class CaptionsController extends Notifier<CaptionsState> {
   /// Show a track, or turn captions off with null.
   Future<void> select(String? trackId) async {
     final generation = ++_generation;
+    _cancel(_selectReqId);
+    
     final engine = ref.read(playbackEngineProvider);
 
     if (trackId == null) {
@@ -254,7 +280,9 @@ class CaptionsController extends Notifier<CaptionsState> {
     state = state.copyWith(selectedId: trackId, isLoadingTrack: true, error: null);
 
     try {
-      final result = await RpcClient.instance.call('captions.get', {'videoId': videoId, 'trackId': trackId});
+      final req = RpcClient.instance.callCancelable('captions.get', {'videoId': videoId, 'trackId': trackId});
+      _selectReqId = req.id;
+      final result = await req.response;
       final content = CaptionTrackContent.fromJson((result as Map).cast<String, Object?>());
       if (_stale(generation)) return;
 

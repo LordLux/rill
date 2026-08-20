@@ -79,8 +79,10 @@ class PlayerMenuController extends Notifier<PlayerMenuState> {
   PlayerMenuState build() {
     // Losing the video takes the menu with it. Otherwise a menu opened on the
     // last video in a queue outlives the thing every one of its rows is about.
-    ref.listen(playbackProvider.select((playback) => playback.item == null), (previous, next) {
-      if (next) close();
+    // This also ensures that if a new video starts, the menu is closed, so
+    // reopening it remounts the pages (like CaptionsPage) and triggers their initState.
+    ref.listen(playbackProvider.select((playback) => playback.item?.id), (previous, next) {
+      if (previous != next) close();
     });
     return const PlayerMenuState();
   }
@@ -597,13 +599,15 @@ class _CaptionRow extends StatelessWidget {
             color: selected ? scheme.primary : Colors.transparent,
           ),
           const SizedBox(width: 8),
-          // `Expanded`, so the badges sit against the right edge rather than
-          // hugging the label. Under `IntrinsicWidth` it still reports the
+          // `Flexible`, so the badges sit exactly after the text rather than
+          // being pushed to the right edge. Under `IntrinsicWidth` it still reports the
           // label's full width, which is what lets the panel grow to fit.
-          Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 13, color: scheme.onSurface),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+            ),
           ),
           // **The derived qualifier wears what a resolution wears** — raised,
           // small, muted — because it is the same kind of thing as `4K`: not

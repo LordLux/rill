@@ -822,7 +822,8 @@ describe('an unstyled document', () => {
     // The guarantee every existing video depends on. `pens: [{}]` with no ids on
     // the events has to resolve to nothing at all, not to a style whose fields
     // happen to be null — the second would emit `{}` override blocks.
-    for (const cue of parseJson3(MANUAL_EVENTS)) expect(cue.style).toBeNull();
+    const emptyArrays = { ...MANUAL_EVENTS, pens: [{}], wsWinStyles: [{}], wpWinPositions: [{}] };
+    for (const cue of parseJson3(emptyArrays)) expect(cue.style).toBeNull();
   });
 
   test('MUTATION: renders byte-identical ASS to a document with no style tables', () => {

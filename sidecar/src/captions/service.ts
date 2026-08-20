@@ -268,7 +268,7 @@ const styledCache = new Map<string, CaptionStyling>();
  *
  * Failures are swallowed to `null`. A badge is not worth failing a menu over.
  */
-async function fillStyled(videoId: string, sources: CaptionTrackSource[]): Promise<void> {
+async function fillStyled(videoId: string, sources: CaptionTrackSource[], signal?: AbortSignal): Promise<void> {
   await Promise.all(
     sources.map(async (source) => {
       const key = `${videoId}\n${source.track.id}`;
@@ -280,7 +280,7 @@ async function fillStyled(videoId: string, sources: CaptionTrackSource[]): Promi
       try {
         const url = new URL(source.baseUrl);
         url.searchParams.set('fmt', FETCH_FORMAT);
-        const response = await fetch(url);
+        const response = await fetch(url, { signal });
         if (!response.ok) return;
         const body = await response.text();
         if (body.trim() === '') return;
@@ -303,10 +303,10 @@ async function fillStyled(videoId: string, sources: CaptionTrackSource[]): Promi
 export async function getCaptionList(
   session: Session,
   videoId: string,
-  options: { allowFallback?: boolean; includeStyled?: boolean } = {},
+  options: { allowFallback?: boolean; includeStyled?: boolean; signal?: AbortSignal } = {},
 ): Promise<CaptionListResult> {
   const { sources } = await listCaptionTracks(session, videoId, options);
-  if (options.includeStyled === true) await fillStyled(videoId, sources);
+  if (options.includeStyled === true) await fillStyled(videoId, sources, options.signal);
   return { tracks: sources.map((source) => source.track) };
 }
 
@@ -321,6 +321,7 @@ export async function getCaptionTrack(
   session: Session,
   videoId: string,
   trackId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<CaptionTrackContent> {
   const key = `${videoId}\n${trackId}`;
   const cached = assCache.get(key);
@@ -338,7 +339,7 @@ export async function getCaptionTrack(
   const url = new URL(source.baseUrl);
   url.searchParams.set('fmt', FETCH_FORMAT);
 
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: options.signal });
   if (!response.ok) {
     throw new RpcError(
       'UPSTREAM_ERROR',

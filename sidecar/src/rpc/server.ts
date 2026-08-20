@@ -351,13 +351,16 @@ async function handleRequest(request: RpcRequest) {
       const result = await getCaptionList(await getResolveSession(), videoId, {
         allowFallback,
         includeStyled,
+        signal: abortController.signal,
       });
       emitResponse(id, result);
     } else if (method === 'captions.get') {
       const videoId = requireString(params, 'videoId', 'captions.get');
       const trackId = requireString(params, 'trackId', 'captions.get');
       const { getCaptionTrack } = await import('../captions/service.ts');
-      const result = await getCaptionTrack(await getResolveSession(), videoId, trackId);
+      const result = await getCaptionTrack(await getResolveSession(), videoId, trackId, {
+        signal: abortController.signal,
+      });
       emitResponse(id, result);
     } else if (method === 'video.related') {
       const videoId = requireString(params, 'videoId', 'video.related');
