@@ -35,6 +35,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/caption_style.dart';
+import '../../data/playback/engine.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 import 'caption_geometry.dart';
@@ -65,8 +66,33 @@ class _CaptionDragLayerState extends ConsumerState<CaptionDragLayer> {
   /// accumulated — accumulating drifts once the clamp starts refusing movement.
   CaptionOffset _origin = CaptionOffset.zero;
 
+  bool _hidTheCaption = false;
+  PlaybackEngine? _engine;
+
+  @override
+  void dispose() {
+    if (_hidTheCaption) {
+      unawaited(_engine?.setSubtitleVisible(true) ?? Future<void>.value());
+    }
+    super.dispose();
+  }
+
+  void _hideRealCaption() {
+    if (_hidTheCaption) return;
+    _hidTheCaption = true;
+    unawaited(ref.read(playbackEngineProvider).setSubtitleVisible(false));
+    unawaited(_engine?.setSubtitleVisible(false));
+  }
+
+  void _showRealCaption() {
+    if (!_hidTheCaption) return;
+    _hidTheCaption = false;
+    unawaited(_engine?.setSubtitleVisible(true));
+  }
+
   @override
   Widget build(BuildContext context) {
+    _engine ??= ref.read(playbackEngineProvider);
     final captions = ref.watch(captionsProvider);
     final layout = captions.layout;
     if (!captions.isOn || layout == null || captions.metrics == null) {
@@ -74,10 +100,11 @@ class _CaptionDragLayerState extends ConsumerState<CaptionDragLayer> {
     }
 
     return StreamBuilder<String?>(
-      stream: ref.read(playbackEngineProvider).subtitleTextStream,
+      stream: _engine!.subtitleTextStream,
       builder: (context, snapshot) {
-        final text = snapshot.data;
-        if (text == null) return const SizedBox.shrink();
+        final rawText = snapshot.data;
+        if (rawText == null) return const SizedBox.shrink();
+        final text = captionTextFrom(rawText, layout);
         return LayoutBuilder(
           builder: (context, constraints) {
             final video = videoRectIn(constraints.biggest, widget.aspectRatio);
@@ -132,22 +159,18 @@ class _CaptionDragLayerState extends ConsumerState<CaptionDragLayer> {
         key: captionDragHandleKey,
         behavior: HitTestBehavior.opaque,
         onPanStart: (_) {
+          _hideRealCaption();
           setState(() {
             _origin = ref.read(captionsProvider).offset;
             _dragging = _origin;
           });
         },
         onPanUpdate: (details) {
-          // The incremental delta, not `localPosition`: the handle moves with
-          // the ghost, so a position measured against it would fight itself.
-          // Screen pixels become fractions of the *video* rectangle, which is
-          // what makes the result survive a resize or a switch to fullscreen.
-          final from = _dragging ?? _origin;
           setState(() {
             _dragging = clampedOffset(
               proposed: CaptionOffset(
-                from.dx + details.delta.dx / video.width,
-                from.dy + details.delta.dy / video.height,
+                _origin.dx + details.delta.dx / video.width,
+                _origin.dy + details.delta.dy / video.height,
               ),
               captionSize: size,
               layout: layout,
@@ -158,9 +181,14 @@ class _CaptionDragLayerState extends ConsumerState<CaptionDragLayer> {
         onPanEnd: (_) {
           final committed = _dragging;
           setState(() => _dragging = null);
+          _showRealCaption();
           if (committed != null) {
             unawaited(ref.read(captionsProvider.notifier).setOffset(committed));
           }
+        },
+        onPanCancel: () {
+          setState(() => _dragging = null);
+          _showRealCaption();
         },
         child: _dragging == null
             ? const SizedBox.expand()
@@ -202,14 +230,21 @@ class _Ghost extends StatelessWidget {
       key: captionDragGhostKey,
       alignment: Alignment.center,
       color: background,
+      // The ghost needs the same padding the hit target includes, so the visual
+      // text lands in the same place inside the box.
+      padding: EdgeInsets.symmetric(
+        horizontal: layout.boxPadding * scale,
+        vertical: layout.boxPadding * scale,
+      ),
       child: Text(
         text,
         textAlign: TextAlign.center,
         style: TextStyle(
           fontFamily: layout.fontFamily,
-          fontSize: layout.fontSize * scale,
-          height: layout.lineSpacing,
+          fontSize: captionEmFontSize(layout) * scale,
+          height: layout.fontSize * layout.lineSpacing / captionEmFontSize(layout),
           color: textColor,
+          decoration: TextDecoration.none,
         ),
       ),
     );

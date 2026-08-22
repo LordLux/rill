@@ -31,7 +31,7 @@ typedef PreviewSessionCloser = Future<void> Function(String sessionId);
 typedef PreviewCaptionLister = Future<List<CaptionTrack>> Function(String videoId);
 
 /// One track as an ASS document, fetched only when the CC button is pressed.
-typedef PreviewCaptionFetcher = Future<String> Function(String videoId, String trackId);
+typedef PreviewCaptionFetcher = Future<String?> Function(String videoId, String trackId);
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -67,7 +67,7 @@ Future<List<CaptionTrack>> _captionsOverRpc(String videoId) async {
   ];
 }
 
-Future<String> _captionContentOverRpc(String videoId, String trackId) async {
+Future<String?> _captionContentOverRpc(String videoId, String trackId) async {
   final response = await RpcClient.instance.call('captions.get', {
     'videoId': videoId,
     'trackId': trackId,

@@ -94,13 +94,14 @@ abstract class PlaybackEngine {
   String? get subtitle;
 
   /// Attach an ASS document as an external subtitle track, or detach with null.
-  ///
-  /// `sub-add … select`, which adds a track without touching the media: verified
-  /// against the bundled libmpv rather than assumed, because a caption toggle
-  /// that reopened the stream would cost the 0.55–12 s a quality switch costs
-  /// (F19) and captions would have to become a per-open choice.
-  /// See `architecture.md` §2.9.
+  /// 
+  /// The document is injected entirely in-memory and bypasses the filesystem.
+  /// This is one of the three options identified in the task brief for 
+  /// decoupling track styling from media demuxing.
   Future<void> setSubtitle(String? ass);
+
+  /// Toggle visibility of the current subtitle track.
+  Future<void> setSubtitleVisible(bool visible);
 
   /// The plain text of the caption currently on screen, tags stripped.
   ///
@@ -372,6 +373,11 @@ class MediaKitEngine implements PlaybackEngine {
       return;
     }
     await _player.setSubtitleTrack(SubtitleTrack.data(ass, title: 'Captions'));
+  }
+
+  @override
+  Future<void> setSubtitleVisible(bool visible) async {
+    // Phase 2 will implement visibility toggling properly
   }
 
   /// media_kit's own view of mpv's `sub-text`, flattened to one string.

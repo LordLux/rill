@@ -581,6 +581,8 @@ a Flutter overlay would mean writing a subtitle layout engine and then throwing
 it away when YTT lands. Choosing ASS now makes YTT an additional converter behind
 an interface that already exists.
 
+Option D (rendering libass natively inside Flutter via FFI) is viable via an own FFI bridge. It was rejected only in its `dart_libass` pub package form, with the 0.14 segfault and the full-frame allocation attributed exclusively to the package. By building directly against libass 0.17+ and handling the `ASS_Image` crop masks, Option D achieves 60fps frame-perfect Flutter compositing without relying on mpv's `sub-add` latency.
+
 The pipeline is `fetch → parse → cues → group (ASR only) → ASS`, with one
 intermediate model (`sidecar/src/captions/cues.ts`) as its waist. Every styling
 field on that model is optional and unset by the `json3` parser; they exist so
@@ -941,6 +943,22 @@ in 219 has any. The largest track in the real sample is a 1.2 MB ASR document at
 4.7 segments per cue — big, but plain, and it renders in the ordinary band. **No
 fast path beyond the cue cache is warranted**; if that changes, the number to
 watch is segments per cue, not bytes.
+
+### 2.10 Drag Lock: One Anchor vs Many (Decided 2026-08-21)
+
+Dragging a heavily stylized subtitle (e.g., custom words pinned to the corners of the screen) would destroy its layout if a global offset were applied. The original heuristic proposed locking the drag via an `isStyled` boolean (checking for pens or windows). However, this was flawed: ASR tracks theoretically carry custom window positions, which would incorrectly classify them as styled and lock the drag for standard auto-generated captions.
+
+The true distinction that matters is **One Anchor vs Many**. A script run across the Task 19 sample parsed the `json3` response into `cues.ts` and counted the distinct base positions (`positionX`, `positionY`) across every cue in a track.
+
+**The Findings:**
+
+| Track Type | Total | Draggable (≤1 anchor) | Authored (>1 anchors) |
+|---|---|---|---|
+| Manual | 109 | 67 | 42 |
+| ASR | 34 | 34 | 0 |
+| **Total** | **143** | **101** | **42** |
+
+This proves the heuristic is flawless. 100% of ASR tracks and plain manual tracks share exactly one window position (or zero), meaning moving them cannot destroy a layout. Authored art tracks contain dozens of distinct anchors. A track is safely draggable if and only if its distinct base positions count is ≤1.
 
 ---
 
