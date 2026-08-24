@@ -365,12 +365,14 @@ async function handleRequest(request: RpcRequest) {
       // `sub-ass-override=force` overrides the ASS `Style` and not the inline
       // tags task 18 emits, so the property route works on plain tracks and
       // silently does nothing on styled ones. See `captions/style.ts`.
+      const renderer = optionalString(params, 'renderer', 'captions.get');
       const { getCaptionTrack } = await import('../captions/service.ts');
       const result = await getCaptionTrack(await getResolveSession(), videoId, trackId, {
         signal: abortController.signal,
         style: captionStyleParam(params),
         offset: captionOffsetParam(params),
         metrics: captionMetricsParam(params),
+        renderer: renderer as 'mpv' | 'libass_layer' | undefined,
       });
       emitResponse(id, result);
     } else if (method === 'video.related') {
