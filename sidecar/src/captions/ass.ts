@@ -586,6 +586,8 @@ export interface RenderOptions {
   offset?: CaptionOffset | null;
   /** The client's width table, for the no-overflow clamp. */
   metrics?: CaptionMetrics | null;
+  /** Which renderer the client is using (controls whether box events are emitted). */
+  renderer?: 'mpv' | 'libass_layer';
 }
 
 const STYLE_FORMAT =
@@ -641,7 +643,7 @@ export function renderAss(track: CueTrack, options: RenderOptions = {}): string 
     // background and window are both off has to produce the document it produced
     // before either existed, byte for byte; an unconditional extra `Style` would
     // change the header of every such track for a feature it does not use.
-    ...(resolved.anyBox
+    ...(resolved.anyBox && options.renderer !== 'libass_layer'
       ? [
           styleLine(BOX_STYLE, 3, BOX_PADDING, {
             primary: TRANSPARENT,
@@ -650,7 +652,7 @@ export function renderAss(track: CueTrack, options: RenderOptions = {}): string 
           }),
         ]
       : []),
-    ...(resolved.hasWindow
+    ...(resolved.hasWindow && options.renderer !== 'libass_layer'
       ? [
           styleLine(WINDOW_STYLE, 4, BOX_PADDING, {
             primary: TRANSPARENT,
@@ -665,7 +667,7 @@ export function renderAss(track: CueTrack, options: RenderOptions = {}): string 
   ];
 
   for (const cue of track.cues) {
-    lines.push(...events(cue, resolved));
+    lines.push(...events(cue, resolved, options));
   }
 
   return lines.join('\n') + '\n';
@@ -679,16 +681,16 @@ export function renderAss(track: CueTrack, options: RenderOptions = {}): string 
  * primitive outside a drawing command, and a drawing command would need the
  * width nothing here can measure.
  */
-function events(cue: Cue, resolved: Resolved): string[] {
+function events(cue: Cue, resolved: Resolved, options: RenderOptions): string[] {
   const at = placement(cue, resolved);
-  const layer = (value: number) => (resolved.layered ? value : 0);
+  const layer = (value: number) => (resolved.layered && options.renderer !== 'libass_layer' ? value : 0);
   const out: string[] = [];
 
   const anchor = cue.style?.alignment != null ? `\\an${cue.style.alignment}` : '';
   const positionTag = at != null ? `\\pos(${at.x},${at.y})` : '';
   const flat = escapeAssText(cueText(cue));
 
-  if (resolved.hasWindow) {
+  if (resolved.hasWindow && options.renderer !== 'libass_layer') {
     out.push(
       `Dialogue: ${layer(LAYER_WINDOW)},${assTime(cue.startMs)},${assTime(cue.endMs)},` +
         `${WINDOW_STYLE},,0,0,0,,{${anchor}${positionTag}\\1a&HFF&\\3a&HFF&` +
@@ -697,7 +699,7 @@ function events(cue: Cue, resolved: Resolved): string[] {
   }
 
   const background = cueBackground(cue.style, resolved);
-  if (background.a > 0) {
+  if (background.a > 0 && options.renderer !== 'libass_layer') {
     out.push(
       `Dialogue: ${layer(LAYER_BOX)},${assTime(cue.startMs)},${assTime(cue.endMs)},` +
         `${BOX_STYLE},,0,0,0,,{${anchor}${positionTag}\\1a&HFF&` +

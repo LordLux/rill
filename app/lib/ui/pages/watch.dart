@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 
@@ -21,16 +20,16 @@ import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
 import '../playback_controller.dart';
-import '../player/caption_drag_layer.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
+import 'watch_layout.dart';
 
 /// Where the two sizing rules meet — architecture §2.8
-const double _referenceAspect = 16 / 9;
+const double _referenceAspect = referenceAspect;
 
 const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
@@ -152,154 +151,61 @@ class _WatchPageState extends ConsumerState<WatchPage> {
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutCubic,
             builder: (context, aspectRatio, _) {
-              double railWidth = 0;
-              double mainContainerWidth = constraints.maxWidth;
-              final isDesktop = constraints.maxWidth >= 889;
-
-              final double maxTheaterWidth = 1280.0 + 453.0 + 24.0 * 3;
-              if (isDesktop) {
-                final maxAllowedWidth = theatre ? maxTheaterWidth : 1950.0;
-                final effectiveWidth = math.min(constraints.maxWidth, maxAllowedWidth);
-                if (effectiveWidth >= 1042.0) {
-                  railWidth = 453.0;
-                } else {
-                  railWidth = math.max(300.0, effectiveWidth - 589.0);
-                }
-                mainContainerWidth = effectiveWidth - railWidth;
-              }
-
               final viewportHeight = MediaQuery.of(context).size.height;
-              final maxPlayerHeight = math.max(480.0, viewportHeight - 169.0);
 
-              final isTwoColumn = isDesktop;
-              final normalPlayerWidth = mainContainerWidth - 32;
+              final geometry = computeWatchGeometry(
+                availableWidth: constraints.maxWidth,
+                viewportHeight: viewportHeight,
+                aspectRatio: aspectRatio,
+                theatre: theatre,
+              );
 
-              // Whether the player is constrained by height rather than width.
-              //The two rules meet at 16:9, so the reference is that.
-              final heightBound = aspectRatio < _referenceAspect;
+              final embeddedQueue = queueHasItems ? EmbeddedQueuePanel(maxHeight: geometry.playerHeight) : const SizedBox.shrink();
 
-              final double playerWidth;
-              final double playerHeight;
-              if (heightBound) {
-                final tallest = math.min(maxPlayerHeight, math.max(480.0, viewportHeight - 169.0));
-                final widest = tallest * aspectRatio;
-                // The clamp matters just under 16:9, where the full available
-                // height would ask for more width than the column has. Without
-                // it the fix would trade an overflow at the bottom for one at
-                // the right.
-                if (widest <= normalPlayerWidth) {
-                  playerHeight = tallest;
-                  playerWidth = widest;
-                } else {
-                  playerWidth = normalPlayerWidth;
-                  playerHeight = normalPlayerWidth / aspectRatio;
-                }
-              } else {
-                playerWidth = normalPlayerWidth;
-                playerHeight = normalPlayerWidth / aspectRatio;
-              }
-
-              // Calculate player width and height for theatre mode (constrained within constraints.maxWidth x maxPlayerHeight)
-              double theatreWidth = constraints.maxWidth;
-              double theatreHeight = theatreWidth / aspectRatio;
-              if (theatreHeight > maxPlayerHeight) {
-                theatreHeight = maxPlayerHeight;
-                theatreWidth = theatreHeight * aspectRatio;
-              }
-
-              final embeddedQueue = queueHasItems ? EmbeddedQueuePanel(maxHeight: playerHeight) : const SizedBox.shrink();
-
-              final playerWidget = Center(
-                child: SizedBox(
-                  height: playerHeight,
-                  width: playerWidth,
-                  child: _PlayerSurface(
-                    playback: playback,
-                    actualAspectRatio: aspectRatio,
+              return WatchLayout(
+                geometry: geometry,
+                playerSlot: _PlayerSurface(
+                  playback: playback,
+                  actualAspectRatio: aspectRatio,
+                  rounded: !theatre,
+                ),
+                theatreBackground: theatre ? Theme.of(context).tokens.scrim : null,
+                metadataSlot: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _Meta(item: item, info: info),
+                      const SizedBox(height: 10),
+                      if (detail != null)
+                        _Description(
+                          detail: detail,
+                          expanded: _descriptionExpanded,
+                          onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+                        ),
+                      if (!geometry.isTwoColumn) ...[
+                        const SizedBox(height: 24),
+                        embeddedQueue,
+                        ..._relatedSection(detail, item.id, asGrid: true),
+                      ],
+                    ],
                   ),
                 ),
-              );
-
-              final metadataColumn = Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (!theatre)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 2, 0, 0),
-                      child: playerWidget,
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Meta(item: item, info: info),
-                        const SizedBox(height: 10),
-                        if (detail != null)
-                          _Description(
-                            detail: detail,
-                            expanded: _descriptionExpanded,
-                            onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
-                          ),
-                        if (!isTwoColumn) ...[
-                          const SizedBox(height: 24),
-                          embeddedQueue,
-                          ..._relatedSection(detail, item.id, asGrid: true),
-                        ],
-                      ],
-                    ),
+                railSlot: Padding(
+                  padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      embeddedQueue,
+                      ..._relatedSection(detail, item.id),
+                    ],
                   ),
-                ],
-              );
-
-              final mainContent = isTwoColumn
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          width: mainContainerWidth,
-                          child: metadataColumn,
-                        ),
-                        SizedBox(
-                          key: const ValueKey('related-rail'),
-                          width: railWidth,
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                embeddedQueue,
-                                ..._relatedSection(detail, item.id),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : metadataColumn;
-
-              return SilkyListView(
-                padding: EdgeInsets.zero,
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  if (theatre)
-                    Container(
-                      color: Theme.of(context).tokens.scrim,
-                      alignment: Alignment.center,
-                      height: theatreHeight,
-                      child: SizedBox(
-                        height: theatreHeight,
-                        width: theatreWidth,
-                        child: _PlayerSurface(
-                          playback: playback,
-                          rounded: false,
-                          actualAspectRatio: aspectRatio,
-                        ),
-                      ),
-                    ),
-                  mainContent,
-                ],
+                ),
+                scrollView: (children) => SilkyListView(
+                  padding: EdgeInsets.zero,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: children,
+                ),
               );
             },
           );
@@ -462,20 +368,16 @@ class _PlayerSurface extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!fullscreen) engine.videoSurface(),
+          if (!fullscreen)
+            (ModalRoute.of(context)?.isCurrent ?? true)
+                ? engine.videoSurface()
+                : engine.videoWidget(),
 
           if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           // A premiere is not a failure, so it does not get the failure screen.
           if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
 
           if (playback.error == null && !playback.isLoading && !fullscreen) PlayerControls(engine: engine, actualAspectRatio: ratio),
-
-          // **Above the controls, and only as big as the caption.** It has to be
-          // on top or the controls' full-surface tap would win the pointer, and
-          // it is a `Positioned` box the size of one caption so it intercepts
-          // nothing else. Task 19 — `player/caption_drag_layer.dart`.
-          if (playback.error == null && !playback.isLoading && !fullscreen)
-            CaptionDragLayer(aspectRatio: ratio),
         ],
       ),
     );

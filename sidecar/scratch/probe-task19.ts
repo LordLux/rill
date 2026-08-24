@@ -241,6 +241,12 @@ async function main(): Promise<void> {
       `font ${home.layout?.fontFamily} ${home.layout?.fontSize}, anchor ` +
         `(${home.layout?.defaultX},${home.layout?.defaultY})`,
     );
+    check(
+      'classification resolves positional flag',
+      home.positional !== null &&
+        (kind === 'styled' ? home.positional === true : home.positional === false),
+      `positional: ${home.positional}`,
+    );
 
     // --- the drag -----------------------------------------------------------
     const dragged = await getCaptionTrack(session, videoId, trackId, {

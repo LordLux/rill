@@ -221,6 +221,8 @@ export interface CaptionTrack {
    * karaoke track does, and it is what drives the per-run highlight.
    */
   styled: CaptionStyling | null;
+  /** Whether the track uses non-default positions or overlapping cues. */
+  positional: boolean | null;
   /** YouTube offers machine translations of it. Translations are out of scope. */
   isTranslatable: boolean;
 }
@@ -257,6 +259,8 @@ export interface CaptionTrackContent {
    * not. `architecture.md` §2.9.
    */
   layout: CaptionLayout;
+  styled: CaptionStyling | null;
+  positional: boolean | null;
 }
 
 

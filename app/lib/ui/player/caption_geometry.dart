@@ -65,6 +65,13 @@ CaptionMetrics measureAdvances(CaptionLayout layout) {
   return CaptionMetrics(advances: advances, fallbackAdvance: widest);
 }
 
+double captionEmFontSize(CaptionLayout layout) {
+  final probe = _painter('Hg', layout.fontFamily, _probeSize);
+  final metrics = probe.computeLineMetrics();
+  final extent = metrics.isEmpty ? _probeSize : metrics.first.ascent + metrics.first.descent;
+  return extent <= 0 ? layout.fontSize : layout.fontSize * _probeSize / extent;
+}
+
 TextPainter _painter(String text, String family, double size) {
   return TextPainter(
     text: TextSpan(
@@ -83,6 +90,28 @@ TextPainter _painter(String text, String family, double size) {
 /// caption line measured, and this covers the rest: Flutter's shaper is not
 /// libass's, and the two disagree slightly on kerning and on font fallback.
 const double captionEstimateInflation = 1.04;
+
+String captionTextFrom(String mpvReportedText, CaptionLayout layout) {
+  if (mpvReportedText.isEmpty) return mpvReportedText;
+  
+  final len = mpvReportedText.length;
+  for (int i = 1; i <= len ~/ 2; i++) {
+    if (len % i == 0) {
+      final chunk = mpvReportedText.substring(0, i);
+      bool isRepeated = true;
+      for (int j = i; j < len; j += i) {
+        if (mpvReportedText.substring(j, j + i) != chunk) {
+          isRepeated = false;
+          break;
+        }
+      }
+      if (isRepeated) {
+        return chunk;
+      }
+    }
+  }
+  return mpvReportedText;
+}
 
 /// Where the caption sits inside the video rectangle, in **screen** pixels.
 ///
@@ -127,7 +156,7 @@ Size captionSize({
 }) {
   final lines = text.split('\n');
   final width = metrics.widthOf(text) * captionEstimateInflation + 2 * layout.boxPadding;
-  final height = lines.length * layout.fontSize * layout.lineSpacing;
+  final height = lines.length * layout.fontSize * layout.lineSpacing + 2 * layout.boxPadding;
   return Size(width, height);
 }
 

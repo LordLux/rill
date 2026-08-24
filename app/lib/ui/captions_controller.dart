@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import '../data/rpc/client.dart';
 import '../domain/caption_style.dart';
 import '../domain/caption_track.dart';
+import '../domain/libass_flag.dart';
 import 'player/caption_geometry.dart';
 import 'playback_controller.dart';
 
@@ -195,6 +196,10 @@ class CaptionsController extends Notifier<CaptionsState> {
 
   @override
   CaptionsState build() {
+    ref.listen(libassEnabledProvider, (_, __) {
+      if (state.selectedId != null) unawaited(_reapply());
+    });
+
     ref.onDispose(() {
       _disposed = true;
       _styleDebounce?.cancel();
@@ -382,6 +387,7 @@ class CaptionsController extends Notifier<CaptionsState> {
         // the clamp. Sending it otherwise would mint a cache entry per client
         // for a table that made no difference to the document.
         if (!state.offset.isZero && state.metrics != null) 'metrics': state.metrics!.toJson(),
+        if (ref.read(libassEnabledProvider)) 'renderer': 'libass_layer',
       });
       _selectReqId = req.id;
       final result = await req.response;
@@ -393,7 +399,22 @@ class CaptionsController extends Notifier<CaptionsState> {
 
       preferOn = true;
       preferredLanguage = content.languageCode;
+      
+      // Update track in list if we learned its styled/positional status
+      List<CaptionTrack>? newTracks;
+      if (content.styled != null || content.positional != null) {
+        final i = state.tracks.indexWhere((t) => t.id == trackId);
+        if (i >= 0 && (state.tracks[i].styled != content.styled || state.tracks[i].positional != content.positional)) {
+          newTracks = List.of(state.tracks);
+          newTracks[i] = newTracks[i].copyWith(
+            styled: content.styled,
+            positional: content.positional,
+          );
+        }
+      }
+
       state = state.copyWith(
+        tracks: newTracks,
         isLoadingTrack: false,
         layout: content.layout,
         metrics: _metricsFor(content.layout),

@@ -15,7 +15,7 @@ These were established empirically. Do not re-litigate them without re-running
 the spike; do not assume they still hold six months from now.
 
 | # | Finding | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | F1 | `WEB` + cookie auth returns the full personalised home feed | 24 `lockupViewModel`, 54 `richItemRenderer`, 21 `chipCloudChipRenderer`, 1 `continuationItemRenderer` in the raw response |
 | F2 | **youtubei.js drops content during parsing.** The raw response has items the typed accessors do not expose | `getHomeFeed().videos` returned 0 against a raw response containing 24 tiles; `ParsingError: Type mismatch, got RelatedChipCloud expected …` |
 | F3 | `WEB` player responses are SABR-only, defined over adaptive formats only. `MWEB` still returns plain adaptive URLs — **but not on every request, as of 2026-08-02** | `WEB` → `SABR-ONLY`; `MWEB` → 41 adaptive formats, max 2160p (2026-08-01). **Amended 2026-08-02:** one `MWEB` `/player` response in ~17 live suite runs came back **SABR-only**, while 12/12 controlled calls in the same hour were plain (`ANDROID_VR` was 12/12 plain alongside them). One response, not a flip — but "MWEB still returns plain adaptive URLs" is now a statement about *most* responses rather than all of them, and a bucketed rollout is exactly what this looks like from outside. The live tripwire therefore samples three times per run: **one** SABR-only sample warns and is recorded, **two or more of the three** fails the suite — at that point most requests are SABR-only and tier 2 is effectively gone whatever the third does. Every run is appended to `sidecar/tripwire-mweb-sabr.ndjson` (gitignored, machine-local), because a rollout is a rate and a rate needs the denominator: this sighting was 1 response in ~17, which is indistinguishable from noise without one. **What it costs today: ladder tier 2 only.** Tier 1 is `ANDROID_VR` and is unaffected, which is the whole reason the reorder mattered more than it looked |
@@ -45,7 +45,6 @@ the spike; do not assume they still hold six months from now.
 **What is not explained, and the honest edge of this finding: it does not reproduce outside the app.** Resolving the same video standalone through the same code — 20 fresh URLs, **95 open-ended requests** across single-resolve, double-resolve and repeat-request designs — produced **zero** refusals. Five hypotheses were tested and are dead: the second `/player` that `video.info` issues for the same video does **not** poison the first one's URLs (0/10); the open-ended form is **not** single-use (4 consecutive per URL, 20/20 `206`); `pcm2cms=yes`, absent from 4 of the 5 failing URLs and present on healthy ones, is **not** the discriminator — failure #4 carried it, and a larger sample puts it in both populations; the session's `clientType` is **not** it either (`MWEB`, the app's own, 0/12); and falling back to another variant cannot help, because every rung of a poisoned mint is refused. Everything else in the query string differs per request by construction (`ei`, `id`, `sig`, `spc`, `expire`, `mt`, `bui`, `cps`, `initcwndbps`). Same edge host (`rr7---sn-fpoq-hm2z`) on both populations. **Re-minting the session is an independent draw, which is the middle of the three possible answers and the one that decides the fix.** Driving the compiled sidecar 90 times — one process, one session, one resolve each — flags **24/90 = 26.7%**, and immediately replacing each flagged session clears it **18/24 = 75%** of the time. An independent draw at that base rate predicts 73.3%, so within this sample the replacement carries **no memory of the session it replaced**: the assignment is not sticky to the client, the machine or the IP, all of which were constant across all 90 mints. That rules out both of the other outcomes — it does not escape reliably (so a single re-mint is not a cure) and it does not never escape (so the fix is not a loop). **What it implies for a detect-and-re-mint fix, arithmetic rather than opinion**: with a cap of 1 re-mint the residual failure rate is 0.267² = **7.1%**, with 2 it is **1.9%**, with 3 it is **0.5%** — against 26.7% today. The flag is in the URL the sidecar already holds, so detection costs nothing; each re-mint costs one session creation (~170 ms, F14) plus one `/player`. **Built and measured end to end, 2026-08-13.** 30 launches of the release build, paced 10 s apart, `LOGIN_REQUIRED` in **0/30** so the run is not throttled: **failures 1/30 = 3.3%** against 26.7% before, predicted 1.9%. Re-mints needed: **23 launches none, 4 one, 3 two** — 7/30 = 23.3% needing at least one, against the ~27% base rate. The one failure exhausted both attempts and fell through to fast-fail, surfacing in 3.97 s. A successful open still costs nothing extra (median 2.44 s, against 2.34 s before the retry existed). n=30, so 1/30 carries a wide interval — it is consistent with 1.9% rather than a confirmation of it. **The pacing is part of the experiment, not incidental**: an unpaced 30-launch run an hour earlier tripped YouTube's anti-bot throttle (18/30 `LOGIN_REQUIRED — Sign in to confirm you're not a bot`) after ~180 anonymous resolutions in an hour, and that run measures rate limiting rather than the fix. The retry now stops on a throttle signal instead of spending re-mints against a limit that is already refusing. n=24 flagged sessions for the escape rate, one machine, one video, one afternoon; the independence is consistent with that sample rather than established, and a rate that is really a slow-moving server-side rollout would look identical over ninety mints taken in ten minutes.
 
 **One fix was made, and it is about the symptom rather than the cause.** The 21.8 s was the guard waiting for a duration that the 403 had already ruled out, so `MediaKitEngine.open` now races the duration wait against `player.stream.error` with the timeout kept as the backstop for a stream that is merely slow. Measured over 20 launches on the fixed build: **failures settle in 1.72–1.95 s** instead of 21.7–21.9, which is *faster than a successful open* (2.1–2.5 s). The user still cannot watch the video — nothing here fixes that — but they find out in under two seconds instead of staring at a black rectangle for twenty. **The variant fallback that was the other candidate is not worth building**, and that is a measurement rather than a judgement: every rung of a poisoned mint is refused. **The next step is a decision rather than an experiment:** whether to spend a capped re-mint on the 26.7%, at the residual rates above. Rate across three runs of 20: **5, 7 and 8 of 20 — 20/60, 33%.** One machine, one video, one afternoon |
-
 
 **F18 has no earlier conclusion to correct.** This investigation was opened on the
 understanding that Task 04 had measured the delay on seeks and concluded it was
@@ -181,7 +180,7 @@ polish — F2 shows strict parsing loses real content on the live feed today.
 Known-good vocabulary as of 2026-08-01, both generations present simultaneously:
 
 | Concern | Classic | View-based |
-|---|---|---|
+| --- | --- | --- |
 | Video tile | `videoRenderer`, `richItemRenderer` | `lockupViewModel` (id on `content_id`) |
 | Filter bar | `chipCloudChipRenderer` (top level) | `ChipsShelfView` → `ChipView` (shelf-scoped) |
 | Mix tile | — | `CollectionThumbnailView` + `"Mix"` badge |
@@ -194,7 +193,7 @@ on a single field name.
 ### 2.3 Client model
 
 | Purpose | Client | Auth |
-|---|---|---|
+| --- | --- | --- |
 | Browse — feed, chips, search, playlists, history | `WEB` | cookies |
 | Stream resolution — ladder tier 1 | `ANDROID_VR` | anonymous, server-issued visitor id |
 | Stream resolution — ladder tier 2 | `MWEB` | anonymous |
@@ -772,7 +771,7 @@ intuition.** Sampled 2026-08-20 across 34 ordinary videos off live search — 20
 captions, 23 tracks read:
 
 | | tracks | share |
-|---|---|---|
+| --- | --- | --- |
 | `plain` | 23 | **100%** |
 | `styled` | 0 | 0% |
 
@@ -913,7 +912,7 @@ colours survive a drag and a colour override.
 Measured 2026-08-20, `convert()` split into its parts:
 
 | Document | Cues | Segments | Size | `JSON.parse` | → cues | `renderAss` | full | cached |
-|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `1S7uIQmkRzk` | 99 | 417 | 70 KB | 0.2 ms | 1.9 ms | 1.3 ms | 3.4 ms | **1.3 ms** |
 | `L-BgxLtMxh0` | 265 | 317 | 127 KB | 0.4 ms | 2.3 ms | 1.0 ms | 3.7 ms | **1.0 ms** |
 | `8Oos6D4_Bjo` | 230 | 46 320 | 3.1 MB | 8.7 ms | 17.2 ms | 32.8 ms | 58.8 ms | **32.8 ms** |
@@ -928,7 +927,7 @@ round trip, a style change is **~15–40 ms** on ordinary content.
 search queries, 219 caption tracks:
 
 | | |
-|---|---|
+| --- | --- |
 | p50 | 29 KB |
 | p90 | 60 KB |
 | p99 | 405 KB |
@@ -953,12 +952,44 @@ The true distinction that matters is **One Anchor vs Many**. A script run across
 **The Findings:**
 
 | Track Type | Total | Draggable (≤1 anchor) | Authored (>1 anchors) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Manual | 109 | 67 | 42 |
 | ASR | 34 | 34 | 0 |
 | **Total** | **143** | **101** | **42** |
 
 This proves the heuristic is flawless. 100% of ASR tracks and plain manual tracks share exactly one window position (or zero), meaning moving them cannot destroy a layout. Authored art tracks contain dozens of distinct anchors. A track is safely draggable if and only if its distinct base positions count is ≤1.
+
+**Implementation — the `positional` flag.** `classifyDocument` in
+`sidecar/src/captions/service.ts` returns `{ styled, positional }`. `positional`
+is `true` when either of two conditions holds, checked only on non-ASR tracks (ASR
+always uses the rolling window, so its positions carry no authored intent):
+
+1. Any `wpWinPositions` entry has a non-default anchor point / horizontal position /
+   vertical position (`apPoint ≠ 7`, `ahHorPos ≠ 50`, or `avVerPos ≠ 100`,
+   defaulted via `??` because absent fields mean the default).
+2. Any two events overlap by more than 150 ms (a composed subtitle that uses
+   multiple simultaneous events to achieve layering or simultaneous-line effects).
+
+The flag rides on `CaptionTrackContent` alongside `styled`, so `captions.get`
+always populates it (the document is in hand). `captions.list` with
+`includeStyled: true` also fetches documents and back-fills both fields on the
+track entries. A track whose document has never been fetched carries `positional:
+null` — **not yet known**.
+
+**In Flutter, `positional` is write-once per track per session.** When
+`CaptionsController` receives a `CaptionTrackContent` whose `positional` differs
+from what the track list entry already holds, it back-fills the list entry with
+`copyWith`. The `copyWith` uses a direct assignment rather than a sentinel (hard
+invariant 10) because these fields are *only* set to a non-null value and never
+cleared — a fetched classification is final for the session. Any future code that
+needs to *unset* `positional` must add the sentinel pattern.
+
+**The drag-lock predicate in `LibassLayer`** is `track.positional != true`. A
+`null` (not-yet-classified) track is treated as draggable — worst case, a
+multi-anchor track is briefly draggable for one `captions.get` round trip before
+the flag arrives. This is the safe-side default: an incorrect allow-drag is
+recoverable (the document re-applies at the new position); an incorrect lock-drag
+is invisible and confusing.
 
 ---
 
@@ -981,7 +1012,7 @@ identical across both so the swap touches only the transport.
 ## 4. Failure modes to design for
 
 | Trigger | Symptom | Response |
-|---|---|---|
+| --- | --- | --- |
 | Cookie rotation | Empty feed, `logged_in: true` | `auth.verify` fails → re-auth prompt |
 | `MWEB` goes SABR-only | `adaptive_formats` all lack `url` | Phase 2, or yt-dlp fallback |
 | New renderer type | Items silently missing | Tolerant parser skips; log unknown types |

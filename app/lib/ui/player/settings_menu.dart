@@ -17,6 +17,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/playback_source.dart';
 import '../widgets/silky_scroll_absorber.dart';
 import '../../domain/caption_style.dart';
+import '../../domain/libass_flag.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 
@@ -454,7 +455,7 @@ class _RootPage extends ConsumerWidget {
           key: playerSettingsMoreRowKey,
           icon: Icons.tune,
           label: 'More options',
-          trailing: Icons.chevron_right,
+          trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.moreOptions),
         ),
         SizedBox(height: 3),
@@ -477,6 +478,29 @@ class _MoreOptionsPage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).back(),
       ),
       children: [
+        _MenuRow(
+          icon: Icons.subtitles_outlined,
+          label: 'Native Subtitles (libass)',
+          trailing: Switch(
+            value: ref.watch(libassEnabledProvider),
+            onChanged: (value) => ref.read(libassEnabledProvider.notifier).set(value),
+          ),
+          onTap: () {
+            ref.read(libassEnabledProvider.notifier).toggle();
+          },
+        ),
+        _MenuRow(
+          icon: Icons.info_outline,
+          label: 'About & Licenses',
+          onTap: () {
+            ref.read(playerMenuProvider.notifier).close();
+            showAboutDialog(
+              context: context,
+              applicationName: 'NativeYouTube',
+              applicationLegalese: 'Includes LGPL-2.1 libraries. See THIRD_PARTY_LICENSES for full compliance details.',
+            );
+          },
+        ),
         for (final row in _morePlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );
@@ -576,7 +600,7 @@ class _CaptionsPageState extends ConsumerState<_CaptionsPage> {
           // one. The page it opens says 'Caption style' in its header, where
           // there is room and no context to supply the noun.
           label: 'Style',
-          trailing: Icons.chevron_right,
+          trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captionStyle),
         ),
       ],
@@ -886,7 +910,7 @@ class _MenuRow extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final IconData? trailing;
+  final Widget? trailing;
   final VoidCallback? onTap;
 
   @override
@@ -913,8 +937,7 @@ class _MenuRow extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: 24,
-              child: trailing == null ? null : Icon(trailing, size: 18, color: enabled ? scheme.onSurfaceVariant : foreground),
+              child: trailing,
             ),
           ],
         ),

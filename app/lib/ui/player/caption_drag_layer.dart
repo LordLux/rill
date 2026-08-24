@@ -99,6 +99,9 @@ class _CaptionDragLayerState extends ConsumerState<CaptionDragLayer> {
       return const SizedBox.shrink();
     }
 
+    final track = captions.tracks.where((t) => t.id == captions.selectedId).firstOrNull;
+    if (track?.positional == true) return const SizedBox.shrink();
+
     return StreamBuilder<String?>(
       stream: _engine!.subtitleTextStream,
       builder: (context, snapshot) {
@@ -107,6 +110,9 @@ class _CaptionDragLayerState extends ConsumerState<CaptionDragLayer> {
         final text = captionTextFrom(rawText, layout);
         return LayoutBuilder(
           builder: (context, constraints) {
+            if (constraints.maxWidth == 0 || constraints.maxHeight == 0) {
+              return const SizedBox.shrink();
+            }
             final video = videoRectIn(constraints.biggest, widget.aspectRatio);
             final offset = _dragging ?? captions.offset;
             final rect = captionRect(

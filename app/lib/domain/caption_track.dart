@@ -53,6 +53,7 @@ abstract class CaptionTrack with _$CaptionTrack {
     /// a decision the UI can act on, including for a value this build has never
     /// heard of.
     String? styled,
+    bool? positional,
     @Default(false) bool isTranslatable,
   }) = _CaptionTrack;
 
@@ -103,6 +104,8 @@ abstract class CaptionTrackContent with _$CaptionTrackContent {
     /// renders captions, with the drag falling back to the defaults in
     /// [CaptionLayout.fromJson].
     CaptionLayout? layout,
+    String? styled,
+    bool? positional,
   }) = _CaptionTrackContent;
 
   factory CaptionTrackContent.fromJson(Map<String, Object?> json) =>

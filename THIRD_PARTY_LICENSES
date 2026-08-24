@@ -11,8 +11,7 @@ This is a documented, conservative compliance position — not legal counsel.
 MANIFEST
 --------
 
-Each entry lists: DLL filename, MSYS2 package, version, license,
-upstream URL, and MSYS2 recipe URL.
+Each entry lists: DLL filename, MSYS2 package, version, license, upstream URL, and MSYS2 recipe URL.
 
  1. libass-9.dll
     Package: mingw-w64-x86_64-libass 0.17.5-1

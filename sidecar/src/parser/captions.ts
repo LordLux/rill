@@ -109,6 +109,7 @@ export function parseCaptionTracks(raw: unknown): CaptionTrackSource[] {
         trackName: str(entry['trackName']) ?? '',
         // Only a fetched document can answer this; see `CaptionTrack.styled`.
         styled: null,
+        positional: null,
         isTranslatable: entry['isTranslatable'] === true,
       },
     });

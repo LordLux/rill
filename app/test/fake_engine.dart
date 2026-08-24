@@ -84,8 +84,19 @@ class FakeEngine implements PlaybackEngine {
   static const Key surfaceKey = ValueKey('fake-video-surface');
 
   @override
+  final LayerLink videoLayerLink = LayerLink();
+
+  @override
+  Widget videoWidget({BoxFit fit = BoxFit.contain}) {
+    return const SizedBox.shrink();
+  }
+
+  @override
   Widget videoSurface({BoxFit fit = BoxFit.contain}) =>
-      const SizedBox.expand(key: surfaceKey);
+      CompositedTransformTarget(
+        link: videoLayerLink,
+        child: SizedBox.expand(key: surfaceKey, child: videoWidget(fit: fit)),
+      );
 
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
   /// take ~20 s here, waiting on a duration before it attaches the audio track.
@@ -109,6 +120,9 @@ class FakeEngine implements PlaybackEngine {
     _subtitle = ass;
     subtitles.add(ass);
   }
+
+  @override
+  Future<void> setSubtitleVisible(bool visible) async {}
 
   /// What a test pushes to stand in for mpv's `sub-text`.
   ///

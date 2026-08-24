@@ -84,7 +84,11 @@ abstract class PlaybackEngine {
   /// That is what lets the watch page and the mini-player show live video from
   /// one player without either of them owning it, and without a texture being
   /// created or freed when the route changes.
+  Widget videoWidget({BoxFit fit = BoxFit.contain});
   Widget videoSurface({BoxFit fit = BoxFit.contain});
+
+  /// The layer link tied to the video surface, for syncing overlays.
+  LayerLink get videoLayerLink;
 
   /// The ASS document currently attached, or null.
   ///
@@ -264,22 +268,29 @@ class MediaKitEngine implements PlaybackEngine {
   Stream<String> get errorStream => _player.stream.error;
 
   /// `controls: NoVideoControls` because every caller draws its own.
+  @override
+  final LayerLink videoLayerLink = LayerLink();
+
+  /// media_kit's `Video` widget, configured for this player.
   ///
-  /// media_kit_video mounts `AdaptiveVideoControls` by default, and on Windows
-  /// that is a full second transport bar — its own scrubber, clock and volume
-  /// slider painted over ours, both live and both responding to clicks.
-  ///
-  /// The subtitle view is off for the same reason and it is the other half of
-  /// [kNoFlutterSubtitles] — it is a *second* renderer for the same
+  /// Built with `NoVideoControls` and `kNoFlutterSubtitles` — it is a *second* renderer for the same
   /// captions, and the one that was winning.
   @override
-  Widget videoSurface({BoxFit fit = BoxFit.contain}) {
+  Widget videoWidget({BoxFit fit = BoxFit.contain}) {
     return Video(
       controller: _video,
+      fit: fit,
       controls: NoVideoControls,
       subtitleViewConfiguration: kNoFlutterSubtitles,
-      fit: fit,
       fill: const Color(0x00000000), // Colors.transparent
+    );
+  }
+
+  @override
+  Widget videoSurface({BoxFit fit = BoxFit.contain}) {
+    return CompositedTransformTarget(
+      link: videoLayerLink,
+      child: videoWidget(fit: fit),
     );
   }
 
@@ -365,10 +376,12 @@ class MediaKitEngine implements PlaybackEngine {
   /// non-data case through `sid`, which is the property mpv uses to *select*
   /// nothing, and leaves the loaded track alone. Turning captions back on
   /// re-adds them, which costs a temp file and no round trip.
+  bool _isSubtitleVisible = true;
+
   @override
   Future<void> setSubtitle(String? ass) async {
     _subtitle = ass;
-    if (ass == null) {
+    if (ass == null || !_isSubtitleVisible) {
       await _player.setSubtitleTrack(SubtitleTrack.no());
       return;
     }
@@ -377,7 +390,12 @@ class MediaKitEngine implements PlaybackEngine {
 
   @override
   Future<void> setSubtitleVisible(bool visible) async {
-    // Phase 2 will implement visibility toggling properly
+    _isSubtitleVisible = visible;
+    if (visible && _subtitle != null) {
+      await _player.setSubtitleTrack(SubtitleTrack.data(_subtitle!, title: 'Captions'));
+    } else {
+      await _player.setSubtitleTrack(SubtitleTrack.no());
+    }
   }
 
   /// media_kit's own view of mpv's `sub-text`, flattened to one string.
