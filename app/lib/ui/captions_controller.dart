@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/rpc/client.dart';
 import '../domain/caption_style.dart';
@@ -17,6 +19,29 @@ import 'playback_controller.dart';
 /// video. `value ?? this.value` would make each of those a silent no-op — the
 /// exact failure `FeedState.copyWith` shipped.
 const Object _unchanged = Object();
+
+final keepCaptionStyleProvider = NotifierProvider<KeepCaptionStyleNotifier, bool>(() {
+  return KeepCaptionStyleNotifier();
+});
+
+class KeepCaptionStyleNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    _load();
+    return false;
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = prefs.getBool('keep_caption_style') ?? false;
+  }
+
+  Future<void> toggle() async {
+    state = !state;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('keep_caption_style', state);
+  }
+}
 
 @immutable
 class CaptionsState {
@@ -196,6 +221,8 @@ class CaptionsController extends Notifier<CaptionsState> {
 
   @override
   CaptionsState build() {
+    _loadPrefs();
+
     ref.listen(libassEnabledProvider, (_, __) {
       if (state.selectedId != null) unawaited(_reapply());
     });
@@ -213,6 +240,23 @@ class CaptionsController extends Notifier<CaptionsState> {
     final current = ref.read(playbackProvider).item?.id;
     if (current != null) unawaited(_load(current));
     return const CaptionsState();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('keep_caption_style') == true) {
+      final jsonStr = prefs.getString('caption_style_json');
+      if (jsonStr != null) {
+        try {
+          final json = jsonDecode(jsonStr);
+          preferredStyle = CaptionStyle.fromJson(json);
+          if (state.style.isDefault) {
+            state = state.copyWith(style: preferredStyle);
+            if (state.selectedId != null) unawaited(_reapply());
+          }
+        } catch (_) {}
+      }
+    }
   }
 
   /// Fetch the track list for a video and apply the session preference.
@@ -234,7 +278,11 @@ class CaptionsController extends Notifier<CaptionsState> {
     // the new list arrives shows the wrong words over the right picture.
     unawaited(ref.read(playbackEngineProvider).setSubtitle(null));
 
-    // The style is a session preference and survives; the offset and the
+    if (!ref.read(keepCaptionStyleProvider)) {
+      preferredStyle = CaptionStyle.none;
+    }
+
+    // The style is a session preference (if kept) and survives; the offset and the
     // measured geometry belong to the document that is going away.
     if (videoId == null) {
       state = CaptionsState(style: preferredStyle);
@@ -456,6 +504,13 @@ class CaptionsController extends Notifier<CaptionsState> {
     if (style == preferredStyle) return;
     preferredStyle = style;
     state = state.copyWith(style: style);
+    
+    if (ref.read(keepCaptionStyleProvider)) {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('caption_style_json', jsonEncode(style.toJson()));
+      });
+    }
+
     _styleDebounce?.cancel();
     if (immediate) return _reapply();
     final completer = Completer<void>();
@@ -478,6 +533,13 @@ class CaptionsController extends Notifier<CaptionsState> {
     _styleDebounce?.cancel();
     preferredStyle = CaptionStyle.none;
     state = state.copyWith(style: CaptionStyle.none, offset: CaptionOffset.zero);
+    
+    if (ref.read(keepCaptionStyleProvider)) {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('caption_style_json', jsonEncode(preferredStyle.toJson()));
+      });
+    }
+
     return _reapply();
   }
 

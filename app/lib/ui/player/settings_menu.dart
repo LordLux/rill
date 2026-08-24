@@ -490,6 +490,17 @@ class _MoreOptionsPage extends ConsumerWidget {
           },
         ),
         _MenuRow(
+          icon: Icons.format_paint_outlined,
+          label: 'Keep caption style',
+          trailing: Switch(
+            value: ref.watch(keepCaptionStyleProvider),
+            onChanged: (value) => ref.read(keepCaptionStyleProvider.notifier).toggle(),
+          ),
+          onTap: () {
+            ref.read(keepCaptionStyleProvider.notifier).toggle();
+          },
+        ),
+        _MenuRow(
           icon: Icons.info_outline,
           label: 'About & Licenses',
           onTap: () {
@@ -1110,16 +1121,23 @@ class CaptionStylePage extends ConsumerWidget {
         ),
         _StyleSlider(
           label: 'Opacity',
-          value: (style.textColor?.a ?? 1) * 100,
-          min: 0,
+          value: style.textColor != null ? style.textColor!.a * 100 : -25,
+          min: -25,
           max: 100,
-          format: (value) => '${value.round()}%',
-          onChanged: (value) => apply(
-            style.copyWith(
-              textColor: (style.textColor ?? captionWhite).withValues(alpha: value / 100),
-            ),
-            immediate: false,
-          ),
+          divisions: 5,
+          format: (value) => value < 0 ? 'Default' : '${value.round()}%',
+          onChanged: (value) {
+            if (value < 0) {
+              apply(style.copyWith(textColor: null), immediate: false);
+            } else {
+              apply(
+                style.copyWith(
+                  textColor: (style.textColor ?? captionWhite).withValues(alpha: value / 100),
+                ),
+                immediate: false,
+              );
+            }
+          },
         ),
 
         Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
@@ -1134,16 +1152,23 @@ class CaptionStylePage extends ConsumerWidget {
         ),
         _StyleSlider(
           label: 'Opacity',
-          value: (style.background?.a ?? captionDefaultBackgroundOpacity) * 100,
-          min: 0,
+          value: style.background != null ? style.background!.a * 100 : -25,
+          min: -25,
           max: 100,
-          format: (value) => '${value.round()}%',
-          onChanged: (value) => apply(
-            style.copyWith(
-              background: (style.background ?? captionBlack).withValues(alpha: value / 100),
-            ),
-            immediate: false,
-          ),
+          divisions: 5,
+          format: (value) => value < 0 ? 'Default' : '${value.round()}%',
+          onChanged: (value) {
+            if (value < 0) {
+              apply(style.copyWith(background: null), immediate: false);
+            } else {
+              apply(
+                style.copyWith(
+                  background: (style.background ?? captionBlack).withValues(alpha: value / 100),
+                ),
+                immediate: false,
+              );
+            }
+          },
         ),
 
         Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
@@ -1160,16 +1185,23 @@ class CaptionStylePage extends ConsumerWidget {
         ),
         _StyleSlider(
           label: 'Opacity',
-          value: (style.window?.a ?? 0) * 100,
-          min: 0,
+          value: style.window != null ? style.window!.a * 100 : -25,
+          min: -25,
           max: 100,
-          format: (value) => '${value.round()}%',
-          onChanged: (value) => apply(
-            style.copyWith(
-              window: (style.window ?? captionBlack).withValues(alpha: value / 100),
-            ),
-            immediate: false,
-          ),
+          divisions: 5,
+          format: (value) => value < 0 ? 'Default' : '${value.round()}%',
+          onChanged: (value) {
+            if (value < 0) {
+              apply(style.copyWith(window: null), immediate: false);
+            } else {
+              apply(
+                style.copyWith(
+                  window: (style.window ?? captionBlack).withValues(alpha: value / 100),
+                ),
+                immediate: false,
+              );
+            }
+          },
         ),
 
         Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
@@ -1346,6 +1378,7 @@ class _StyleSlider extends StatelessWidget {
     required this.value,
     required this.min,
     required this.max,
+    this.divisions,
     required this.format,
     required this.onChanged,
   });
@@ -1354,6 +1387,7 @@ class _StyleSlider extends StatelessWidget {
   final double value;
   final double min;
   final double max;
+  final int? divisions;
   final String Function(double) format;
   final ValueChanged<double> onChanged;
 
@@ -1375,6 +1409,7 @@ class _StyleSlider extends StatelessWidget {
                 value: value.clamp(min, max),
                 min: min,
                 max: max,
+                divisions: divisions,
                 onChanged: onChanged,
               ),
             ),

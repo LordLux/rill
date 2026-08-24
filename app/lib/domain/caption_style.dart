@@ -116,6 +116,21 @@ class CaptionStyle {
         'edgeStyle': edgeStyle?.wire,
       };
 
+  factory CaptionStyle.fromJson(Map<String, dynamic> json) {
+    CaptionEdgeStyle? edge;
+    if (json['edgeStyle'] != null) {
+      edge = CaptionEdgeStyle.values.where((e) => e.wire == json['edgeStyle']).firstOrNull;
+    }
+    return CaptionStyle(
+      fontFamily: json['fontFamily'] as String?,
+      fontSizePercent: (json['fontSizePercent'] as num?)?.toDouble(),
+      textColor: _colorFromJson(json['textColor'] as Map<String, dynamic>?),
+      background: _colorFromJson(json['background'] as Map<String, dynamic>?),
+      window: _colorFromJson(json['window'] as Map<String, dynamic>?),
+      edgeStyle: edge,
+    );
+  }
+
   @override
   bool operator ==(Object other) =>
       other is CaptionStyle &&
@@ -173,6 +188,16 @@ Map<String, Object?>? _colorToJson(Color? color) {
     'b': (color.b * 255).round(),
     'a': color.a,
   };
+}
+
+Color? _colorFromJson(Map<String, dynamic>? json) {
+  if (json == null) return null;
+  return Color.fromARGB(
+    (json['a'] as num * 255).round(),
+    json['r'] as int,
+    json['g'] as int,
+    json['b'] as int,
+  );
 }
 
 /// Where the user dragged the caption, as a fraction of the video rect.
