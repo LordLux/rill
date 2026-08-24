@@ -490,8 +490,11 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
         final captions = ref.read(captionsProvider);
         final track = captions.tracks.where((t) => t.id == captions.selectedId).firstOrNull;
-        final isDraggable = track == null || track.positional != true;
-        final backgroundColor = captions.style.background ?? captionDefaultBackground;
+        final isPositional = track?.positional == true;
+        final isDraggable = !isPositional;
+        
+        final defaultBg = isPositional ? const Color(0x00000000) : captionDefaultBackground;
+        final backgroundColor = captions.style.background ?? defaultBg;
         final windowColor = captions.style.window ?? const Color(0x00000000);
 
         return Stack(
