@@ -277,7 +277,13 @@ function resolve(options: RenderOptions, cues: readonly Cue[] = []): Resolved {
  * would put a black box behind every caption-art frame.
  */
 function cueBackground(style: CueStyle | null, resolved: Resolved): RgbaColor {
-  if (resolved.style?.background != null) return resolved.style.background;
+  const user = resolved.style?.background ?? null;
+  const force = resolved.style?.forceBackground ?? true;
+
+  if (user !== null) {
+    if (!force && style?.backgroundColor != null) return style.backgroundColor;
+    return user;
+  }
   if (style?.backgroundColor != null) return style.backgroundColor;
   return resolved.background;
 }
@@ -481,8 +487,10 @@ function overrides(
   }
 
   if (style !== null) {
-    if (style.fontFamily !== null && user?.fontFamily == null) tags.push(`\\fn${style.fontFamily}`);
-    if (style.fontSizePercent !== null && user?.fontSizePercent == null) {
+    if (style.fontFamily !== null && (user?.fontFamily == null || user?.forceFontFamily === false)) {
+      tags.push(`\\fn${style.fontFamily}`);
+    }
+    if (style.fontSizePercent !== null && (user?.fontSizePercent == null || user?.forceFontSize === false)) {
       tags.push(
         `\\fs${Math.round((style.fontSizePercent / DEFAULT_FONT_SIZE_PERCENT) * resolved.fontSize)}`,
       );
@@ -498,7 +506,7 @@ function overrides(
   if (!isRun) {
     // The edge colour is the outline *and* the shadow. It only reaches the text
     // event, because the box event has neither.
-    if (style?.edgeColor != null && user?.edgeStyle == null) {
+    if (style?.edgeColor != null && (user?.edgeStyle == null || user?.forceEdgeStyle === false)) {
       tags.push(`\\3c${assColorInline(style.edgeColor)}`);
       tags.push(`\\4c${assColorInline(style.edgeColor)}`);
     }
@@ -545,7 +553,12 @@ function effectiveTextColor(
   baseTextColor: RgbaColor | null | undefined,
 ): RgbaColor | null {
   const user = resolved.style?.textColor ?? null;
+  const force = resolved.style?.forceTextColor ?? true;
+
   if (user === null) return authored;
+  
+  if (!force && authored !== null) return authored;
+
   if (baseTextColor !== undefined) {
     if (authored !== null && !sameColor(authored, baseTextColor)) return authored;
     // Explicitly, rather than by falling through: an ASS override persists to
@@ -567,7 +580,12 @@ function sameColor(a: RgbaColor, b: RgbaColor | null): boolean {
 /** What edges this cue draws, or `null` to leave the `Style`'s alone. */
 function edgeStylesFor(style: CueStyle | null, resolved: Resolved): CueEdgeStyle[] | null {
   const user = resolved.style?.edgeStyle ?? null;
-  if (user !== null) return user === 'none' ? ['none'] : [user];
+  const force = resolved.style?.forceEdgeStyle ?? true;
+  
+  if (user !== null) {
+    if (!force && style?.edgeStyles != null) return style.edgeStyles;
+    return user === 'none' ? ['none'] : [user];
+  }
   return style?.edgeStyles ?? null;
 }
 

@@ -65,7 +65,7 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 /// button beside quality's, so reaching it through the gear would be a second
 /// route to a place that already has a door. [_depthOf] and [back] both encode
 /// that — only `moreOptions` is under anything.
-enum SettingsPage { root, moreOptions, quality, captions, captionStyle }
+enum SettingsPage { root, moreOptions, quality, captions, captionStyle, forceStyle }
 
 @immutable
 class PlayerMenuState {
@@ -320,6 +320,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
         SettingsPage.captions => const _CaptionsPage(),
         SettingsPage.captionStyle => const CaptionStylePage(),
+        SettingsPage.forceStyle => const _ForceStylePage(),
       },
     );
 
@@ -1071,6 +1072,68 @@ List<PlaybackVariant> distinctQualities(List<PlaybackVariant> variants) {
 /// bevel), and the background's **rounded corners** are not expressible at all —
 /// both ASS boxes are rectangles. Recorded in `architecture.md` §2.9 as
 /// knowingly dropped.
+class _ForceStylePage extends ConsumerWidget {
+  const _ForceStylePage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final captions = ref.watch(captionsProvider);
+    final controller = ref.read(captionsProvider.notifier);
+    final style = captions.style;
+
+    Widget buildRow(String name, bool forceValue, ValueChanged<bool> onChanged) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _MenuRow(
+            icon: Icons.auto_fix_high,
+            label: 'Force $name',
+            trailing: Switch(
+              value: forceValue,
+              onChanged: onChanged,
+            ),
+            onTap: () => onChanged(!forceValue),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Text(
+              forceValue
+                  ? 'Overrides all subtitle $name, even if a different value is specified by the video.'
+                  : 'Allows for a different subtitle $name specified by the video.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return _MenuBody(
+      header: _MenuHeader(
+        title: 'Video overrides',
+        onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captionStyle),
+      ),
+      children: [
+        if (style.fontFamily != null)
+          buildRow('font family', style.forceFontFamily, (v) => controller.setStyle(style.copyWith(forceFontFamily: v), immediate: true)),
+        if (style.fontSizePercent != null)
+          buildRow('size', style.forceFontSize, (v) => controller.setStyle(style.copyWith(forceFontSize: v), immediate: true)),
+        if (style.textColor != null)
+          buildRow('text color and opacity', style.forceTextColor, (v) => controller.setStyle(style.copyWith(forceTextColor: v), immediate: true)),
+        if (style.background != null)
+          buildRow('background color and opacity', style.forceBackground, (v) => controller.setStyle(style.copyWith(forceBackground: v), immediate: true)),
+        if (style.window != null)
+          buildRow('window color and opacity', style.forceWindow, (v) => controller.setStyle(style.copyWith(forceWindow: v), immediate: true)),
+        if (style.edgeStyle != null)
+          buildRow('character edge', style.forceEdgeStyle, (v) => controller.setStyle(style.copyWith(forceEdgeStyle: v), immediate: true)),
+      ],
+    );
+  }
+}
+
+/// The caption style submenu: font, size, and colours.
 ///
 /// Public because `player_caption_style_test.dart` builds it directly; nothing
 /// else outside this file mounts it.
@@ -1095,6 +1158,15 @@ class CaptionStylePage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captions),
       ),
       children: [
+        if (style.fontFamily != null || style.fontSizePercent != null || style.textColor != null || style.background != null || style.window != null || style.edgeStyle != null) ...[
+          _MenuRow(
+            icon: Icons.auto_fix_high,
+            label: 'Video overrides',
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.forceStyle),
+          ),
+          Divider(height: 1, color: scheme.outlineVariant),
+        ],
         _StyleSection(label: 'Font'),
         _StyleChoices<String?>(
           value: style.fontFamily,

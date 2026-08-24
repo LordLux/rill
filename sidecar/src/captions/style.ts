@@ -43,25 +43,42 @@ export type CaptionEdgeStyle = 'none' | 'outline' | 'dropShadow';
  */
 export interface CaptionStyle {
   fontFamily: string | null;
+  forceFontFamily?: boolean;
+  
   /** Percentage of the document's default size. 100 is unchanged. */
   fontSizePercent: number | null;
+  forceFontSize?: boolean;
+  
   /** Text colour *and* opacity — `a` is the font-opacity control. */
   textColor: RgbaColor | null;
+  forceTextColor?: boolean;
+  
   /** The per-line box. `a: 0` is a user asking for no background. */
   background: RgbaColor | null;
+  forceBackground?: boolean;
+  
   /** The rectangle around every caption on screen. `a: 0` is YouTube's default. */
   window: RgbaColor | null;
+  forceWindow?: boolean;
+  
   edgeStyle: CaptionEdgeStyle | null;
+  forceEdgeStyle?: boolean;
 }
 
 /** Nothing overridden — what a fresh session and the menu's reset both produce. */
 export const NO_CAPTION_STYLE: CaptionStyle = {
   fontFamily: null,
+  forceFontFamily: true,
   fontSizePercent: null,
+  forceFontSize: true,
   textColor: null,
+  forceTextColor: true,
   background: null,
+  forceBackground: true,
   window: null,
+  forceWindow: true,
   edgeStyle: null,
+  forceEdgeStyle: true,
 };
 
 /**

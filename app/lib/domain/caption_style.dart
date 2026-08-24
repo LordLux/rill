@@ -52,27 +52,39 @@ class CaptionStyle {
     this.background,
     this.window,
     this.edgeStyle,
+    this.forceFontFamily = true,
+    this.forceFontSize = true,
+    this.forceTextColor = true,
+    this.forceBackground = true,
+    this.forceWindow = true,
+    this.forceEdgeStyle = true,
   });
 
   /// A fresh session, and what the menu's *Reset* produces.
   static const CaptionStyle none = CaptionStyle();
 
   final String? fontFamily;
+  final bool forceFontFamily;
 
   /// Percentage of the document's own default size. 100 is unchanged.
   final double? fontSizePercent;
+  final bool forceFontSize;
 
   /// Text colour *and* opacity — the alpha channel is the font-opacity control.
   final Color? textColor;
+  final bool forceTextColor;
 
   /// The per-line box behind the words. A zero alpha is a user turning it off.
   final Color? background;
+  final bool forceBackground;
 
   /// The rectangle around every caption on screen. Zero alpha by default, which
   /// is what YouTube ships.
   final Color? window;
+  final bool forceWindow;
 
   final CaptionEdgeStyle? edgeStyle;
+  final bool forceEdgeStyle;
 
   bool get isDefault =>
       fontFamily == null &&
@@ -94,6 +106,12 @@ class CaptionStyle {
     Object? background = _unchanged,
     Object? window = _unchanged,
     Object? edgeStyle = _unchanged,
+    bool? forceFontFamily,
+    bool? forceFontSize,
+    bool? forceTextColor,
+    bool? forceBackground,
+    bool? forceWindow,
+    bool? forceEdgeStyle,
   }) {
     return CaptionStyle(
       fontFamily: identical(fontFamily, _unchanged) ? this.fontFamily : fontFamily as String?,
@@ -104,6 +122,12 @@ class CaptionStyle {
       window: identical(window, _unchanged) ? this.window : window as Color?,
       edgeStyle:
           identical(edgeStyle, _unchanged) ? this.edgeStyle : edgeStyle as CaptionEdgeStyle?,
+      forceFontFamily: forceFontFamily ?? this.forceFontFamily,
+      forceFontSize: forceFontSize ?? this.forceFontSize,
+      forceTextColor: forceTextColor ?? this.forceTextColor,
+      forceBackground: forceBackground ?? this.forceBackground,
+      forceWindow: forceWindow ?? this.forceWindow,
+      forceEdgeStyle: forceEdgeStyle ?? this.forceEdgeStyle,
     );
   }
 
@@ -114,6 +138,12 @@ class CaptionStyle {
         'background': _colorToJson(background),
         'window': _colorToJson(window),
         'edgeStyle': edgeStyle?.wire,
+        'forceFontFamily': forceFontFamily,
+        'forceFontSize': forceFontSize,
+        'forceTextColor': forceTextColor,
+        'forceBackground': forceBackground,
+        'forceWindow': forceWindow,
+        'forceEdgeStyle': forceEdgeStyle,
       };
 
   factory CaptionStyle.fromJson(Map<String, dynamic> json) {
@@ -128,6 +158,12 @@ class CaptionStyle {
       background: _colorFromJson(json['background'] as Map<String, dynamic>?),
       window: _colorFromJson(json['window'] as Map<String, dynamic>?),
       edgeStyle: edge,
+      forceFontFamily: json['forceFontFamily'] as bool? ?? true,
+      forceFontSize: json['forceFontSize'] as bool? ?? true,
+      forceTextColor: json['forceTextColor'] as bool? ?? true,
+      forceBackground: json['forceBackground'] as bool? ?? true,
+      forceWindow: json['forceWindow'] as bool? ?? true,
+      forceEdgeStyle: json['forceEdgeStyle'] as bool? ?? true,
     );
   }
 
@@ -139,11 +175,29 @@ class CaptionStyle {
       other.textColor == textColor &&
       other.background == background &&
       other.window == window &&
-      other.edgeStyle == edgeStyle;
+      other.edgeStyle == edgeStyle &&
+      other.forceFontFamily == forceFontFamily &&
+      other.forceFontSize == forceFontSize &&
+      other.forceTextColor == forceTextColor &&
+      other.forceBackground == forceBackground &&
+      other.forceWindow == forceWindow &&
+      other.forceEdgeStyle == forceEdgeStyle;
 
   @override
-  int get hashCode =>
-      Object.hash(fontFamily, fontSizePercent, textColor, background, window, edgeStyle);
+  int get hashCode => Object.hash(
+        fontFamily,
+        fontSizePercent,
+        textColor,
+        background,
+        window,
+        edgeStyle,
+        forceFontFamily,
+        forceFontSize,
+        forceTextColor,
+        forceBackground,
+        forceWindow,
+        forceEdgeStyle,
+      );
 }
 
 const Object _unchanged = Object();
@@ -193,7 +247,7 @@ Map<String, Object?>? _colorToJson(Color? color) {
 Color? _colorFromJson(Map<String, dynamic>? json) {
   if (json == null) return null;
   return Color.fromARGB(
-    (json['a'] as num * 255).round(),
+    ((json['a'] as num) * 255).round(),
     json['r'] as int,
     json['g'] as int,
     json['b'] as int,
