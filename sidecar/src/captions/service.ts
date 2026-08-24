@@ -501,11 +501,13 @@ function render(
 function renderSignature(options: RenderOptions): string {
   const style = options.style ?? null;
   const offset = options.offset ?? null;
-  if (style === null && isZeroOffset(offset)) return 'default';
+  const renderer = options.renderer ?? 'mpv';
+  if (style === null && isZeroOffset(offset) && renderer === 'mpv') return 'default';
   return JSON.stringify([
     style,
     offset,
     isZeroOffset(offset) ? null : options.metrics ?? null,
+    renderer,
   ]);
 }
 

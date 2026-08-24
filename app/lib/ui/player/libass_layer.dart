@@ -147,10 +147,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     _rawAss = raw;
     debugPrint('LibassLayer: raw is not null, padding script');
     
-    final styleRegex = RegExp(r'^(Style:(?:[^,]*,){15})3(,)', multiLine: true);
-    final processedRaw = raw.replaceAllMapped(styleRegex, (m) => '${m.group(1)}1${m.group(2)}');
-
-    _padded = padScript(processedRaw, padX: kPadX, padY: kPadY);
+    _padded = padScript(raw, padX: kPadX, padY: kPadY);
     
     _libass!.ass_set_margins(_assRenderer!.ptr, 0, 0, 0, 0);
     _libass!.ass_set_use_margins(_assRenderer!.ptr, 0);
