@@ -18,6 +18,31 @@ import 'libass/ass_padding.dart';
 import 'libass/caption_layout.dart';
 import 'libass/ass_reposition.dart';
 
+/// The background/window colour LibassLayer actually paints.
+///
+/// Both are client-only since phase 5 — the document carries no background or
+/// window `Dialogue` any more, so there is no authored per-cue value to weigh
+/// against the user's choice the way `ass.ts`'s text-colour force flags do.
+/// `positional` (via [fallback]) is the closest thing to "the track's own
+/// opinion" available here: `LibassLayer.build` passes a transparent
+/// [fallback] for a positional track and YouTube's default box otherwise. So
+/// "not forced" falls back to that rather than being a no-op — a track's
+/// default still means something even though no per-cue value does.
+Color _resolveOverlayColor(
+  Color? user,
+  Color fallback, {
+  required bool forceColor,
+  required bool forceOpacity,
+}) {
+  if (user == null) return fallback;
+  return Color.from(
+    alpha: forceOpacity ? user.a : fallback.a,
+    red: forceColor ? user.r : fallback.r,
+    green: forceColor ? user.g : fallback.g,
+    blue: forceColor ? user.b : fallback.b,
+  );
+}
+
 class _LibraryWrapper {
   final Pointer<ASS_Library> ptr;
   _LibraryWrapper(this.ptr);
@@ -508,8 +533,18 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final isDraggable = !isPositional;
         
         final defaultBg = isPositional ? const Color(0x00000000) : captionDefaultBackground;
-        final backgroundColor = captions.style.background ?? defaultBg;
-        final windowColor = captions.style.window ?? const Color(0x00000000);
+        final backgroundColor = _resolveOverlayColor(
+          captions.style.background,
+          defaultBg,
+          forceColor: captions.style.forceBackgroundColor,
+          forceOpacity: captions.style.forceBackgroundOpacity,
+        );
+        final windowColor = _resolveOverlayColor(
+          captions.style.window,
+          const Color(0x00000000),
+          forceColor: captions.style.forceWindowColor,
+          forceOpacity: captions.style.forceWindowOpacity,
+        );
 
         return Stack(
           children: [
@@ -650,6 +685,15 @@ class _CaptionGroup extends StatelessWidget {
   }
 }
 
+/// Draws the per-line background and the window rectangle.
+///
+/// **`_verticalNudge` is a reported-not-measured correction.** Both boxes are
+/// built from the exact same glyph boxes `RawImage` paints from — there is no
+/// code path that can put them out of step with the text — so the fix for
+/// "the background sits slightly low" cannot be a positioning bug in this
+/// class as written; it is a small uniform shift applied on top. If it turns
+/// out wrong or over/under-corrected, this constant is the one place to
+/// change — it is not derived from anything and does not need to be.
 class _BackgroundPainter extends CustomPainter {
   final List<Rect> lines;
   final Box windowBox;
@@ -667,10 +711,14 @@ class _BackgroundPainter extends CustomPainter {
     required this.windowColor,
   });
 
+  /// A manual visual correction, not a measured one — see the class doc.
+  static const double _verticalNudge = -3.0;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (backgroundColor.a == 0 && windowColor.a == 0) return;
 
+    canvas.translate(0, _verticalNudge);
     final paint = Paint()..style = PaintingStyle.fill;
     final path = Path();
 

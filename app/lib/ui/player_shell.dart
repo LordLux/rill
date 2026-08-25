@@ -12,6 +12,7 @@ import 'player/shortcuts.dart';
 import 'player/settings_menu.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
+import 'widgets/topbar.dart';
 
 const String watchRouteName = 'watch';
 
@@ -177,16 +178,49 @@ class PlayerShell extends ConsumerWidget {
               ),
             // The only caption renderer (§2.9). It hides mpv's own on mount, so
             // nothing here has to keep `sub-visibility` in step with a toggle.
-            LayerLinkFollower(
-              link: engine.videoLayerLink,
-              fullscreen: fullscreen,
-              child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
+            //
+            // **Clipped below the page's own TopBar when not fullscreen.** The
+            // caption paints last in this Stack — above everything, including
+            // `page_wrapper.dart`'s `Scaffold(appBar: TopBar(...))` — and
+            // `CompositedTransformFollower` repositions it purely at the
+            // compositing layer, so scrolling the watch page's video up under
+            // a sticky bar does not stop the caption from following it there
+            // too. The clip has to be `Positioned.fill` over the *whole* Stack
+            // (screen coordinates) rather than sized to the follower's own
+            // box: the follower's transform is a descendant of this clip, so a
+            // fixed rect here stays fixed on screen regardless of where the
+            // transform later moves the caption to.
+            Positioned.fill(
+              child: ClipRect(
+                clipper: _BelowTopBarClipper(
+                  fullscreen ? 0 : MediaQuery.paddingOf(context).top + TopBar.preferredHeight,
+                ),
+                child: LayerLinkFollower(
+                  link: engine.videoLayerLink,
+                  fullscreen: fullscreen,
+                  child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
+                ),
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+/// Cuts off everything above [top], leaving the rest of the clipped subtree's
+/// own coordinates untouched. Used to keep the caption layer off the TopBar.
+class _BelowTopBarClipper extends CustomClipper<Rect> {
+  const _BelowTopBarClipper(this.top);
+
+  final double top;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(0, top, size.width, size.height);
+
+  @override
+  bool shouldReclip(covariant _BelowTopBarClipper oldClipper) => oldClipper.top != top;
 }
 
 class _FullscreenPlayer extends ConsumerWidget {

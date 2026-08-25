@@ -1076,7 +1076,6 @@ class _ForceStylePage extends ConsumerStatefulWidget {
 class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
   String _hoverProperty = 'style';
   bool? _hoverActive;
-  bool _masterSwitch = true;
 
   @override
   Widget build(BuildContext context) {
@@ -1085,9 +1084,24 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
     final style = captions.style;
     final scheme = Theme.of(context).colorScheme;
 
+    // Derived from the real style, not a separate bool — a switch that only
+    // tracked its own last direct toggle could show "on" while an individual
+    // tile the user had turned off left the actual style half-forced, or
+    // "off" after one tile was flipped back on. All nine, so this reads true
+    // exactly when every one of them does.
+    final masterSwitch = style.forceFontFamily &&
+        style.forceFontSize &&
+        style.forceTextColor &&
+        style.forceTextOpacity &&
+        style.forceBackgroundColor &&
+        style.forceBackgroundOpacity &&
+        style.forceWindowColor &&
+        style.forceWindowOpacity &&
+        style.forceEdgeStyle;
+
     Widget buildTile(String label, IconData icon, bool active, ValueChanged<bool> onChanged) {
       final isHovered = _hoverProperty == label;
-      final isEnabled = _masterSwitch && active;
+      final isEnabled = masterSwitch && active;
       final backgroundColor = isHovered
           ? (isEnabled ? scheme.primary : scheme.secondaryContainer)
           : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
@@ -1106,7 +1120,6 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
-            if (!_masterSwitch) setState(() => _masterSwitch = true);
             onChanged(!active);
             if (_hoverProperty == label) setState(() => _hoverActive = !active);
           },
@@ -1147,7 +1160,7 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
       );
     }
 
-    final isActive = (_hoverActive ?? _masterSwitch) && _masterSwitch;
+    final isActive = (_hoverActive ?? masterSwitch) && masterSwitch;
     final prefix = isActive ? 'Overrides all subtitle ' : 'Allows for a different subtitle ';
     final suffix = isActive ? ', even if a different value is specified by the video.' : ' specified by the video.';
 
@@ -1163,10 +1176,10 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
             icon: Icons.auto_fix_high,
             label: 'Force Style',
             trailing: Switch(
-              value: _masterSwitch,
+              value: masterSwitch,
               onChanged: (v) => onForceStyleChanged(v, controller, style),
             ),
-            onTap: () => onForceStyleChanged(!_masterSwitch, controller, style),
+            onTap: () => onForceStyleChanged(!masterSwitch, controller, style),
           ),
         ),
         AnimatedCrossFade(
@@ -1229,21 +1242,21 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
               ),
             ),
           ),
-          crossFadeState: _masterSwitch ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          crossFadeState: masterSwitch ? CrossFadeState.showSecond : CrossFadeState.showFirst,
           firstCurve: Curves.easeInOut,
           secondCurve: Curves.easeInOut,
           duration: const Duration(milliseconds: 150),
         ),
         AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          height: _masterSwitch ? 0 : 8, // padding when the switch is off, so the text does not sit too close to the switch
+          height: masterSwitch ? 0 : 8, // padding when the switch is off, so the text does not sit too close to the switch
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             width: _menuMaxWidth - 28,
-            height: _masterSwitch ? 48 : 28,
+            height: masterSwitch ? 48 : 28,
             alignment: Alignment.center,
             child: RichText(
               textAlign: TextAlign.center,
@@ -1255,7 +1268,7 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
                   TextSpan(text: prefix),
                   TextSpan(
                     text: _hoverProperty,
-                    style: TextStyle(fontWeight: _masterSwitch ? FontWeight.bold : FontWeight.normal),
+                    style: TextStyle(fontWeight: masterSwitch ? FontWeight.bold : FontWeight.normal),
                   ),
                   TextSpan(text: suffix),
                 ],
@@ -1268,7 +1281,6 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
   }
 
   void onForceStyleChanged(bool v, CaptionsController controller, CaptionStyle style) {
-    setState(() => _masterSwitch = v);
     if (!v) {
       // If turning off master switch, disable all active overrides
       controller.setStyle(

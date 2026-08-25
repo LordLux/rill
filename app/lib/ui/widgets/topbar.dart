@@ -152,8 +152,12 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
+  /// One source of truth for `player_shell.dart`'s caption clip, which has no
+  /// other way to know how tall this bar is without instantiating one.
+  static const double preferredHeight = 64.0;
+
   @override
-  Size get preferredSize => const Size.fromHeight(64.0);
+  Size get preferredSize => const Size.fromHeight(preferredHeight);
 }
 
 /// The search field, stateful only so it can own a [FocusNode].
