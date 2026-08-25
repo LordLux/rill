@@ -400,11 +400,16 @@ class MediaKitEngine implements PlaybackEngine {
 
   /// media_kit's own view of mpv's `sub-text`, flattened to one string.
   ///
-  /// It is a `List<String>` because mpv can report a cue as several lines; the
-  /// hit rectangle wants them joined the way ASS joins them, so `\N` becomes a
-  /// newline and [captionSize] counts the result. Empty entries — which is what
-  /// the stream carries between cues — become null, so "no caption" is one value
-  /// rather than three spellings of it.
+  /// It is a `List<String>` because mpv can report a cue as several lines, so
+  /// they are joined the way ASS joins them and `\N` becomes a newline. Empty
+  /// entries — which is what the stream carries between cues — become null, so
+  /// "no caption" is one value rather than three spellings of it.
+  ///
+  /// **Nothing reads this today.** It was how `CaptionDragLayer` learned what
+  /// libass was drawing, back when that was the only way to find out; `LibassLayer`
+  /// renders the document itself and has the cues in hand. Kept as an engine
+  /// capability rather than deleted with its one caller, but it is dead weight
+  /// if nothing picks it up.
   @override
   Stream<String?> get subtitleTextStream => _player.stream.subtitle.map((lines) {
         final joined = lines.where((line) => line.isNotEmpty).join('\n').trim();

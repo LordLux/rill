@@ -8,8 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/rpc/client.dart';
 import '../domain/caption_style.dart';
 import '../domain/caption_track.dart';
-import '../domain/libass_flag.dart';
-import 'player/caption_geometry.dart';
 import 'playback_controller.dart';
 
 /// `copyWith` sentinel — hard invariant 10.
@@ -53,8 +51,6 @@ class CaptionsState {
     this.error,
     this.style = CaptionStyle.none,
     this.offset = CaptionOffset.zero,
-    this.layout,
-    this.metrics,
   });
 
   /// Every track for the current video, **after** the sidecar's `ANDROID_VR` →
@@ -93,16 +89,6 @@ class CaptionsState {
   /// which is the one continuity a user notices.
   final CaptionOffset offset;
 
-  /// The geometry the current document was generated with, or null before one.
-  final CaptionLayout? layout;
-
-  /// The width table measured against [layout], for the hit rect and the clamp.
-  ///
-  /// Measured once per layout rather than per frame — it is 74 `TextPainter`
-  /// layouts — and re-measured whenever the font or size changes, because that
-  /// is what makes it wrong.
-  final CaptionMetrics? metrics;
-
   bool get hasTracks => tracks.isNotEmpty;
   bool get isOn => selectedId != null;
 
@@ -121,8 +107,6 @@ class CaptionsState {
     Object? error = _unchanged,
     CaptionStyle? style,
     CaptionOffset? offset,
-    Object? layout = _unchanged,
-    Object? metrics = _unchanged,
   }) {
     return CaptionsState(
       tracks: tracks ?? this.tracks,
@@ -132,8 +116,6 @@ class CaptionsState {
       error: identical(error, _unchanged) ? this.error : error as String?,
       style: style ?? this.style,
       offset: offset ?? this.offset,
-      layout: identical(layout, _unchanged) ? this.layout : layout as CaptionLayout?,
-      metrics: identical(metrics, _unchanged) ? this.metrics : metrics as CaptionMetrics?,
     );
   }
 
@@ -146,13 +128,11 @@ class CaptionsState {
       other.error == error &&
       other.style == style &&
       other.offset == offset &&
-      other.layout == layout &&
-      identical(other.metrics, metrics) &&
       _sameTracks(other.tracks, tracks);
 
   @override
   int get hashCode => Object.hash(
-      selectedId, isLoadingTracks, isLoadingTrack, error, tracks.length, style, offset, layout);
+      selectedId, isLoadingTracks, isLoadingTrack, error, tracks.length, style, offset);
 
   static bool _sameTracks(List<CaptionTrack> a, List<CaptionTrack> b) {
     if (a.length != b.length) return false;
@@ -223,10 +203,6 @@ class CaptionsController extends Notifier<CaptionsState> {
   CaptionsState build() {
     _loadPrefs();
 
-    ref.listen(libassEnabledProvider, (_, __) {
-      if (state.selectedId != null) unawaited(_reapply());
-    });
-
     ref.onDispose(() {
       _disposed = true;
       _styleDebounce?.cancel();
@@ -282,8 +258,8 @@ class CaptionsController extends Notifier<CaptionsState> {
       preferredStyle = CaptionStyle.none;
     }
 
-    // The style is a session preference (if kept) and survives; the offset and the
-    // measured geometry belong to the document that is going away.
+    // The style is a session preference (if kept) and survives; the offset
+    // belongs to the document that is going away.
     if (videoId == null) {
       state = CaptionsState(style: preferredStyle);
       return;
@@ -412,7 +388,7 @@ class CaptionsController extends Notifier<CaptionsState> {
     await _fetch(videoId, trackId, generation);
   }
 
-  /// `captions.get` with the current style, offset and width table, then attach.
+  /// `captions.get` with the current style and offset, then attach.
   ///
   /// **Every one of those is applied by the sidecar, during generation.** The
   /// mpv properties that look like they would do it act on the ASS `Style`, and
@@ -431,11 +407,6 @@ class CaptionsController extends Notifier<CaptionsState> {
         'trackId': trackId,
         if (!preferredStyle.isDefault) 'style': preferredStyle.toJson(),
         if (!state.offset.isZero) 'offset': state.offset.toJson(),
-        // Only alongside an offset, because that is the only thing it changes:
-        // the clamp. Sending it otherwise would mint a cache entry per client
-        // for a table that made no difference to the document.
-        if (!state.offset.isZero && state.metrics != null) 'metrics': state.metrics!.toJson(),
-        if (ref.read(libassEnabledProvider)) 'renderer': 'libass_layer',
       });
       _selectReqId = req.id;
       final result = await req.response;
@@ -461,12 +432,7 @@ class CaptionsController extends Notifier<CaptionsState> {
         }
       }
 
-      state = state.copyWith(
-        tracks: newTracks,
-        isLoadingTrack: false,
-        layout: content.layout,
-        metrics: _metricsFor(content.layout),
-      );
+      state = state.copyWith(tracks: newTracks, isLoadingTrack: false);
     } on Object catch (e) {
       if (_stale(generation)) return;
       // Back to Off rather than leaving a track ticked that is not showing. A
@@ -474,23 +440,6 @@ class CaptionsController extends Notifier<CaptionsState> {
       // that gets reported as "captions are broken" with nothing to go on.
       state = state.copyWith(selectedId: null, isLoadingTrack: false, error: e.toString());
     }
-  }
-
-  /// The width table for a layout, re-measured only when the layout moves.
-  ///
-  /// 74 `TextPainter` layouts, so it is cheap but not free, and the font and size
-  /// are the only things that change it. Returning the existing table when they
-  /// have not is what keeps a slider drag from re-measuring on every commit.
-  CaptionMetrics? _metricsFor(CaptionLayout? layout) {
-    if (layout == null) return null;
-    final held = state.layout;
-    if (held != null &&
-        state.metrics != null &&
-        held.fontFamily == layout.fontFamily &&
-        held.fontSize == layout.fontSize) {
-      return state.metrics;
-    }
-    return measureAdvances(layout);
   }
 
   /// Apply a style from the menu, regenerating the document.

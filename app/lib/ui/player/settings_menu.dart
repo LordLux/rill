@@ -17,7 +17,6 @@ import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/playback_source.dart';
 import '../widgets/silky_scroll_absorber.dart';
 import '../../domain/caption_style.dart';
-import '../../domain/libass_flag.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 
@@ -478,17 +477,6 @@ class _MoreOptionsPage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).back(),
       ),
       children: [
-        _MenuRow(
-          icon: Icons.subtitles_outlined,
-          label: 'Native Subtitles (libass)',
-          trailing: Switch(
-            value: ref.watch(libassEnabledProvider),
-            onChanged: (value) => ref.read(libassEnabledProvider.notifier).set(value),
-          ),
-          onTap: () {
-            ref.read(libassEnabledProvider.notifier).toggle();
-          },
-        ),
         _MenuRow(
           icon: Icons.format_paint_outlined,
           label: 'Keep caption style',

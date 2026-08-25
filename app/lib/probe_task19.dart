@@ -43,7 +43,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'data/playback/engine.dart';
-import 'domain/libass_flag.dart';
 import 'domain/playback_source.dart';
 import 'ui/playback_controller.dart';
 import 'ui/player/libass_layer.dart';
@@ -96,7 +95,6 @@ void main() async {
   final container = ProviderContainer(
     overrides: [playbackEngineProvider.overrideWithValue(engine)],
   );
-  container.read(libassEnabledProvider.notifier).set(true);
 
   runApp(UncontrolledProviderScope(
     container: container,

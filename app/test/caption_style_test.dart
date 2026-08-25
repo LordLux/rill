@@ -1,4 +1,4 @@
-/// Task 19 — the style menu, the drag, and the width estimate.
+/// Task 19 — the style menu and the drag.
 ///
 /// Against the same real sidecar process `captions_test.dart` uses, so the
 /// claims here are about what the app actually put on the wire. Whether the
@@ -64,21 +64,6 @@ Future<List<dynamic>> gets() async {
   final response = await RpcClient.instance.call('test.captionLog', {}) as Map<String, dynamic>;
   return response['gets'] as List<dynamic>;
 }
-
-/// The layout the fake sidecar reports — the real numbers from `ass.ts`.
-const CaptionLayout _layout = CaptionLayout(
-  fontFamily: 'Arial',
-  fontSize: 48,
-  playResX: 1920,
-  playResY: 1080,
-  margin: 60,
-  outlineWidth: 2.5,
-  boxPadding: 6,
-  defaultAlignment: 2,
-  defaultX: 960,
-  defaultY: 1020,
-  lineSpacing: 1.2,
-);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -177,7 +162,7 @@ void main() {
   });
 
   group('the drag offset', () {
-    test('a commit sends the delta and the width table with it', () async {
+    test('a commit sends the delta, and nothing else', () async {
       await play('a');
       await controller.select('.en');
       await controller.setOffset(const CaptionOffset(0.1, -0.2));
@@ -186,9 +171,11 @@ void main() {
       final last = (await gets()).last;
       expect((last['offset'] as Map)['dx'], closeTo(0.1, 1e-9));
       expect((last['offset'] as Map)['dy'], closeTo(-0.2, 1e-9));
-      // The table only matters to the clamp, and the clamp only runs when the
-      // caption has been dragged — so it rides with the offset and not on its own.
-      expect(last['hasMetrics'], isTrue);
+      // A drag used to carry a measured width table so the sidecar could clamp
+      // the position against an estimate of the text. `LibassLayer` clamps
+      // against the boxes libass actually produced, so the delta is the whole
+      // message and there is no second instrument to keep in step with it.
+      expect(last['hasMetrics'], isFalse);
     });
 
     test('it resets when the track changes and survives captions off and on', () async {
@@ -220,99 +207,15 @@ void main() {
       await settle();
       expect(captions.offset.isZero, isTrue);
     });
-
-    test('the width table is measured once and reused', () async {
-      await play('a');
-      await controller.select('.en');
-      await settle();
-      final first = captions.metrics;
-      expect(first, isNotNull);
-
-      await controller.setOffset(const CaptionOffset(0.1, 0));
-      await settle();
-      expect(identical(captions.metrics, first), isTrue,
-          reason: '74 TextPainter layouts per commit would be a real cost for no answer');
-    });
   });
 
-  group('the width estimate', () {
-    test('it is a per-character table, summed per line', () {
-      // **`flutter test` renders with a fixed-width test font**, so nothing here
-      // can assert that `W` is wider than `i` — every glyph measures the same.
-      // That claim belongs where the real font is: measured through the bundled
-      // libass in `sidecar/scratch/measure-advances.ts` (8.3 px to 40.5 px at
-      // Arial 48, a 4.9x range, which is what rules out a single
-      // pixels-per-character number), and asserted against the shipped table in
-      // `sidecar/test/captions.test.ts`. What is testable here is the shape: one
-      // entry per character, and a width that is their sum.
-      final metrics = measureAdvances(_layout);
-      expect(metrics.advances, isNotEmpty);
-      expect(metrics.fallbackAdvance, greaterThan(0));
-      expect(metrics.widthOf('aaa'), closeTo(3 * metrics.advances['a']!, 1e-6));
-      expect(metrics.widthOf('unmeasurable 一'),
-          greaterThanOrEqualTo(metrics.fallbackAdvance));
-    });
-
-    test('the widest line wins, not the total', () {
-      final metrics = measureAdvances(_layout);
-      expect(metrics.widthOf('aa\nbbbb'), metrics.widthOf('bbbb'));
-    });
-
-    test('the clamp keeps the whole caption inside the frame', () {
-      final metrics = measureAdvances(_layout);
-      // Short enough to fit under the test font's fixed-width glyphs, which are
-      // much wider than Arial's — a realistic caption string would be past the
-      // frame here and would be testing the overflow branch below instead.
-      final size = captionSize(text: 'hello', layout: _layout, metrics: metrics);
-      expect(size.width, lessThan(_layout.playResX),
-          reason: 'otherwise this measures the pinning rule, not the clamp');
-
-      // Dragged well past the bottom-right corner.
-      final clamped = clampedOffset(
-        proposed: const CaptionOffset(0.5, 0.5),
-        captionSize: size,
-        layout: _layout,
-        alignment: _layout.defaultAlignment,
-      );
-      final anchorX = _layout.defaultX + clamped.dx * _layout.playResX;
-      final anchorY = _layout.defaultY + clamped.dy * _layout.playResY;
-      expect(anchorX + size.width / 2, lessThanOrEqualTo(_layout.playResX));
-      expect(anchorY, lessThanOrEqualTo(_layout.playResY));
-    });
-
-    test('a caption wider than the frame is pinned to the left, not centred', () {
-      // The one case the clamp cannot satisfy. libass wraps a positioned line at
-      // the frame width, so whenever the estimate exceeds the frame the real
-      // text is narrower than it — and pinning the start on screen is the useful
-      // failure. Centring it would hide the beginning of the line.
-      final metrics = measureAdvances(_layout);
-      final huge = Size(_layout.playResX * 2, 60);
-      final clamped = clampedOffset(
-        proposed: const CaptionOffset(0.5, 0),
-        captionSize: huge,
-        layout: _layout,
-        alignment: _layout.defaultAlignment,
-      );
-      final left = _layout.defaultX + clamped.dx * _layout.playResX - huge.width / 2;
-      expect(left, closeTo(_layout.boxPadding, 0.001));
-      expect(metrics.advances, isNotEmpty);
-    });
-
-    test('a longer caption is pushed further in than a shorter one', () {
-      // The requirement in the user's own words: drag one into the corner, and a
-      // longer line that follows has to come back in to fit.
-      final metrics = measureAdvances(_layout);
-      CaptionOffset at(String text) => clampedOffset(
-            proposed: const CaptionOffset(0.5, 0.5),
-            captionSize: captionSize(text: text, layout: _layout, metrics: metrics),
-            layout: _layout,
-            alignment: _layout.defaultAlignment,
-          );
-      // Both short enough to fit the frame under the test font — see the clamp
-      // test above for why the strings are not realistic caption lines.
-      expect(at('hi there you').dx, lessThan(at('hi').dx));
-    });
-
+  group('the video rectangle', () {
+    // What is left of `caption_geometry.dart` after phase 5. The per-character
+    // width table, the predicted caption rectangle and the clamp built on both
+    // were retired with the mpv pipeline that needed them: `LibassLayer` reads
+    // the real boxes out of `ass_render_frame`, so there is nothing left to
+    // estimate. Letterboxing is the one piece of geometry that was never an
+    // estimate, and it is still the client's to work out.
     test('the video rectangle is the picture, not the widget', () {
       // media_kit letterboxes the texture, so a caption placed against the
       // widget's own bounds drifts on every aspect ratio but the window's.
@@ -329,23 +232,12 @@ void main() {
       expect(letterboxed.top, greaterThan(0));
     });
 
-    test('the hit rectangle follows the drag', () {
-      final metrics = measureAdvances(_layout);
-      Rect rect(CaptionOffset offset) => captionRect(
-            text: 'a caption',
-            layout: _layout,
-            metrics: metrics,
-            offset: offset,
-            video: const Rect.fromLTWH(0, 0, 1920, 1080),
-          )!;
-      final home = rect(CaptionOffset.zero);
-      final moved = rect(const CaptionOffset(0.1, -0.1));
-      expect(moved.left - home.left, closeTo(192, 0.001));
-      expect(moved.top - home.top, closeTo(-108, 0.001));
-      // Bottom-centred on the default anchor, which is where an undragged,
-      // unpositioned cue lands.
-      expect(home.center.dx, closeTo(960, 0.001));
-      expect(home.bottom, closeTo(1020, 0.001));
+    test('a degenerate aspect ratio fills the box rather than vanishing', () {
+      expect(videoRectIn(const Size(800, 600), 0), const Rect.fromLTWH(0, 0, 800, 600));
+      expect(
+        videoRectIn(const Size(800, 600), double.nan),
+        const Rect.fromLTWH(0, 0, 800, 600),
+      );
     });
   });
 }

@@ -8,11 +8,14 @@
  * is checked against a frame rather than against the document that was supposed
  * to produce one.
  *
- * What it covers: a drag on a plain track, a drag on a styled one, three style
- * changes, and the clamp at the frame edge. What it does not: the gesture
- * itself, and `CaptionsState`'s reset-on-track-change / survive-a-toggle rules —
- * those are Flutter's, and `app/test/caption_drag_test.dart` and
- * `app/test/caption_style_test.dart` hold them.
+ * What it covers: a drag on a plain track, a drag on a styled one, and three
+ * style changes. What it does not: the gesture itself, `CaptionsState`'s
+ * reset-on-track-change rules, and — since phase 5 — **the clamp**, which is no
+ * longer the document's job at all. `LibassLayer` clamps against the boxes
+ * `ass_render_frame` returns; what is asserted here is the property that makes
+ * that trustworthy, namely that the document applies the delta and nothing else.
+ * The Flutter side is `app/test/caption_style_test.dart` and
+ * `app/test/probe_drag_lag.dart`.
  *
  *   bun run scratch/probe-task19.ts [outdir]
  */
@@ -274,23 +277,53 @@ async function main(): Promise<void> {
       'byte-identical',
     );
 
-    // --- the clamp ----------------------------------------------------------
+    // --- no clamp -----------------------------------------------------------
+    // Phase 5 retired the server-side clamp with the mpv pipeline it was built
+    // for. It existed because nothing could see where libass put a line, so the
+    // sidecar estimated a width from a client-supplied advance table and pulled
+    // an over-far drag back inside the frame. `LibassLayer` reads the rendered
+    // boxes out of `ass_render_frame` and clamps against those, every frame, so
+    // the document now carries the position it was asked for and the client is
+    // the only thing that decides where a caption may sit.
+    //
+    // The two claims here used to be "nothing leaves the frame" and "a longer
+    // cue is pushed further in". Both are now false of the *document* on
+    // purpose, and asserting them again is what re-introduces a second, worse
+    // clamp. What replaces them is the property that makes the client's clamp
+    // trustworthy: the document is a pure function of the anchor and the delta.
     const corner = await getCaptionTrack(session, videoId, trackId, {
       offset: { dx: 0.5, dy: 0.5 },
     });
-    const pinned = renderInk(corner.content, second, `${kind}-corner`);
+    const cornerX = [...corner.content.matchAll(/\\pos\((-?\d+),(-?\d+)\)/g)].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+    }));
+    const homeX = [...dragged.content.matchAll(/\\pos\((-?\d+),(-?\d+)\)/g)].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+    }));
+    // Every cue moved by exactly the difference between the two deltas, whatever
+    // its text and wherever it started. Under the old clamp the long lines and
+    // the short ones landed on different pixels.
+    const stepX = Math.round((0.5 - -0.2) * 1920);
+    const stepY = Math.round((0.5 - -0.3) * 1080);
+    const uniform =
+      cornerX.length === homeX.length &&
+      cornerX.length > 0 &&
+      cornerX.every((p, i) => p.x - homeX[i]!.x === stepX && p.y - homeX[i]!.y === stepY);
     check(
-      'dragged into the corner, nothing leaves the frame',
-      pinned !== null && pinned.right <= WIDTH - 1 && pinned.bottom <= HEIGHT - 1,
-      pinned === null ? 'nothing rendered' : `right ${pinned.right}, bottom ${pinned.bottom}`,
+      'the position is the anchor plus the delta, unclamped and text-independent',
+      uniform,
+      `${cornerX.length} cues, all shifted by (${stepX},${stepY})`,
     );
-    // The claim the whole width table exists for: a longer line than the one
-    // that was on screen when the drag ended has to come further in.
-    const positions = [...corner.content.matchAll(/\\pos\((\d+),\d+\)/g)].map((m) => Number(m[1]));
+    // And the frame is no longer a boundary the document respects: dragged half
+    // the frame past the corner, the text is meant to be off-screen. Rendering
+    // nothing is the correct outcome, and is what the client's own clamp exists
+    // to prevent ever reaching a user.
     check(
-      'a longer cue is pushed further in than a shorter one',
-      new Set(positions).size > 1,
-      `${new Set(positions).size} distinct x across ${positions.length} cues`,
+      'the document does not stop a drag at the frame edge',
+      renderInk(corner.content, second, `${kind}-corner`) === null,
+      'off-frame as asked',
     );
 
     // --- three style changes ------------------------------------------------
@@ -300,15 +333,20 @@ async function main(): Promise<void> {
         { ...NO_STYLE, textColor: { r: 255, g: 0, b: 0, a: 1 } },
         (doc) => doc.includes('Style: Default,Arial,48,&H000000FF,'),
       ],
+      // The two backdrop controls are **client-side now** — `LibassLayer` paints
+      // the per-line box and the window over the boxes it measured, so the
+      // document must not carry them or libass draws them a second time. Both
+      // therefore assert *absence*: the style menu's backdrop half changes what
+      // the user sees without changing a byte of what the sidecar produces.
       [
         'background off',
         { ...NO_STYLE, background: { r: 0, g: 0, b: 0, a: 0 } },
-        (doc) => !doc.includes('Style: Box,'),
+        (doc) => !doc.includes('Style: Box,') && !doc.includes(',Box,,'),
       ],
       [
         'window on',
         { ...NO_STYLE, window: { r: 0, g: 0, b: 255, a: 0.6 } },
-        (doc) => doc.includes('Style: Window,') && doc.includes('\\4cFF0000'.replace('FF0000', '&HFF0000')),
+        (doc) => !doc.includes('Style: Window,') && !doc.includes(',Window,,'),
       ],
     ];
     for (const [name, style, expected] of changes) {

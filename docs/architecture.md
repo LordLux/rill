@@ -809,6 +809,9 @@ measurements against the bundled libass rather than readings of the ASS spec.
 YouTube tracks and reports every claim below as OK or FAIL.
 
 **A caption is up to three events, one per layer, and that is not tidiness.**
+*(Removed in phase 5 — see "What phase 5 deleted" below. Kept because it is the
+reasoning a future reader will otherwise reinvent the moment they consider
+putting a background back into the document.)*
 ASS makes the background a `BorderStyle` on the `Style`, and `BorderStyle: 3` —
 the box — *replaces* the outline rather than sitting behind it: `\bord` becomes
 the box's padding and no outline is drawn at all. So a document that puts the box
@@ -832,27 +835,64 @@ that draws neither backdrop emits neither, and no layer numbers**, so a track
 with the background turned off is byte-identical to what Task 17 rendered —
 asserted in `captions.test.ts`.
 
-**The `renderer` flag, and what byte-identity means after it.** `LibassLayer`
-paints its own background and window (`_BackgroundPainter`, wired to
-`CaptionStyle`), so a document built for it must not *also* carry the box and
-window `Dialogue` events above — libass would draw both, the double-draw bug.
-`captions.get`'s optional `renderer: 'mpv' | 'libass_layer'` (`sidecar/src/
-captions/ass.ts`) tells `renderAss` which case it is: box events, window events,
-and the layer split are all gated on `options.renderer !== 'libass_layer'`. The
-client decides, not the document: `CaptionsController` (`app/lib/ui/
-captions_controller.dart`) sends `renderer: 'libass_layer'` exactly when the
-debug toggle (`libassEnabledProvider`) has switched the active pipeline, and
-omits the field — falling back to `'mpv'` in `service.ts` — otherwise. The cache
-key (`renderSignature`) includes `renderer`, so the two pipelines never share a
-cached document.
+**What phase 5 deleted, and what byte-identity means now.** For one release
+there were two caption renderers behind a debug toggle (`libassEnabledProvider`):
+Option A, the `sub-add → mpv → libass` pipeline described above, and Option D,
+`LibassLayer`. A `renderer: 'mpv' | 'libass_layer'` parameter on `captions.get`
+told `renderAss` which one it was writing for, because `LibassLayer` paints its
+own background and window and a document carrying the box and window `Dialogue`
+events would have drawn both — the double-draw bug. Phase 5 removed Option A.
+`LibassLayer` is the only caption renderer, and with it went `CaptionDragLayer`,
+the box and window events, the layer split, the `renderer` parameter, and the
+`metrics` parameter and everything behind it.
 
-This means Task 18's byte-identity claim is no longer "the same document
-regardless of caller" — it is **identical for a given renderer**. A background-off
-track is still byte-identical to pre-Task-19 output *under `mpv`*; under
-`libass_layer` it was always missing the box/window events, by construction, so
-there is nothing to compare it against. The two renderers are expected to diverge
-on any track that draws a backdrop — that divergence is the fix, not a
-regression — and no test should assert cross-renderer equality.
+So there is no divergence to reason about any more, and **Task 18's
+byte-identity claim is unconditional again** — not "identical for a given
+renderer", just identical, because there is one renderer. Precisely:
+
+- A **zero-offset, unpositioned** track is byte-identical to what Task 17
+  rendered, with no options and no opt-out. It was Task 19 that needed the
+  caveat (the background was on by default, so the comparison had to turn it
+  off); backgrounds are not something this document expresses at all now, so
+  asking for none and asking for nothing produce the same bytes. Both halves are
+  asserted in `captions.test.ts`.
+- A **dragged or positioned** track is *not* byte-identical to Task 19's output,
+  and that is a deliberate change rather than a drift. Its `\pos` values used to
+  be pulled back inside the frame by the clamp below; they are now the anchor
+  plus the delta and nothing else, so any cue whose old position had been nudged
+  moves. Nothing asserts equality with old output here, and nothing should.
+
+**The retired width estimate, and why "retired" does not mean "wrong".** The
+clamp described below — the advance table Flutter measured and shipped, the
+`Fontsize`-vs-em correction, `estimateWidth` and `clampSpan` in `ass.ts`,
+`CaptionMetrics` on the wire — is gone. It is worth being exact about why,
+because a future reader finding only its absence cannot tell whether it was
+removed as a bug or as surplus, and the two lead to opposite conclusions about
+whether to rebuild it.
+
+It was surplus, and it was correct. Every measurement recorded below still
+holds: the advance table really does beat any single pixels-per-character
+number, it really does land within +1–2% of what libass draws, and the
+0.895 correction really is Arial's units-per-em over its ascent-plus-descent.
+The estimate existed because **mpv cannot see its own output.** libass
+composited into the video texture, media_kit exposed no subtitle surface, and
+nothing published a caption's rectangle — so a client that wanted to draw a hit
+target or stop a drag at the frame edge had no choice but to approximate a box,
+and the sidecar had to approximate the same box independently for the cues that
+had not appeared yet. Two estimates of one invisible thing, kept in step by
+shipping the instrument across the wire.
+
+`ass_render_frame` returns the rendered boxes. That is the whole argument for
+Option D over Option A, and it is not an implementation detail: it converts a
+quantity that had to be predicted into one that can be read. `LibassLayer`'s
+`_computeNudges`/`clampOffset` clamp against real geometry every rendered frame,
+at rest and mid-drag alike, which is strictly better than what the estimate
+could do at its best — and it removes the class of bug where the two
+approximations disagree. The sidecar therefore emits the honest, unclamped
+position, and the client is the only thing that decides where a caption may sit.
+`assLayout()` and the `layout` field survive and are still populated on every
+`captions.get`; they are the document's own constants, never an estimate, and
+sending them is cheaper than keeping a second copy in Flutter.
 
 **Position is a delta, not a coordinate.** The drag is stored as a fraction of
 the frame and added to whatever position the source gives — none, an ASR rolling
@@ -863,7 +903,10 @@ than load-bearing, which matters: two of the three predicates tried for it durin
 Task 18 were wrong, and a misclassification that costs a wrong badge is a very
 different thing from one that picks a renderer.
 
-**The no-overflow rule needs a width neither side has.** libass does not help — a
+**The no-overflow rule needs a width neither side has.** *(Removed in phase 5 —
+see "The retired width estimate" above for why the measurements below all still
+hold and the mechanism went anyway. The rule itself did not go: `LibassLayer`
+enforces it against real geometry.)* libass does not help — a
 positioned line wider than the frame runs straight off the edge, no clamp and no
 wrap — so the clamp is ours, and it needs the rendered width of text. The sidecar
 holds every cue's text and has no font engine; Flutter has the font engine and,
@@ -901,14 +944,16 @@ of one caption" shape this project has already been bitten by.
 
 `captions.get` therefore gained a `layout` field in its result (eight numbers per
 *track*, sent rather than duplicated as constants in Flutter) and three optional
-parameters — `style`, `offset`, `metrics`. `protocol.md` §3.8 has the shapes.
+parameters — `style`, `offset`, `metrics`. Phase 5 took `metrics` back off;
+`layout` and the other two remain. `protocol.md` §3.8 has the shapes.
 
-**A width table can be missing, and it cannot be missing when it matters.** The
-client learns the font from `layout` on the *first* `captions.get` for a track,
-which by definition carries no offset because the offset resets when the track
-changes; every later request has both. What is left is an older client or a
-restored offset that outlived its measurement, and `captions/style.ts` carries a
-measured Arial-48 fallback for those rather than failing the request.
+**A width table can be missing, and it cannot be missing when it matters.**
+*(Also removed in phase 5, with the table it hedged.)* The client learns the font
+from `layout` on the *first* `captions.get` for a track, which by definition
+carries no offset because the offset resets when the track changes; every later
+request has both. What is left is an older client or a restored offset that
+outlived its measurement, and `captions/style.ts` carried a measured Arial-48
+fallback for those rather than failing the request.
 
 **The style menu applies during generation, and it has to.** mpv's live
 properties act on the ASS `Style`, and `sub-ass-override=force` — the switch that

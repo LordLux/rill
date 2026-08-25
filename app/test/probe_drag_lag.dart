@@ -26,7 +26,6 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rill/domain/libass_flag.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/libass_layer.dart';
 
@@ -61,7 +60,6 @@ Future<void> _pump(WidgetTester tester, {required int atMs}) async {
     overrides: [playbackEngineProvider.overrideWithValue(engine)],
   );
   addTearDown(container.dispose);
-  container.read(libassEnabledProvider.notifier).set(true);
 
   engine.emitPosition(Duration(milliseconds: atMs));
   await engine.setSubtitle(ass);

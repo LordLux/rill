@@ -355,8 +355,8 @@ class CaptionLayout {
 
   final String fontFamily;
 
-  /// ASS `Fontsize`, after any user override. **Not an em size** — see
-  /// `CaptionMetrics.measure`, which is the only place that difference matters.
+  /// ASS `Fontsize`, after any user override. **Not an em size** — libass
+  /// scales the face so its ascent plus descent equals this.
   final double fontSize;
   final double playResX;
   final double playResY;
@@ -402,63 +402,4 @@ class CaptionLayout {
   @override
   int get hashCode => Object.hash(fontFamily, fontSize, playResX, playResY, margin, outlineWidth,
       boxPadding, defaultAlignment, defaultX, defaultY, lineSpacing);
-}
-
-/// How wide a string will be, per character, in the document's own pixels.
-///
-/// **Flutter measures it and sends it, because neither side can do it alone.**
-/// The sidecar holds every cue's text and has no font engine; Flutter has the
-/// font engine and never sees a cue it is not currently displaying. So Flutter
-/// measures the alphabet once per font and size, and the sidecar applies the
-/// table to the cue texts it already holds.
-///
-/// **A table, not a single pixels-per-character number**, and that is measured
-/// rather than assumed. Advances at Arial 48 through the bundled libass run from
-/// 8.3 px to 40.5 px — a 4.9x range — and a scalar calibrated on a
-/// representative sentence under-estimates an all-capitals caption by 26% and a
-/// run of `M` by 46%. Under-estimating is the one direction that lets text clip
-/// off the edge of the player, which is the failure the clamp exists to prevent.
-/// Summing per-character advances lands within +1–2% on every real caption line
-/// tried, always on the safe side. `sidecar/scratch/measure-advances.ts`.
-@immutable
-class CaptionMetrics {
-  const CaptionMetrics({required this.advances, required this.fallbackAdvance});
-
-  final Map<String, double> advances;
-
-  /// What a character outside the table is charged — CJK, emoji, accented Latin.
-  /// The widest advance measured, so an unlisted glyph is over-counted.
-  final double fallbackAdvance;
-
-  Map<String, Object?> toJson() => {
-        'advances': advances,
-        'fallbackAdvance': fallbackAdvance,
-      };
-
-  /// The widest of a string's `\N`-separated lines, in the document's pixels.
-  ///
-  /// The same sum the sidecar performs, so the hit rectangle the user sees and
-  /// the clamp the sidecar applies cannot disagree about the same caption.
-  double widthOf(String text) {
-    var widest = 0.0;
-    for (final line in text.split('\n')) {
-      var width = 0.0;
-      for (final character in line.characters()) {
-        width += advances[character] ?? fallbackAdvance;
-      }
-      if (width > widest) widest = width;
-    }
-    return widest;
-  }
-}
-
-extension on String {
-  /// Grapheme-naive, and deliberately the same split the sidecar does with
-  /// `for…of` over a string: both iterate code points, so both charge a
-  /// surrogate pair once.
-  Iterable<String> characters() sync* {
-    for (final rune in runes) {
-      yield String.fromCharCode(rune);
-    }
-  }
 }

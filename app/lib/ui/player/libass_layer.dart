@@ -9,7 +9,6 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../domain/libass_flag.dart';
 import '../../domain/caption_style.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
@@ -110,10 +109,28 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     });
   }
 
+  /// Whether `libass-9.dll` could not be opened. Tried once, never retried.
+  ///
+  /// **This layer is unconditional since phase 5**, so it mounts wherever
+  /// `PlayerShell` does — including a `flutter test` process, which has no
+  /// libmpv beside it and so no `libass-9.dll` on its search path. `dlopen`
+  /// throwing out of `build()` there takes down the whole widget tree with an
+  /// `ArgumentError`, which is how ~57 unrelated widget tests failed the first
+  /// time the debug toggle came out. A missing renderer means no caption
+  /// overlay; it must not mean no player.
+  bool _assUnavailable = false;
+
   void _setupAss() {
-    if (_assLibrary != null) return;
-    
-    final dylib = DynamicLibrary.open('libass-9.dll');
+    if (_assLibrary != null || _assUnavailable) return;
+
+    final DynamicLibrary dylib;
+    try {
+      dylib = DynamicLibrary.open('libass-9.dll');
+    } on Object catch (e) {
+      _assUnavailable = true;
+      debugPrint('LibassLayer: libass-9.dll unavailable, captions will not render ($e)');
+      return;
+    }
     _libass = LibAssBindings(dylib);
 
     final libPtr = _libass!.ass_library_init();
@@ -449,12 +466,9 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
   @override
   Widget build(BuildContext context) {
-    if (!ref.watch(libassEnabledProvider)) {
-      return const SizedBox.shrink();
-    }
-    
     if (_assLibrary == null) _setupAss();
-    
+    if (_assUnavailable) return const SizedBox.shrink();
+
     ref.watch(captionsProvider);
     
     final engine = ref.read(playbackEngineProvider);

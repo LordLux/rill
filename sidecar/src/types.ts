@@ -158,7 +158,7 @@ export interface VideoDetail {
 export type CaptionStyling = 'plain' | 'styled' | 'karaoke';
 
 /**
- * Task 19's caption style, drag offset, hit-rect geometry and width table.
+ * Task 19's caption style, drag offset and document geometry.
  *
  * Defined in `captions/style.ts` — where the reasons live — and re-exported here
  * because they are part of the Flutter contract and this file is where that
@@ -167,7 +167,6 @@ export type CaptionStyling = 'plain' | 'styled' | 'karaoke';
 export type {
   CaptionEdgeStyle,
   CaptionLayout,
-  CaptionMetrics,
   CaptionOffset,
   CaptionStyle,
 } from './captions/style.ts';

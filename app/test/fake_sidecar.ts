@@ -254,10 +254,14 @@ rl.on('line', (line) => {
         },
       }) + '\n');
     } else if (req.method === 'captions.get') {
-      // Task 19's three optional parameters are recorded rather than acted on:
-      // what the app *put on the wire* is the claim under test, and the sidecar's
-      // own handling of them is asserted in `sidecar/test/captions.test.ts`
-      // against the real renderer.
+      // Task 19's optional parameters are recorded rather than acted on: what
+      // the app *put on the wire* is the claim under test, and the sidecar's own
+      // handling of them is asserted in `sidecar/test/captions.test.ts` against
+      // the real renderer.
+      //
+      // `hasMetrics` is now permanently false and is kept for that reason — the
+      // width table went out with the mpv pipeline, and a test that watches it
+      // stay absent is what stops it drifting back onto the wire.
       captionGets.push({
         videoId: req.params?.videoId,
         trackId: req.params?.trackId,

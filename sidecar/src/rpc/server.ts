@@ -4,7 +4,7 @@ import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { announceCapabilities } from '../capabilities.ts';
 import { PLAYBACK_REPORT_STATES } from '../types.ts';
-import type { CaptionMetrics, CaptionOffset, CaptionStyle } from '../types.ts';
+import type { CaptionOffset, CaptionStyle } from '../types.ts';
 import type { RgbaColor } from '../captions/cues.ts';
 
 const log = logger('rpc');
@@ -359,20 +359,17 @@ async function handleRequest(request: RpcRequest) {
     } else if (method === 'captions.get') {
       const videoId = requireString(params, 'videoId', 'captions.get');
       const trackId = requireString(params, 'trackId', 'captions.get');
-      // Task 19. All three are optional and all three change the *document*
-      // rather than anything about the fetch — `protocol.md` §3.8. They are
-      // applied here and not through mpv properties because
-      // `sub-ass-override=force` overrides the ASS `Style` and not the inline
-      // tags task 18 emits, so the property route works on plain tracks and
-      // silently does nothing on styled ones. See `captions/style.ts`.
-      const renderer = optionalString(params, 'renderer', 'captions.get');
+      // Task 19. Both are optional and both change the *document* rather than
+      // anything about the fetch — `protocol.md` §3.8. They are applied here and
+      // not through mpv properties because `sub-ass-override=force` overrides the
+      // ASS `Style` and not the inline tags task 18 emits, so the property route
+      // works on plain tracks and silently does nothing on styled ones. See
+      // `captions/style.ts`.
       const { getCaptionTrack } = await import('../captions/service.ts');
       const result = await getCaptionTrack(await getResolveSession(), videoId, trackId, {
         signal: abortController.signal,
         style: captionStyleParam(params),
         offset: captionOffsetParam(params),
-        metrics: captionMetricsParam(params),
-        renderer: renderer as 'mpv' | 'libass_layer' | undefined,
       });
       emitResponse(id, result);
     } else if (method === 'video.related') {
@@ -513,35 +510,6 @@ function captionOffsetParam(
     throw new RpcError('BAD_REQUEST', "captions.get: 'offset' needs finite 'dx' and 'dy'");
   }
   return { dx, dy };
-}
-
-function captionMetricsParam(
-  params: Record<string, unknown> | undefined,
-): CaptionMetrics | null {
-  const raw = params?.['metrics'];
-  if (raw === undefined || raw === null) return null;
-  const record = raw as Record<string, unknown>;
-  const table = record['advances'];
-  if (table === null || typeof table !== 'object') {
-    throw new RpcError('BAD_REQUEST', "captions.get: 'metrics.advances' must be an object");
-  }
-  const advances: Record<string, number> = {};
-  for (const [character, width] of Object.entries(table as Record<string, unknown>)) {
-    const value = finiteOrNull(width);
-    // A single unusable entry is dropped rather than failing the request: the
-    // fallback for an absent character is already the widest advance, which is
-    // the safe direction, and a caption should not fail to render because one
-    // glyph measured badly.
-    if (value !== null && value >= 0) advances[character] = value;
-  }
-  const fallback = finiteOrNull(record['fallbackAdvance']);
-  return {
-    advances,
-    fallbackAdvance:
-      fallback !== null && fallback > 0
-        ? fallback
-        : Math.max(0, ...Object.values(advances)),
-  };
 }
 
 function finiteOrNull(value: unknown): number | null {

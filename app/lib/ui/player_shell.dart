@@ -6,14 +6,12 @@ import '../domain/feed_item.dart';
 import '../theme/tokens.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
-import 'player/caption_drag_layer.dart';
 import 'player/controls.dart';
 import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
 import 'player/settings_menu.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
-import '../../domain/libass_flag.dart';
 
 const String watchRouteName = 'watch';
 
@@ -156,12 +154,6 @@ class PlayerShell extends ConsumerWidget {
     final showMini = playback.item != null && !onWatchPage && !fullscreen;
     final engine = ref.read(playbackEngineProvider);
 
-    ref.listen(libassEnabledProvider, (prev, next) {
-      if (prev != next) {
-        engine.setSubtitleVisible(!next);
-      }
-    });
-
     return PlayerShortcuts(
       child: Listener(
         onPointerDown: (event) {
@@ -183,18 +175,13 @@ class PlayerShell extends ConsumerWidget {
                   child: MiniPlayer(),
                 ),
               ),
-            if (!ref.watch(libassEnabledProvider))
-              LayerLinkFollower(
-                link: engine.videoLayerLink,
-                fullscreen: fullscreen,
-                child: CaptionDragLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
-              ),
-            if (ref.watch(libassEnabledProvider))
-              LayerLinkFollower(
-                link: engine.videoLayerLink,
-                fullscreen: fullscreen,
-                child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
-              ),
+            // The only caption renderer (§2.9). It hides mpv's own on mount, so
+            // nothing here has to keep `sub-visibility` in step with a toggle.
+            LayerLinkFollower(
+              link: engine.videoLayerLink,
+              fullscreen: fullscreen,
+              child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
+            ),
           ],
         ),
       ),

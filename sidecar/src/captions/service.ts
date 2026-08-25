@@ -494,21 +494,15 @@ function render(
 /**
  * What makes two renders of one track different documents.
  *
- * The metrics only reach the output through the clamp, and the clamp only runs
- * when the caption has been dragged — so a zero offset drops them from the key
- * rather than minting a new cache entry for a table that changed nothing.
+ * The style and the drag, and nothing else — those are the only two things
+ * [RenderOptions] carries. `'default'` for a request that overrides neither, so
+ * the overwhelmingly common case shares one cache entry across every caller.
  */
 function renderSignature(options: RenderOptions): string {
   const style = options.style ?? null;
   const offset = options.offset ?? null;
-  const renderer = options.renderer ?? 'mpv';
-  if (style === null && isZeroOffset(offset) && renderer === 'mpv') return 'default';
-  return JSON.stringify([
-    style,
-    offset,
-    isZeroOffset(offset) ? null : options.metrics ?? null,
-    renderer,
-  ]);
+  if (style === null && isZeroOffset(offset)) return 'default';
+  return JSON.stringify([style, offset]);
 }
 
 /**
