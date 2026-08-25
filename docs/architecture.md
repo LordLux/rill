@@ -1013,6 +1013,48 @@ the flag arrives. This is the safe-side default: an incorrect allow-drag is
 recoverable (the document re-applies at the new position); an incorrect lock-drag
 is invisible and confusing.
 
+### Whether the isolate design holds — measured 2026-08-25
+
+Phase 5 removes the `sub-add → mpv → libass` fallback and the debug toggle,
+making `LibassLayer` — a fresh `Isolate.run` per rendered frame, driven by
+`positionStream` — the only caption renderer. Three things about that design
+had never been measured against anything real. `app/test/README.md` has the
+harnesses; the numbers below are what they found, against the real bundled
+`libass-9.dll`/`libmpv-2.dll` in an actual Flutter Windows release build (a
+`flutter test` process has no video-output timing loop at all — `media_kit`'s
+`Player()` without a `VideoController` emits exactly one `positionStream` event
+over 20 s of real playback — so the cadence half of this could not have been
+measured any other way).
+
+**`positionStream` ticks once per decoded video frame** — 41.7 ms at 23.976
+fps, 33.3 ms at 30 fps, essentially jitter-free (p99 within 2 ms of the mean).
+One `LibassLayer._runRenderIsolate` round trip costs **~1 ms at p50** (max
+21.6 ms, release/AOT) against a real karaoke document, and **0 of 2,756**
+position events were coalesced away by a render already in flight, across
+three runs. Every one of 136 cues live during a 25 s karaoke-heavy window got
+at least one render (karaoke's ~200 ms steps got ~4.8 each); every one of 34
+cues live during a 60 s ASR run got at least 33. Frame scheduler: zero frames
+over the 16.67 ms budget in either release run. Drag: the on-screen caption
+lags the cursor during a continuous drag by a **bounded ~65 ms**, invariant
+across a 2.3× speed range and a 3.75× pointer-cadence range (a fixed-fraction
+chaser off `TweenAnimationBuilder`'s 180 ms `easeOutCubic` being re-targeted on
+every pointer-move `setState`, not an accumulator), fully settled within
+180 ms of release. None of the three needs a fix before phase 5.
+
+**The stated bound, not a footnote: a cue shorter than one video-frame period
+can be rendered zero times, silently.** The render loop only sees the world at
+`positionStream`'s cadence — it has no notion of "a cue existed and was
+skipped," so a cue that starts and ends between two consecutive position
+events simply never appears, with nothing logged anywhere. At 24 fps that
+period is 41.7 ms. This did not happen in either measurement run — the
+shortest live cue was 60 ms, a **1.4× margin**, not the ~40× margin the
+200 ms karaoke cadence and the 1200 ms ASR floor (`cues.ts`'s clamp) enjoy —
+but 1.4× is a margin a single dropped frame, a 30 fps stream showing 60 ms
+cues, or a future content shape can close. If sub-frame-period cues turn out
+to matter, the fix is at the source (`cues.ts`'s merge-forward threshold, or
+a render call keyed to cue boundaries rather than position ticks alone), not
+in `LibassLayer`, which cannot render faster than it is told the clock moved.
+
 ---
 
 ## 3. Phasing
