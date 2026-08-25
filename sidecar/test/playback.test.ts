@@ -1038,7 +1038,22 @@ describe('format selection', () => {
  * under test is what happens to two OS pipes — a stubbed spawn would prove
  * nothing about either. Written at test time so the repository does not carry a
  * platform-specific script, and a `.cmd` on Windows because `Bun.spawn` needs
- * something the shell can start.
+ * something the shell can start — deliberately, because a real `yt-dlp` install
+ * on Windows (pip, scoop) is a `.cmd` shim too, and that shim is exactly what a
+ * cmd.exe `AutoRun` hook injects into.
+ *
+ * **If these two tests fail fast (not a timeout) with `stdout` one byte short
+ * of valid JSON,** check `HKCU\SOFTWARE\Microsoft\Command Processor\AutoRun` —
+ * mine was `cls & clink.bat inject …`. Windows runs `AutoRun` for *every*
+ * `cmd.exe`, including the hidden one spawned to start a `.cmd`, and `cls`
+ * against a non-console (piped) stdout writes a bare form-feed byte ahead of
+ * the child's real output — not a timeout, not a deadlock, just corrupted
+ * stdout, ~0.2 s in. Reproduced 2026-08-25 outside the test: the same script
+ * spawned directly (`Bun.spawn(['bun', 'stub.mjs'])`) is clean; spawned through
+ * the identical `.cmd` it comes back as `"\f{...}"`. Not a bug in this repo —
+ * it is real for anyone with an `AutoRun` hook and a `.cmd`-shimmed tool, which
+ * makes it a live (if narrow) production hazard in `tierYtDlp` too, not just a
+ * test artifact.
  */
 const stubDir = mkdtempSync(join(tmpdir(), 'ytdlp-stub-'));
 const stub = join(stubDir, process.platform === 'win32' ? 'stub.cmd' : 'stub.sh');
