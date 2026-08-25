@@ -190,15 +190,38 @@ class PlayerShell extends ConsumerWidget {
             // box: the follower's transform is a descendant of this clip, so a
             // fixed rect here stays fixed on screen regardless of where the
             // transform later moves the caption to.
+            //
+            // **`OverflowBox` is load-bearing, not decoration.** `Positioned.fill`
+            // gives `ClipRect` tight constraints spanning the whole Stack, and
+            // constraints flow straight through `ClipRect` and
+            // `CompositedTransformFollower` — both are plain proxies for layout
+            // purposes — to `LayerLinkFollower`'s inner `SizedBox(width:
+            // leaderSize.width, height: leaderSize.height)`. A `SizedBox`
+            // cannot be smaller than a tight incoming constraint, so without
+            // this the caption was laid out at the *window's* size instead of
+            // the video's, rendering at several times its correct scale over
+            // the whole page — measured 2026-08-26, this is what shipped for
+            // one round before being caught. `OverflowBox` reports whatever
+            // size its parent (`ClipRect`) imposes upward, unrelated to its
+            // child's, while handing the child its own unconstrained (0..∞)
+            // constraints — restoring exactly the free sizing `LayerLinkFollower`
+            // had before this clip existed, with the clip still applied.
             Positioned.fill(
               child: ClipRect(
                 clipper: _BelowTopBarClipper(
                   fullscreen ? 0 : MediaQuery.paddingOf(context).top + TopBar.preferredHeight,
                 ),
-                child: LayerLinkFollower(
-                  link: engine.videoLayerLink,
-                  fullscreen: fullscreen,
-                  child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
+                child: OverflowBox(
+                  alignment: Alignment.topLeft,
+                  minWidth: 0,
+                  minHeight: 0,
+                  maxWidth: double.infinity,
+                  maxHeight: double.infinity,
+                  child: LayerLinkFollower(
+                    link: engine.videoLayerLink,
+                    fullscreen: fullscreen,
+                    child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
+                  ),
                 ),
               ),
             ),
