@@ -832,6 +832,28 @@ that draws neither backdrop emits neither, and no layer numbers**, so a track
 with the background turned off is byte-identical to what Task 17 rendered —
 asserted in `captions.test.ts`.
 
+**The `renderer` flag, and what byte-identity means after it.** `LibassLayer`
+paints its own background and window (`_BackgroundPainter`, wired to
+`CaptionStyle`), so a document built for it must not *also* carry the box and
+window `Dialogue` events above — libass would draw both, the double-draw bug.
+`captions.get`'s optional `renderer: 'mpv' | 'libass_layer'` (`sidecar/src/
+captions/ass.ts`) tells `renderAss` which case it is: box events, window events,
+and the layer split are all gated on `options.renderer !== 'libass_layer'`. The
+client decides, not the document: `CaptionsController` (`app/lib/ui/
+captions_controller.dart`) sends `renderer: 'libass_layer'` exactly when the
+debug toggle (`libassEnabledProvider`) has switched the active pipeline, and
+omits the field — falling back to `'mpv'` in `service.ts` — otherwise. The cache
+key (`renderSignature`) includes `renderer`, so the two pipelines never share a
+cached document.
+
+This means Task 18's byte-identity claim is no longer "the same document
+regardless of caller" — it is **identical for a given renderer**. A background-off
+track is still byte-identical to pre-Task-19 output *under `mpv`*; under
+`libass_layer` it was always missing the box/window events, by construction, so
+there is nothing to compare it against. The two renderers are expected to diverge
+on any track that draws a backdrop — that divergence is the fix, not a
+regression — and no test should assert cross-renderer equality.
+
 **Position is a delta, not a coordinate.** The drag is stored as a fraction of
 the frame and added to whatever position the source gives — none, an ASR rolling
 window, or a per-cue styled position — so one rule covers every kind of track and
