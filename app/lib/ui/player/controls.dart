@@ -21,6 +21,7 @@ import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
+import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
@@ -35,6 +36,12 @@ import 'view_mode.dart';
 /// anything else that reached for them here still can.
 export 'settings_menu.dart' show describeVariant, distinctQualities;
 
+/// `playerControlsBarKey` lives in `domain/player_controls_visibility.dart` now
+/// — `LibassLayer` needs it too, and that is the file with no reason to import
+/// this one. Re-exported so existing callers (this file's own tests included)
+/// do not need to know it moved.
+export '../../domain/player_controls_visibility.dart' show playerControlsBarKey;
+
 /// How long the pointer must be still before the controls go away.
 const Duration autoHideDelay = Duration(seconds: 1);
 
@@ -44,8 +51,6 @@ const Duration autoHideDelay = Duration(seconds: 1);
 /// rather than incidental — see [_PlayerControlsState._onTap].
 const Duration doubleClickWindow = kDoubleTapTimeout;
 
-/// The bar, for tests that need to read its opacity rather than infer it.
-const Key playerControlsBarKey = ValueKey('player-controls-bar');
 const Key playerScrubberKey = ValueKey('player-scrubber');
 const Key playerSwitchCoverKey = ValueKey('player-switch-cover');
 const Key playerBusySpinnerKey = ValueKey('player-busy-spinner');
@@ -131,6 +136,15 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     super.dispose();
   }
 
+  /// The one place `_visible` changes, so `playerControlsVisibleProvider` — the
+  /// copy `LibassLayer` reads to nudge captions off the bar — cannot drift from
+  /// what this widget actually shows.
+  void _setVisible(bool value) {
+    if (_visible == value) return;
+    setState(() => _visible = value);
+    ref.read(playerControlsVisibleProvider.notifier).set(value);
+  }
+
   /// The auto-hide rule, in one place.
   ///
   /// Hides only while **playing**, only after [autoHideDelay], and never while
@@ -140,17 +154,17 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     _hideTimer?.cancel();
     _hideTimer = null;
     if (!_playing || ref.read(playerMenuProvider).open) {
-      if (!_visible) setState(() => _visible = true);
+      _setVisible(true);
       return;
     }
     _hideTimer = Timer(autoHideDelay, () {
       if (!mounted) return;
-      setState(() => _visible = false);
+      _setVisible(false);
     });
   }
 
   void _wake() {
-    if (!_visible) setState(() => _visible = true);
+    _setVisible(true);
     _restartHideTimer();
   }
 

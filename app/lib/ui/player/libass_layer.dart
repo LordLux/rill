@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/caption_style.dart';
+import '../../domain/player_controls_visibility.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 import 'caption_geometry.dart';
@@ -380,12 +381,33 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     return rawImages;
   }
 
+  /// How much of the frame's bottom, in document (`PlayRes`) pixels, the
+  /// visible control bar currently covers — 0 when it is hidden, or has not
+  /// laid out yet.
+  ///
+  /// Read from the bar's own rendered size (`playerControlsBarKey`) rather
+  /// than a guessed constant, because the bar's height differs between the
+  /// windowed and fullscreen layouts and is not fixed even within one of
+  /// them (the vertical layout's row wraps). Converted with the same `sy`
+  /// this class already uses everywhere else, so it lines up with the boxes
+  /// libass actually rendered rather than an independent estimate of them —
+  /// the mistake `CaptionMetrics` was retired for (`architecture.md` §2.9).
+  double get _reservedBottomDocPx {
+    if (!ref.read(playerControlsVisibleProvider)) return 0;
+    if (_lastHeight == null || _padded == null) return 0;
+    final box = playerControlsBarKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return 0;
+    final sy = _lastHeight! / _padded!.playResY;
+    return box.size.height / sy;
+  }
+
   List<Offset> _computeNudges(List<Box> boxes, int nowMs) {
     if (boxes.isEmpty) return const [];
+    final h = _padded!.playResY - _reservedBottomDocPx;
     final out = List<Offset>.filled(boxes.length, Offset.zero);
     for (var i = 0; i < boxes.length; i++) {
       final b = boxes[i].shift(_dragDelta.dx, _dragDelta.dy);
-      final clamp = clampOffset(b, _padded!.playResX.toDouble(), _padded!.playResY.toDouble());
+      final clamp = clampOffset(b, _padded!.playResX.toDouble(), h);
       out[i] = Offset(_dragDelta.dx + clamp[0], _dragDelta.dy + clamp[1]);
     }
     return out;
@@ -415,11 +437,15 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     var dx = _dragDelta.dx + details.delta.dx / sx;
     var dy = _dragDelta.dy + details.delta.dy / sy;
 
+    // Same reservation `_computeNudges` applies passively on every render —
+    // here so a live drag cannot be thrown past the bar either.
+    final safeBottom = _padded!.playResY - _reservedBottomDocPx;
+
     var loX = double.negativeInfinity, hiX = double.infinity;
     var loY = double.negativeInfinity, hiY = double.infinity;
     for (var i = 0; i < _groupBoxes.length; i++) {
       final b = _groupBoxes[i];
-      
+
       final padX = 8.0 / sx;
       final padY = 4.0 / sy;
       final bPadded = Box(b.left - padX, b.top - padY, b.right + padX, b.bottom + padY);
@@ -427,7 +453,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
       loX = math.max(loX, -bPadded.left);
       hiX = math.min(hiX, _padded!.playResX - bPadded.right);
       loY = math.max(loY, -bPadded.top);
-      hiY = math.min(hiY, _padded!.playResY - bPadded.bottom);
+      hiY = math.min(hiY, safeBottom - bPadded.bottom);
     }
 
     if (dx < loX) dx = loX;
@@ -495,7 +521,15 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     if (_assUnavailable) return const SizedBox.shrink();
 
     ref.watch(captionsProvider);
-    
+    // The render loop re-nudges on every position tick anyway, but a paused
+    // video has no ticks — and the control bar can only ever come *back*
+    // while paused (`_restartHideTimer` never hides it then), so without this
+    // a caption revealed by that path would sit under the bar until the next
+    // seek or play.
+    ref.listen(playerControlsVisibleProvider, (previous, next) {
+      if (previous != next) _scheduleRender(_targetTimeSeconds);
+    });
+
     final engine = ref.read(playbackEngineProvider);
     debugPrint('LibassLayer build: engine.subtitle length: ${engine.subtitle?.length}, _currentAss length: ${_currentAss?.length}, _targetAss length: ${_targetAss?.length}, _isCommittingDrag: $_isCommittingDrag');
     if (engine.subtitle != _currentAss && !_isCommittingDrag && engine.subtitle != _targetAss) {
