@@ -52,14 +52,17 @@ export interface CaptionStyle {
   /** Text colour *and* opacity — `a` is the font-opacity control. */
   textColor: RgbaColor | null;
   forceTextColor?: boolean;
+  forceTextOpacity?: boolean;
   
   /** The per-line box. `a: 0` is a user asking for no background. */
   background: RgbaColor | null;
-  forceBackground?: boolean;
+  forceBackgroundColor?: boolean;
+  forceBackgroundOpacity?: boolean;
   
   /** The rectangle around every caption on screen. `a: 0` is YouTube's default. */
   window: RgbaColor | null;
-  forceWindow?: boolean;
+  forceWindowColor?: boolean;
+  forceWindowOpacity?: boolean;
   
   edgeStyle: CaptionEdgeStyle | null;
   forceEdgeStyle?: boolean;
@@ -73,10 +76,13 @@ export const NO_CAPTION_STYLE: CaptionStyle = {
   forceFontSize: true,
   textColor: null,
   forceTextColor: true,
+  forceTextOpacity: true,
   background: null,
-  forceBackground: true,
+  forceBackgroundColor: true,
+  forceBackgroundOpacity: true,
   window: null,
-  forceWindow: true,
+  forceWindowColor: true,
+  forceWindowOpacity: true,
   edgeStyle: null,
   forceEdgeStyle: true,
 };

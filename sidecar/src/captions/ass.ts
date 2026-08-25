@@ -278,11 +278,20 @@ function resolve(options: RenderOptions, cues: readonly Cue[] = []): Resolved {
  */
 function cueBackground(style: CueStyle | null, resolved: Resolved): RgbaColor {
   const user = resolved.style?.background ?? null;
-  const force = resolved.style?.forceBackground ?? true;
+  const forceColor = resolved.style?.forceBackgroundColor ?? true;
+  const forceAlpha = resolved.style?.forceBackgroundOpacity ?? true;
 
   if (user !== null) {
-    if (!force && style?.backgroundColor != null) return style.backgroundColor;
-    return user;
+    let r = user.r, g = user.g, b = user.b, a = user.a;
+    if (!forceColor && style?.backgroundColor != null) {
+      r = style.backgroundColor.r;
+      g = style.backgroundColor.g;
+      b = style.backgroundColor.b;
+    }
+    if (!forceAlpha && style?.backgroundColor != null) {
+      a = style.backgroundColor.a;
+    }
+    return { r, g, b, a };
   }
   if (style?.backgroundColor != null) return style.backgroundColor;
   return resolved.background;
@@ -553,23 +562,30 @@ function effectiveTextColor(
   baseTextColor: RgbaColor | null | undefined,
 ): RgbaColor | null {
   const user = resolved.style?.textColor ?? null;
-  const force = resolved.style?.forceTextColor ?? true;
+  const forceColor = resolved.style?.forceTextColor ?? true;
+  const forceAlpha = resolved.style?.forceTextOpacity ?? true;
 
   if (user === null) return authored;
-  
-  if (!force && authored !== null) return authored;
+
+  const isHighlight = baseTextColor !== undefined && authored !== null && !sameColor(authored, baseTextColor);
+
+  let r = user.r, g = user.g, b = user.b, a = user.a;
+  if (!forceColor && authored !== null) {
+    r = authored.r; g = authored.g; b = authored.b;
+  }
+  if (!forceAlpha && authored !== null) {
+    a = authored.a;
+  }
 
   if (baseTextColor !== undefined) {
-    if (authored !== null && !sameColor(authored, baseTextColor)) return authored;
-    // Explicitly, rather than by falling through: an ASS override persists to
-    // the end of its event, so a base run that emitted nothing after a
-    // highlighted one would inherit the highlight — the very distinction this
-    // function exists to keep.
-    return user;
+    if (isHighlight) return authored;
+    return { r, g, b, a };
   }
-  // The line itself. The `Style` already carries the user's colour, so there is
-  // nothing to say.
-  return null;
+  
+  if (r === user.r && g === user.g && b === user.b && a === user.a) {
+    return null;
+  }
+  return { r, g, b, a };
 }
 
 function sameColor(a: RgbaColor, b: RgbaColor | null): boolean {

@@ -69,7 +69,7 @@ abstract class CaptionTrack with _$CaptionTrack {
   String? get styleBadge => switch (styled) {
         // 'karaoke' => "🎤",//'Karaoke',
         // 'styled' => "🖌️",//'Styled',
-        'karaoke' => 'Karaoke',
+        'karaoke' => 'Animated',
         'styled' => 'Styled',
         _ => null,
       };

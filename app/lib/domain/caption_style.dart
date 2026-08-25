@@ -55,8 +55,11 @@ class CaptionStyle {
     this.forceFontFamily = true,
     this.forceFontSize = true,
     this.forceTextColor = true,
-    this.forceBackground = true,
-    this.forceWindow = true,
+    this.forceTextOpacity = true,
+    this.forceBackgroundColor = true,
+    this.forceBackgroundOpacity = true,
+    this.forceWindowColor = true,
+    this.forceWindowOpacity = true,
     this.forceEdgeStyle = true,
   });
 
@@ -73,15 +76,18 @@ class CaptionStyle {
   /// Text colour *and* opacity — the alpha channel is the font-opacity control.
   final Color? textColor;
   final bool forceTextColor;
+  final bool forceTextOpacity;
 
   /// The per-line box behind the words. A zero alpha is a user turning it off.
   final Color? background;
-  final bool forceBackground;
+  final bool forceBackgroundColor;
+  final bool forceBackgroundOpacity;
 
   /// The rectangle around every caption on screen. Zero alpha by default, which
   /// is what YouTube ships.
   final Color? window;
-  final bool forceWindow;
+  final bool forceWindowColor;
+  final bool forceWindowOpacity;
 
   final CaptionEdgeStyle? edgeStyle;
   final bool forceEdgeStyle;
@@ -109,8 +115,11 @@ class CaptionStyle {
     bool? forceFontFamily,
     bool? forceFontSize,
     bool? forceTextColor,
-    bool? forceBackground,
-    bool? forceWindow,
+    bool? forceTextOpacity,
+    bool? forceBackgroundColor,
+    bool? forceBackgroundOpacity,
+    bool? forceWindowColor,
+    bool? forceWindowOpacity,
     bool? forceEdgeStyle,
   }) {
     return CaptionStyle(
@@ -125,8 +134,11 @@ class CaptionStyle {
       forceFontFamily: forceFontFamily ?? this.forceFontFamily,
       forceFontSize: forceFontSize ?? this.forceFontSize,
       forceTextColor: forceTextColor ?? this.forceTextColor,
-      forceBackground: forceBackground ?? this.forceBackground,
-      forceWindow: forceWindow ?? this.forceWindow,
+      forceTextOpacity: forceTextOpacity ?? this.forceTextOpacity,
+      forceBackgroundColor: forceBackgroundColor ?? this.forceBackgroundColor,
+      forceBackgroundOpacity: forceBackgroundOpacity ?? this.forceBackgroundOpacity,
+      forceWindowColor: forceWindowColor ?? this.forceWindowColor,
+      forceWindowOpacity: forceWindowOpacity ?? this.forceWindowOpacity,
       forceEdgeStyle: forceEdgeStyle ?? this.forceEdgeStyle,
     );
   }
@@ -141,8 +153,11 @@ class CaptionStyle {
         'forceFontFamily': forceFontFamily,
         'forceFontSize': forceFontSize,
         'forceTextColor': forceTextColor,
-        'forceBackground': forceBackground,
-        'forceWindow': forceWindow,
+        'forceTextOpacity': forceTextOpacity,
+        'forceBackgroundColor': forceBackgroundColor,
+        'forceBackgroundOpacity': forceBackgroundOpacity,
+        'forceWindowColor': forceWindowColor,
+        'forceWindowOpacity': forceWindowOpacity,
         'forceEdgeStyle': forceEdgeStyle,
       };
 
@@ -161,8 +176,11 @@ class CaptionStyle {
       forceFontFamily: json['forceFontFamily'] as bool? ?? true,
       forceFontSize: json['forceFontSize'] as bool? ?? true,
       forceTextColor: json['forceTextColor'] as bool? ?? true,
-      forceBackground: json['forceBackground'] as bool? ?? true,
-      forceWindow: json['forceWindow'] as bool? ?? true,
+      forceTextOpacity: json['forceTextOpacity'] as bool? ?? true,
+      forceBackgroundColor: json['forceBackgroundColor'] as bool? ?? true,
+      forceBackgroundOpacity: json['forceBackgroundOpacity'] as bool? ?? true,
+      forceWindowColor: json['forceWindowColor'] as bool? ?? true,
+      forceWindowOpacity: json['forceWindowOpacity'] as bool? ?? true,
       forceEdgeStyle: json['forceEdgeStyle'] as bool? ?? true,
     );
   }
@@ -179,8 +197,11 @@ class CaptionStyle {
       other.forceFontFamily == forceFontFamily &&
       other.forceFontSize == forceFontSize &&
       other.forceTextColor == forceTextColor &&
-      other.forceBackground == forceBackground &&
-      other.forceWindow == forceWindow &&
+      other.forceTextOpacity == forceTextOpacity &&
+      other.forceBackgroundColor == forceBackgroundColor &&
+      other.forceBackgroundOpacity == forceBackgroundOpacity &&
+      other.forceWindowColor == forceWindowColor &&
+      other.forceWindowOpacity == forceWindowOpacity &&
       other.forceEdgeStyle == forceEdgeStyle;
 
   @override
@@ -191,12 +212,17 @@ class CaptionStyle {
         background,
         window,
         edgeStyle,
-        forceFontFamily,
-        forceFontSize,
-        forceTextColor,
-        forceBackground,
-        forceWindow,
-        forceEdgeStyle,
+        Object.hash(
+          forceFontFamily,
+          forceFontSize,
+          forceTextColor,
+          forceTextOpacity,
+          forceBackgroundColor,
+          forceBackgroundOpacity,
+          forceWindowColor,
+          forceWindowOpacity,
+          forceEdgeStyle,
+        ),
       );
 }
 

@@ -177,7 +177,7 @@ final GlobalKey captionsButtonAnchorKey = GlobalKey();
 /// False when none is mounted, which is the case the caller wants anyway: with
 /// no menu up there is no click-outside to detect.
 bool pointerIsOnSettingsMenu(Offset globalPosition) =>
-    _hits(settingsMenuPanelKey, globalPosition) ||
+    _hits(settingsMenuPanelKey, globalPosition) || //
     _hits(settingsMenuAnchorKey, globalPosition) ||
     _hits(qualityButtonAnchorKey, globalPosition) ||
     _hits(captionsButtonAnchorKey, globalPosition);
@@ -295,8 +295,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   /// Root and Quality are both top levels — quality has its own button and is
   /// not reached through the root — so moving between them is sideways and gets
   /// no slide at all. Only *More options* is under anything.
-  static int _depthOf(SettingsPage page) =>
-      page == SettingsPage.moreOptions || page == SettingsPage.captionStyle ? 1 : 0;
+  static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions || page == SettingsPage.captionStyle ? 1 : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -676,7 +675,8 @@ class _CaptionRow extends StatelessWidget {
           // small, muted — because it is the same kind of thing as `4K`: not
           // part of the track's name, but something read off it.
           // `_QualityRow._badge` is the other half of that pairing.
-          if (badge != null) ...[
+          // Show only if the track name is not empty, to avoid unnecessary or possibly repetitive text.
+          if (badge != null && trackName.isNotEmpty) ...[
             const SizedBox(width: 4),
             Transform.translate(
               offset: const Offset(0, -5),
@@ -781,10 +781,16 @@ class _QualityPage extends ConsumerWidget {
 /// different insets depending on which page you are on is a menu that looks
 /// broken without anything being wrong.
 class _MenuBody extends StatelessWidget {
-  const _MenuBody({super.key, this.header, required this.children});
+  const _MenuBody({
+    super.key,
+    this.header,
+    required this.children,
+    EdgeInsetsGeometry? padding,
+  }) : _padding = padding ?? const EdgeInsets.symmetric(vertical: 6);
 
   final Widget? header;
   final List<Widget> children;
+  final EdgeInsetsGeometry _padding;
 
   @override
   Widget build(BuildContext context) {
@@ -834,7 +840,7 @@ class _MenuBody extends StatelessWidget {
                 // edge. It is inside the scrollable rather than around it, so a
                 // long ladder scrolls *through* the gap instead of stopping
                 // short of one.
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: _padding,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1072,43 +1078,90 @@ List<PlaybackVariant> distinctQualities(List<PlaybackVariant> variants) {
 /// bevel), and the background's **rounded corners** are not expressible at all —
 /// both ASS boxes are rectangles. Recorded in `architecture.md` §2.9 as
 /// knowingly dropped.
-class _ForceStylePage extends ConsumerWidget {
+class _ForceStylePage extends ConsumerStatefulWidget {
   const _ForceStylePage();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ForceStylePage> createState() => _ForceStylePageState();
+}
+
+class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
+  String _hoverProperty = 'style';
+  bool? _hoverActive;
+  bool _masterSwitch = true;
+
+  @override
+  Widget build(BuildContext context) {
     final captions = ref.watch(captionsProvider);
     final controller = ref.read(captionsProvider.notifier);
     final style = captions.style;
+    final scheme = Theme.of(context).colorScheme;
 
-    Widget buildRow(String name, bool forceValue, ValueChanged<bool> onChanged) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _MenuRow(
-            icon: Icons.auto_fix_high,
-            label: 'Force $name',
-            trailing: Switch(
-              value: forceValue,
-              onChanged: onChanged,
+    Widget buildTile(String label, IconData icon, bool active, ValueChanged<bool> onChanged) {
+      final isHovered = _hoverProperty == label;
+      final isEnabled = _masterSwitch && active;
+      final backgroundColor = isHovered
+          ? (isEnabled ? scheme.primary : scheme.secondaryContainer)
+          : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
+      final foregroundColor = isHovered
+          ? (isEnabled ? scheme.onPrimary : scheme.onSecondaryContainer)
+          : (isEnabled ? scheme.onPrimaryContainer : scheme.onSurfaceVariant);
+      return MouseRegion(
+        onEnter: (_) => setState(() {
+          _hoverProperty = label;
+          _hoverActive = active;
+        }),
+        onExit: (_) => setState(() {
+          _hoverProperty = 'style';
+          _hoverActive = null;
+        }),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            if (!_masterSwitch) setState(() => _masterSwitch = true);
+            onChanged(!active);
+            if (_hoverProperty == label) setState(() => _hoverActive = !active);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isHovered ? scheme.outline : scheme.outlineVariant,
+                width: isHovered ? 1.5 : 0,
+              ),
             ),
-            onTap: () => onChanged(!forceValue),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Text(
-              forceValue
-                  ? 'Overrides all subtitle $name, even if a different value is specified by the video.'
-                  : 'Allows for a different subtitle $name specified by the video.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: foregroundColor,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  style: TextStyle(
+                    fontSize: 10,
+                    height: 1.1,
+                    fontWeight: FontWeight.w500,
+                    color: foregroundColor,
                   ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       );
     }
+
+    final isActive = (_hoverActive ?? _masterSwitch) && _masterSwitch;
+    final prefix = isActive ? 'Overrides all subtitle ' : 'Allows for a different subtitle ';
+    final suffix = isActive ? ', even if a different value is specified by the video.' : ' specified by the video.';
 
     return _MenuBody(
       header: _MenuHeader(
@@ -1116,20 +1169,151 @@ class _ForceStylePage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captionStyle),
       ),
       children: [
-        if (style.fontFamily != null)
-          buildRow('font family', style.forceFontFamily, (v) => controller.setStyle(style.copyWith(forceFontFamily: v), immediate: true)),
-        if (style.fontSizePercent != null)
-          buildRow('size', style.forceFontSize, (v) => controller.setStyle(style.copyWith(forceFontSize: v), immediate: true)),
-        if (style.textColor != null)
-          buildRow('text color and opacity', style.forceTextColor, (v) => controller.setStyle(style.copyWith(forceTextColor: v), immediate: true)),
-        if (style.background != null)
-          buildRow('background color and opacity', style.forceBackground, (v) => controller.setStyle(style.copyWith(forceBackground: v), immediate: true)),
-        if (style.window != null)
-          buildRow('window color and opacity', style.forceWindow, (v) => controller.setStyle(style.copyWith(forceWindow: v), immediate: true)),
-        if (style.edgeStyle != null)
-          buildRow('character edge', style.forceEdgeStyle, (v) => controller.setStyle(style.copyWith(forceEdgeStyle: v), immediate: true)),
+        SizedBox(
+          height: 50,
+          child: _MenuRow(
+            icon: Icons.auto_fix_high,
+            label: 'Force Style',
+            trailing: Switch(
+              value: _masterSwitch,
+              onChanged: (v) => onForceStyleChanged(v, controller, style),
+            ),
+            onTap: () => onForceStyleChanged(!_masterSwitch, controller, style),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox(width: _menuMaxWidth, height: 0),
+          secondChild: SizedBox(
+            width: _menuMaxWidth,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Font', Icons.font_download_outlined, style.forceFontFamily, (v) => controller.setStyle(style.copyWith(forceFontFamily: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Size', Icons.format_size, style.forceFontSize, (v) => controller.setStyle(style.copyWith(forceFontSize: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Text Color', Icons.format_color_text, style.forceTextColor, (v) => controller.setStyle(style.copyWith(forceTextColor: v), immediate: true))),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Text Opacity', Icons.opacity, style.forceTextOpacity, (v) => controller.setStyle(style.copyWith(forceTextOpacity: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Background Color', Icons.format_color_fill, style.forceBackgroundColor, (v) => controller.setStyle(style.copyWith(forceBackgroundColor: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Background Opacity', Icons.blur_on, style.forceBackgroundOpacity, (v) => controller.setStyle(style.copyWith(forceBackgroundOpacity: v), immediate: true))),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Window Color', Icons.picture_in_picture, style.forceWindowColor, (v) => controller.setStyle(style.copyWith(forceWindowColor: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Window Opacity', Icons.picture_in_picture_alt, style.forceWindowOpacity, (v) => controller.setStyle(style.copyWith(forceWindowOpacity: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Edge', Icons.border_style, style.forceEdgeStyle, (v) => controller.setStyle(style.copyWith(forceEdgeStyle: v), immediate: true))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          crossFadeState: _masterSwitch ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          firstCurve: Curves.easeInOut,
+          secondCurve: Curves.easeInOut,
+          duration: const Duration(milliseconds: 150),
+        ),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          height: _masterSwitch ? 0 : 8, // padding when the switch is off, so the text does not sit too close to the switch
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: _menuMaxWidth - 28,
+            height: _masterSwitch ? 48 : 28,
+            alignment: Alignment.center,
+            child: RichText(
+              textAlign: TextAlign.center,
+              text: TextSpan(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+                children: [
+                  TextSpan(text: prefix),
+                  TextSpan(
+                    text: _hoverProperty,
+                    style: TextStyle(fontWeight: _masterSwitch ? FontWeight.bold : FontWeight.normal),
+                  ),
+                  TextSpan(text: suffix),
+                ],
+              ),
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  void onForceStyleChanged(bool v, CaptionsController controller, CaptionStyle style) {
+    setState(() => _masterSwitch = v);
+    if (!v) {
+      // If turning off master switch, disable all active overrides
+      controller.setStyle(
+        style.copyWith(
+          forceFontFamily: false,
+          forceFontSize: false,
+          forceTextColor: false,
+          forceTextOpacity: false,
+          forceBackgroundColor: false,
+          forceBackgroundOpacity: false,
+          forceWindowColor: false,
+          forceWindowOpacity: false,
+          forceEdgeStyle: false,
+        ),
+        immediate: true,
+      );
+    } else {
+      // If turning on, enable them all
+      controller.setStyle(
+        style.copyWith(
+          forceFontFamily: true,
+          forceFontSize: true,
+          forceTextColor: true,
+          forceTextOpacity: true,
+          forceBackgroundColor: true,
+          forceBackgroundOpacity: true,
+          forceWindowColor: true,
+          forceWindowOpacity: true,
+          forceEdgeStyle: true,
+        ),
+        immediate: true,
+      );
+    }
   }
 }
 
@@ -1158,15 +1342,14 @@ class CaptionStylePage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captions),
       ),
       children: [
-        if (style.fontFamily != null || style.fontSizePercent != null || style.textColor != null || style.background != null || style.window != null || style.edgeStyle != null) ...[
-          _MenuRow(
-            icon: Icons.auto_fix_high,
-            label: 'Video overrides',
-            trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.forceStyle),
-          ),
-          Divider(height: 1, color: scheme.outlineVariant),
-        ],
+        _MenuRow(
+          icon: Icons.auto_fix_high,
+          label: 'Video overrides',
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.forceStyle),
+        ),
+        SizedBox(height: 6),
+        Divider(height: 1, color: scheme.outlineVariant),
         _StyleSection(label: 'Font'),
         _StyleChoices<String?>(
           value: style.fontFamily,
@@ -1182,14 +1365,12 @@ class CaptionStylePage extends ConsumerWidget {
           // A slider fires per frame and every change is a round trip plus a
           // `sub-add`; the controller debounces trailing so a drag commits a
           // handful of times instead of sixty.
-          onChanged: (value) =>
-              apply(style.copyWith(fontSizePercent: value), immediate: false),
+          onChanged: (value) => apply(style.copyWith(fontSizePercent: value), immediate: false),
         ),
         _StyleColors(
           label: 'Colour',
           value: style.textColor,
-          onPicked: (colour) =>
-              apply(style.copyWith(textColor: colour?.withValues(alpha: style.textColor?.a ?? 1))),
+          onPicked: (colour) => apply(style.copyWith(textColor: colour?.withValues(alpha: style.textColor?.a ?? 1))),
         ),
         _StyleSlider(
           label: 'Opacity',
@@ -1217,10 +1398,11 @@ class CaptionStylePage extends ConsumerWidget {
         _StyleColors(
           label: 'Colour',
           value: style.background,
-          onPicked: (colour) => apply(style.copyWith(
-            background:
-                colour?.withValues(alpha: style.background?.a ?? captionDefaultBackgroundOpacity),
-          )),
+          onPicked: (colour) => apply(
+            style.copyWith(
+              background: colour?.withValues(alpha: style.background?.a ?? captionDefaultBackgroundOpacity),
+            ),
+          ),
         ),
         _StyleSlider(
           label: 'Opacity',
@@ -1252,8 +1434,7 @@ class CaptionStylePage extends ConsumerWidget {
         _StyleColors(
           label: 'Colour',
           value: style.window,
-          onPicked: (colour) => apply(
-              style.copyWith(window: colour?.withValues(alpha: style.window?.a ?? 0.75))),
+          onPicked: (colour) => apply(style.copyWith(window: colour?.withValues(alpha: style.window?.a ?? 0.75))),
         ),
         _StyleSlider(
           label: 'Opacity',
@@ -1292,9 +1473,7 @@ class CaptionStylePage extends ConsumerWidget {
           key: playerCaptionStyleResetKey,
           icon: Icons.restart_alt,
           label: 'Reset',
-          onTap: style.isDefault && captions.offset.isZero
-              ? null
-              : () => unawaited(controller.resetStyle()),
+          onTap: style.isDefault && captions.offset.isZero ? null : () => unawaited(controller.resetStyle()),
         ),
       ],
     );
@@ -1327,11 +1506,11 @@ class _StyleSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
       child: Text(
         label.toUpperCase(),
         style: TextStyle(
-          fontSize: 10,
+          fontSize: 12,
           letterSpacing: 0.8,
           fontWeight: FontWeight.w600,
           color: scheme.onSurfaceVariant,
@@ -1430,9 +1609,7 @@ class _StyleColors extends StatelessWidget {
                           width: isPicked(swatch) ? 2 : 1,
                         ),
                       ),
-                      child: swatch == null
-                          ? Icon(Icons.remove, size: 12, color: scheme.onSurfaceVariant)
-                          : null,
+                      child: swatch == null ? Icon(Icons.remove, size: 12, color: scheme.onSurfaceVariant) : null,
                     ),
                   ),
               ],
