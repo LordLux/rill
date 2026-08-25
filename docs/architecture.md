@@ -1100,6 +1100,25 @@ to matter, the fix is at the source (`cues.ts`'s merge-forward threshold, or
 a render call keyed to cue boundaries rather than position ticks alone), not
 in `LibassLayer`, which cannot render faster than it is told the clock moved.
 
+**Known follow-ups from phase 5, not yet done — noted here so they outlive this
+thread:**
+
+- **`PlaybackEngine.subtitleTextStream` is dead code.** Its only caller was
+  `CaptionDragLayer`, deleted in phase 5 (`5b50555`). Left in place rather than
+  removed alongside it because deleting it means editing the `PlaybackEngine`
+  interface (`app/lib/data/playback/engine.dart`), which is its own small,
+  separately-reviewable change rather than a rider on a pipeline removal.
+- **No karaoke-classified track has been rendered end to end.** `L-BgxLtMxh0`
+  classifies `styled`, not `karaoke`, for its full document (it has font/bold/
+  italic styling beyond the colour sweep) — `classifyDocument`'s narrower
+  `karaoke` case is exhaustively unit-tested in `captions.test.ts` against real
+  document *structure*, but no real frame has been drawn for a track that
+  actually lands in that classification, the way `probe-task19.ts` does for
+  `plain` and `styled`. Not a known gap in the classifier — a gap in having
+  seen it happen. If a real `karaoke`-classified track turns up in ordinary
+  use, run it through `probe-task19.ts` (add its video id alongside `PLAIN`/
+  `STYLED`) and confirm.
+
 ---
 
 ## 3. Phasing
