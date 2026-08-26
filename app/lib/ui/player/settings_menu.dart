@@ -1101,7 +1101,11 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
 
     Widget buildTile(String label, IconData icon, bool active, ValueChanged<bool> onChanged) {
       final isHovered = _hoverProperty == label;
-      final isEnabled = masterSwitch && active;
+      // Each tile's own force flag, not `masterSwitch && active` — that AND
+      // was what made turning off one property grey out (and, through the
+      // crossfade below, could hide) the other eight: `masterSwitch` reads
+      // false the moment any single one of the nine does, by construction.
+      final isEnabled = active;
       final backgroundColor = isHovered
           ? (isEnabled ? scheme.primary : scheme.secondaryContainer)
           : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
@@ -1160,7 +1164,11 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
       );
     }
 
-    final isActive = (_hoverActive ?? masterSwitch) && masterSwitch;
+    // The hovered tile's own state when one is hovered — not gated on
+    // `masterSwitch` too, for the same reason `isEnabled` above isn't: the
+    // explanation is about *this* property, not about whether all nine
+    // happen to agree.
+    final isActive = _hoverActive ?? masterSwitch;
     final prefix = isActive ? 'Overrides all subtitle ' : 'Allows for a different subtitle ';
     final suffix = isActive ? ', even if a different value is specified by the video.' : ' specified by the video.';
 
@@ -1182,11 +1190,15 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
             onTap: () => onForceStyleChanged(!masterSwitch, controller, style),
           ),
         ),
-        AnimatedCrossFade(
-          firstChild: const SizedBox(width: _menuMaxWidth, height: 0),
-          secondChild: SizedBox(
-            width: _menuMaxWidth,
-            child: Padding(
+        // Always shown — this is the page a user reaches specifically to set
+        // these nine, and it used to collapse away (behind an
+        // `AnimatedCrossFade`) the moment any one of them stopped matching
+        // the other eight, since `masterSwitch` reads false then by
+        // construction. That's what made turning off a single tile look like
+        // the whole feature had switched off.
+        SizedBox(
+          width: _menuMaxWidth,
+          child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1242,21 +1254,17 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
               ),
             ),
           ),
-          crossFadeState: masterSwitch ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-          firstCurve: Curves.easeInOut,
-          secondCurve: Curves.easeInOut,
-          duration: const Duration(milliseconds: 150),
-        ),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          height: masterSwitch ? 0 : 8, // padding when the switch is off, so the text does not sit too close to the switch
-        ),
+        const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             width: _menuMaxWidth - 28,
-            height: masterSwitch ? 48 : 28,
+            // Sized to which string is showing (the "Overrides…" one is the
+            // longer of the two and wraps), not to `masterSwitch` — the box
+            // used to double as "is the grid even open", which it no longer
+            // needs to answer.
+            height: isActive ? 48 : 28,
             alignment: Alignment.center,
             child: RichText(
               textAlign: TextAlign.center,
@@ -1268,7 +1276,7 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
                   TextSpan(text: prefix),
                   TextSpan(
                     text: _hoverProperty,
-                    style: TextStyle(fontWeight: masterSwitch ? FontWeight.bold : FontWeight.normal),
+                    style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
                   ),
                   TextSpan(text: suffix),
                 ],

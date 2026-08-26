@@ -21,28 +21,20 @@ import 'libass/ass_reposition.dart';
 
 /// The background/window colour LibassLayer actually paints.
 ///
-/// Both are client-only since phase 5 — the document carries no background or
-/// window `Dialogue` any more, so there is no authored per-cue value to weigh
-/// against the user's choice the way `ass.ts`'s text-colour force flags do.
-/// `positional` (via [fallback]) is the closest thing to "the track's own
-/// opinion" available here: `LibassLayer.build` passes a transparent
-/// [fallback] for a positional track and YouTube's default box otherwise. So
-/// "not forced" falls back to that rather than being a no-op — a track's
-/// default still means something even though no per-cue value does.
-Color _resolveOverlayColor(
-  Color? user,
-  Color fallback, {
-  required bool forceColor,
-  required bool forceOpacity,
-}) {
-  if (user == null) return fallback;
-  return Color.from(
-    alpha: forceOpacity ? user.a : fallback.a,
-    red: forceColor ? user.r : fallback.r,
-    green: forceColor ? user.g : fallback.g,
-    blue: forceColor ? user.b : fallback.b,
-  );
-}
+/// **No `force` here, on purpose — there is nothing left for it to weigh
+/// against.** `ass.ts`'s text-colour force flags exist to let an *authored*
+/// per-cue value win over the user's choice on a styled or karaoke track; on
+/// a track with nothing authored (the ASR case), that logic already falls
+/// through to the user's value regardless of the flag, because there is no
+/// authored alternative to prefer. Background and window are exactly that
+/// second case, unconditionally, for every track: phase 5 moved them to pure
+/// client-side painting, and the wire protocol carries no per-cue background
+/// or window value at all any more for `forceBackgroundColor/Opacity` or
+/// `forceWindowColor/Opacity` to have chosen between. So the user's value
+/// applies whenever they have set one, exactly as it already did for text
+/// when nothing was authored — [fallback] is only for `user == null`,
+/// untouched.
+Color _resolveOverlayColor(Color? user, Color fallback) => user ?? fallback;
 
 class _LibraryWrapper {
   final Pointer<ASS_Library> ptr;
@@ -600,18 +592,8 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final isDraggable = !isPositional;
         
         final defaultBg = isPositional ? const Color(0x00000000) : captionDefaultBackground;
-        final backgroundColor = _resolveOverlayColor(
-          captions.style.background,
-          defaultBg,
-          forceColor: captions.style.forceBackgroundColor,
-          forceOpacity: captions.style.forceBackgroundOpacity,
-        );
-        final windowColor = _resolveOverlayColor(
-          captions.style.window,
-          const Color(0x00000000),
-          forceColor: captions.style.forceWindowColor,
-          forceOpacity: captions.style.forceWindowOpacity,
-        );
+        final backgroundColor = _resolveOverlayColor(captions.style.background, defaultBg);
+        final windowColor = _resolveOverlayColor(captions.style.window, const Color(0x00000000));
 
         return Stack(
           children: [
