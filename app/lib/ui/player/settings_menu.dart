@@ -1084,35 +1084,29 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
     final style = captions.style;
     final scheme = Theme.of(context).colorScheme;
 
-    // Derived from the real style, not a separate bool — a switch that only
-    // tracked its own last direct toggle could show "on" while an individual
-    // tile the user had turned off left the actual style half-forced, or
-    // "off" after one tile was flipped back on. All nine, so this reads true
-    // exactly when every one of them does.
-    final masterSwitch = style.forceFontFamily &&
-        style.forceFontSize &&
-        style.forceTextColor &&
-        style.forceTextOpacity &&
-        style.forceBackgroundColor &&
-        style.forceBackgroundOpacity &&
-        style.forceWindowColor &&
-        style.forceWindowOpacity &&
-        style.forceEdgeStyle;
+    // Its own field, independent of the nine tiles — see CaptionStyle.
+    // forceStyleEnabled's doc. A switch derived from the nine (their AND)
+    // used to read false the moment any single tile did, which both looked
+    // like a switch nobody touched had turned itself off and, downstream,
+    // collapsed the whole grid away for the same reason.
+    final masterSwitch = style.forceStyleEnabled;
 
     Widget buildTile(String label, IconData icon, bool active, ValueChanged<bool> onChanged) {
       final isHovered = _hoverProperty == label;
-      // Each tile's own force flag, not `masterSwitch && active` — that AND
-      // was what made turning off one property grey out (and, through the
-      // crossfade below, could hide) the other eight: `masterSwitch` reads
-      // false the moment any single one of the nine does, by construction.
-      final isEnabled = active;
+      // Gated on the (now independent) master too: a tile the master has
+      // disabled should not look selectable, whatever its own flag says.
+      final isEnabled = masterSwitch && active;
       final backgroundColor = isHovered
           ? (isEnabled ? scheme.primary : scheme.secondaryContainer)
           : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
       final foregroundColor = isHovered
           ? (isEnabled ? scheme.onPrimary : scheme.onSecondaryContainer)
           : (isEnabled ? scheme.onPrimaryContainer : scheme.onSurfaceVariant);
-      return MouseRegion(
+      // No hover, no click, while the master is off — the tiles depend on
+      // it rather than the other way around.
+      return IgnorePointer(
+        ignoring: !masterSwitch,
+        child: MouseRegion(
         onEnter: (_) => setState(() {
           _hoverProperty = label;
           _hoverActive = active;
@@ -1160,6 +1154,7 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
               ],
             ),
           ),
+        ),
         ),
       );
     }
@@ -1288,40 +1283,10 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
     );
   }
 
+  /// Just the one field now — the nine tiles are untouched, forced or not,
+  /// so turning the master back on restores exactly what they said before.
   void onForceStyleChanged(bool v, CaptionsController controller, CaptionStyle style) {
-    if (!v) {
-      // If turning off master switch, disable all active overrides
-      controller.setStyle(
-        style.copyWith(
-          forceFontFamily: false,
-          forceFontSize: false,
-          forceTextColor: false,
-          forceTextOpacity: false,
-          forceBackgroundColor: false,
-          forceBackgroundOpacity: false,
-          forceWindowColor: false,
-          forceWindowOpacity: false,
-          forceEdgeStyle: false,
-        ),
-        immediate: true,
-      );
-    } else {
-      // If turning on, enable them all
-      controller.setStyle(
-        style.copyWith(
-          forceFontFamily: true,
-          forceFontSize: true,
-          forceTextColor: true,
-          forceTextOpacity: true,
-          forceBackgroundColor: true,
-          forceBackgroundOpacity: true,
-          forceWindowColor: true,
-          forceWindowOpacity: true,
-          forceEdgeStyle: true,
-        ),
-        immediate: true,
-      );
-    }
+    controller.setStyle(style.copyWith(forceStyleEnabled: v), immediate: true);
   }
 }
 
@@ -1369,35 +1334,33 @@ class CaptionStylePage extends ConsumerWidget {
           value: style.fontSizePercent ?? 100,
           min: 50,
           max: 300,
+          divisions: 50, // (300 - 50) / 5% per tick
           format: (value) => '${value.round()}%',
           // A slider fires per frame and every change is a round trip plus a
           // `sub-add`; the controller debounces trailing so a drag commits a
           // handful of times instead of sixty.
           onChanged: (value) => apply(style.copyWith(fontSizePercent: value), immediate: false),
         ),
+        // Colour and opacity are independent fields on CaptionStyle
+        // (textColor / textOpacity) precisely so that resetting either one
+        // to "Default" here does not clear the other.
         _StyleColors(
           label: 'Colour',
           value: style.textColor,
-          onPicked: (colour) => apply(style.copyWith(textColor: colour?.withValues(alpha: style.textColor?.a ?? 1))),
+          onPicked: (colour) => apply(style.copyWith(textColor: colour)),
         ),
         _StyleSlider(
           label: 'Opacity',
-          value: style.textColor != null ? style.textColor!.a * 100 : -25,
+          value: style.textOpacity != null ? style.textOpacity! * 100 : -25,
           min: -25,
           max: 100,
           divisions: 5,
           format: (value) => value < 0 ? 'Default' : '${value.round()}%',
           onChanged: (value) {
-            if (value < 0) {
-              apply(style.copyWith(textColor: null), immediate: false);
-            } else {
-              apply(
-                style.copyWith(
-                  textColor: (style.textColor ?? captionWhite).withValues(alpha: value / 100),
-                ),
-                immediate: false,
-              );
-            }
+            apply(
+              style.copyWith(textOpacity: value < 0 ? null : value / 100),
+              immediate: false,
+            );
           },
         ),
 
@@ -1406,30 +1369,20 @@ class CaptionStylePage extends ConsumerWidget {
         _StyleColors(
           label: 'Colour',
           value: style.background,
-          onPicked: (colour) => apply(
-            style.copyWith(
-              background: colour?.withValues(alpha: style.background?.a ?? captionDefaultBackgroundOpacity),
-            ),
-          ),
+          onPicked: (colour) => apply(style.copyWith(background: colour)),
         ),
         _StyleSlider(
           label: 'Opacity',
-          value: style.background != null ? style.background!.a * 100 : -25,
+          value: style.backgroundOpacity != null ? style.backgroundOpacity! * 100 : -25,
           min: -25,
           max: 100,
           divisions: 5,
           format: (value) => value < 0 ? 'Default' : '${value.round()}%',
           onChanged: (value) {
-            if (value < 0) {
-              apply(style.copyWith(background: null), immediate: false);
-            } else {
-              apply(
-                style.copyWith(
-                  background: (style.background ?? captionBlack).withValues(alpha: value / 100),
-                ),
-                immediate: false,
-              );
-            }
+            apply(
+              style.copyWith(backgroundOpacity: value < 0 ? null : value / 100),
+              immediate: false,
+            );
           },
         ),
 
@@ -1442,26 +1395,20 @@ class CaptionStylePage extends ConsumerWidget {
         _StyleColors(
           label: 'Colour',
           value: style.window,
-          onPicked: (colour) => apply(style.copyWith(window: colour?.withValues(alpha: style.window?.a ?? 0.75))),
+          onPicked: (colour) => apply(style.copyWith(window: colour)),
         ),
         _StyleSlider(
           label: 'Opacity',
-          value: style.window != null ? style.window!.a * 100 : -25,
+          value: style.windowOpacity != null ? style.windowOpacity! * 100 : -25,
           min: -25,
           max: 100,
           divisions: 5,
           format: (value) => value < 0 ? 'Default' : '${value.round()}%',
           onChanged: (value) {
-            if (value < 0) {
-              apply(style.copyWith(window: null), immediate: false);
-            } else {
-              apply(
-                style.copyWith(
-                  window: (style.window ?? captionBlack).withValues(alpha: value / 100),
-                ),
-                immediate: false,
-              );
-            }
+            apply(
+              style.copyWith(windowOpacity: value < 0 ? null : value / 100),
+              immediate: false,
+            );
           },
         ),
 

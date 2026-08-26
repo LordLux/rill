@@ -175,6 +175,25 @@ const OPAQUE_BLACK: RgbaColor = { r: 0, g: 0, b: 0, a: 1 };
 const HALF_BLACK: RgbaColor = { r: 0, g: 0, b: 0, a: 0.5 };
 const OPAQUE_WHITE: RgbaColor = { r: 255, g: 255, b: 255, a: 1 };
 
+/**
+ * Rebuilds one `RgbaColor` from independently-nullable colour and opacity —
+ * the style menu's colour and opacity controls, which must not clear each
+ * other when only one is reset to default. `rgb`'s own alpha is ignored, the
+ * same convention `style.ts`'s `CaptionStyle.textColor` etc. document.
+ */
+function combineRgba(
+  rgb: RgbaColor | null,
+  alpha: number | null,
+  fallback: RgbaColor,
+): RgbaColor {
+  return {
+    r: rgb?.r ?? fallback.r,
+    g: rgb?.g ?? fallback.g,
+    b: rgb?.b ?? fallback.b,
+    a: alpha ?? fallback.a,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // One user style folded into one track's defaults
 // ---------------------------------------------------------------------------
@@ -188,7 +207,22 @@ interface Resolved {
 }
 
 function resolve(options: RenderOptions): Resolved {
-  const style = options.style ?? null;
+  let style = options.style ?? null;
+  // The master switch. Flattened here, once, rather than checked alongside
+  // every individual forceXxx read below — every one of those already knows
+  // how to behave when its own flag is false, so master-off is just "every
+  // flag reads false today" without disturbing what the menu has stored for
+  // when the user turns it back on.
+  if (style !== null && style.forceStyleEnabled === false) {
+    style = {
+      ...style,
+      forceFontFamily: false,
+      forceFontSize: false,
+      forceTextColor: false,
+      forceTextOpacity: false,
+      forceEdgeStyle: false,
+    };
+  }
   return {
     style,
     offset: options.offset ?? null,
@@ -197,7 +231,7 @@ function resolve(options: RenderOptions): Resolved {
       (DEFAULT_FONT_SIZE * (style?.fontSizePercent ?? DEFAULT_FONT_SIZE_PERCENT)) /
         DEFAULT_FONT_SIZE_PERCENT,
     ),
-    textColor: style?.textColor ?? OPAQUE_WHITE,
+    textColor: combineRgba(style?.textColor ?? null, style?.textOpacity ?? null, OPAQUE_WHITE),
   };
 }
 
@@ -379,34 +413,51 @@ function overrides(
  * It generalises past karaoke without having to detect it: on a plain track every
  * run is the base and everything changes, and on a track that colours one word
  * for emphasis the emphasis survives while the rest follows the user.
+ *
+ * **Colour and opacity are resolved independently.** `resolved.style.textColor`
+ * and `.textOpacity` are two separately-nullable fields — see `style.ts` — so a
+ * user who touched only the opacity slider must not have their (never chosen)
+ * colour forced onto authored content, and vice versa. Each starts from
+ * `authored ?? resolved.textColor` (what this run gets if the user had set
+ * neither) and only the *touched* component is overwritten, gated by its own
+ * `forceXxx` flag exactly as before.
  */
 function effectiveTextColor(
   authored: RgbaColor | null,
   resolved: Resolved,
   baseTextColor: RgbaColor | null | undefined,
 ): RgbaColor | null {
-  const user = resolved.style?.textColor ?? null;
+  const userRgb = resolved.style?.textColor ?? null;
+  const userAlpha = resolved.style?.textOpacity ?? null;
+  if (userRgb === null && userAlpha === null) return authored;
+
   const forceColor = resolved.style?.forceTextColor ?? true;
   const forceAlpha = resolved.style?.forceTextOpacity ?? true;
 
-  if (user === null) return authored;
-
   const isHighlight = baseTextColor !== undefined && authored !== null && !sameColor(authored, baseTextColor);
+  if (baseTextColor !== undefined && isHighlight) return authored;
 
-  let r = user.r, g = user.g, b = user.b, a = user.a;
-  if (!forceColor && authored !== null) {
-    r = authored.r; g = authored.g; b = authored.b;
+  const base = authored ?? resolved.textColor;
+  let r = base.r, g = base.g, b = base.b, a = base.a;
+  if (userRgb !== null && (forceColor || authored === null)) {
+    r = userRgb.r; g = userRgb.g; b = userRgb.b;
   }
-  if (!forceAlpha && authored !== null) {
-    a = authored.a;
+  if (userAlpha !== null && (forceAlpha || authored === null)) {
+    a = userAlpha;
   }
 
   if (baseTextColor !== undefined) {
-    if (isHighlight) return authored;
     return { r, g, b, a };
   }
-  
-  if (r === user.r && g === user.g && b === user.b && a === user.a) {
+
+  if (
+    r === resolved.textColor.r &&
+    g === resolved.textColor.g &&
+    b === resolved.textColor.b &&
+    a === resolved.textColor.a
+  ) {
+    // Matches the `Style` line already (which is built from the same
+    // resolved.textColor) — nothing to say with an inline tag.
     return null;
   }
   return { r, g, b, a };

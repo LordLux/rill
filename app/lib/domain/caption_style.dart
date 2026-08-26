@@ -49,9 +49,13 @@ class CaptionStyle {
     this.fontFamily,
     this.fontSizePercent,
     this.textColor,
+    this.textOpacity,
     this.background,
+    this.backgroundOpacity,
     this.window,
+    this.windowOpacity,
     this.edgeStyle,
+    this.forceStyleEnabled = true,
     this.forceFontFamily = true,
     this.forceFontSize = true,
     this.forceTextColor = true,
@@ -66,6 +70,16 @@ class CaptionStyle {
   /// A fresh session, and what the menu's *Reset* produces.
   static const CaptionStyle none = CaptionStyle();
 
+  /// The "Force Style" master switch. Independent of the nine `forceXxx`
+  /// flags below — it does not read them and toggling one does not change
+  /// it — so a tile can be turned on or off without disturbing what the
+  /// other eight are set to, and the menu can show the master truthfully
+  /// without it drifting the moment any single tile differs from the rest.
+  /// `false` gates every one of the nine off, in `ass.ts`'s `resolve()`,
+  /// without touching their stored values — turning the master back on
+  /// restores whatever the tiles already said.
+  final bool forceStyleEnabled;
+
   final String? fontFamily;
   final bool forceFontFamily;
 
@@ -73,20 +87,32 @@ class CaptionStyle {
   final double? fontSizePercent;
   final bool forceFontSize;
 
-  /// Text colour *and* opacity — the alpha channel is the font-opacity control.
+  /// Text colour, independent of [textOpacity] — resetting one to default
+  /// (`null`) must not touch the other, so they are two nullable fields
+  /// rather than one `Color?` carrying both in its alpha channel. Any alpha
+  /// on this [Color] itself is ignored; [textOpacity] is authoritative.
   final Color? textColor;
   final bool forceTextColor;
+
+  /// 0–1. Independent of [textColor] — see there for why.
+  final double? textOpacity;
   final bool forceTextOpacity;
 
-  /// The per-line box behind the words. A zero alpha is a user turning it off.
+  /// The per-line box behind the words, independent of [backgroundOpacity]
+  /// for the same reason [textColor] is independent of [textOpacity].
   final Color? background;
   final bool forceBackgroundColor;
+
+  /// 0–1. `0` is a user turning the background off.
+  final double? backgroundOpacity;
   final bool forceBackgroundOpacity;
 
-  /// The rectangle around every caption on screen. Zero alpha by default, which
-  /// is what YouTube ships.
+  /// The rectangle around every caption on screen, independent of
+  /// [windowOpacity] for the same reason [textColor] is independent of
+  /// [textOpacity]. `0` opacity by default, which is what YouTube ships.
   final Color? window;
   final bool forceWindowColor;
+  final double? windowOpacity;
   final bool forceWindowOpacity;
 
   final CaptionEdgeStyle? edgeStyle;
@@ -96,8 +122,11 @@ class CaptionStyle {
       fontFamily == null &&
       fontSizePercent == null &&
       textColor == null &&
+      textOpacity == null &&
       background == null &&
+      backgroundOpacity == null &&
       window == null &&
+      windowOpacity == null &&
       edgeStyle == null;
 
   /// **A sentinel per field, because every one of them has to be clearable.**
@@ -109,9 +138,13 @@ class CaptionStyle {
     Object? fontFamily = _unchanged,
     Object? fontSizePercent = _unchanged,
     Object? textColor = _unchanged,
+    Object? textOpacity = _unchanged,
     Object? background = _unchanged,
+    Object? backgroundOpacity = _unchanged,
     Object? window = _unchanged,
+    Object? windowOpacity = _unchanged,
     Object? edgeStyle = _unchanged,
+    bool? forceStyleEnabled,
     bool? forceFontFamily,
     bool? forceFontSize,
     bool? forceTextColor,
@@ -127,10 +160,18 @@ class CaptionStyle {
       fontSizePercent:
           identical(fontSizePercent, _unchanged) ? this.fontSizePercent : fontSizePercent as double?,
       textColor: identical(textColor, _unchanged) ? this.textColor : textColor as Color?,
+      textOpacity:
+          identical(textOpacity, _unchanged) ? this.textOpacity : textOpacity as double?,
       background: identical(background, _unchanged) ? this.background : background as Color?,
+      backgroundOpacity: identical(backgroundOpacity, _unchanged)
+          ? this.backgroundOpacity
+          : backgroundOpacity as double?,
       window: identical(window, _unchanged) ? this.window : window as Color?,
+      windowOpacity:
+          identical(windowOpacity, _unchanged) ? this.windowOpacity : windowOpacity as double?,
       edgeStyle:
           identical(edgeStyle, _unchanged) ? this.edgeStyle : edgeStyle as CaptionEdgeStyle?,
+      forceStyleEnabled: forceStyleEnabled ?? this.forceStyleEnabled,
       forceFontFamily: forceFontFamily ?? this.forceFontFamily,
       forceFontSize: forceFontSize ?? this.forceFontSize,
       forceTextColor: forceTextColor ?? this.forceTextColor,
@@ -146,10 +187,14 @@ class CaptionStyle {
   Map<String, Object?> toJson() => {
         'fontFamily': fontFamily,
         'fontSizePercent': fontSizePercent,
-        'textColor': _colorToJson(textColor),
-        'background': _colorToJson(background),
-        'window': _colorToJson(window),
+        'textColor': _rgbToJson(textColor),
+        'textOpacity': textOpacity,
+        'background': _rgbToJson(background),
+        'backgroundOpacity': backgroundOpacity,
+        'window': _rgbToJson(window),
+        'windowOpacity': windowOpacity,
         'edgeStyle': edgeStyle?.wire,
+        'forceStyleEnabled': forceStyleEnabled,
         'forceFontFamily': forceFontFamily,
         'forceFontSize': forceFontSize,
         'forceTextColor': forceTextColor,
@@ -169,10 +214,14 @@ class CaptionStyle {
     return CaptionStyle(
       fontFamily: json['fontFamily'] as String?,
       fontSizePercent: (json['fontSizePercent'] as num?)?.toDouble(),
-      textColor: _colorFromJson(json['textColor'] as Map<String, dynamic>?),
-      background: _colorFromJson(json['background'] as Map<String, dynamic>?),
-      window: _colorFromJson(json['window'] as Map<String, dynamic>?),
+      textColor: _rgbFromJson(json['textColor'] as Map<String, dynamic>?),
+      textOpacity: (json['textOpacity'] as num?)?.toDouble(),
+      background: _rgbFromJson(json['background'] as Map<String, dynamic>?),
+      backgroundOpacity: (json['backgroundOpacity'] as num?)?.toDouble(),
+      window: _rgbFromJson(json['window'] as Map<String, dynamic>?),
+      windowOpacity: (json['windowOpacity'] as num?)?.toDouble(),
       edgeStyle: edge,
+      forceStyleEnabled: json['forceStyleEnabled'] as bool? ?? true,
       forceFontFamily: json['forceFontFamily'] as bool? ?? true,
       forceFontSize: json['forceFontSize'] as bool? ?? true,
       forceTextColor: json['forceTextColor'] as bool? ?? true,
@@ -191,9 +240,13 @@ class CaptionStyle {
       other.fontFamily == fontFamily &&
       other.fontSizePercent == fontSizePercent &&
       other.textColor == textColor &&
+      other.textOpacity == textOpacity &&
       other.background == background &&
+      other.backgroundOpacity == backgroundOpacity &&
       other.window == window &&
+      other.windowOpacity == windowOpacity &&
       other.edgeStyle == edgeStyle &&
+      other.forceStyleEnabled == forceStyleEnabled &&
       other.forceFontFamily == forceFontFamily &&
       other.forceFontSize == forceFontSize &&
       other.forceTextColor == forceTextColor &&
@@ -209,10 +262,14 @@ class CaptionStyle {
         fontFamily,
         fontSizePercent,
         textColor,
+        textOpacity,
         background,
+        backgroundOpacity,
         window,
+        windowOpacity,
         edgeStyle,
         Object.hash(
+          forceStyleEnabled,
           forceFontFamily,
           forceFontSize,
           forceTextColor,
@@ -250,30 +307,28 @@ const List<Color?> captionPalette = [
 const Color captionWhite = Color(0xFFFFFFFF);
 const Color captionBlack = Color(0xFF000000);
 
-/// YouTube's own default caption background: black at 75%.
-///
-/// The sidecar draws this when nobody has said otherwise, and the value is
-/// repeated here for two things that need it before a document exists — the
-/// menu's opacity slider, so it starts where the caption is, and the drag ghost.
-const double captionDefaultBackgroundOpacity = 0.75;
+/// YouTube's own default caption background: black at 75%. `LibassLayer`
+/// paints this on a non-positional track with no [CaptionStyle.background]
+/// set — see `_resolveOverlayColor`.
 const Color captionDefaultBackground = Color(0xBF000000);
 
-/// Straight RGBA, in the order the sidecar reads it. ASS's inversion is the
-/// sidecar's business and stays there.
-Map<String, Object?>? _colorToJson(Color? color) {
+/// RGB only, in the order the sidecar reads it. Opacity travels as its own
+/// field now (`textOpacity`/`backgroundOpacity`/`windowOpacity`), so there is
+/// nothing here for the colour's own alpha channel to carry — any alpha this
+/// [Color] happens to have is not sent and must not be read back out.
+Map<String, Object?>? _rgbToJson(Color? color) {
   if (color == null) return null;
   return {
     'r': (color.r * 255).round(),
     'g': (color.g * 255).round(),
     'b': (color.b * 255).round(),
-    'a': color.a,
   };
 }
 
-Color? _colorFromJson(Map<String, dynamic>? json) {
+Color? _rgbFromJson(Map<String, dynamic>? json) {
   if (json == null) return null;
   return Color.fromARGB(
-    ((json['a'] as num) * 255).round(),
+    255,
     json['r'] as int,
     json['g'] as int,
     json['b'] as int,

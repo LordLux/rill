@@ -14,6 +14,7 @@ import '../../domain/player_controls_visibility.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 import 'caption_geometry.dart';
+import 'settings_menu.dart' show playerMenuProvider;
 import 'libass/ass_binding.dart';
 import 'libass/ass_padding.dart';
 import 'libass/caption_layout.dart';
@@ -32,9 +33,20 @@ import 'libass/ass_reposition.dart';
 /// or window value at all any more for `forceBackgroundColor/Opacity` or
 /// `forceWindowColor/Opacity` to have chosen between. So the user's value
 /// applies whenever they have set one, exactly as it already did for text
-/// when nothing was authored — [fallback] is only for `user == null`,
-/// untouched.
-Color _resolveOverlayColor(Color? user, Color fallback) => user ?? fallback;
+/// when nothing was authored.
+///
+/// **[rgb] and [opacity] combine independently**, the same reason
+/// `CaptionStyle.background`/`.backgroundOpacity` are two nullable fields
+/// rather than one `Color` carrying both — resetting the opacity slider to
+/// default must not also forget a colour the user picked, and vice versa.
+/// Each falls back to [fallback]'s own channel only when its own component is
+/// untouched (`null`).
+Color _resolveOverlayColor(Color? rgb, double? opacity, Color fallback) => Color.from(
+      alpha: opacity ?? fallback.a,
+      red: rgb?.r ?? fallback.r,
+      green: rgb?.g ?? fallback.g,
+      blue: rgb?.b ?? fallback.b,
+    );
 
 class _LibraryWrapper {
   final Pointer<ASS_Library> ptr;
@@ -554,6 +566,13 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     ref.listen(playerControlsVisibleProvider, (previous, next) {
       if (previous != next) _onControlsVisibilityChanged(next);
     });
+    // The settings/quality/captions popup floats wherever its anchor button
+    // is, at whatever height its current page needs — unlike the bottom bar,
+    // there is no one rectangle to reserve against a caption that could be
+    // long, positioned, or dragged anywhere on screen. Simpler and correct
+    // either way: nothing needs a caption's drag handle while a menu is open,
+    // so it goes click-through for exactly as long as one is.
+    final menuOpen = ref.watch(playerMenuProvider.select((menu) => menu.open));
 
     final engine = ref.read(playbackEngineProvider);
     debugPrint('LibassLayer build: engine.subtitle length: ${engine.subtitle?.length}, _currentAss length: ${_currentAss?.length}, _targetAss length: ${_targetAss?.length}, _isCommittingDrag: $_isCommittingDrag');
@@ -592,34 +611,45 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final isDraggable = !isPositional;
         
         final defaultBg = isPositional ? const Color(0x00000000) : captionDefaultBackground;
-        final backgroundColor = _resolveOverlayColor(captions.style.background, defaultBg);
-        final windowColor = _resolveOverlayColor(captions.style.window, const Color(0x00000000));
+        final backgroundColor = _resolveOverlayColor(
+          captions.style.background,
+          captions.style.backgroundOpacity,
+          defaultBg,
+        );
+        final windowColor = _resolveOverlayColor(
+          captions.style.window,
+          captions.style.windowOpacity,
+          const Color(0x00000000),
+        );
 
-        return Stack(
-          children: [
-            Positioned.fromRect(
-              rect: videoRect,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  for (var g = 0; g < _groupBoxes.length; g++)
-                    _CaptionGroup(
-                      key: ValueKey(g),
-                      nudge: Offset(_nudgeFor(g).dx * sx, _nudgeFor(g).dy * sy),
-                      images: _images.where((i) => i.group == g).toList(),
-                      sx: sx,
-                      sy: sy,
-                      backgroundColor: backgroundColor,
-                      windowColor: windowColor,
-                      groupBox: _groupBoxes[g],
-                      showBounds: _showBounds,
-                      onPanUpdate: isDraggable ? _onPanUpdate : null,
-                      onPanEnd: isDraggable ? (_) => _commitDrag() : null,
-                    ),
-                ],
+        return IgnorePointer(
+          ignoring: menuOpen,
+          child: Stack(
+            children: [
+              Positioned.fromRect(
+                rect: videoRect,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (var g = 0; g < _groupBoxes.length; g++)
+                      _CaptionGroup(
+                        key: ValueKey(g),
+                        nudge: Offset(_nudgeFor(g).dx * sx, _nudgeFor(g).dy * sy),
+                        images: _images.where((i) => i.group == g).toList(),
+                        sx: sx,
+                        sy: sy,
+                        backgroundColor: backgroundColor,
+                        windowColor: windowColor,
+                        groupBox: _groupBoxes[g],
+                        showBounds: _showBounds,
+                        onPanUpdate: isDraggable ? _onPanUpdate : null,
+                        onPanEnd: isDraggable ? (_) => _commitDrag() : null,
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );

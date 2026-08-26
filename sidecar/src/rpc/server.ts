@@ -488,13 +488,36 @@ function captionStyleParam(
       "captions.get: 'style.edgeStyle' must be none, outline or dropShadow",
     );
   }
+  // Every forceXxx field was missing here entirely until this fix: none of
+  // them were ever read off `record`, so `resolved.style?.forceTextColor ??
+  // true` (and the other eight, plus the master) always saw `undefined` and
+  // read as force-on regardless of what the client actually sent. Silent —
+  // nothing threw, nothing logged — and unnoticed because force is a no-op
+  // on any track with nothing authored to defer to (ASR, most plain tracks),
+  // which is what every prior check of "does force do anything" happened to
+  // be tested against.
+  const boolOrUndefined = (value: unknown): boolean | undefined =>
+    typeof value === 'boolean' ? value : undefined;
   return {
     fontFamily: typeof record['fontFamily'] === 'string' ? record['fontFamily'] : null,
     fontSizePercent: finiteOrNull(record['fontSizePercent']),
     textColor: colorOrNull(record['textColor'], 'style.textColor'),
+    textOpacity: opacityOrNull(record['textOpacity']),
     background: colorOrNull(record['background'], 'style.background'),
+    backgroundOpacity: opacityOrNull(record['backgroundOpacity']),
     window: colorOrNull(record['window'], 'style.window'),
+    windowOpacity: opacityOrNull(record['windowOpacity']),
     edgeStyle: (edge ?? null) as CaptionStyle['edgeStyle'],
+    forceStyleEnabled: boolOrUndefined(record['forceStyleEnabled']),
+    forceFontFamily: boolOrUndefined(record['forceFontFamily']),
+    forceFontSize: boolOrUndefined(record['forceFontSize']),
+    forceTextColor: boolOrUndefined(record['forceTextColor']),
+    forceTextOpacity: boolOrUndefined(record['forceTextOpacity']),
+    forceBackgroundColor: boolOrUndefined(record['forceBackgroundColor']),
+    forceBackgroundOpacity: boolOrUndefined(record['forceBackgroundOpacity']),
+    forceWindowColor: boolOrUndefined(record['forceWindowColor']),
+    forceWindowOpacity: boolOrUndefined(record['forceWindowOpacity']),
+    forceEdgeStyle: boolOrUndefined(record['forceEdgeStyle']),
   };
 }
 
@@ -516,6 +539,14 @@ function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/**
+ * RGB only — `a` is not read here. Opacity is `textOpacity`/
+ * `backgroundOpacity`/`windowOpacity`'s job now, sent and parsed
+ * separately (`opacityOrNull`), so a colour picked without touching opacity
+ * cannot smuggle a stale or default alpha back in through this object. The
+ * returned `RgbaColor.a` is a placeholder (`1`) that nothing downstream may
+ * read.
+ */
 function colorOrNull(value: unknown, name: string): RgbaColor | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== 'object') {
@@ -527,6 +558,11 @@ function colorOrNull(value: unknown, name: string): RgbaColor | null {
     r: channel('r'),
     g: channel('g'),
     b: channel('b'),
-    a: Math.max(0, Math.min(1, finiteOrNull(record['a']) ?? 1)),
+    a: 1,
   };
+}
+
+function opacityOrNull(value: unknown): number | null {
+  const n = finiteOrNull(value);
+  return n === null ? null : Math.max(0, Math.min(1, n));
 }

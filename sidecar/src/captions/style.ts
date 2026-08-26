@@ -50,6 +50,14 @@ export type CaptionEdgeStyle = 'none' | 'outline' | 'dropShadow';
  * the box is drawn unconditionally and is the drag handle.
  */
 export interface CaptionStyle {
+  /**
+   * The "Force Style" master switch. Independent of the nine `forceXxx`
+   * flags below — `resolve()` in `ass.ts` gates all nine off when this is
+   * `false`, without touching their own values, so turning the master back
+   * on restores whatever each one already said.
+   */
+  forceStyleEnabled?: boolean;
+
   fontFamily: string | null;
   forceFontFamily?: boolean;
   
@@ -57,19 +65,31 @@ export interface CaptionStyle {
   fontSizePercent: number | null;
   forceFontSize?: boolean;
   
-  /** Text colour *and* opacity — `a` is the font-opacity control. */
+  /**
+   * Text colour, independent of `textOpacity` — resetting one to `null`
+   * must not touch the other. `a` on this value is unused; opacity is
+   * `textOpacity`'s job now, not this colour's alpha channel.
+   */
   textColor: RgbaColor | null;
   forceTextColor?: boolean;
+  /** 0–1, independent of `textColor` — see there for why. */
+  textOpacity: number | null;
   forceTextOpacity?: boolean;
-  
-  /** The per-line box. `a: 0` is a user asking for no background. */
+
+  /** The per-line box, independent of `backgroundOpacity` for the same reason
+   * `textColor` is independent of `textOpacity`. `a` is unused. */
   background: RgbaColor | null;
   forceBackgroundColor?: boolean;
+  /** 0–1. `0` is a user asking for no background. */
+  backgroundOpacity: number | null;
   forceBackgroundOpacity?: boolean;
-  
-  /** The rectangle around every caption on screen. `a: 0` is YouTube's default. */
+
+  /** The rectangle around every caption on screen, independent of
+   * `windowOpacity` for the same reason. `a` is unused. */
   window: RgbaColor | null;
   forceWindowColor?: boolean;
+  /** 0–1. `0` is YouTube's default. */
+  windowOpacity: number | null;
   forceWindowOpacity?: boolean;
   
   edgeStyle: CaptionEdgeStyle | null;
@@ -78,18 +98,22 @@ export interface CaptionStyle {
 
 /** Nothing overridden — what a fresh session and the menu's reset both produce. */
 export const NO_CAPTION_STYLE: CaptionStyle = {
+  forceStyleEnabled: true,
   fontFamily: null,
   forceFontFamily: true,
   fontSizePercent: null,
   forceFontSize: true,
   textColor: null,
   forceTextColor: true,
+  textOpacity: null,
   forceTextOpacity: true,
   background: null,
   forceBackgroundColor: true,
+  backgroundOpacity: null,
   forceBackgroundOpacity: true,
   window: null,
   forceWindowColor: true,
+  windowOpacity: null,
   forceWindowOpacity: true,
   edgeStyle: null,
   forceEdgeStyle: true,
