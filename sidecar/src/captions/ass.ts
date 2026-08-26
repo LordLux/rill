@@ -402,17 +402,16 @@ function overrides(
 /**
  * The colour one run actually gets, or `null` to inherit the `Style`.
  *
- * **The karaoke rule lives here, and it is why this is not a one-liner.** A user
- * font colour replaces the *line's base colour* and nothing else. On a karaoke
- * track the sung and unsung runs are two inline colours; replacing both flattens
- * the highlight into one colour, so the caption looks broken while the setting
- * looks like it worked — the silent class of failure this project keeps finding.
- * So a run whose colour differs from the line's base is left exactly as authored,
- * and only the base follows the user.
- *
- * It generalises past karaoke without having to detect it: on a plain track every
- * run is the base and everything changes, and on a track that colours one word
- * for emphasis the emphasis survives while the rest follows the user.
+ * **A run whose colour differs from the line's base — a karaoke highlight, or
+ * one word coloured for emphasis — is authored content, exactly like a run
+ * that matches the base.** It follows the same rule as any other authored
+ * value in this file: `forceTextColor` off defers to it, on replaces it. There
+ * is deliberately no separate carve-out that protects a highlight from a force
+ * the user actually asked for — `forceTextColor` defaults to `true`, so
+ * without this a caption with several inline colours (three speakers marked by
+ * colour, say) could never be unified by the style menu at all, which is the
+ * bug this shape of cue was filed as. A real karaoke track that should keep
+ * its highlight is protected the ordinary way: leave force off.
  *
  * **Colour and opacity are resolved independently.** `resolved.style.textColor`
  * and `.textOpacity` are two separately-nullable fields — see `style.ts` — so a
@@ -433,9 +432,6 @@ function effectiveTextColor(
 
   const forceColor = resolved.style?.forceTextColor ?? true;
   const forceAlpha = resolved.style?.forceTextOpacity ?? true;
-
-  const isHighlight = baseTextColor !== undefined && authored !== null && !sameColor(authored, baseTextColor);
-  if (baseTextColor !== undefined && isHighlight) return authored;
 
   const base = authored ?? resolved.textColor;
   let r = base.r, g = base.g, b = base.b, a = base.a;
@@ -461,11 +457,6 @@ function effectiveTextColor(
     return null;
   }
   return { r, g, b, a };
-}
-
-function sameColor(a: RgbaColor, b: RgbaColor | null): boolean {
-  if (b === null) return false;
-  return a.r === b.r && a.g === b.g && a.b === b.b && a.a === b.a;
 }
 
 /** What edges this cue draws, or `null` to leave the `Style`'s alone. */

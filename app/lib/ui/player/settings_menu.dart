@@ -1102,6 +1102,9 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
       final foregroundColor = isHovered
           ? (isEnabled ? scheme.onPrimary : scheme.onSecondaryContainer)
           : (isEnabled ? scheme.onPrimaryContainer : scheme.onSurfaceVariant);
+      // The label reads too close to full contrast when disabled — the icon
+      // stays as-is, just the text underneath it dims further.
+      final labelColor = isEnabled ? foregroundColor : foregroundColor.withValues(alpha: 0.6);
       // No hover, no click, while the master is off — the tiles depend on
       // it rather than the other way around.
       return IgnorePointer(
@@ -1148,7 +1151,7 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
                     fontSize: 10,
                     height: 1.1,
                     fontWeight: FontWeight.w500,
-                    color: foregroundColor,
+                    color: labelColor,
                   ),
                 ),
               ],

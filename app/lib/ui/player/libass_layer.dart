@@ -14,7 +14,7 @@ import '../../domain/player_controls_visibility.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 import 'caption_geometry.dart';
-import 'settings_menu.dart' show playerMenuProvider;
+import 'settings_menu.dart' show playerMenuProvider, settingsMenuPanelKey, settingsMenuFade, settingsMenuMorph;
 import 'libass/ass_binding.dart';
 import 'libass/ass_padding.dart';
 import 'libass/caption_layout.dart';
@@ -113,6 +113,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
   double? _lastWidth;
   double? _lastHeight;
+  double? _lastVideoLeft;
   double _targetTimeSeconds = 0;
 
   List<_SubtitleImage> _images = [];
@@ -437,13 +438,80 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     });
   }
 
+  /// Clearance kept to the left of the settings panel's own rendered left
+  /// edge, in screen pixels — mirrors [_controlBarClearance].
+  static const double _settingsMenuClearance = 16.0;
+
+  /// The debounced read of the menu's open state — see
+  /// [_onSettingsMenuChanged]. Starts `false`: no menu is open on first build.
+  bool _reserveForSettingsMenu = false;
+  Timer? _settingsMenuReleaseTimer;
+  Timer? _settingsMenuSettleTimer;
+
+  /// How much of the frame's right edge, in document pixels, the settings
+  /// panel currently reserves.
+  ///
+  /// Read from the panel's own rendered box (`settingsMenuPanelKey`, the
+  /// `Material` in `PlayerSettingsMenu` — already a `GlobalKey`, unlike the
+  /// control bar's, so no similar conversion was needed here) rather than its
+  /// fixed `right:`/width constants, because it grows past its floor width for
+  /// long labels (`_menuMaxWidth`) and its `AnimatedSize` means the box the
+  /// user is looking at and the box this measures are never more than one
+  /// frame apart. The panel is positioned in the same coordinate space as
+  /// this layer's own `LayoutBuilder` box (`context`'s render object) — both
+  /// descend from the same player-box ancestor — so its left edge is read
+  /// through `globalToLocal`/`localToGlobal` against that box, then offset by
+  /// [_lastVideoLeft] to land in the video-relative space `_computeNudges`
+  /// already works in, and finally scaled into document units the same way
+  /// [_reservedBottomDocPx] does.
+  double get _reservedRightDocPx {
+    if (!_reserveForSettingsMenu) return 0;
+    if (_lastWidth == null || _padded == null || _lastVideoLeft == null) return 0;
+    final videoBox = context.findRenderObject();
+    if (videoBox is! RenderBox || !videoBox.hasSize) return 0;
+    final panelBox = settingsMenuPanelKey.currentContext?.findRenderObject();
+    if (panelBox is! RenderBox || !panelBox.hasSize) return 0;
+    final panelLocal = videoBox.globalToLocal(panelBox.localToGlobal(Offset.zero));
+    final sx = _lastWidth! / _padded!.playResX;
+    final panelLeftPx = panelLocal.dx - _lastVideoLeft!;
+    final safeRightPx = panelLeftPx - _settingsMenuClearance;
+    final reserved = _padded!.playResX - safeRightPx / sx;
+    return reserved.clamp(0, _padded!.playResX.toDouble());
+  }
+
+  /// **Immediate on open, debounced on close** — same rationale as
+  /// [_onControlsVisibilityChanged]. `pageChanged` additionally catches a
+  /// paused video: nothing else re-renders when navigating between the
+  /// panel's pages mid-pause, so a follow-up render is scheduled for once its
+  /// `AnimatedSize` (`settingsMenuMorph`) has settled on the new page's width.
+  void _onSettingsMenuChanged(bool open, {bool pageChanged = false}) {
+    if (open) {
+      _settingsMenuReleaseTimer?.cancel();
+      _reserveForSettingsMenu = true;
+      _scheduleRender(_targetTimeSeconds);
+      if (pageChanged) {
+        _settingsMenuSettleTimer?.cancel();
+        _settingsMenuSettleTimer = Timer(settingsMenuMorph, () {
+          if (mounted) _scheduleRender(_targetTimeSeconds);
+        });
+      }
+      return;
+    }
+    _settingsMenuReleaseTimer = Timer(settingsMenuFade, () {
+      if (!mounted) return;
+      _reserveForSettingsMenu = false;
+      _scheduleRender(_targetTimeSeconds);
+    });
+  }
+
   List<Offset> _computeNudges(List<Box> boxes, int nowMs) {
     if (boxes.isEmpty) return const [];
+    final w = _padded!.playResX - _reservedRightDocPx;
     final h = _padded!.playResY - _reservedBottomDocPx;
     final out = List<Offset>.filled(boxes.length, Offset.zero);
     for (var i = 0; i < boxes.length; i++) {
       final b = boxes[i].shift(_dragDelta.dx, _dragDelta.dy);
-      final clamp = clampOffset(b, _padded!.playResX.toDouble(), h);
+      final clamp = clampOffset(b, w, h);
       out[i] = Offset(_dragDelta.dx + clamp[0], _dragDelta.dy + clamp[1]);
     }
     return out;
@@ -474,7 +542,9 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     var dy = _dragDelta.dy + details.delta.dy / sy;
 
     // Same reservation `_computeNudges` applies passively on every render —
-    // here so a live drag cannot be thrown past the bar either.
+    // here so a live drag cannot be thrown past the bar or the settings
+    // panel either.
+    final safeRight = _padded!.playResX - _reservedRightDocPx;
     final safeBottom = _padded!.playResY - _reservedBottomDocPx;
 
     var loX = double.negativeInfinity, hiX = double.infinity;
@@ -487,7 +557,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
       final bPadded = Box(b.left - padX, b.top - padY, b.right + padX, b.bottom + padY);
 
       loX = math.max(loX, -bPadded.left);
-      hiX = math.min(hiX, _padded!.playResX - bPadded.right);
+      hiX = math.min(hiX, safeRight - bPadded.right);
       loY = math.max(loY, -bPadded.top);
       hiY = math.min(hiY, safeBottom - bPadded.bottom);
     }
@@ -527,6 +597,8 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   void dispose() {
     _posSub?.cancel();
     _controlBarReleaseTimer?.cancel();
+    _settingsMenuReleaseTimer?.cancel();
+    _settingsMenuSettleTimer?.cancel();
     _disposed = true;
 
     final lib = _assLibrary;
@@ -566,16 +638,22 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     ref.listen(playerControlsVisibleProvider, (previous, next) {
       if (previous != next) _onControlsVisibilityChanged(next);
     });
-    // The settings/quality/captions popup floats wherever its anchor button
-    // is, at whatever height its current page needs — unlike the bottom bar,
-    // there is no one rectangle to reserve against a caption that could be
-    // long, positioned, or dragged anywhere on screen. Simpler and correct
-    // either way: nothing needs a caption's drag handle while a menu is open,
-    // so it goes click-through for exactly as long as one is.
+    // The settings/quality/captions panel is right-anchored and reserved
+    // against the same way the bottom bar is — see `_reservedRightDocPx`.
+    // Independently, nothing needs a caption's drag handle while any menu is
+    // open, so it goes click-through for exactly as long as one is (belt and
+    // braces alongside the reservation: a long caption or an edge case in the
+    // geometry read should never be able to trap a click the menu was owed).
     final menuOpen = ref.watch(playerMenuProvider.select((menu) => menu.open));
+    ref.listen(playerMenuProvider, (previous, next) {
+      if (previous?.open != next.open) {
+        _onSettingsMenuChanged(next.open);
+      } else if (next.open && previous?.page != next.page) {
+        _onSettingsMenuChanged(true, pageChanged: true);
+      }
+    });
 
     final engine = ref.read(playbackEngineProvider);
-    debugPrint('LibassLayer build: engine.subtitle length: ${engine.subtitle?.length}, _currentAss length: ${_currentAss?.length}, _targetAss length: ${_targetAss?.length}, _isCommittingDrag: $_isCommittingDrag');
     if (engine.subtitle != _currentAss && !_isCommittingDrag && engine.subtitle != _targetAss) {
       _targetAss = engine.subtitle;
       _dragDelta = Offset.zero;
@@ -592,6 +670,12 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         
         final videoRect = videoRectIn(constraints.biggest, widget.aspectRatio);
         if (videoRect.width == 0 || videoRect.height == 0) return const SizedBox.shrink();
+
+        // Always current, not gated behind the width/height-changed check
+        // below — a pure re-centering (letterboxing shifting without the
+        // video's own size changing) would otherwise leave this stale, and
+        // `_reservedRightDocPx` reads it on every render.
+        _lastVideoLeft = videoRect.left;
 
         if (_lastWidth != videoRect.width || _lastHeight != videoRect.height) {
           _lastWidth = videoRect.width;
@@ -714,49 +798,58 @@ class _CaptionGroup extends StatelessWidget {
         height: groupBox.height * sy,
         child: child!,
       ),
-      child: MouseRegion(
-        cursor: onPanUpdate != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onPanUpdate: onPanUpdate,
-          onPanEnd: onPanEnd,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              if (backgroundColor.a > 0 || windowColor.a > 0)
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _BackgroundPainter(
-                      lines: lineRects,
-                      windowBox: groupBox,
-                      sx: sx,
-                      sy: sy,
-                      backgroundColor: backgroundColor,
-                      windowColor: windowColor,
-                    ),
-                  ),
-                ),
-              if (showBounds)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.cyanAccent, width: 1),
+      // A positional caption (`onPanUpdate`/`onPanEnd` both null, from
+      // `isDraggable = !isPositional`) has nothing for the gesture detector
+      // below to do — but `HitTestBehavior.opaque` absorbs the hit test
+      // either way, so without this it would still swallow a click meant for
+      // the video underneath. Ignored entirely rather than left opaque-but-
+      // inert, so hover, taps and scroll all pass through untouched.
+      child: IgnorePointer(
+        ignoring: onPanUpdate == null,
+        child: MouseRegion(
+          cursor: onPanUpdate != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanUpdate: onPanUpdate,
+            onPanEnd: onPanEnd,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                if (backgroundColor.a > 0 || windowColor.a > 0)
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _BackgroundPainter(
+                        lines: lineRects,
+                        windowBox: groupBox,
+                        sx: sx,
+                        sy: sy,
+                        backgroundColor: backgroundColor,
+                        windowColor: windowColor,
                       ),
                     ),
                   ),
-                ),
-              for (final img in images)
-                Positioned(
-                  // The image coordinates are ALREADY physical screen pixels. 
-                  // We just offset them by the group box's top-left to place them correctly in this local Stack!
-                  left: img.x - (groupBox.left * sx),
-                  top: img.y - (groupBox.top * sy),
-                  width: img.w,
-                  height: img.h,
-                  child: RawImage(image: img.image, filterQuality: FilterQuality.high),
-                ),
-            ],
+                if (showBounds)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.cyanAccent, width: 1),
+                        ),
+                      ),
+                    ),
+                  ),
+                for (final img in images)
+                  Positioned(
+                    // The image coordinates are ALREADY physical screen pixels.
+                    // We just offset them by the group box's top-left to place them correctly in this local Stack!
+                    left: img.x - (groupBox.left * sx),
+                    top: img.y - (groupBox.top * sy),
+                    width: img.w,
+                    height: img.h,
+                    child: RawImage(image: img.image, filterQuality: FilterQuality.high),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
