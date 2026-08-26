@@ -381,9 +381,21 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     return rawImages;
   }
 
+  /// Clearance kept above the bar's own rendered height, in screen pixels —
+  /// the bar's hit box is what's measured, and a caption sitting flush against
+  /// it still reads as touching it.
+  static const double _controlBarClearance = 16.0;
+
+  /// The debounced read of [playerControlsVisibleProvider] — see
+  /// [_onControlsVisibilityChanged]. Starts `true` to match the bar's own
+  /// initial state (`_PlayerControlsState._visible`).
+  bool _reserveForControlBar = true;
+  Timer? _controlBarReleaseTimer;
+
   /// How much of the frame's bottom, in document (`PlayRes`) pixels, the
-  /// visible control bar currently covers — 0 when it is hidden, or has not
-  /// laid out yet.
+  /// control bar currently reserves — 0 once [_reserveForControlBar] has
+  /// caught up to the bar actually being hidden, or before there's any
+  /// geometry to measure it against.
   ///
   /// Read from the bar's own rendered size (`playerControlsBarKey`) rather
   /// than a guessed constant, because the bar's height differs between the
@@ -393,12 +405,32 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   /// libass actually rendered rather than an independent estimate of them —
   /// the mistake `CaptionMetrics` was retired for (`architecture.md` §2.9).
   double get _reservedBottomDocPx {
-    if (!ref.read(playerControlsVisibleProvider)) return 0;
+    if (!_reserveForControlBar) return 0;
     if (_lastHeight == null || _padded == null) return 0;
     final box = playerControlsBarKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return 0;
     final sy = _lastHeight! / _padded!.playResY;
-    return box.size.height / sy;
+    return (box.size.height + _controlBarClearance) / sy;
+  }
+
+  /// **Immediate on the way in, debounced on the way out.** The bar itself
+  /// fades out over a couple hundred milliseconds (`controls.dart`'s
+  /// `_fadeDuration`), and dropping the reservation the instant
+  /// `playerControlsVisibleProvider` flips means the caption starts sliding
+  /// back down while the bar is still visibly there. A control reappearing
+  /// has no such grace period — that one has to protect the click.
+  void _onControlsVisibilityChanged(bool visible) {
+    _controlBarReleaseTimer?.cancel();
+    if (visible) {
+      _reserveForControlBar = true;
+      _scheduleRender(_targetTimeSeconds);
+      return;
+    }
+    _controlBarReleaseTimer = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      _reserveForControlBar = false;
+      _scheduleRender(_targetTimeSeconds);
+    });
   }
 
   List<Offset> _computeNudges(List<Box> boxes, int nowMs) {
@@ -490,6 +522,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   @override
   void dispose() {
     _posSub?.cancel();
+    _controlBarReleaseTimer?.cancel();
     _disposed = true;
 
     final lib = _assLibrary;
@@ -527,7 +560,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     // a caption revealed by that path would sit under the bar until the next
     // seek or play.
     ref.listen(playerControlsVisibleProvider, (previous, next) {
-      if (previous != next) _scheduleRender(_targetTimeSeconds);
+      if (previous != next) _onControlsVisibilityChanged(next);
     });
 
     final engine = ref.read(playbackEngineProvider);
