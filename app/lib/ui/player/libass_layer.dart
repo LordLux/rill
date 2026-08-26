@@ -312,13 +312,24 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
           _images = newImages;
           _groupBoxes = newBoxes;
-          _nudges = isDraggable
-              ? _computeNudges(newBoxes, nowMs)
-              : List.filled(newBoxes.length, Offset.zero);
+          // Cleared *before* `_computeNudges` runs, not after. `newBoxes` on a
+          // commit's first render is already the shifted script's boxes — the
+          // reposition is baked into the document (`_commitDrag`'s
+          // `repositionScript`) — so computing nudges against them while
+          // `_dragDelta` still held the drag's own full offset applied that
+          // offset a second time for exactly this one frame, which the clamp
+          // then fights however the geometry happens to resolve it: overshoot,
+          // undershoot, or a snap back toward the pre-drag position depending
+          // on how close the commit landed to an edge. Resetting first means
+          // this render computes nudges the same way any steady-state one
+          // after it will.
           if (_isCommittingDrag) {
             _dragDelta = Offset.zero;
             _isCommittingDrag = false;
           }
+          _nudges = isDraggable
+              ? _computeNudges(newBoxes, nowMs)
+              : List.filled(newBoxes.length, Offset.zero);
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           for (final i in previous) i.image.dispose();

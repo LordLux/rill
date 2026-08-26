@@ -103,6 +103,52 @@ void main() {
       expect(engine.subtitles.last, isNotNull);
     });
 
+    test('a colour change notifies watchers twice: the style write and the fetch landing',
+        () async {
+      // The bug this guards: `_fetch`'s last write was `state.copyWith(tracks:
+      // newTracks, isLoadingTrack: false)`. On a track whose styled/positional
+      // classification doesn't change (the common case — nothing here reclassifies
+      // it), `newTracks` is null and `isLoadingTrack` was already false, so that
+      // write produced a `CaptionsState` equal to the one already there.
+      // Riverpod does not notify on a `state = value` that equals the previous
+      // state, so `LibassLayer` — which only looks at `engine.subtitle` inside a
+      // build triggered by watching this provider — was never told a new document
+      // had landed. It kept showing whatever was on screen until some *other*,
+      // later field change dragged a rebuild along with it: "one step behind".
+      //
+      // A single `setStyle(..., immediate: true)` call makes *two* writes:
+      // `state = state.copyWith(style: style)` at the top (always notifies,
+      // since `style` itself changed — this is why a test that only checks "did
+      // it notify at all" cannot catch the bug, that write always passes) and
+      // the tail write once the fetch lands (notifies only with the
+      // `documentVersion` fix). So the real assertion is the *count within one
+      // call*, not just whether it moved off zero.
+      await play('a');
+      await controller.select('.en');
+      await settle();
+
+      var notifications = 0;
+      final sub = container.listen(captionsProvider, (previous, next) => notifications++);
+      addTearDown(sub.close);
+
+      await controller.setStyle(
+        const CaptionStyle(textColor: Color(0xFF4CAF50)),
+        immediate: true,
+      );
+      await settle();
+      expect(notifications, 2,
+          reason: 'one for the style field itself, one for the fetched document landing — '
+              'without the second, LibassLayer is never told to look at engine.subtitle again');
+
+      notifications = 0;
+      await controller.setStyle(
+        const CaptionStyle(textColor: Color(0xFFFFEB3B)),
+        immediate: true,
+      );
+      await settle();
+      expect(notifications, 2, reason: 'the second colour change must land the same way');
+    });
+
     test('slider input is debounced into one commit, not one per frame', () async {
       // A colour or opacity slider fires per frame, and each change costs a
       // round trip plus a `sub-add`. Without the debounce a single drag would
@@ -123,6 +169,43 @@ void main() {
       expect((log.last['style'] as Map)['fontSizePercent'], 180,
           reason: 'and the value that lands is the last one, not an early one');
     });
+
+    test('three separate, fully-settled slider commits each carry their own value', () async {
+      // Reported: opacity 100 -> 0 does nothing; then 0 -> 50 shows 0; then
+      // 50 -> 100 shows 50 — every commit one step behind the one before it.
+      // Each step here is `immediate: false` (what the opacity slider actually
+      // passes) and is awaited to full settle before the next starts, so this
+      // is not the debounce-collapsing-a-burst case above — each is its own
+      // independent, completed action.
+      await play('a');
+      await controller.select('.en');
+
+      await controller.setStyle(const CaptionStyle(textOpacity: 0));
+      await settle();
+      expect((await gets()).last['style'], isNotNull, reason: 'a default-null->0 change is not a no-op');
+      expect(((await gets()).last['style'] as Map)['textOpacity'], 0,
+          reason: 'the first commit must carry 0, not be dropped as a no-op');
+
+      await controller.setStyle(const CaptionStyle(textOpacity: 0.5));
+      await settle();
+      expect(((await gets()).last['style'] as Map)['textOpacity'], 0.5,
+          reason: 'the second commit must carry 0.5, not the previous 0');
+
+      await controller.setStyle(const CaptionStyle(textOpacity: 1));
+      await settle();
+      expect(((await gets()).last['style'] as Map)['textOpacity'], 1,
+          reason: 'the third commit must carry 1, not the previous 0.5');
+    });
+
+    // A widget-level version of the test above — real controller, real
+    // `PlayerSettingsMenu`, real 120ms debounce — was tried and dropped: it
+    // hung `flutter test` for the full 10-minute test timeout rather than
+    // failing or passing. `testWidgets`'s pumped clock and a real RPC
+    // subprocess's genuine async I/O do not mix reliably in this harness;
+    // `settings_menu_test.dart`'s widget tests avoid it by never using real
+    // RPC, and this file's real-RPC tests avoid it by never pumping a widget.
+    // Combining both is the one thing neither file does, and it is not a
+    // fixable test — it needs a different harness, not a longer timeout.
 
     test('the style survives a track change and a video change', () async {
       // It is a session preference, like the chosen language. Someone who turned

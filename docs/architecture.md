@@ -757,6 +757,27 @@ none is worth approximating:
 Each is counted per document and logged, so a track leaning on one is visible in
 the log rather than silently plain.
 
+**A styled track's authored background colour is not painted — chosen, not
+discovered missing.** `json3.ts` still parses it onto `CueStyle.backgroundColor`;
+nothing downstream reads it, on either side. Phase 5 moved the caption
+background off the ASS document to client-side compositing
+(`LibassLayer._BackgroundPainter`, "What phase 5 deleted" above), driven by the
+user's own colour choice, and never carried the per-cue authored one over to
+that new path. Two things make this a real decision rather than an oversight
+nobody has gotten to: the wire protocol carries one ASS document per track and
+nothing per-cue (`protocol.md` §3.8), so wiring authored background through
+needs a new time-indexed channel the client can resolve against the currently
+showing cue; and the ASS-native alternative — put the box back in the document
+— is the one this section's "What phase 5 deleted" already walked back, because
+`BorderStyle: 3` replaces the outline rather than sitting behind it, so a
+background sharing an event with the text would silently kill every edge style
+again. Measured 2026-08-20 (§2.10's sample): **0 of 23 tracks across 20 ordinary
+videos were styled at all**; every styled track in this project's corpus is a
+caption-art demo (`L-BgxLtMxh0`, `1S7uIQmkRzk`, `8Oos6D4_Bjo`). **What would
+change this:** a styled track with a real, non-demo authored background turning
+up in the wild — the case for the channel is the frequency, not the
+difficulty, and right now the frequency is zero.
+
 ### Who draws a caption — decided 2026-08-20
 
 Draggable captions need three things libass will not hand over: a rounded box, the

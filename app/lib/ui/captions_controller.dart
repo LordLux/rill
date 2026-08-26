@@ -51,6 +51,7 @@ class CaptionsState {
     this.error,
     this.style = CaptionStyle.none,
     this.offset = CaptionOffset.zero,
+    this.documentVersion = 0,
   });
 
   /// Every track for the current video, **after** the sidecar's `ANDROID_VR` →
@@ -89,6 +90,25 @@ class CaptionsState {
   /// which is the one continuity a user notices.
   final CaptionOffset offset;
 
+  /// Bumped every time [CaptionsController._fetch] applies a newly-fetched
+  /// document to the engine, and nothing else.
+  ///
+  /// **Exists purely so this state is never value-equal to the one before
+  /// it on a successful fetch.** Every other field a style or track change
+  /// touches can, on its own, land back on a value equal to what was already
+  /// there — a colour change that doesn't reclassify the track's
+  /// `styled`/`positional` flags writes `tracks: null, isLoadingTrack:
+  /// false` at the end of `_fetch`, which is `==` to the state already
+  /// there whenever both were already true. Riverpod does not notify
+  /// `ref.watch`ers on a `state = value` that equals the previous state, so
+  /// that write was a silent no-op: `engine.subtitle` had the new document,
+  /// but nothing told `LibassLayer` to look again, and it kept the old one
+  /// on screen until some *unrelated* field changed later and dragged it
+  /// along — which is what "the caption is always one step behind" was.
+  /// `LibassLayer` doesn't read this value; it only needs the state
+  /// containing it to reliably change so `ref.watch` fires.
+  final int documentVersion;
+
   bool get hasTracks => tracks.isNotEmpty;
   bool get isOn => selectedId != null;
 
@@ -107,6 +127,7 @@ class CaptionsState {
     Object? error = _unchanged,
     CaptionStyle? style,
     CaptionOffset? offset,
+    int? documentVersion,
   }) {
     return CaptionsState(
       tracks: tracks ?? this.tracks,
@@ -116,6 +137,7 @@ class CaptionsState {
       error: identical(error, _unchanged) ? this.error : error as String?,
       style: style ?? this.style,
       offset: offset ?? this.offset,
+      documentVersion: documentVersion ?? this.documentVersion,
     );
   }
 
@@ -128,11 +150,12 @@ class CaptionsState {
       other.error == error &&
       other.style == style &&
       other.offset == offset &&
+      other.documentVersion == documentVersion &&
       _sameTracks(other.tracks, tracks);
 
   @override
-  int get hashCode => Object.hash(
-      selectedId, isLoadingTracks, isLoadingTrack, error, tracks.length, style, offset);
+  int get hashCode => Object.hash(selectedId, isLoadingTracks, isLoadingTrack, error, tracks.length,
+      style, offset, documentVersion);
 
   static bool _sameTracks(List<CaptionTrack> a, List<CaptionTrack> b) {
     if (a.length != b.length) return false;
@@ -432,7 +455,11 @@ class CaptionsController extends Notifier<CaptionsState> {
         }
       }
 
-      state = state.copyWith(tracks: newTracks, isLoadingTrack: false);
+      state = state.copyWith(
+        tracks: newTracks,
+        isLoadingTrack: false,
+        documentVersion: state.documentVersion + 1,
+      );
     } on Object catch (e) {
       if (_stale(generation)) return;
       // Back to Off rather than leaving a track ticked that is not showing. A

@@ -805,6 +805,36 @@ void main() {
       expect(captions.appliedImmediately.every((immediate) => !immediate), isTrue);
     });
 
+    testWidgets('two separate, fully-settled taps each carry their own target, not the one before',
+        (tester) async {
+      // Reported: a slider commit is one step behind the one before it —
+      // opacity 100 -> 0 does nothing, then 0 -> 50 shows 0. Absolute taps at
+      // known positions, rather than relative drags (whose synthesized start
+      // point is a test-harness detail, not app behaviour), so the expected
+      // target of each tap is known independently of what the previous one did.
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      final sizeSlider = find.byType(Slider).first; // 'Size' — fontSizePercent, 50..300
+      await tester.ensureVisible(sizeSlider);
+      await tester.pumpAndSettle();
+      final trackRect = tester.getRect(sizeSlider);
+
+      await tester.tapAt(Offset(trackRect.left + trackRect.width * 0.05, trackRect.center.dy));
+      await tester.pumpAndSettle();
+      final captions = container.read(captionsProvider.notifier) as _FixedCaptions;
+      expect(captions.applied, isNotEmpty);
+      final firstTarget = captions.applied.last.fontSizePercent!;
+      expect(firstTarget, lessThan(100), reason: 'a tap near the left edge must land near the low end');
+
+      await tester.tapAt(Offset(trackRect.left + trackRect.width * 0.95, trackRect.center.dy));
+      await tester.pumpAndSettle();
+      final secondTarget = captions.applied.last.fontSizePercent!;
+      expect(secondTarget, greaterThan(200),
+          reason: 'a tap near the right edge must land near the high end, not repeat the first tap\'s target');
+    });
+
     testWidgets('back returns to the track list, not to the root', (tester) async {
       await pumpCaptions(tester, [track('English')]);
       await tester.tap(find.byKey(playerCaptionStyleRowKey));
