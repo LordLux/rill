@@ -1407,7 +1407,7 @@ describe('the style menu', () => {
     fontSizePercent: 150,
   };
 
-  test('a user override suppresses the authored tag rather than racing it', () => {
+  test('a user font-family override suppresses the authored tag rather than racing it', () => {
     // Emitting both and relying on order would put the answer in libass's
     // precedence rules instead of in `ass.ts`.
     const ass = renderAss(oneCue('styled', authored), {
@@ -1415,7 +1415,24 @@ describe('the style menu', () => {
     });
     expect(ass).toContain('Style: Default,Georgia,96,');
     expect(textEvents(ass)[0]).not.toContain('\\fnComic Sans MS');
-    expect(textEvents(ass)[0]).not.toContain('\\fs');
+  });
+
+  test('a forced font size multiplies the authored size rather than replacing it', () => {
+    // Replacing outright would flatten every run to one size, discarding
+    // whatever relative emphasis the track authored — 150% authored times a
+    // 200% user preference is 300% (of the 48-unit baseline: 144), not 200%.
+    const ass = renderAss(oneCue('styled', authored), {
+      style: { ...NO_CAPTION_STYLE, fontSizePercent: 200 },
+    });
+    expect(textEvents(ass)[0]).toContain('\\fs144');
+  });
+
+  test('an unforced font size leaves the authored size untouched', () => {
+    // 150% authored, regardless of what the user's own percent is set to.
+    const ass = renderAss(oneCue('styled', authored), {
+      style: { ...NO_CAPTION_STYLE, fontSizePercent: 200, forceFontSize: false },
+    });
+    expect(textEvents(ass)[0]).toContain('\\fs72');
   });
 
   const karaokeCue = (sung: CueStyle, base: CueStyle) => ({

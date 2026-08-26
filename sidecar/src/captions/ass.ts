@@ -357,11 +357,8 @@ function overrides(
     if (style.fontFamily !== null && (user?.fontFamily == null || user?.forceFontFamily === false)) {
       tags.push(`\\fn${style.fontFamily}`);
     }
-    if (style.fontSizePercent !== null && (user?.fontSizePercent == null || user?.forceFontSize === false)) {
-      tags.push(
-        `\\fs${Math.round((style.fontSizePercent / DEFAULT_FONT_SIZE_PERCENT) * resolved.fontSize)}`,
-      );
-    }
+    const fontSize = effectiveFontSize(style.fontSizePercent, resolved);
+    if (fontSize !== null) tags.push(`\\fs${fontSize}`);
   }
 
   const textColor = effectiveTextColor(style?.textColor ?? null, resolved, context.baseTextColor);
@@ -397,6 +394,29 @@ function overrides(
   }
 
   return tags.length === 0 ? '' : `{${tags.join('')}}`;
+}
+
+/**
+ * The font size one run actually gets, in this document's absolute units, or
+ * `null` when nothing was authored for it to say.
+ *
+ * **Unforced defers to the authored percent untouched; forced multiplies it
+ * by the user's percent rather than replacing it outright.** A hard
+ * replacement would flatten every run to one size, discarding whatever
+ * relative emphasis the track authors — the same failure mode
+ * `effectiveTextColor` was fixed for, just along a different axis. 100% is a
+ * no-op multiplier; 200% doubles both an authored baseline run and whatever
+ * bigger or smaller text a cue carries for emphasis, so a track that sizes
+ * one word up keeps that relationship under an accessibility "make
+ * everything bigger" preference instead of losing it to one flat size.
+ */
+function effectiveFontSize(authoredPercent: number | null, resolved: Resolved): number | null {
+  if (authoredPercent === null) return null;
+  const user = resolved.style;
+  const forced = user?.forceFontSize !== false;
+  const userPercent = user?.fontSizePercent ?? null;
+  const multiplier = forced && userPercent !== null ? userPercent / DEFAULT_FONT_SIZE_PERCENT : 1;
+  return Math.round(((authoredPercent * multiplier) / DEFAULT_FONT_SIZE_PERCENT) * DEFAULT_FONT_SIZE);
 }
 
 /**
