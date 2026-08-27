@@ -20,6 +20,15 @@ import 'libass/ass_padding.dart';
 import 'libass/caption_layout.dart';
 import 'libass/ass_reposition.dart';
 
+/// Millisecond-precision timestamp for the `debugPrint` trail below — plain
+/// log lines have no ordering signal of their own once two async chains
+/// (a local FFI render, an RPC round trip) are racing each other.
+String _ts() {
+  final now = DateTime.now();
+  return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:'
+      '${now.second.toString().padLeft(2, '0')}.${now.millisecond.toString().padLeft(3, '0')}';
+}
+
 /// The background/window colour LibassLayer actually paints.
 ///
 /// **No `force` here, on purpose — there is nothing left for it to weigh
@@ -111,6 +120,22 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   String _rawAss = '';
   PaddedScript? _padded;
 
+  /// Bumped every time [_targetAss] is reassigned — a drag commit, or a new
+  /// document arriving from `engine.subtitle`.
+  ///
+  /// **Guards a render already in flight when a newer target shows up.**
+  /// `_renderLoop`'s only per-iteration state (`_currentAss`, `nowMs`,
+  /// the renderer/track addresses) is captured before its one `await`
+  /// (`_runRenderIsolate`), so a commit landing *during* that await changes
+  /// `_targetAss` for the *next* iteration but cannot make the in-flight one
+  /// re-read anything — it finishes and calls `setState` with whatever it
+  /// started with, painting the pre-drag position for one frame before the
+  /// next iteration (already queued via `_needsRender`) corrects it. This
+  /// happens on every ordinary tick too, which is why it only shows up
+  /// during playback: paused, the render loop is idle when a commit lands,
+  /// so there is no in-flight iteration to race.
+  int _renderRequestId = 0;
+
   double? _lastWidth;
   double? _lastHeight;
   double? _lastVideoLeft;
@@ -123,6 +148,10 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   
   bool _isCommittingDrag = false;
   final bool _showBounds = false;
+
+  /// Set for exactly one build after a commit's render completes — see the
+  /// doc on `_CaptionGroup.nudgeDuration` for why.
+  bool _snapNudgeOnce = false;
 
   bool _needsRender = false;
   bool _disposed = false;
@@ -159,7 +188,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
       dylib = DynamicLibrary.open('libass-9.dll');
     } on Object catch (e) {
       _assUnavailable = true;
-      debugPrint('LibassLayer: libass-9.dll unavailable, captions will not render ($e)');
+      debugPrint('[${_ts()}] LibassLayer: libass-9.dll unavailable, captions will not render ($e)');
       return;
     }
     _libass = LibAssBindings(dylib);
@@ -185,7 +214,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
   void _installScriptToC(String? raw) {
     if (raw == null) {
-      debugPrint('LibassLayer: raw is null, freeing track');
+      debugPrint('[${_ts()}] LibassLayer: raw is null, freeing track');
       if (_assTrack != null) _libass!.ass_free_track(_assTrack!.ptr);
       _assTrack = null;
       _padded = null;
@@ -193,7 +222,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
       return;
     }
     _rawAss = raw;
-    debugPrint('LibassLayer: raw is not null, padding script');
+    debugPrint('[${_ts()}] LibassLayer: raw is not null, padding script');
     
     _padded = padScript(raw, padX: kPadX, padY: kPadY);
     
@@ -201,22 +230,22 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     _libass!.ass_set_use_margins(_assRenderer!.ptr, 0);
     _libass!.ass_set_pixel_aspect(_assRenderer!.ptr, 1.0);
 
-    debugPrint('LibassLayer: freeing old track before allocating new one');
+    debugPrint('[${_ts()}] LibassLayer: freeing old track before allocating new one');
     if (_assTrack != null) {
       _libass!.ass_free_track(_assTrack!.ptr);
       _assTrack = null;
     }
 
-    debugPrint('LibassLayer: allocating new track');
+    debugPrint('[${_ts()}] LibassLayer: allocating new track');
     final trackPtr = _libass!.ass_new_track(_assLibrary!.ptr);
     if (trackPtr != nullptr) {
-      debugPrint('LibassLayer: new track allocated, processing data');
+      debugPrint('[${_ts()}] LibassLayer: new track allocated, processing data');
       _assTrack = _TrackWrapper(trackPtr);
       final data = _padded!.source.toNativeUtf8();
       _libass!.ass_process_data(trackPtr, data, data.length);
       malloc.free(data);
     } else {
-      debugPrint('LibassLayer: ass_new_track returned nullptr!');
+      debugPrint('[${_ts()}] LibassLayer: ass_new_track returned nullptr!');
     }
   }
 
@@ -236,17 +265,18 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     try {
       while (_needsRender && !_disposed) {
         _needsRender = false;
+        final myRequestId = _renderRequestId;
 
-        debugPrint('LibassLayer: _renderLoop starting. currentAss length: ${_currentAss?.length}, targetAss length: ${_targetAss?.length}');
+        debugPrint('[${_ts()}] LibassLayer: _renderLoop starting. currentAss length: ${_currentAss?.length}, targetAss length: ${_targetAss?.length}');
 
         if (_currentAss != _targetAss) {
           _currentAss = _targetAss;
-          debugPrint('LibassLayer: installing script to C');
+          debugPrint('[${_ts()}] LibassLayer: installing script to C');
           _installScriptToC(_currentAss);
         }
 
         if (_assRenderer == null || _assTrack == null || _padded == null || _lastWidth == null) {
-          debugPrint('LibassLayer: skipping render. renderer: ${_assRenderer != null}, track: ${_assTrack != null}, padded: ${_padded != null}, lastWidth: $_lastWidth');
+          debugPrint('[${_ts()}] LibassLayer: skipping render. renderer: ${_assRenderer != null}, track: ${_assTrack != null}, padded: ${_padded != null}, lastWidth: $_lastWidth');
           continue;
         }
 
@@ -269,6 +299,16 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final rawImages = await _runRenderIsolate(rendererAddr, trackAddr, nowMs, physPadX, physPadY);
 
         if (_disposed || !mounted) break;
+        if (myRequestId != _renderRequestId) {
+          // A commit (or a new document) landed while this render was in
+          // flight, capturing `_currentAss`/`nowMs` from before it. Applying
+          // this result now would paint the pre-commit position for one
+          // frame; the iteration `_needsRender` is already queued for will
+          // pick up the current target instead.
+          debugPrint('[${_ts()}] LibassLayer: discarding stale render '
+              '(started for requestId $myRequestId, now $_renderRequestId)');
+          continue;
+        }
 
         final sx = _lastWidth! / _padded!.playResX;
         final sy = _lastHeight! / _padded!.playResY;
@@ -323,20 +363,33 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
           // on how close the commit landed to an edge. Resetting first means
           // this render computes nudges the same way any steady-state one
           // after it will.
+          final wasCommittingDrag = _isCommittingDrag;
+          final dragDeltaBeforeReset = _dragDelta;
           if (_isCommittingDrag) {
             _dragDelta = Offset.zero;
             _isCommittingDrag = false;
+            // The box just jumped straight to its final, already-shifted
+            // position — see the comment above. The nudge landing at ~zero
+            // here is the other half of the same jump, not a fresh change to
+            // ease into: animating it plays the whole drag distance a second
+            // time, on top of a box that already made the trip instantly.
+            _snapNudgeOnce = true;
           }
           _nudges = isDraggable
               ? _computeNudges(newBoxes, nowMs)
               : List.filled(newBoxes.length, Offset.zero);
+          String fmt(Offset o) => '(${o.dx.toStringAsFixed(1)}, ${o.dy.toStringAsFixed(1)})';
+          debugPrint('[${_ts()}] LibassLayer render setState: wasCommittingDrag=$wasCommittingDrag '
+              'dragDeltaBeforeReset=${fmt(dragDeltaBeforeReset)} firstBox='
+              '${newBoxes.isNotEmpty ? newBoxes.first : null} '
+              'firstNudge=${_nudges.isNotEmpty ? fmt(_nudges.first) : null}');
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           for (final i in previous) i.image.dispose();
         });
       }
     } catch (e, st) {
-      debugPrint('LibassLayer _renderLoop error: $e\n$st');
+      debugPrint('[${_ts()}] LibassLayer _renderLoop error: $e\n$st');
     }
   }
 
@@ -587,17 +640,22 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   void _commitDrag() {
     final shift = _largestNudge;
     if (shift == Offset.zero) return;
+    debugPrint('[${_ts()}] LibassLayer _commitDrag: shift=(${shift.dx.toStringAsFixed(1)}, '
+        '${shift.dy.toStringAsFixed(1)})');
 
     _targetAss = repositionScript(_rawAss, shift.dx, shift.dy);
+    _renderRequestId++;
     _isCommittingDrag = true;
-    
+
     if (_padded != null) {
       final currentOffset = ref.read(captionsProvider).offset;
       final fracX = shift.dx / _padded!.playResX;
       final fracY = shift.dy / _padded!.playResY;
-      unawaited(ref.read(captionsProvider.notifier).setOffset(
-        CaptionOffset(currentOffset.dx + fracX, currentOffset.dy + fracY)
-      ));
+      final newOffset = CaptionOffset(currentOffset.dx + fracX, currentOffset.dy + fracY);
+      debugPrint('[${_ts()}] LibassLayer _commitDrag: setOffset $newOffset (was $currentOffset), sending to sidecar');
+      unawaited(ref.read(captionsProvider.notifier).setOffset(newOffset).then((_) {
+        debugPrint('[${_ts()}] LibassLayer _commitDrag: setOffset $newOffset COMPLETED (round trip done)');
+      }));
     }
 
     final engine = ref.read(playbackEngineProvider);
@@ -666,7 +724,12 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
     final engine = ref.read(playbackEngineProvider);
     if (engine.subtitle != _currentAss && !_isCommittingDrag && engine.subtitle != _targetAss) {
+      debugPrint('[${_ts()}] LibassLayer build: NEW engine.subtitle diverges from current/target '
+          '(engine=${engine.subtitle?.length}, current=${_currentAss?.length}, '
+          'target=${_targetAss?.length}, isCommittingDrag=$_isCommittingDrag) — '
+          'clearing groupBoxes/nudges/dragDelta');
       _targetAss = engine.subtitle;
+      _renderRequestId++;
       _dragDelta = Offset.zero;
       _nudges = const [];
       _groupBoxes = const [];
@@ -717,6 +780,11 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
           const Color(0x00000000),
         );
 
+        // Consumed here, once — this build is the only one that gets the
+        // snap; the next one (if any) is back to the normal animated glide.
+        final snapNudge = _snapNudgeOnce;
+        _snapNudgeOnce = false;
+
         return IgnorePointer(
           ignoring: menuOpen,
           child: Stack(
@@ -730,6 +798,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
                       _CaptionGroup(
                         key: ValueKey(g),
                         nudge: Offset(_nudgeFor(g).dx * sx, _nudgeFor(g).dy * sy),
+                        snapNudge: snapNudge,
                         images: _images.where((i) => i.group == g).toList(),
                         sx: sx,
                         sy: sy,
@@ -753,6 +822,22 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
 class _CaptionGroup extends StatelessWidget {
   final Offset nudge;
+
+  /// True for exactly the build right after a drag commit's render lands.
+  ///
+  /// That render's `groupBox` already jumped straight to its final,
+  /// already-shifted position — the whole point of baking the shift into
+  /// the document rather than only nudging on top of it — and `nudge` on
+  /// that same render settles at ~zero for the matching reason (see
+  /// `_LibassLayerState`'s render-loop comment). Animating the nudge here
+  /// regardless would ease it down from the drag's full offset while the
+  /// box is already sitting at the shifted position, which plays the same
+  /// distance a second time: the caption visibly overshoots past where it
+  /// was just dropped, in the direction it was dragged, before easing back.
+  /// A zero-duration tween on just this one build lands both halves of the
+  /// jump together instead.
+  final bool snapNudge;
+
   final List<_SubtitleImage> images;
   final double sx;
   final double sy;
@@ -766,6 +851,7 @@ class _CaptionGroup extends StatelessWidget {
   const _CaptionGroup({
     super.key,
     required this.nudge,
+    required this.snapNudge,
     required this.images,
     required this.sx,
     required this.sy,
@@ -800,7 +886,7 @@ class _CaptionGroup extends StatelessWidget {
 
     return TweenAnimationBuilder<Offset>(
       tween: Tween<Offset>(begin: nudge, end: nudge),
-      duration: const Duration(milliseconds: 180),
+      duration: snapNudge ? Duration.zero : const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       builder: (_, off, child) => Positioned(
         left: groupBox.left * sx + off.dx,
