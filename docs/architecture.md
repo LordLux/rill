@@ -582,6 +582,20 @@ an interface that already exists.
 
 Option D (rendering libass natively inside Flutter via FFI) is viable via an own FFI bridge. It was rejected only in its `dart_libass` pub package form, with the 0.14 segfault and the full-frame allocation attributed exclusively to the package. By building directly against libass 0.17+ and handling the `ASS_Image` crop masks, Option D achieves 60fps frame-perfect Flutter compositing without relying on mpv's `sub-add` latency.
 
+**The order these landed in, since it reads as a contradiction without it.**
+A Flutter overlay was rejected first (Task 17) for being unable to express
+YTT. `mpv sub-add` plus a Flutter-drawn drag ghost was built on that decision
+(Tasks 17–19). `dart_libass` — the pub package, libass 0.14 — was evaluated
+next and rejected: wrong `BorderStyle: 4` window geometry, and a reliable
+segfault on the two-event layering this task's own background/window split
+needs. An own FFI binding against libass 0.17 was spiked, adopted, and the
+mpv path removed entirely (phase 5,
+`docs/tasks/19-caption-drag-and-style.md` §10.1). The middle step is the
+hinge: evaluating `dart_libass` is what surfaced `ASS_Image` carrying the
+exact rendered box per glyph — the fact that makes leaving the ghost-and-
+estimate approach for a direct FFI binding the same argument as adopting the
+ghost in the first place, rather than its reversal.
+
 The pipeline is `fetch → parse → cues → group (ASR only) → ASS`, with one
 intermediate model (`sidecar/src/captions/cues.ts`) as its waist. Every styling
 field on that model is optional and unset by the `json3` parser; they exist so
