@@ -23,6 +23,14 @@ final keepCaptionStyleProvider = NotifierProvider<KeepCaptionStyleNotifier, bool
 });
 
 class KeepCaptionStyleNotifier extends Notifier<bool> {
+  /// Set the instant [toggle] is called, before its own `await` — so a
+  /// [_load] already in flight from [build] knows an explicit action has
+  /// since landed and must not overwrite it when its own read resolves.
+  /// Without this, a toggle fired while [_load]'s first
+  /// `SharedPreferences.getInstance()` is still pending is silently reverted
+  /// the moment that read completes.
+  bool _touched = false;
+
   @override
   bool build() {
     _load();
@@ -31,10 +39,12 @@ class KeepCaptionStyleNotifier extends Notifier<bool> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    if (_touched) return;
     state = prefs.getBool('keep_caption_style') ?? false;
   }
 
   Future<void> toggle() async {
+    _touched = true;
     state = !state;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('keep_caption_style', state);

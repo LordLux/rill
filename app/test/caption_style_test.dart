@@ -207,9 +207,11 @@ void main() {
     // Combining both is the one thing neither file does, and it is not a
     // fixable test — it needs a different harness, not a longer timeout.
 
-    test('the style survives a track change and a video change', () async {
-      // It is a session preference, like the chosen language. Someone who turned
-      // the background off wants it off on the next video too.
+    test('the style survives a track change and a video change, with "keep style" on', () async {
+      // A session preference, like the chosen language, but opt-in via the
+      // "Keep caption style" toggle (settings_menu.dart) — off by default, so
+      // a style chosen for one video does not otherwise follow the next one.
+      await container.read(keepCaptionStyleProvider.notifier).toggle();
       await play('a');
       await controller.select('.en');
       await controller.setStyle(const CaptionStyle(fontFamily: 'Georgia'), immediate: true);
