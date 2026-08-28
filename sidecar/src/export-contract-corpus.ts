@@ -71,6 +71,10 @@ function sanitiseItem(item: FeedItem, index: number): FeedItem {
   // A mix subtitle is a track/artist list — "Daft Punk, Todd Terje, and more" —
   // which is the same taste profile the chip labels leak.
   if (sanitised.subtitle) sanitised.subtitle = `Sanitised Subtitle ${n}`;
+  // Public, but not the point of the corpus — same call as `title`. First hit
+  // 2026-08-27: no fixture had ever produced a `ChannelItem` before the search
+  // filter fix that let real ones through.
+  if (sanitised.subscriberText) sanitised.subscriberText = `Sanitised Subscribers ${n}`;
 
   if (sanitised.thumbnailUrl) sanitised.thumbnailUrl = `https://fake.url/img${n}.jpg`;
   if (sanitised.avatarUrl) sanitised.avatarUrl = `https://fake.url/avatar${n}.jpg`;

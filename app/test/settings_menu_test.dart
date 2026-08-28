@@ -707,25 +707,40 @@ void main() {
       expect(text.didExceedMaxLines, isFalse);
     });
 
-    testWidgets('MUTATION: the badge and the sub-name are counted, not just the label',
+    testWidgets(
+        'MUTATION: the badge and the sub-name are counted, and a name suppresses the badge',
         (tester) async {
-      // The failure this guards is a *manual* width calculation that adds up the
-      // label and forgets what sits beside it — the panel then looks right until
-      // a track carries a badge, and truncates the language rather than growing.
+      // The failure this guards is two-sided now. The first is the original
+      // one: a *manual* width calculation that adds up the label and forgets
+      // what sits beside it — the panel then looks right until a track
+      // carries a badge or a sub-name, and truncates the language rather than
+      // growing. The second is the priority rule itself: a `trackName` is the
+      // uploader's own answer to "how is this track different", and it wins
+      // over the app's own guess — the badge exists only for when the
+      // uploader never said, so it must disappear the moment a name shows up
+      // rather than stacking additional width on top of it.
       await pumpCaptions(tester, [track('English (Ireland)')]);
       final bare = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
 
       await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled')]);
-      final badged = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+      final badgeOnly = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      await pumpCaptions(tester, [track('English (Ireland)', name: 'X')]);
+      final nameOnly = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
 
       await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled', name: 'X')]);
       final both = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
 
-      expect(badged, greaterThan(bare), reason: 'the badge takes room');
-      expect(both, greaterThan(badged), reason: 'so does the sub-name');
-      // All three inside the band, so neither bound is doing the work: at the
-      // floor every reading would be 248, at the ceiling every reading 380, and
-      // the test would pass while measuring nothing.
+      expect(badgeOnly, greaterThan(bare),
+          reason: 'the badge takes room when nothing else distinguishes the track');
+      expect(nameOnly, greaterThan(bare), reason: 'so does the sub-name, on its own');
+      expect(both, nameOnly,
+          reason: 'a trackName suppresses the badge — width with both must equal name-only, '
+              'not grow further');
+
+      // Inside the band, so neither bound is doing the work: at the floor
+      // every reading would be 248, at the ceiling every reading 380, and the
+      // test would pass while measuring nothing.
       expect(bare, greaterThan(248));
       expect(both, lessThan(380));
     });

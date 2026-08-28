@@ -341,6 +341,30 @@ describe('RPC Transport', () => {
         { sessionId: 's1', positionMs: 0, state: 'scrubbing' },
       ],
       ['playback.close with no sessionId', 'playback.close', {}],
+      ['search.query with no q', 'search.query', {}],
+      ['search.query with a blank q', 'search.query', { q: '   ' }],
+      [
+        'search.query with a non-string continuation',
+        'search.query',
+        { q: 'lofi', continuation: 42 },
+      ],
+      [
+        'search.query with a non-object filters',
+        'search.query',
+        { q: 'lofi', filters: 'video' },
+      ],
+      [
+        'search.query with an unknown filters.type',
+        'search.query',
+        { q: 'lofi', filters: { type: 'song' } },
+      ],
+      [
+        'search.query with an unknown filters.sortBy',
+        'search.query',
+        { q: 'lofi', filters: { sortBy: 'uploadDate' } },
+      ],
+      ['search.suggest with no q', 'search.suggest', {}],
+      ['search.suggest with a blank q', 'search.suggest', { q: '  ' }],
     ];
 
     let nextId = 100;

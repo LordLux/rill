@@ -51,6 +51,8 @@ const CAPTIONS_FAIL_ID = 'capsfail1';
 
 const captionLists: unknown[] = [];
 const captionGets: unknown[] = [];
+const searchCalls: unknown[] = [];
+const suggestCalls: unknown[] = [];
 
 const opens: Array<{ videoId?: string; preload: boolean }> = [];
 const reports: unknown[] = [];
@@ -331,6 +333,8 @@ rl.on('line', (line) => {
       baseAttempts = 0;
       captionLists.length = 0;
       captionGets.length = 0;
+      searchCalls.length = 0;
+      suggestCalls.length = 0;
       process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
     } else if (req.method === 'test.playbackLog') {
       // The test's window into what the client actually sent. Reports are
@@ -432,6 +436,147 @@ rl.on('line', (line) => {
         // Only a cancellable request goes in `pending`; $cancel clears that map.
         if (!keepalive) pending.set(req.id, timer);
       }
+    } else if (req.method === 'search.suggest') {
+      // Grammar: "<text>@<delayMs>" — the delay is how a debounce/cancel test
+      // stages an in-flight request to supersede. Every call is recorded so a
+      // test can assert exactly how many reached the wire.
+      suggestCalls.push(req.params?.q);
+      const raw = req.params?.q || '';
+      const at = raw.indexOf('@');
+      const q = at === -1 ? raw : raw.slice(0, at);
+      const delay = at === -1 ? 0 : parseInt(raw.slice(at + 1), 10) || 0;
+      const send = () => {
+        pending.delete(req.id);
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          result: { suggestions: [`${q} one`, `${q} two`, `${q} three`] },
+        }) + '\n');
+      };
+      if (delay === 0) {
+        send();
+      } else {
+        const timer = setTimeout(send, delay);
+        pending.set(req.id, timer);
+      }
+    } else if (req.method === 'search.query') {
+      // Token grammar, mirroring `feed.home`'s (test-only):
+      //
+      //   "foo"                first page — items tagged with the query
+      //   "foo@250"            the same, answered after 250 ms
+      //   "foo@250!keepalive"  answered even after $cancel
+      //   "foo!fail=user"      answered with a retry:"user" failure envelope
+      //   "foo!fail=auto"      answered with a retry:"auto" failure envelope
+      //   "empty"              a real, successful zero-item page (not a failure)
+      //
+      // `continuation` alone (no `q`) is the second-page shape §3.3 promises —
+      // this fixture answers it with a distinct item set and no further page.
+      searchCalls.push({ q: req.params?.q, filters: req.params?.filters ?? null });
+      const continuation = req.params?.continuation as string | undefined;
+      if (continuation) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          result: {
+            items: [3, 4, 5].map((n) => ({
+              kind: 'video',
+              id: `search_p2_${n}`,
+              title: `search page2 item ${n}`,
+              channelName: 'Fake Channel',
+              channelId: 'chan_001',
+              channelAvatarUrl: null,
+              thumbnailUrl: 'https://fake.url/img.jpg',
+              durationSeconds: 60,
+              isLive: false,
+              viewCountText: null,
+              publishedText: null,
+              badges: [],
+              canWatchLater: true,
+              canAddToQueue: true,
+            })),
+            continuation: null,
+          },
+        }) + '\n');
+        return;
+      }
+
+      const rawQ = (req.params?.q as string) || '';
+      const failAt = rawQ.indexOf('!fail=');
+      if (failAt !== -1) {
+        const failMode = rawQ.slice(failAt + '!fail='.length);
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: failMode === 'auto'
+            ? { code: 'UPSTREAM_ERROR', message: 'search upstream fell over', retry: 'auto' }
+            : { code: 'STREAM_UNAVAILABLE', message: 'search unavailable', retry: 'user' },
+        }) + '\n');
+        return;
+      }
+
+      const keepalive = rawQ.endsWith('!keepalive');
+      const spec = keepalive ? rawQ.slice(0, -'!keepalive'.length) : rawQ;
+      const at = spec.indexOf('@');
+      const q = at === -1 ? spec : spec.slice(0, at);
+      const delay = at === -1 ? 0 : parseInt(spec.slice(at + 1), 10) || 0;
+
+      const send = () => {
+        pending.delete(req.id);
+        const items = q === 'empty'
+          ? []
+          : [0, 1, 2].map((n) => ({
+              kind: 'video',
+              id: `search_${n}`,
+              title: `${q} result ${n}`,
+              channelName: 'Fake Channel',
+              channelId: 'chan_001',
+              channelAvatarUrl: null,
+              thumbnailUrl: 'https://fake.url/img.jpg',
+              durationSeconds: 60,
+              isLive: false,
+              viewCountText: null,
+              publishedText: null,
+              badges: [],
+              canWatchLater: true,
+              canAddToQueue: true,
+            }));
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          result: { items, continuation: q === 'empty' ? null : 'SEARCH_PAGE2' },
+        }) + '\n');
+      };
+
+      if (delay === 0) {
+        send();
+      } else {
+        const timer = setTimeout(send, delay);
+        if (!keepalive) pending.set(req.id, timer);
+      }
+    } else if (req.method === 'feed.subscriptions') {
+      // Same anonymous/authenticated split as `feed.home`'s 'empty-home' mode
+      // drives for `auth.verify`, minus the chip bar `feed.subscriptions` never
+      // had.
+      const items = mode === 'empty-home'
+        ? []
+        : [0, 1, 2].map((n) => ({
+            kind: 'video',
+            id: `sub_${n}`,
+            title: `subscriptions item ${n}`,
+            channelName: 'Fake Channel',
+            channelId: 'chan_001',
+            channelAvatarUrl: null,
+            thumbnailUrl: 'https://fake.url/img.jpg',
+            durationSeconds: 60,
+            isLive: false,
+            viewCountText: null,
+            publishedText: null,
+            badges: [],
+            canWatchLater: true,
+            canAddToQueue: true,
+          }));
+      process.stdout.write(JSON.stringify({ id: req.id, result: { items, continuation: null } }) + '\n');
+    } else if (req.method === 'test.searchLog') {
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: { searchCalls, suggestCalls },
+      }) + '\n');
     } else if (req.method === 'test.large_payload') {
       const largeStr = 'x'.repeat(1000000);
       process.stdout.write(JSON.stringify({ id: req.id, result: largeStr }) + '\n');

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/feed_item.dart';
@@ -56,7 +55,8 @@ final routeTrackerProvider = Provider<RouteTracker>((ref) {
   return RouteTracker((name) => ref.read(currentRouteProvider.notifier).set(name));
 });
 
-// Upgraded Follower explicitly polling the leader size. 
+// Polls the leader size once per rendered frame — see `_scheduleCheck` for
+// why that is not a `Ticker` (any more).
 // Completely eliminates the 1-frame fullscreen freeze bug!
 class LayerLinkFollower extends StatefulWidget {
   final LayerLink link;
@@ -69,28 +69,52 @@ class LayerLinkFollower extends StatefulWidget {
   State<LayerLinkFollower> createState() => _LayerLinkFollowerState();
 }
 
-class _LayerLinkFollowerState extends State<LayerLinkFollower> with SingleTickerProviderStateMixin {
+class _LayerLinkFollowerState extends State<LayerLinkFollower> {
   Size _lastSize = Size.zero;
-  late Ticker _ticker;
 
   @override
   void initState() {
     super.initState();
-    // A Ticker flawlessly captures the exact frame media_kit updates its texture size.
-    _ticker = createTicker((_) {
-      if (widget.link.leaderSize != null && widget.link.leaderSize != _lastSize) {
-        setState(() {
-          _lastSize = widget.link.leaderSize!;
-        });
-      }
-    });
-    _ticker.start();
+    _scheduleCheck();
   }
 
-  @override
-  void dispose() {
-    _ticker.dispose();
-    super.dispose();
+  /// Re-checks `widget.link.leaderSize` after every frame the app renders,
+  /// for any reason — and only after such a frame, never on its own.
+  ///
+  /// **This used to be a raw `Ticker`.** A `Ticker` requests a fresh frame on
+  /// every tick for as long as it runs — invisible in a real app, but it means
+  /// `SchedulerBinding` never reports "nothing pending" while this widget is
+  /// mounted, which is always: `PlayerShell` mounts it above the entire app
+  /// (`main.dart`'s `MaterialApp.builder`), unconditionally, whether or not a
+  /// video is even open. Every `pumpAndSettle` in a test that builds through
+  /// `PlayerShell` timed out the instant it existed — confirmed by disabling
+  /// libass entirely and getting the identical timeout, which ruled out
+  /// captions as the cause and pointed here instead (measured 2026-08-27).
+  ///
+  /// `leaderSize` is a layout/paint *output* — `CompositedTransformTarget`
+  /// only reports a new one because Flutter already laid out and painted a
+  /// frame that changed it, which only happens because something (fullscreen
+  /// toggling, an aspect-ratio provider, a window resize) already triggered a
+  /// rebuild and therefore already scheduled that frame. So riding
+  /// `addPostFrameCallback` — fire once after a frame that was going to
+  /// happen anyway, check, `setState` if the size moved (which schedules the
+  /// *next* frame for the corrected size), then re-register for whatever
+  /// frame comes after that — catches the same change the Ticker did, at the
+  /// same one-frame-later timing, without ever asking the engine for a frame
+  /// nothing else needed. Once nothing is changing `leaderSize` any more, no
+  /// frame is scheduled, this callback simply waits, and `pumpAndSettle`
+  /// converges like it is supposed to.
+  void _scheduleCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final leaderSize = widget.link.leaderSize;
+      if (leaderSize != null && leaderSize != _lastSize) {
+        setState(() {
+          _lastSize = leaderSize;
+        });
+      }
+      _scheduleCheck();
+    });
   }
 
   @override

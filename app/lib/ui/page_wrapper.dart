@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'pages/subscriptions.dart';
+import 'player_shell.dart' show currentRouteProvider, rootNavigatorKey;
 import 'widgets/topbar.dart';
 
 const String drawerPrefsKey = 'left_drawer_open';
@@ -46,9 +48,20 @@ class PageWrapper extends ConsumerStatefulWidget {
 class _PageWrapperState extends ConsumerState<PageWrapper> {
   void _toggleDrawer() => ref.read(drawerStateProvider.notifier).toggle();
 
+  void _openSubscriptions() {
+    if (ref.read(currentRouteProvider) == subscriptionsRouteName) return;
+    rootNavigatorKey.currentState?.push(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: subscriptionsRouteName),
+        builder: (_) => const SubscriptionsPage(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDrawerOpen = ref.watch(drawerStateProvider);
+    final isOnSubscriptions = ref.watch(currentRouteProvider) == subscriptionsRouteName;
 
     return Scaffold(
       appBar: TopBar(
@@ -75,8 +88,10 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
                     icon: Icons.home,
                     label: 'Home',
                     isOpen: isDrawerOpen,
-                    isSelected: true, // Example of selected state
-                    onTap: () {},
+                    isSelected: !isOnSubscriptions,
+                    onTap: () {
+                      rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+                    },
                   ),
                   // No Shorts entry. The parser strips Shorts by design — it is
                   // the product's first requirement — so the item could never
@@ -87,7 +102,8 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
                     icon: Icons.subscriptions_outlined,
                     label: 'Subscriptions',
                     isOpen: isDrawerOpen,
-                    onTap: () {},
+                    isSelected: isOnSubscriptions,
+                    onTap: _openSubscriptions,
                   ),
                   if (isDrawerOpen) ...[
                     const Divider(height: 32),

@@ -79,8 +79,12 @@ export function bestImageUrl(node: Json): string | null {
       for (const entry of list) {
         if (!isObject(entry)) continue;
         const url = str(entry['url']);
-        if (!url || !/^https?:\/\//.test(url)) continue;
-        sources.push({ url, width: num(entry['width']) ?? 0 });
+        if (!url) continue;
+        // Channel avatars (`yt3.ggpht.com`) arrive protocol-relative — `//host/…`
+        // — where video thumbnails do not. Measured on a search channel result
+        // 2026-08-27: rejecting these left every `ChannelItem.avatarUrl` empty.
+        if (/^\/\//.test(url)) sources.push({ url: `https:${url}`, width: num(entry['width']) ?? 0 });
+        else if (/^https?:\/\//.test(url)) sources.push({ url, width: num(entry['width']) ?? 0 });
       }
     }
     return true;

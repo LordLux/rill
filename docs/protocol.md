@@ -120,11 +120,95 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` |
 | `mix.start` | `{videoId}` | `{playlistId, items[], continuation?}` |
-| `search.query` | `{q, continuation?}` | `{items[], continuation?}` |
+| `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
 Mixes are `RD*` radio playlists that auto-extend; fetch the continuation as the
 user nears the end. Same code path as queue autoplay.
+
+**`search.query`'s `filters` — decided in Task 20 §3, not chips.** A chip is a
+token the server hands back in a response; a filter (upload date, type,
+duration, sort by) is a token the client *constructs* from a closed set the
+sidecar owns. Reusing `chips[]` with a different `scope` was rejected: nothing
+about a filter comes from the response, so shipping one there would invite a
+caller to render it as if the server had suggested it. A distinct `filters[]`
+was also rejected — it implies a set of *options* the server offers, and there
+is no such response to read them from. What ships is the third option: an
+opaque, client-constructed request parameter.
+
+```jsonc
+// search.query {q, continuation?, filters?}
+{"q": "lofi hip hop", "filters": {"type": "playlist", "sortBy": "viewCount"}}
+```
+
+```ts
+interface SearchFilters {
+  uploadDate?: 'hour' | 'today' | 'week' | 'month' | 'year';
+  type?: 'video' | 'channel' | 'playlist' | 'movie';
+  duration?: 'short' | 'medium' | 'long';
+  /** The only verified value — see below. */
+  sortBy?: 'viewCount';
+}
+```
+
+`filters` is client vocabulary, not YouTube's. `search-filters.ts` is the only
+place that turns it into the `params` string `/search` actually reads, and
+every value in it was **measured against the live endpoint on 2026-08-27**, not
+derived from a spec — `capture.ts` already leaned on one of these
+(`EgIQAw%3D%3D`, type=playlist) before this task generalised it. Each
+single-dimension filter is a small protobuf entry (`uploadDate`/`type`/
+`duration` nest inside one field-2 submessage at inner tags 1/2/3; `sortBy` is
+a bare top-level field-1 varint), and dimensions **compose by concatenating
+their raw bytes** — confirmed live: protobuf merges repeated entries of an
+embedded-message field as if the submessages were merged, so `type=playlist`
+bytes followed by `sortBy=viewCount` bytes decode server-side as both at once.
+
+**`duration`'s values are not 1=short, 2=medium, 3=long — they are short=1,
+long=2, medium=3.** Trusting the UI's presentation order here would have
+silently swapped medium and long; the real mapping was pinned by checking the
+resolved videos' own `durationSeconds` (short: 66–186s, long: 1466–12202s,
+medium: 254–1170s).
+
+**`sortBy` ships only `'viewCount'`.** YouTube's picker has four options —
+relevance (the default, sent as no filter at all), upload date, view count and
+rating — and repeated live probes against the other three candidate field
+values could not distinguish any of them from relevance by result ordering.
+Most likely a search response interleaves an unsorted shelf (a live-news card
+was one observed case) ahead of the sorted list, which defeats ordering as a
+verification method from outside the response. `viewCount`'s effect was
+unambiguous (the top results are consistently the account's highest-view
+videos in the set) and is the only value shipped; the other three are a known
+gap, not an oversight — see the Task 20 report.
+
+**`search.suggest` is not an InnerTube endpoint — Task 20 §2 asked to confirm
+rather than assume, and it does not hold.** There is no `/youtubei/v1/*` POST,
+no session, and nothing to run `parse: false` over. It is a plain,
+unauthenticated `GET` against Google's classic suggest service, answering
+JSONP:
+
+```
+GET https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&q=<query>
+
+window.google.ac.h(["lofi hip h",[["lofi hip hop",0,[512,433]], …]])
+```
+
+— confirmed live 2026-08-27. Only the first element of each triple
+(the suggestion text) is read; the rest is client-side telemetry hinting this
+project has no use for. youtubei.js has its own wrapper
+(`Innertube.getSearchSuggestions`), but it sits outside hard invariant 1's
+session/auth/decipher boundary — not a renderer parser, so not the failure
+mode that invariant guards against, but fetching and unwrapping the JSONP
+directly (`sidecar/src/search/suggest.ts`) keeps this endpoint's shape inside
+code this project owns, the same as every other network boundary in
+`sidecar/src`.
+
+**`feed.subscriptions`'s empty-page ambiguity is handled exactly like
+`feed.home`'s.** No chip bar (it never had one), same
+`auth.verify`-after-an-empty-base-load check §3.1 already specifies, driven
+client-side by the same generalised surface config Task 20 §1 built —
+`checkAuthOnEmpty` in `FeedController`'s `SurfaceConfig`. Search opts out of
+it: an empty search result is a real, un-ambiguous answer ("no results"), not
+a signal worth spending an `auth.verify` round trip on.
 
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The

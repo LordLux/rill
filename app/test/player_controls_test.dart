@@ -856,7 +856,24 @@ void main() {
 
   testWidgets('the captions button appears once the track list has, and opens its page',
       (tester) async {
-    await pumpWatching(tester);
+    // Not `pumpWatching` — it ends with `settleReal`, a real 400ms wait that
+    // is plenty of time for the fake sidecar's `captions.list` round trip to
+    // land, so by the time it returns the "before the list arrives" moment
+    // this test wants to check has already passed. Opening by hand and
+    // stopping at a plain `pump()` (no `runAsync`) keeps the check honest: a
+    // real subprocess response cannot land inside the fake-async test zone
+    // without `runAsync` stepping outside it, so the button's absence here is
+    // guaranteed by construction, not by outrunning a race.
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const TestApp()),
+    );
+    await tester.pumpAndSettle();
+    container.read(queueProvider.notifier).play(video('aaa'));
+    showWatchPageIn(container);
+    await tester.pump();
 
     // Absent before the list arrives — not disabled. An empty list is settled
     // once `captions.list` answers (`protocol.md` §3.8), so the button is drawn
@@ -864,8 +881,7 @@ void main() {
     expect(find.byKey(playerCaptionsKey), findsNothing,
         reason: 'nothing to show until the list is back');
 
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
-    await tester.pumpAndSettle();
+    await settleReal(tester);
     expect(find.byKey(playerCaptionsKey), findsOneWidget);
 
     await tester.tap(find.byKey(playerCaptionsKey));

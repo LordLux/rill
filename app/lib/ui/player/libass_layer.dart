@@ -19,6 +19,7 @@ import 'libass/ass_binding.dart';
 import 'libass/ass_padding.dart';
 import 'libass/caption_layout.dart';
 import 'libass/ass_reposition.dart';
+import 'libass/dll_search.dart';
 
 /// Millisecond-precision timestamp for the `debugPrint` trail below — plain
 /// log lines have no ordering signal of their own once two async chains
@@ -172,12 +173,16 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   /// Whether `libass-9.dll` could not be opened. Tried once, never retried.
   ///
   /// **This layer is unconditional since phase 5**, so it mounts wherever
-  /// `PlayerShell` does — including a `flutter test` process, which has no
-  /// libmpv beside it and so no `libass-9.dll` on its search path. `dlopen`
-  /// throwing out of `build()` there takes down the whole widget tree with an
-  /// `ArgumentError`, which is how ~57 unrelated widget tests failed the first
-  /// time the debug toggle came out. A missing renderer means no caption
-  /// overlay; it must not mean no player.
+  /// `PlayerShell` does — including a `flutter test` process, which runs as
+  /// `flutter_tester.exe` deep in the Flutter SDK cache, nowhere near
+  /// `windows/libass_bundle/`. `dlopen` throwing out of `build()` there used to
+  /// take down the whole widget tree with an `ArgumentError`, which is how ~57
+  /// unrelated widget tests failed the first time the debug toggle came out —
+  /// `openLibass()` (`libass/dll_search.dart`) now retries once with that
+  /// directory added to the process's DLL search path before giving up, so a
+  /// clean checkout resolves it with nothing built and nothing per-machine to
+  /// set up. A missing renderer still means no caption overlay, never no
+  /// player — that part of this comment is unchanged.
   bool _assUnavailable = false;
 
   void _setupAss() {
@@ -185,7 +190,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
 
     final DynamicLibrary dylib;
     try {
-      dylib = DynamicLibrary.open('libass-9.dll');
+      dylib = openLibass();
     } on Object catch (e) {
       _assUnavailable = true;
       debugPrint('[${_ts()}] LibassLayer: libass-9.dll unavailable, captions will not render ($e)');
@@ -398,6 +403,11 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
   }
 
   static List<_RawImage> _renderIsolate(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
+    // Never the first `libass-9.dll` open in this process — `_setupAss` above
+    // already succeeded (via `openLibass()`, fallback included) before
+    // anything schedules a render. `SetDllDirectoryW` is process-wide and this
+    // `Isolate.run` body still executes inside the same OS process, so a
+    // spawned isolate inherits whatever that first open already fixed.
     final dylib = DynamicLibrary.open('libass-9.dll');
     final bindings = LibAssBindings(dylib);
 

@@ -358,7 +358,7 @@ void main() {
       await play('vid1');
       await controller.loadStyled();
       await settle();
-      expect(captions.tracks.map((t) => t.styleBadge), ['Karaoke', null]);
+      expect(captions.tracks.map((t) => t.styleBadge), ['Animated', null]);
     });
 
     test('a category this build has never heard of badges nothing', () async {

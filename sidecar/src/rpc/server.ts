@@ -6,6 +6,7 @@ import { announceCapabilities } from '../capabilities.ts';
 import { PLAYBACK_REPORT_STATES } from '../types.ts';
 import type { CaptionOffset, CaptionStyle } from '../types.ts';
 import type { RgbaColor } from '../captions/cues.ts';
+import type { SearchFilters } from '../parser/search-filters.ts';
 
 const log = logger('rpc');
 
@@ -304,6 +305,53 @@ async function handleRequest(request: RpcRequest) {
         : await fetchBaseBrowse(session, 'FEwhat_to_watch');
       const result = parseFeed(raw, 'home');
       emitResponse(id, result);
+    } else if (method === 'feed.subscriptions') {
+      // Same base-browse cache as `feed.home` (`auth.verify`-then-`feed.home`
+      // is exactly the pattern the app also runs on this surface for the
+      // anonymous/degraded check — Task 20 §1), and the same continuation
+      // shape §3.2 already promises. No chip bar: `feed.subscriptions` never
+      // carried one, so this never calls `mapChip` and the result omits it —
+      // `ItemListResult`, not `FeedResult`, per the table in `types.ts`.
+      const { parseFeed } = await import('../parser/feed.ts');
+      const session = await getBrowseSession();
+      const continuation = optionalString(params, 'continuation', 'feed.subscriptions');
+      const raw = continuation
+        ? await session.execute('/browse', { continuation })
+        : await fetchBaseBrowse(session, 'FEsubscriptions');
+      const result = parseFeed(raw, 'subscriptions');
+      emitResponse(id, { items: result.items, continuation: result.continuation });
+    } else if (method === 'search.query') {
+      // Browse-generation, per §2.3's client table: `WEB` with cookies, same
+      // session `feed.home` uses. A continuation carries its own context —
+      // verified live 2026-08-27, `{continuation}` alone pages a search result
+      // exactly like a browse continuation does — so `q` and `filters` are not
+      // resent on page 2 even though the caller may still be holding them.
+      const q = requireString(params, 'q', 'search.query');
+      const continuation = optionalString(params, 'continuation', 'search.query');
+      const filters = searchFiltersParam(params);
+      const { parseFeed } = await import('../parser/feed.ts');
+      const { buildSearchParams } = await import('../parser/search-filters.ts');
+      const session = await getBrowseSession();
+      const raw = continuation
+        ? await session.execute('/search', { continuation })
+        : await session.execute('/search', {
+            query: q,
+            ...(buildSearchParams(filters) ? { params: buildSearchParams(filters) } : {}),
+          });
+      const result = parseFeed(raw, 'search');
+      // ItemListResult, not FeedResult: search carries no chip bar of its own
+      // (protocol.md §3.3), so `chips` is dropped here rather than shipped
+      // empty — an empty `chips: []` would invite a caller to render one.
+      emitResponse(id, { items: result.items, continuation: result.continuation });
+    } else if (method === 'search.suggest') {
+      // Not InnerTube — a different, unauthenticated endpoint entirely. See
+      // `search/suggest.ts` for what was actually measured here; §3.3's
+      // assumption that this rides the same `/search` surface as
+      // `search.query` does not hold.
+      const q = requireString(params, 'q', 'search.suggest');
+      const { getSearchSuggestions } = await import('../search/suggest.ts');
+      const result = await getSearchSuggestions(q, abortController.signal);
+      emitResponse(id, result);
     } else if (method === 'playback.open') {
       // Validate *before* the dynamic import. `videoId` is the one parameter the
       // ladder cannot proceed without, and it comes off a wire — checking here
@@ -518,6 +566,47 @@ function captionStyleParam(
     forceWindowColor: boolOrUndefined(record['forceWindowColor']),
     forceWindowOpacity: boolOrUndefined(record['forceWindowOpacity']),
     forceEdgeStyle: boolOrUndefined(record['forceEdgeStyle']),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// `search.query`'s `filters` parameter
+// ---------------------------------------------------------------------------
+
+/**
+ * `search.query`'s `filters` object, or `BAD_REQUEST` naming the bad field —
+ * same shape-checked-before-use policy as every other param here, and the same
+ * reason: an unvalidated filter value would otherwise reach
+ * `buildSearchParams` as `undefined`, silently searching unfiltered rather than
+ * failing loudly on a client bug.
+ */
+function searchFiltersParam(
+  params: Record<string, unknown> | undefined,
+): SearchFilters | null {
+  const raw = params?.['filters'];
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') {
+    throw new RpcError('BAD_REQUEST', "search.query: 'filters' must be an object if present");
+  }
+  const record = raw as Record<string, unknown>;
+
+  function enumOrUndefined<T extends string>(field: string, allowed: readonly T[]): T | undefined {
+    const value = record[field];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string' || !allowed.includes(value as T)) {
+      throw new RpcError(
+        'BAD_REQUEST',
+        `search.query: 'filters.${field}' must be one of ${allowed.join(', ')}`,
+      );
+    }
+    return value as T;
+  }
+
+  return {
+    uploadDate: enumOrUndefined('uploadDate', ['hour', 'today', 'week', 'month', 'year'] as const),
+    type: enumOrUndefined('type', ['video', 'channel', 'playlist', 'movie'] as const),
+    duration: enumOrUndefined('duration', ['short', 'medium', 'long'] as const),
+    sortBy: enumOrUndefined('sortBy', ['viewCount'] as const),
   };
 }
 

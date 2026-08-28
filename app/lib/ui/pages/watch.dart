@@ -19,6 +19,7 @@ import '../../domain/video_detail.dart';
 import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
+import '../player_shell.dart' show currentRouteProvider, watchRouteName;
 import '../playback_controller.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
@@ -368,8 +369,20 @@ class _PlayerSurface extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
+          // `currentRouteProvider`, not `ModalRoute.of(context)?.isCurrent` —
+          // see the comment on that provider in `player_shell.dart`. The two
+          // used to disagree for exactly one frame on the transition *into*
+          // this page: `isCurrent` flips the moment this route is pushed
+          // (synchronous), while `PlayerShell`'s `MiniPlayer` only stops
+          // claiming the same `LayerLink` a frame later, once
+          // `currentRouteProvider` catches up — so for that one frame both
+          // this page and the mini-player registered as the link's leader,
+          // which is exactly the shape `LayerLink`'s own debug assertion
+          // exists to catch. Reading the same provider here that gates
+          // `MiniPlayer` means both sides update in the same rebuild, off the
+          // same value, so there is no longer a second signal to race.
           if (!fullscreen)
-            (ModalRoute.of(context)?.isCurrent ?? true)
+            (ref.watch(currentRouteProvider) == watchRouteName)
                 ? engine.videoSurface()
                 : engine.videoWidget(),
 

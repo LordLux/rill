@@ -87,6 +87,26 @@ export interface FeedResult {
 }
 
 // ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+/**
+ * `search.query`'s filter parameter (`protocol.md` §3.3, Task 20 §3).
+ *
+ * Not a chip: a chip is a token the server hands back in a response, a filter
+ * is a token the client asks for from a closed set the sidecar owns. This
+ * struct is the wire shape; `parser/search-filters.ts` is what turns it into
+ * the opaque `params` string `/search` actually reads, and carries the
+ * measurements behind each value.
+ */
+export type { SearchFilters } from './parser/search-filters.ts';
+
+/** `search.suggest`'s result — a flat, ranked list of query strings. */
+export interface SearchSuggestResult {
+  suggestions: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Video detail
 // ---------------------------------------------------------------------------
 

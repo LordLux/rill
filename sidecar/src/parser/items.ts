@@ -222,11 +222,27 @@ export function mapClassicChannel(node: JsonObject): ChannelItem | null {
     id,
     name,
     avatarUrl: bestImageUrl(node['thumbnail']) ?? '',
-    subscriberText:
-      text(node['subscriberCountText']) ??
-      text(node['videoCountText']) ??
-      null,
+    subscriberText: subscriberishText(node),
   } satisfies ChannelItem;
+}
+
+/**
+ * `channelRenderer`'s subscriber count, from whichever field actually holds it.
+ *
+ * `videoCountText`, despite the name, is where a search channel result puts
+ * "21.2M subscribers" — measured 2026-08-27. `subscriberCountText` is *not* a
+ * fallback for it; on that same node it held `"@mkbhd"`, the handle. Trusting
+ * field-name order the way `mapClassicVideo`'s byline does would have shipped
+ * a handle as a subscriber count, silently — nothing throws, the string is
+ * just wrong. So this checks shape instead of name: a handle starts with `@`
+ * and is skipped rather than trusted.
+ */
+function subscriberishText(node: JsonObject): string | null {
+  for (const value of [node['videoCountText'], node['subscriberCountText']]) {
+    const candidate = text(value);
+    if (candidate && !candidate.startsWith('@')) return candidate;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -663,8 +663,15 @@ class _CaptionRow extends StatelessWidget {
           // small, muted — because it is the same kind of thing as `4K`: not
           // part of the track's name, but something read off it.
           // `_QualityRow._badge` is the other half of that pairing.
-          // Show only if the track name is not empty, to avoid unnecessary or possibly repetitive text.
-          if (badge != null && trackName.isNotEmpty) ...[
+          //
+          // **Shown only when there is no `trackName`.** The badge is *our*
+          // guess at how this track differs from the others — styled,
+          // karaoke — for when the uploader never said. A `trackName` is the
+          // uploader's own answer to that same question ("Commentary",
+          // "Director's cut"), and it wins: showing both would be the app's
+          // inference sitting next to the source's own label, disagreeing or
+          // redundant either way.
+          if (badge != null && trackName.isEmpty) ...[
             const SizedBox(width: 4),
             Transform.translate(
               offset: const Offset(0, -5),
