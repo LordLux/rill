@@ -304,7 +304,13 @@ async function handleRequest(request: RpcRequest) {
         ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
         : await fetchBaseBrowse(session, 'FEwhat_to_watch');
       const result = parseFeed(raw, 'home');
-      emitResponse(id, result);
+      // Explicit rather than `emitResponse(id, result)`: `FeedResult` carries
+      // an internal `artistPanel` field search.query uses (below), and the
+      // wire contract for `feed.home` is exactly `{chips, items,
+      // continuation}` — picking fields here is what keeps a field added to
+      // the parser's return type from silently widening every surface's
+      // response.
+      emitResponse(id, { chips: result.chips, items: result.items, continuation: result.continuation });
     } else if (method === 'feed.subscriptions') {
       // Same base-browse cache as `feed.home` (`auth.verify`-then-`feed.home`
       // is exactly the pattern the app also runs on this surface for the
@@ -319,6 +325,26 @@ async function handleRequest(request: RpcRequest) {
         ? await session.execute('/browse', { continuation })
         : await fetchBaseBrowse(session, 'FEsubscriptions');
       const result = parseFeed(raw, 'subscriptions');
+      emitResponse(id, { items: result.items, continuation: result.continuation });
+    } else if (method === 'subscriptions.channels') {
+      // Task 21 §4. A different browse endpoint entirely from the video feed
+      // above — `FEchannels` (confirmed live: its own `GetChannels_rid`
+      // tracking param, page title "All subscriptions") rather than
+      // `FEsubscriptions`. Items are plain `channelRenderer` nodes, so this
+      // needs no parser code of its own: `mapClassicChannel` already handles
+      // the shape, including Task 20's protocol-relative-avatar and
+      // videoCountText-carries-subscribers fixes, both confirmed live on this
+      // endpoint too. Same base-browse cache and continuation shape as every
+      // other list method here. Sort order is fixed (server returns
+      // alphabetical, confirmed stable across a page boundary) — there is no
+      // sort parameter to expose.
+      const { parseFeed } = await import('../parser/feed.ts');
+      const session = await getBrowseSession();
+      const continuation = optionalString(params, 'continuation', 'subscriptions.channels');
+      const raw = continuation
+        ? await session.execute('/browse', { continuation })
+        : await fetchBaseBrowse(session, 'FEchannels');
+      const result = parseFeed(raw, 'channels');
       emitResponse(id, { items: result.items, continuation: result.continuation });
     } else if (method === 'search.query') {
       // Browse-generation, per §2.3's client table: `WEB` with cookies, same
@@ -342,7 +368,9 @@ async function handleRequest(request: RpcRequest) {
       // ItemListResult, not FeedResult: search carries no chip bar of its own
       // (protocol.md §3.3), so `chips` is dropped here rather than shipped
       // empty — an empty `chips: []` would invite a caller to render one.
-      emitResponse(id, { items: result.items, continuation: result.continuation });
+      // `artist` is Task 21 §3: populated only when the response carried an
+      // `officialCardViewModel`, `null` on every ordinary search.
+      emitResponse(id, { items: result.items, continuation: result.continuation, artist: result.artistPanel });
     } else if (method === 'search.suggest') {
       // Not InnerTube — a different, unauthenticated endpoint entirely. See
       // `search/suggest.ts` for what was actually measured here; §3.3's

@@ -2,8 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../theme/screen_values.dart';
+
 /// Where the two sizing rules meet — architecture §2.8
-const double referenceAspect = 16 / 9;
+const double referenceAspect = ScreenValues.normalAspectRatio;
 
 /// The geometry a [WatchLayout] computed for the current frame.
 ///
@@ -51,12 +53,12 @@ WatchLayoutGeometry computeWatchGeometry({
   double mainContainerWidth = availableWidth;
   final isDesktop = availableWidth >= 889;
 
-  final double maxTheaterWidth = 1280.0 + 453.0 + 24.0 * 3;
+  final double maxTheaterWidth = 1280.0 + 483.0 + 24.0 * 3;
   if (isDesktop) {
     final maxAllowedWidth = theatre ? maxTheaterWidth : 1950.0;
     final effectiveWidth = math.min(availableWidth, maxAllowedWidth);
     if (effectiveWidth >= 1042.0) {
-      railWidth = 453.0;
+      railWidth = 483.0;
     } else {
       railWidth = math.max(300.0, effectiveWidth - 589.0);
     }

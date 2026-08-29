@@ -138,4 +138,89 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     expect(container.read(searchSuggestProvider).suggestions, isEmpty);
   });
+
+  group('arrow-key highlight navigation', () {
+    /// Types [query], waits past the debounce and the fake sidecar's answer,
+    /// and returns once three suggestions (`fake_sidecar.ts`'s fixed shape)
+    /// are in state — the precondition every test below needs.
+    Future<void> loadThreeSuggestions(SearchSuggestController controller, String query) async {
+      controller.onTextChanged(query);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+
+    test('does nothing while the dropdown is closed or empty', () async {
+      container = await _boot();
+      final controller = container.read(searchSuggestProvider.notifier);
+
+      // Closed: never typed anything.
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, isNull);
+
+      // Open, but the fetch has not answered yet — still nothing to move onto.
+      controller.onTextChanged('x');
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, isNull);
+    });
+
+    test('arrow-down walks 0, 1, 2 and stops at the last suggestion — no wrap', () async {
+      container = await _boot();
+      final controller = container.read(searchSuggestProvider.notifier);
+      await loadThreeSuggestions(controller, 'x');
+      expect(container.read(searchSuggestProvider).suggestions, hasLength(3));
+
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 0);
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 1);
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 2);
+
+      // MUTATION CHECK: a version that wraps (`% length`) or keeps
+      // incrementing past the list would both pass a test that only checked
+      // "index 2 is reachable" — this is the one arrow-down that must be a
+      // no-op, on the boundary the bug would actually show up on.
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 2,
+          reason: 'arrow-down past the last suggestion must not wrap or overrun');
+    });
+
+    test('arrow-up from index 0 returns to the text field, not index -1', () async {
+      container = await _boot();
+      final controller = container.read(searchSuggestProvider.notifier);
+      await loadThreeSuggestions(controller, 'x');
+
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 0);
+      controller.moveHighlight(-1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, isNull,
+          reason: 'arrow-up out of the list must land on "nothing highlighted", not -1');
+
+      // And arrow-up again, already back at the field, goes nowhere further.
+      controller.moveHighlight(-1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, isNull);
+    });
+
+    test('typing again clears whatever was highlighted', () async {
+      container = await _boot();
+      final controller = container.read(searchSuggestProvider.notifier);
+      await loadThreeSuggestions(controller, 'x');
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 0);
+
+      controller.onTextChanged('xy');
+      expect(container.read(searchSuggestProvider).highlightedIndex, isNull,
+          reason: 'a highlight pointing into the previous keystroke\'s list must not survive a new one');
+    });
+
+    test('close() clears the highlight along with everything else', () async {
+      container = await _boot();
+      final controller = container.read(searchSuggestProvider.notifier);
+      await loadThreeSuggestions(controller, 'x');
+      controller.moveHighlight(1);
+      expect(container.read(searchSuggestProvider).highlightedIndex, 0);
+
+      controller.close();
+      expect(container.read(searchSuggestProvider).highlightedIndex, isNull);
+    });
+  });
 }

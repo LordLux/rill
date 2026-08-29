@@ -82,9 +82,16 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   channelName: /^Sanitised Channel \d+$/,
   name: /^Sanitised Channel \d+$/,
   subtitle: /^Sanitised Subtitle \d+$/,
+  // Free text from an arbitrary uploader, same reasoning as `title`.
+  descriptionSnippet: /^Sanitised Snippet \d+$/,
   thumbnailUrl: /^https:\/\/fake\.url\/img\d+\.jpg$/,
   avatarUrl: /^https:\/\/fake\.url\/avatar\d+\.jpg$/,
   channelAvatarUrl: /^https:\/\/fake\.url\/avatar\d+\.jpg$/,
+  // ArtistPanel (Task 21 §3) — its own `channelId`/`mixPlaylistId` reuse
+  // `chan_`/`mix_` id shapes; `handle` and `videoCountText` are new.
+  handle: /^@sanitised_handle_\d+$/,
+  videoCountText: /^Sanitised Videos \d+$/,
+  mixPlaylistId: /^mix_\d{3,}$/,
 
   // "All" survives verbatim: the app keys its unfiltered state off that label,
   // and an empty token is the contract's "no filter" rather than session data.
@@ -314,7 +321,12 @@ describe('corpus sanitisation', () => {
     });
 
     test('an unsanitised new field is caught even though nothing matches it', () => {
-      const docs = poisoned({ id: 'vid_001', title: 'Sanitised Title 1', descriptionSnippet: 'anything at all' });
+      // `descriptionSnippet` used to be this test's example — it was itself an
+      // unsanitised field until Task 21's re-export caught it for real (see
+      // `export-contract-corpus.ts`). Now that it has a shape, this needs a
+      // field name that will never be a real one, so the control keeps testing
+      // "a brand-new field is caught" rather than quietly re-testing the fixed bug.
+      const docs = poisoned({ id: 'vid_001', title: 'Sanitised Title 1', someUnsanitisedField: 'anything at all' });
       expect(auditShapes(docs).join()).toContain('no sanitised shape');
     });
 

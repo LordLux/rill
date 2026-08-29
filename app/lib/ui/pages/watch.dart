@@ -25,12 +25,14 @@ import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
+import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
 import 'watch_layout.dart';
+import '../../theme/screen_values.dart';
 
 /// Where the two sizing rules meet — architecture §2.8
-const double _referenceAspect = referenceAspect;
+const double _referenceAspect = ScreenValues.normalAspectRatio;
 
 const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
@@ -144,7 +146,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
         builder: (context, constraints) {
           final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
           final detail = info.value;
-          final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (16 / 9);
+          final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
           final queueHasItems = ref.watch(queueProvider.select((q) => q.items.length > 1));
 
           return TweenAnimationBuilder<double>(
@@ -255,7 +257,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                   for (final related in items)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: _relatedTile(related),
+                      child: _relatedTile(related, asGrid: asGrid),
                     ),
                 ],
               );
@@ -268,7 +270,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                 for (final related in items)
                   SizedBox(
                     width: ((constraints.maxWidth - 16) / 2).floorToDouble(),
-                    child: _relatedTile(related),
+                    child: _relatedTile(related, asGrid: asGrid),
                   ),
               ],
             );
@@ -283,18 +285,25 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       for (final related in items)
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _relatedTile(related),
+          child: _relatedTile(related, asGrid: asGrid),
         ),
       showMore,
     ];
   }
 
-  Widget _relatedTile(FeedItem related) {
+  Widget _relatedTile(FeedItem related, {bool asGrid = false}) {
     final spec = specFor(related);
     if (spec == null) return const SizedBox.shrink();
+    if (!asGrid) {
+      return MediaTile.wide(
+        spec: spec,
+        onTap: () => openFromTile(ref, related),
+        onAddToQueue: () => queueFromTile(ref, related),
+        onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
+      );
+    }
     return MediaTile(
       spec: spec,
-      // No route push: this replaces the video on the page it is already on.
       onTap: () => openFromTile(ref, related),
       onAddToQueue: () => queueFromTile(ref, related),
       onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
@@ -362,35 +371,26 @@ class _PlayerSurface extends ConsumerWidget {
     final scheme = theme.colorScheme;
     final engine = ref.read(playbackEngineProvider);
     final fullscreen = ref.watch(playerViewProvider.select((view) => view.fullscreen));
-    final ratio = actualAspectRatio ?? ref.watch(_aspectRatioProvider).value ?? (16 / 9);
+    final ratio = actualAspectRatio ?? ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
+    final isTopWatchPage = (ModalRoute.of(context)?.isCurrent == true) && (ref.watch(currentRouteProvider) == watchRouteName);
 
     final content = ColoredBox(
       color: theme.tokens.scrim,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // `currentRouteProvider`, not `ModalRoute.of(context)?.isCurrent` —
+          // `currentRouteProvider`, not *just* `ModalRoute.of(context)?.isCurrent` —
           // see the comment on that provider in `player_shell.dart`. The two
           // used to disagree for exactly one frame on the transition *into*
-          // this page: `isCurrent` flips the moment this route is pushed
-          // (synchronous), while `PlayerShell`'s `MiniPlayer` only stops
-          // claiming the same `LayerLink` a frame later, once
-          // `currentRouteProvider` catches up — so for that one frame both
-          // this page and the mini-player registered as the link's leader,
-          // which is exactly the shape `LayerLink`'s own debug assertion
-          // exists to catch. Reading the same provider here that gates
-          // `MiniPlayer` means both sides update in the same rebuild, off the
-          // same value, so there is no longer a second signal to race.
-          if (!fullscreen)
-            (ref.watch(currentRouteProvider) == watchRouteName)
-                ? engine.videoSurface()
-                : engine.videoWidget(),
+          // this page. We AND them together so only the top-most WatchPage
+          // claims the surface, but it still waits for the provider to catch up.
+          if (!fullscreen) isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
 
           if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           // A premiere is not a failure, so it does not get the failure screen.
           if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
 
-          if (playback.error == null && !playback.isLoading && !fullscreen) PlayerControls(engine: engine, actualAspectRatio: ratio),
+          if (playback.error == null && !playback.isLoading && !fullscreen && isTopWatchPage) PlayerControls(engine: engine, actualAspectRatio: ratio),
         ],
       ),
     );
@@ -614,7 +614,15 @@ class _Meta extends ConsumerWidget {
                                 color: scheme.onSurface,
                               ),
                             ),
-                            // TODO verified/music artist badge
+                            if ((detail?.isArtistChannel ?? item.isArtistChannel) ||
+                                (detail?.isVerified ?? item.isVerified)) ...[
+                              const SizedBox(width: 4),
+                              ChannelBadge(
+                                isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
+                                isVerified: detail?.isVerified ?? item.isVerified,
+                                size: 14,
+                              ),
+                            ],
                           ],
                         ),
                       ),

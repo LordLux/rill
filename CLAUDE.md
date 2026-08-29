@@ -96,7 +96,12 @@ interface VideoItem {
   isLive: boolean;
   viewCountText: string | null;     // display string, not parsed
   publishedText: string | null;
+  descriptionSnippet: string | null;
   badges: string[];                 // "4K", "New", "Members only"
+  isShort: boolean;                 // Task 21 — classified, not stripped
+  isMusic: boolean;                 // the ♪ on the duration badge, per video
+  isVerified: boolean;              // the uploading channel's checkmark
+  isArtistChannel: boolean;         // the uploading channel's artist badge
   premiereAtMs: number | null;      // unix ms; null unless it is a premiere
   canWatchLater: boolean;
   canAddToQueue: boolean;
@@ -115,7 +120,8 @@ interface PlaylistItem { kind: 'playlist'; id: string; title: string;
   thumbnailUrl: string; videoCount: number | null; channelName: string | null; }
 
 interface ChannelItem { kind: 'channel'; id: string; name: string;
-  avatarUrl: string; subscriberText: string | null; }
+  avatarUrl: string; subscriberText: string | null;
+  isVerified: boolean; isArtistChannel: boolean; }
 
 interface Chip {
   label: string;

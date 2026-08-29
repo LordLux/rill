@@ -10,22 +10,42 @@ import '../data/rpc/client.dart';
 /// The first real exercise of `$cancel` and the generation guard under actual
 /// typing load — every prior use (the feed's chip switch) fires at most a few
 /// times a minute. Sustained typing fires it per keystroke.
+/// Sentinel for [SearchSuggestState.copyWith]'s `highlightedIndex` — see hard
+/// invariant 10. `null` is this field's own "nothing highlighted" value, so
+/// the ordinary `int? highlightedIndex` parameter default of `null` cannot
+/// also mean "leave it alone": that reflex would make clearing the highlight
+/// (arrow-up back out of the list) silently a no-op.
+const Object _unchanged = Object();
+
 class SearchSuggestState {
   const SearchSuggestState({
     this.query = '',
     this.suggestions = const [],
     this.isOpen = false,
+    this.highlightedIndex,
   });
 
   final String query;
   final List<String> suggestions;
   final bool isOpen;
 
-  SearchSuggestState copyWith({String? query, List<String>? suggestions, bool? isOpen}) {
+  /// The suggestion arrow-key navigation has moved to, or `null` when focus
+  /// is still on the text field itself — the state before the first
+  /// arrow-down, and what arrow-up returns to from index 0.
+  final int? highlightedIndex;
+
+  SearchSuggestState copyWith({
+    String? query,
+    List<String>? suggestions,
+    bool? isOpen,
+    Object? highlightedIndex = _unchanged,
+  }) {
     return SearchSuggestState(
       query: query ?? this.query,
       suggestions: suggestions ?? this.suggestions,
       isOpen: isOpen ?? this.isOpen,
+      highlightedIndex:
+          identical(highlightedIndex, _unchanged) ? this.highlightedIndex : highlightedIndex as int?,
     );
   }
 }
@@ -66,7 +86,10 @@ class SearchSuggestController extends Notifier<SearchSuggestState> {
   /// Called on every keystroke. Debounced: only the last call in a burst
   /// shorter than [debounce] actually issues a request.
   void onTextChanged(String text) {
-    state = state.copyWith(query: text, isOpen: text.trim().isNotEmpty);
+    // Typing invalidates whatever the arrow keys had highlighted — the list
+    // it pointed into is about to change under it, and the field is once
+    // again what the user is actively editing.
+    state = state.copyWith(query: text, isOpen: text.trim().isNotEmpty, highlightedIndex: null);
     _debounceTimer?.cancel();
 
     if (text.trim().isEmpty) {
@@ -77,6 +100,23 @@ class SearchSuggestController extends Notifier<SearchSuggestState> {
     }
 
     _debounceTimer = Timer(debounce, () => _fetch(text));
+  }
+
+  /// Arrow-down (`delta: 1`) or arrow-up (`delta: -1`) through the dropdown.
+  ///
+  /// `null` — nothing highlighted, focus reads as "on the text field" — is
+  /// one end of the range and index `0` is the other; arrow-up from `0`
+  /// returns to `null` rather than stopping there, so the key that moved
+  /// focus into the list is the same one that moves it back out. Does not
+  /// wrap past the last suggestion: this is a bounded list, not a carousel.
+  void moveHighlight(int delta) {
+    final suggestions = state.suggestions;
+    if (!state.isOpen || suggestions.isEmpty) return;
+
+    final current = state.highlightedIndex ?? -1;
+    final next = (current + delta).clamp(-1, suggestions.length - 1);
+    if (next == current) return;
+    state = state.copyWith(highlightedIndex: next == -1 ? null : next);
   }
 
   Future<void> _fetch(String query) async {
@@ -92,7 +132,10 @@ class SearchSuggestController extends Notifier<SearchSuggestState> {
       if (generation != _generation) return; // superseded — drop, never render
       _inFlight = null;
       final raw = response['suggestions'] as List<dynamic>? ?? [];
-      state = state.copyWith(suggestions: raw.whereType<String>().toList());
+      // A fresh list invalidates any index the user had arrowed to against
+      // the previous one — defensive, since `onTextChanged` already clears
+      // it up front; this covers a highlight set during the debounce window.
+      state = state.copyWith(suggestions: raw.whereType<String>().toList(), highlightedIndex: null);
     } on RpcException catch (_) {
       // A suggest failure is not worth surfacing to the user — the dropdown
       // just stays empty, and typing Enter still searches directly.
@@ -116,7 +159,7 @@ class SearchSuggestController extends Notifier<SearchSuggestState> {
   void close() {
     _debounceTimer?.cancel();
     _cancelInFlight();
-    state = state.copyWith(isOpen: false);
+    state = state.copyWith(isOpen: false, highlightedIndex: null);
   }
 }
 

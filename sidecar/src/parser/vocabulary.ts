@@ -27,7 +27,8 @@ export type RendererRole =
   | 'chip-shelf'
   | 'continuation'
   | 'container'
-  | 'ignore';
+  | 'ignore'
+  | 'artist-panel';
 
 /** Leaf renderers that map to exactly one `FeedItem`. */
 const ITEMS = [
@@ -81,6 +82,11 @@ const STRIPPED = [
   'videodisplayfulllayout',
   'videodisplaybuttongrouplayout',
   'feedadmetadata',
+  // A masthead-style promoted video, first seen 2026-08-28: wraps a real
+  // `videoRenderer` in `content`, same shape problem as `adSlotRenderer` — the
+  // whole subtree has to go, or the paid placement inside it surfaces as an
+  // ordinary organic tile.
+  'brandvideosingleton',
 ];
 
 /** Traversed, never emitted. */
@@ -172,6 +178,10 @@ const IGNORED = [
   'backstagepost',
   'backstagepostthread',
   'sharedpost',
+  // "View all posts" — a navigation button attached to a post shelf, first
+  // seen 2026-08-28 on an artist channel's search results. Not a tile itself;
+  // same reasoning as the post renderers above it.
+  'buttoncard',
   'menu',
   'multipagemenu',
   'multipagemenusection',
@@ -212,6 +222,10 @@ for (const name of IGNORED) ROLES.set(name, 'ignore');
 ROLES.set('chipcloudchip', 'chip-feed');
 ROLES.set('chip', 'chip-shelf');
 ROLES.set('continuationitem', 'continuation');
+// The artist-search panel (Task 21 §3) — `officialCardViewModel`, live-
+// confirmed absent for an ordinary creator query. Mapped whole, not
+// descended into: its embedded video/mix shelf is not modelled.
+ROLES.set('officialcard', 'artist-panel');
 
 /** Role of a renderer key, or null when we have never seen it before. */
 export function roleOf(rendererName: string): RendererRole | null {

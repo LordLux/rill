@@ -49,7 +49,7 @@ const history = HAS_CAPTURES ? fixture('history') : null;
 
 /** Every feed-shaped fixture this capture produced, for corpus-wide invariants. */
 const CORPUS: Record<string, unknown> = Object.fromEntries(
-  ['home', 'home-continuation', 'subscriptions', 'history', 'watch-later', 'search', 'search-playlists', 'mix', 'playlist']
+  ['home', 'home-continuation', 'subscriptions', 'channels', 'history', 'watch-later', 'search', 'search-artist', 'search-playlists', 'mix', 'playlist']
     .filter(hasFixture)
     .map((name) => [name, fixture(name)]),
 );
@@ -74,7 +74,12 @@ const SHAPES = {
     isLive: 'boolean',
     viewCountText: 'string?',
     publishedText: 'string?',
+    descriptionSnippet: 'string?',
     badges: 'string[]',
+    isShort: 'boolean',
+    isMusic: 'boolean',
+    isVerified: 'boolean',
+    isArtistChannel: 'boolean',
     premiereAtMs: 'number?',
     canWatchLater: 'boolean',
     canAddToQueue: 'boolean',
@@ -98,6 +103,8 @@ const SHAPES = {
     name: 'string',
     avatarUrl: 'string',
     subscriberText: 'string?',
+    isVerified: 'boolean',
+    isArtistChannel: 'boolean',
   },
 } as const;
 
@@ -526,20 +533,141 @@ describe.if(HAS_CAPTURES)('mixes', () => {
 
 describe.if(HAS_CAPTURES)('shorts', () => {
   test('are stripped from every feed', () => {
-    const shortsIds = idsOf(home, 'shortsLockupViewModel', 'entityId');
-    expect(shortsIds.size).toBeGreaterThan(0);
+    // Across the whole corpus, not just `home`: which fixture carries a
+    // Shorts shelf on a given capture is YouTube's choice on the day
+    // (`corpusIsolate`'s own doc comment above), and this capture happened to
+    // put it in `mix`/`search`/`search-artist`/`subscriptions` instead.
+    let checked = 0;
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const shortsIds = idsOf(raw, 'shortsLockupViewModel', 'entityId');
+      if (shortsIds.size === 0) continue;
+      checked += shortsIds.size;
 
-    const emitted = new Set(parseFeed(home, 'home').items.map((item) => item.id));
-    for (const entityId of shortsIds) {
-      // entityId is `shorts-shelf-item-<videoId>`.
-      const videoId = entityId.replace(/^shorts-shelf-item-/, '');
-      expect(emitted.has(videoId)).toBe(false);
+      const emitted = new Set(parseFeed(raw, name).items.map((item) => item.id));
+      for (const entityId of shortsIds) {
+        // entityId is `shorts-shelf-item-<videoId>`.
+        const videoId = entityId.replace(/^shorts-shelf-item-/, '');
+        expect(emitted.has(videoId)).toBe(false);
+      }
     }
+    expect(checked).toBeGreaterThan(0);
   });
 
   test('a Shorts shelf does not become an empty item', () => {
     const shelf = isolate(home, 'reelShelfRenderer');
     expect(parseFeed(shelf, 'shorts').items).toEqual([]);
+  });
+
+  // Task 21 §1: the *other* Shorts shape — an ordinary videoRenderer carrying
+  // a SHORTS-styled duration overlay — is classified, not stripped. By id,
+  // per the task's own mutation-check instruction: a hardcoded `false` would
+  // pass a test that only checked "the field exists".
+  // `search-artist.json` (query "Ado"), not `history`: this capture's watch
+  // history happened to carry no SHORTS-badged entry, and the task's own
+  // premise (§1) is that Shorts interleave with ordinary videos in *search*.
+  test.skipIf(!hasFixture('search-artist'))('a SHORTS-badged video is flagged isShort, and the badge is not duplicated', () => {
+    const raw = fixture('search-artist');
+    const items = parseFeed(raw, 'search-artist').items;
+    const short = items.find((item) => item.kind === 'video' && item.id === 'T0oRfI3PYCU');
+    expect(short?.kind).toBe('video');
+    if (short?.kind !== 'video') return;
+    expect(short.isShort).toBe(true);
+    expect(short.badges).not.toContain('SHORTS');
+  });
+
+  test.skipIf(!hasFixture('search-artist'))('an ordinary video is not flagged isShort', () => {
+    const raw = fixture('search-artist');
+    const items = parseFeed(raw, 'search-artist').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'MhViuFoLkbs');
+    expect(ordinary?.kind).toBe('video');
+    if (ordinary?.kind !== 'video') return;
+    expect(ordinary.isShort).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 21 — music note, verified / artist channel badges
+// ---------------------------------------------------------------------------
+
+describe.if(HAS_CAPTURES)('music note (per video)', () => {
+  test('a video with a MUSIC-badged thumbnail is flagged isMusic, by id', () => {
+    const items = parseFeed(history, 'history').items;
+    const musicVideo = items.find((item) => item.kind === 'video' && item.id === '7i_nc5GGIsI');
+    expect(musicVideo?.kind).toBe('video');
+    if (musicVideo?.kind !== 'video') return;
+    expect(musicVideo.isMusic).toBe(true);
+  });
+
+  test('an ordinary video is not flagged isMusic', () => {
+    const items = parseFeed(history, 'history').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'EgpLbFbC_4o');
+    expect(ordinary?.kind).toBe('video');
+    if (ordinary?.kind !== 'video') return;
+    expect(ordinary.isMusic).toBe(false);
+  });
+});
+
+describe.if(HAS_CAPTURES)('verified / artist-channel badges', () => {
+  test('an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    const search = fixture('search');
+    const items = parseFeed(search, 'search').items;
+    const lofiGirl = items.find((item) => item.kind === 'channel' && item.id === 'UCSJ4gkVC6NrvII8umztf0Ow');
+    expect(lofiGirl?.kind).toBe('channel');
+    if (lofiGirl?.kind !== 'channel') return;
+    expect(lofiGirl.isArtistChannel).toBe(true);
+    expect(lofiGirl.isVerified).toBe(false);
+  });
+
+  test('a video from an official artist channel is flagged isArtistChannel', () => {
+    const search = fixture('search');
+    const items = parseFeed(search, 'search').items;
+    const artistVideo = items.find((item) => item.kind === 'video' && item.id === 'rFZHOHl-L8A');
+    expect(artistVideo?.kind).toBe('video');
+    if (artistVideo?.kind !== 'video') return;
+    expect(artistVideo.isArtistChannel).toBe(true);
+    expect(artistVideo.isVerified).toBe(false);
+  });
+
+  test('a video from a plain verified channel is flagged isVerified, not isArtistChannel', () => {
+    const search = fixture('search');
+    const items = parseFeed(search, 'search').items;
+    const verifiedVideo = items.find((item) => item.kind === 'video' && item.id === 'mG1aeD7odqk');
+    expect(verifiedVideo?.kind).toBe('video');
+    if (verifiedVideo?.kind !== 'video') return;
+    expect(verifiedVideo.isVerified).toBe(true);
+    expect(verifiedVideo.isArtistChannel).toBe(false);
+  });
+
+  test('an unbadged channel/video is flagged neither', () => {
+    const items = parseFeed(history, 'history').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'EgpLbFbC_4o');
+    expect(ordinary?.kind).toBe('video');
+    if (ordinary?.kind !== 'video') return;
+    expect(ordinary.isVerified).toBe(false);
+    expect(ordinary.isArtistChannel).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 21 §3 — the artist search panel
+// ---------------------------------------------------------------------------
+
+describe.if(hasFixture('search-artist'))('artist panel (officialCardViewModel)', () => {
+  test('an artist-name search carries the panel, populated', () => {
+    const raw = fixture('search-artist');
+    const result = parseFeed(raw, 'search-artist');
+    const panel = result.artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+    expect(panel.channelId).toMatch(/^UC[\w-]{20,}$/);
+    expect(panel.name.length).toBeGreaterThan(0);
+    expect(panel.avatarUrl).toMatch(/^https:\/\//);
+    expect(typeof panel.isSubscribed).toBe('boolean');
+  });
+
+  test('an ordinary search carries no panel', () => {
+    const search = fixture('search');
+    expect(parseFeed(search, 'search').artistPanel).toBeNull();
   });
 });
 

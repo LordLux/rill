@@ -217,6 +217,20 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
     openSearch(ref, text);
   }
 
+  /// Enter, with a suggestion arrow-highlighted: search *that* suggestion,
+  /// not whatever is still sitting in the text field — the highlight is a
+  /// choice the user just made, and submitting the box's stale text past it
+  /// would silently discard it. No highlight falls back to the box's own
+  /// text, which is `TextField.onSubmitted`'s ordinary behaviour.
+  void _submitHighlightedOrText(String text) {
+    final suggestState = ref.read(searchSuggestProvider);
+    final index = suggestState.highlightedIndex;
+    final chosen = (index != null && index < suggestState.suggestions.length)
+        ? suggestState.suggestions[index]
+        : text;
+    _submit(chosen);
+  }
+
   void _syncOverlay() {
     final state = ref.read(searchSuggestProvider);
     final shouldShow = _focus.hasFocus && state.isOpen && state.suggestions.isNotEmpty;
@@ -240,6 +254,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
       builder: (context) {
         final scheme = Theme.of(context).colorScheme;
         final suggestions = ref.watch(searchSuggestProvider.select((s) => s.suggestions));
+        final highlightedIndex = ref.watch(searchSuggestProvider.select((s) => s.highlightedIndex));
         return Positioned(
           width: 600,
           child: CompositedTransformFollower(
@@ -258,8 +273,11 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                   itemCount: suggestions.length,
                   itemBuilder: (context, index) {
                     final suggestion = suggestions[index];
+                    final isHighlighted = index == highlightedIndex;
                     return ListTile(
                       dense: true,
+                      selected: isHighlighted,
+                      selectedTileColor: scheme.surfaceContainerHigh,
                       leading: const Icon(Icons.search, size: 18),
                       title: Text(suggestion),
                       onTap: () {
@@ -292,7 +310,9 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
     });
 
     ref.listen(searchSuggestProvider, (previous, next) {
-      if (previous?.suggestions != next.suggestions || previous?.isOpen != next.isOpen) {
+      if (previous?.suggestions != next.suggestions ||
+          previous?.isOpen != next.isOpen ||
+          previous?.highlightedIndex != next.highlightedIndex) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _syncOverlay();
         });
@@ -322,12 +342,25 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                   // keeps the text from shifting when the field takes focus.
                   padding: EdgeInsets.only(left: focused ? 15.0 : 16.0, right: 8.0),
                   child: Shortcuts(
-                    shortcuts: {LogicalKeySet(LogicalKeyboardKey.escape): const _CloseSearchIntent()},
+                    shortcuts: {
+                      LogicalKeySet(LogicalKeyboardKey.escape): const _CloseSearchIntent(),
+                      // A single-line `TextField` has no vertical text of its
+                      // own to move a cursor through, so `EditableText` does
+                      // not claim these — they reach here unhandled, which is
+                      // exactly what let the dropdown steal them for its own
+                      // navigation instead.
+                      LogicalKeySet(LogicalKeyboardKey.arrowDown): const _MoveHighlightIntent(1),
+                      LogicalKeySet(LogicalKeyboardKey.arrowUp): const _MoveHighlightIntent(-1),
+                    },
                     child: Actions(
                       actions: {
                         _CloseSearchIntent: CallbackAction<_CloseSearchIntent>(onInvoke: (_) {
                           ref.read(searchSuggestProvider.notifier).close();
                           _focus.unfocus();
+                          return null;
+                        }),
+                        _MoveHighlightIntent: CallbackAction<_MoveHighlightIntent>(onInvoke: (intent) {
+                          ref.read(searchSuggestProvider.notifier).moveHighlight(intent.delta);
                           return null;
                         }),
                       },
@@ -348,29 +381,36 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                         ),
                         onChanged: (text) =>
                             ref.read(searchSuggestProvider.notifier).onTextChanged(text),
-                        onSubmitted: _submit,
+                        onSubmitted: _submitHighlightedOrText,
                       ),
                     ),
                   ),
                 ),
               ),
               // Search Button
-              GestureDetector(
-                onTap: () => _submit(_controller.text),
-                child: Container(
-                  width: 64,
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHigh,
-                    borderRadius: const BorderRadius.only(
-                      topRight: Radius.circular(40),
-                      bottomRight: Radius.circular(40),
-                    ),
-                    border: Border(
-                      left: BorderSide(color: scheme.outlineVariant, width: 1),
-                    ),
+              Material(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(40),
+                  bottomRight: Radius.circular(40),
+                ),
+                child: InkWell(
+                  onTap: () => _submit(_controller.text),
+                  borderRadius: const BorderRadius.only(
+                    topRight: Radius.circular(40),
+                    bottomRight: Radius.circular(40),
                   ),
-                  child: Center(
-                    child: Icon(Icons.search, color: scheme.onSurface, size: 24),
+                  mouseCursor: SystemMouseCursors.click,
+                  child: Container(
+                    width: 64,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: scheme.outlineVariant, width: 1),
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.search, color: scheme.onSurface, size: 24),
+                    ),
                   ),
                 ),
               ),
@@ -384,4 +424,10 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
 
 class _CloseSearchIntent extends Intent {
   const _CloseSearchIntent();
+}
+
+/// Arrow-down (`1`) or arrow-up (`-1`) through the suggestions dropdown.
+class _MoveHighlightIntent extends Intent {
+  const _MoveHighlightIntent(this.delta);
+  final int delta;
 }

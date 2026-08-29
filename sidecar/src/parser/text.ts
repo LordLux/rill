@@ -12,7 +12,7 @@
  * Every reader below accepts all four and returns `string | null`.
  */
 
-import { asArray, deepFind, get, isObject, num, str, walk, type Json } from './tree.ts';
+import { asArray, deepFind, get, isObject, num, str, walk, type Json, type JsonObject } from './tree.ts';
 
 // ---------------------------------------------------------------------------
 // Text
@@ -144,23 +144,45 @@ export function isPublishedText(value: string): boolean {
 // ---------------------------------------------------------------------------
 
 export interface BadgeScan {
-  /** Non-duration, non-live labels: "4K", "New", "Members only", "Upcoming". */
+  /** Non-duration, non-live, non-Shorts labels: "4K", "New", "Members only", "Upcoming". */
   labels: string[];
   durationSeconds: number | null;
   isLive: boolean;
+  /**
+   * A `SHORTS`-styled duration overlay (Task 21 §1). Pulled out of `labels`
+   * the same way `LIVE` already is — leaving `"SHORTS"` in `badges[]` as well
+   * would be the same fact shipped through two fields.
+   */
+  isShort: boolean;
+  /**
+   * The `♪` YouTube draws on a music video's duration badge — `imageName:
+   * "MUSIC"` on the badge's own icon, not its text. Only ever seen on
+   * `thumbnailBadgeViewModel` (view-based) in the corpus; classic tiles carry
+   * no equivalent icon field, so this stays false for them.
+   */
+  hasMusicNote: boolean;
 }
 
 const LIVE_LABEL = /^(live|live now|in diretta)$/i;
+const SHORTS_LABEL = /^shorts$/i;
+
+/** `thumbnailBadgeViewModel.icon.sources[].clientResource.imageName === 'MUSIC'`. */
+function badgeHasMusicIcon(badge: JsonObject): boolean {
+  const sources = asArray(get(badge, 'icon', 'sources'));
+  return sources.some((source) => str(get(source, 'clientResource', 'imageName')) === 'MUSIC');
+}
 
 /**
- * Sweep every badge-ish node in a tile and split it into duration, live flag and
- * display labels. Covers `thumbnailBadgeViewModel` (view-based),
- * `metadataBadgeRenderer` (classic) and `thumbnailOverlayTimeStatusRenderer`.
+ * Sweep every badge-ish node in a tile and split it into duration, live/Shorts
+ * flags, the music-note icon and display labels. Covers `thumbnailBadgeViewModel`
+ * (view-based), `metadataBadgeRenderer` (classic) and
+ * `thumbnailOverlayTimeStatusRenderer`.
  */
 export function scanBadges(node: Json): BadgeScan {
   const labels: string[] = [];
   let durationSeconds: number | null = null;
   let isLive = false;
+  let isShort = false;
 
   const consider = (value: string | null, style: string | null): void => {
     if (!value) return;
@@ -173,13 +195,20 @@ export function scanBadges(node: Json): BadgeScan {
       if (!labels.includes('LIVE')) labels.push('LIVE');
       return;
     }
+    if (SHORTS_LABEL.test(value) || (style !== null && /SHORTS/i.test(style))) {
+      isShort = true;
+      return;
+    }
     if (!labels.includes(value)) labels.push(value);
   };
+
+  let hasMusicNote = false;
 
   walk(node, (candidate) => {
     const badge = candidate['thumbnailBadgeViewModel'];
     if (isObject(badge)) {
       consider(text(badge['text']), str(badge['badgeStyle']));
+      if (badgeHasMusicIcon(badge)) hasMusicNote = true;
     }
 
     const metadataBadge = candidate['metadataBadgeRenderer'];
@@ -195,7 +224,47 @@ export function scanBadges(node: Json): BadgeScan {
     return true;
   });
 
-  return { labels, durationSeconds, isLive };
+  return { labels, durationSeconds, isLive, isShort, hasMusicNote };
+}
+
+const VERIFIED_STYLE = 'BADGE_STYLE_TYPE_VERIFIED';
+const VERIFIED_ARTIST_STYLE = 'BADGE_STYLE_TYPE_VERIFIED_ARTIST';
+
+export interface OwnerBadgeScan {
+  isVerified: boolean;
+  isArtistChannel: boolean;
+}
+
+/**
+ * The channel-level verified checkmark and "Official Artist Channel" badge
+ * (Task 21 §2). Both are `metadataBadgeRenderer`, under `ownerBadges` on a
+ * classic video/channel tile — but keyed on `style` rather than that wrapper
+ * key, since `officialCardViewModel`'s title carries the same badge under a
+ * different shape entirely, and `style` is the one thing constant across
+ * both generations.
+ *
+ * Not folded into `scanBadges`: that function's `metadataBadgeRenderer`
+ * branch reads `label`, which an owner badge never sets (only `tooltip`/
+ * `accessibilityData.label` — both localised, and deliberately not read
+ * here). Sharing one walk would mean every owner-badge node also passing
+ * through `consider()` with a null label, which is harmless but couples two
+ * unrelated extraction rules for no reason.
+ */
+export function scanOwnerBadges(node: Json): OwnerBadgeScan {
+  let isVerified = false;
+  let isArtistChannel = false;
+
+  walk(node, (candidate) => {
+    const badge = candidate['metadataBadgeRenderer'];
+    if (isObject(badge)) {
+      const style = str(badge['style']);
+      if (style === VERIFIED_STYLE) isVerified = true;
+      else if (style === VERIFIED_ARTIST_STYLE) isArtistChannel = true;
+    }
+    return true;
+  });
+
+  return { isVerified, isArtistChannel };
 }
 
 /**

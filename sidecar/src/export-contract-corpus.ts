@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFeed } from './parser/feed.ts';
 import { parseVideoDetail } from './parser/video.ts';
-import type { Chip, FeedItem, VideoDetail } from './types.ts';
+import type { ArtistPanel, Chip, FeedItem, VideoDetail } from './types.ts';
 import { logger } from './log.ts';
 
 const log = logger('corpus');
@@ -63,6 +63,11 @@ function sanitiseItem(item: FeedItem, index: number): FeedItem {
   if (sanitised.channelId) sanitised.channelId = `chan_${seq}`;
 
   if (sanitised.title) sanitised.title = `Sanitised Title ${n}`;
+  // Free text from an arbitrary uploader — the same reasoning as `title`, and
+  // a pre-existing gap: this field shipped without an exporter branch, so it
+  // was passing every real snippet straight into the corpus until the first
+  // re-export after it landed exercised the auditor for the first time.
+  if (sanitised.descriptionSnippet) sanitised.descriptionSnippet = `Sanitised Snippet ${n}`;
   if (sanitised.channelName) sanitised.channelName = `Sanitised Channel ${n}`;
   // ChannelItem carries the channel's own name here rather than in
   // `channelName`. Branch added before a re-export that includes channel tiles
@@ -133,6 +138,28 @@ function sanitiseVideoDetail(detail: VideoDetail): VideoDetail {
   };
 }
 
+/**
+ * The artist panel (Task 21 §3), sanitised the same way an item is:
+ * `channelId`/`mixPlaylistId` are ids (reuses the item shapes so
+ * `corpus.test.ts` needs no bespoke pattern for either), `name`/`avatarUrl`/
+ * `subscriberText`/`description` reuse the shapes those fields already have
+ * on other DTOs, and `handle`/`videoCountText` are the two genuinely new
+ * string fields this panel introduces.
+ */
+function sanitiseArtistPanel(panel: ArtistPanel): ArtistPanel {
+  return {
+    ...panel,
+    channelId: 'chan_001',
+    name: 'Sanitised Channel 1',
+    handle: panel.handle === null ? null : '@sanitised_handle_1',
+    avatarUrl: 'https://fake.url/avatar1.jpg',
+    subscriberText: panel.subscriberText === null ? null : 'Sanitised Subscribers 1',
+    videoCountText: panel.videoCountText === null ? null : 'Sanitised Videos 1',
+    description: panel.description === null ? null : 'Sanitised Description 1',
+    mixPlaylistId: panel.mixPlaylistId === null ? null : 'mix_001',
+  };
+}
+
 async function main() {
   await mkdir(CORPUS, { recursive: true });
   const files = (await readdir(FIXTURES)).filter(
@@ -149,6 +176,7 @@ async function main() {
       chips: parsed.chips.map(sanitiseChip()),
       items: parsed.items.map(sanitiseItem),
       continuation: sanitiseContinuation(parsed.continuation, fileIndex),
+      artistPanel: parsed.artistPanel ? sanitiseArtistPanel(parsed.artistPanel) : null,
     };
 
     await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');

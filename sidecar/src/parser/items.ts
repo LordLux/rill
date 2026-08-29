@@ -7,7 +7,7 @@
  * fields go to `null` and the item still ships.
  */
 
-import type { ChannelItem, FeedItem, MixItem, PlaylistItem, VideoItem } from '../types.ts';
+import type { ArtistPanel, ChannelItem, FeedItem, MixItem, PlaylistItem, VideoItem } from '../types.ts';
 import { premiereStartMs } from './premiere.ts';
 import {
   asArray,
@@ -28,6 +28,7 @@ import {
   isViewCountText,
   metadataRowTexts,
   scanBadges,
+  scanOwnerBadges,
   scanTileActions,
   text,
   tileId,
@@ -91,12 +92,15 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   }
 
   if (/CHANNEL/i.test(contentType)) {
+    const ownerBadges = scanOwnerBadges(node);
     return {
       kind: 'channel',
       id,
       name: title,
       avatarUrl: bestImageUrl(node['contentImage']) ?? '',
       subscriberText: flatRows.find((row) => /subscriber/i.test(row)) ?? null,
+      isVerified: ownerBadges.isVerified,
+      isArtistChannel: ownerBadges.isArtistChannel,
     } satisfies ChannelItem;
   }
 
@@ -105,6 +109,7 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   const channelRow = rows[0] ?? [];
   const detailRows = rows.slice(1).flat();
   const actions = scanTileActions(node);
+  const ownerBadges = scanOwnerBadges(node);
 
   return {
     kind: 'video',
@@ -118,7 +123,12 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     isLive: badges.isLive || detailRows.some((row) => /watching now/i.test(row)),
     viewCountText: detailRows.find(isViewCountText) ?? null,
     publishedText: detailRows.find(isPublishedText) ?? null,
+    descriptionSnippet: null,
     badges: badges.labels.filter((label) => label !== 'LIVE'),
+    isShort: badges.isShort,
+    isMusic: badges.hasMusicNote,
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),
     canWatchLater: actions.canWatchLater,
     canAddToQueue: actions.canAddToQueue,
@@ -139,6 +149,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
   const byline = node['longBylineText'] ?? node['ownerText'] ?? node['shortBylineText'];
   const badges = scanBadges(node);
   const actions = scanTileActions(node);
+  const ownerBadges = scanOwnerBadges(node);
 
   const lengthSeconds =
     durationToSeconds(node['lengthText']) ??
@@ -164,7 +175,15 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     isLive,
     viewCountText,
     publishedText: text(node['publishedTimeText']),
+    descriptionSnippet:
+      text(get(asArray(node['detailedMetadataSnippets'])[0], 'snippetText')) ??
+      text(node['descriptionSnippet']) ??
+      null,
     badges: badges.labels.filter((label) => label !== 'LIVE'),
+    isShort: badges.isShort,
+    isMusic: badges.hasMusicNote,
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),
     canWatchLater: actions.canWatchLater,
     canAddToQueue: actions.canAddToQueue,
@@ -217,12 +236,16 @@ export function mapClassicChannel(node: JsonObject): ChannelItem | null {
   const name = text(node['title']) ?? text(node['displayName']);
   if (!name) return null;
 
+  const ownerBadges = scanOwnerBadges(node);
+
   return {
     kind: 'channel',
     id,
     name,
     avatarUrl: bestImageUrl(node['thumbnail']) ?? '',
     subscriberText: subscriberishText(node),
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
   } satisfies ChannelItem;
 }
 
@@ -243,6 +266,73 @@ function subscriberishText(node: JsonObject): string | null {
     if (candidate && !candidate.startsWith('@')) return candidate;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// officialCardViewModel — the artist panel (Task 21 §3)
+// ---------------------------------------------------------------------------
+
+/**
+ * `officialCardViewModel` → `ArtistPanel`. Live-confirmed the top item of a
+ * search-results `itemSectionRenderer` for an artist-name query, and absent
+ * for an ordinary creator query — its presence is itself the "is an official
+ * artist channel" fact, so unlike every other mapper here this one has no
+ * badge check of its own to gate on.
+ *
+ * `subscriptionEntities` resolves `isSubscribed`: this view-model does **not**
+ * carry the current subscription state inline. `subscribeButtonContent` and
+ * `unsubscribeButtonContent` both ship, each with its own hardcoded
+ * `subscribeState.subscribed` (`false` and `true` respectively) describing
+ * what clicking *that* variant would produce — not which variant is active.
+ * The real answer is the response's `frameworkUpdates.entityBatchUpdate`
+ * entity store, looked up by `stateEntityStoreKey`; `parseFeed` resolves that
+ * map once per response and threads it down here.
+ */
+export function mapArtistPanel(
+  node: JsonObject,
+  subscriptionEntities: ReadonlyMap<string, boolean>,
+): ArtistPanel | null {
+  const header = get(node, 'header', 'pageHeaderViewModel');
+  if (!isObject(header)) return null;
+
+  const channelId = channelIdFrom(header);
+  if (!channelId) return null;
+
+  const name = text(get(header, 'title', 'dynamicTextViewModel', 'text'));
+  if (!name) return null;
+
+  const avatarUrl = bestImageUrl(get(header, 'image')) ?? '';
+  const rows = metadataRowTexts(get(header, 'metadata', 'contentMetadataViewModel')).flat();
+  const handle = rows.find((row) => row.startsWith('@')) ?? null;
+  const subscriberText = rows.find((row) => /subscriber/i.test(row)) ?? null;
+  const videoCountText = rows.find((row) => /video/i.test(row)) ?? null;
+  const description = text(get(header, 'description', 'descriptionPreviewViewModel', 'description'));
+
+  const subscribeVm = deepFind(header, (candidate) => typeof candidate['stateEntityStoreKey'] === 'string');
+  const stateKey = subscribeVm ? str(subscribeVm['stateEntityStoreKey']) : null;
+  const isSubscribed = stateKey !== null ? (subscriptionEntities.get(stateKey) ?? false) : false;
+
+  // The panel's "Mix" action, found by its `RD…` playlist id rather than by
+  // button title — `buttonViewModel.title` is the localised label ("Mix" is
+  // English-only), and the id shape is the same structural check `isMixId`
+  // uses everywhere else in this file.
+  const mixHolder = deepFind(get(header, 'actions'), (candidate) => {
+    const playlistId = candidate['playlistId'];
+    return typeof playlistId === 'string' && isMixId(playlistId);
+  });
+  const mixPlaylistId = mixHolder ? str(mixHolder['playlistId']) : null;
+
+  return {
+    channelId,
+    name,
+    handle,
+    avatarUrl,
+    subscriberText,
+    videoCountText,
+    description,
+    isSubscribed,
+    mixPlaylistId,
+  } satisfies ArtistPanel;
 }
 
 // ---------------------------------------------------------------------------

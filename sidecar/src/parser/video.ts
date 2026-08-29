@@ -14,7 +14,7 @@
 import type { FeedItem, VideoDetail } from '../types.ts';
 import { parseFeed } from './feed.ts';
 import { premiereStartMs } from './premiere.ts';
-import { bestImageUrl, channelIdFrom, durationToSeconds, text } from './text.ts';
+import { bestImageUrl, channelIdFrom, durationToSeconds, scanOwnerBadges, text } from './text.ts';
 import { deepCollect, deepFind, get, isObject, num, str, type Json } from './tree.ts';
 
 function findRenderer(root: Json, key: string): Json {
@@ -105,6 +105,8 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
 
   const likeText = findLikeText(body);
 
+  const ownerBadges = scanOwnerBadges(owner);
+
   const badges = deepCollect(body, (node) => isObject(node['metadataBadgeRenderer']))
     .map((node) => text(get(node, 'metadataBadgeRenderer', 'label')))
     .filter((label): label is string => label !== null);
@@ -135,6 +137,8 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
       text(get(primary, 'relativeDateText')) ?? text(get(primary, 'dateText')),
     likeText,
     isSubscribed: hasSubscribedButton(body),
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
     badges: [...new Set(badges)],
     // Deep-searched for the same reason the tiles are: the watch page hangs this
     // off a different renderer depending on generation, and no premiere is in

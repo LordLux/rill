@@ -94,6 +94,7 @@ flag derived from cookie presence.
 | `feed.subscriptions` | `{continuation?}` | `{items[], continuation?}` |
 | `feed.watchLater` | `{continuation?}` | `{items[], continuation?}` |
 | `feed.history` | `{continuation?}` | `{items[], continuation?}` |
+| `subscriptions.channels` | `{continuation?}` | `{items[], continuation?}` — Task 21 §4 |
 
 `continuation` is a parameter on every list method rather than a separate
 `*.more` method — first page and infinite scroll share one path, and chips are
@@ -180,6 +181,101 @@ unambiguous (the top results are consistently the account's highest-view
 videos in the set) and is the only value shipped; the other three are a known
 gap, not an oversight — see the Task 20 report.
 
+**`search.query` carries an optional `artist` field alongside `items[]` —
+Task 21 §3.** A search for an official artist's name (confirmed live with
+`"Ado"`, matching `sidecar/scratch/task21-probe.ts`) returns
+`officialCardViewModel`, a distinct panel above the ordinary results: avatar,
+handle, subscriber/video count, description, a Subscribe action and the same
+"Official Artist Channel" badge described below. Confirmed **absent** for an
+ordinary creator search (`"MrBeast"` — the top result is a plain
+`channelRenderer` item instead), so the panel's presence *is* the "is an
+official artist channel" signal; nothing else needs to gate it.
+
+```jsonc
+// search.query {q: "Ado"} → {items[], continuation?, artist}
+{"items": [...], "continuation": "...", "artist": {
+  "channelId": "UCln9P4Qm3-EAY4aiEPmRwEA",
+  "name": "Ado",
+  "handle": "@Ado1024",
+  "avatarUrl": "https://yt3.googleusercontent.com/…",
+  "subscriberText": "9.51M subscribers",
+  "videoCountText": "739 videos",
+  "description": "Ado is a Japanese singer.",
+  "isSubscribed": true,
+  "mixPlaylistId": "RDEMCI2wPNzV0xPhm5R9l6ofvw"
+}}
+// or "artist": null on an ordinary search — every other list method's
+// response is unchanged; this field exists only on search.query's.
+```
+
+Shipped as a field on the search response rather than a new `FeedItem` kind,
+per the task's own preference: `FeedItem` is a sealed union every surface
+switches over, and a panel is not a grid item — widening the union would make
+every surface responsible for skipping it, and `UnknownItem`'s fallback-union
+behaviour is unaffected either way since nothing here touches that union.
+
+**The panel does not carry its own subscription state inline, and reading the
+obvious field is wrong.** `subscribeButtonContent.subscribeState.subscribed`
+and `unsubscribeButtonContent.subscribeState.subscribed` both ship on every
+response — `false` and `true` respectively — because each describes what
+*that* button variant represents, not which one is currently showing. The real
+answer is resolved server-side into the response's own entity store,
+`frameworkUpdates.entityBatchUpdate.mutations[]`, keyed by the panel's
+`stateEntityStoreKey`; `parser/feed.ts` resolves that map once per response
+before mapping the panel. Confirmed live against this account's own
+subscription to Ado (`isSubscribed: true`), matching the account's real state.
+
+**`mixPlaylistId` is found structurally, not by the button's label.** The
+panel's "Mix" action is a `buttonViewModel` alongside "View Channel" and
+"YouTube Music", and matching on `title === "Mix"` would be matching a
+localised string (the same trap `search-filters.ts` avoids elsewhere in this
+document). It is found instead by shape: the one action whose endpoint carries
+a `playlistId` starting `RD`, the same discriminator `isMixId` already uses
+throughout `parser/items.ts`.
+
+**Verified and "Official Artist Channel" badges — Task 21 §2, on `VideoItem`
+and `ChannelItem` both.** Two closed-vocabulary signals, both
+`metadataBadgeRenderer` (under `ownerBadges` on a classic search tile, or the
+panel's title attachment above), disambiguated by `style` rather than
+`tooltip`/`accessibilityData.label` — those are localised (this account
+browses `tz=Europe.Rome`), `style` is not:
+
+| Badge | `style` | `icon.iconType` |
+| --- | --- | --- |
+| Verified | `BADGE_STYLE_TYPE_VERIFIED` | `CHECK_CIRCLE_THICK` |
+| Official Artist Channel | `BADGE_STYLE_TYPE_VERIFIED_ARTIST` | `AUDIO_BADGE` |
+
+`isVerified` is the uploading/owning channel's checkmark; `isArtistChannel` is
+the artist badge. Neither duplicates `badges[]` — confirmed live, no
+`"Verified"`/`"Official Artist Channel"` string has ever appeared there.
+
+**The `♪` on a music video's duration badge — Task 21 §2, `VideoItem.isMusic`,
+per video rather than per channel.** Distinct from `isArtistChannel`: an
+artist channel can upload a non-music video, and — confirmed on a real capture
+— an ordinary channel's upload can carry the music note too.
+`thumbnailBadgeViewModel.icon.sources[].clientResource.imageName === "MUSIC"`,
+co-located with the duration text on the same badge node. Seen only on the
+view-based badge shape in this corpus; classic tiles carry no equivalent icon
+field, so `isMusic` stays `false` for anything that never reaches that node —
+a real answer, not a gap, per the task's own "say so plainly" instruction.
+
+**Shorts are classified, not stripped — Task 21 §1, and this reverses the
+original "no Shorts" requirement deliberately.** Two structurally different
+shapes carry a Short, and only one is changed:
+
+- An ordinary `videoRenderer`/`lockupViewModel` carrying a `SHORTS`-styled
+  duration overlay (`thumbnailOverlayTimeStatusRenderer.style === "SHORTS"`)
+  is the leak this task is about — confirmed reaching search interleaved with
+  ordinary videos, previously landing in `badges: ["SHORTS"]` unflagged. Now
+  extracted into `VideoItem.isShort`, the same way the existing `LIVE` badge
+  is pulled out rather than left as a label, and no longer duplicated in
+  `badges[]`.
+- The dedicated Shorts shelf (`reelShelfRenderer` → `shortsLockupViewModel`)
+  is a structurally different renderer — no `content_id`, no
+  `lockupMetadataViewModel` — that the existing video mapper cannot produce a
+  tile from at all. It stays stripped; building a second mapper for a shelf
+  this app still does not render is out of this task's scope.
+
 **`search.suggest` is not an InnerTube endpoint — Task 20 §2 asked to confirm
 rather than assume, and it does not hold.** There is no `/youtubei/v1/*` POST,
 no session, and nothing to run `parse: false` over. It is a plain,
@@ -209,6 +305,25 @@ client-side by the same generalised surface config Task 20 §1 built —
 `checkAuthOnEmpty` in `FeedController`'s `SurfaceConfig`. Search opts out of
 it: an empty search result is a real, un-ambiguous answer ("no results"), not
 a signal worth spending an `auth.verify` round trip on.
+
+**`subscriptions.channels` is a different browse endpoint from
+`feed.subscriptions`, not a parameter on it — Task 21 §4.** `feed.subscriptions`
+returns the video feed (`browseId: 'FEsubscriptions'`); this returns every
+channel the user is subscribed to (`browseId: 'FEchannels'`, confirmed live by
+its own `GetChannels_rid` tracking param and a page title of "All
+subscriptions"). Items are plain `channelRenderer` nodes — the existing
+`ChannelItem` mapper, Task 20's protocol-relative-avatar and
+`videoCountText`-carries-subscribers fixes included, all confirmed live on
+this endpoint too, so it needed no parser code beyond the badge fields §5
+below adds to every surface. **Pagination is confirmed working**: a live
+continuation round-trip returned a second page of 100 more channels through
+the same generic `parseFeed`/`contentRoots` machinery, unchanged. **Sort order
+is not exposed as a request parameter.** The response does carry a single
+`A-Z`-labelled shelf-scope chip — a sort-menu trigger, not a set of
+alternatives to pick between — but replaying it was not explored for this
+task, and this method ships `ItemListResult` only, with no `chips[]`, matching
+`feed.subscriptions` and `search.query`. Client-side search over the already-
+loaded list is UI work, not a request parameter (the task's own framing).
 
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The

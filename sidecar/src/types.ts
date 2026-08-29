@@ -30,8 +30,30 @@ export interface VideoItem {
   /** Display string as YouTube formatted it ("22K views"), never parsed. */
   viewCountText: string | null;
   publishedText: string | null;
+  descriptionSnippet: string | null;
   /** "4K", "New", "Members only", … */
   badges: string[];
+  /**
+   * A Short, classified rather than stripped (Task 21 §1). Covers the plain
+   * `videoRenderer`/`lockupViewModel` shape carrying a `SHORTS`-styled
+   * duration overlay — the shape that reaches search interleaved with
+   * ordinary videos. The dedicated Shorts shelf (`reelShelfRenderer` /
+   * `shortsLockupViewModel`) is a structurally different renderer with no
+   * `content_id` and no title path this mapper reads; it stays stripped and
+   * never reaches this type.
+   */
+  isShort: boolean;
+  /**
+   * The `♪` on YouTube's own duration badge — `thumbnailBadgeViewModel`'s
+   * icon, not its text. Distinct from [isArtistChannel]: this is per-video,
+   * that is per-channel, and they can disagree (an artist channel can upload
+   * a non-music video).
+   */
+  isMusic: boolean;
+  /** The uploading channel's verified checkmark. Never true alongside {@link isArtistChannel} — YouTube ships one badge per channel. */
+  isVerified: boolean;
+  /** The uploading channel's "Official Artist Channel" badge. */
+  isArtistChannel: boolean;
   /**
    * When a premiere or scheduled stream starts, unix ms — null for everything
    * that has already happened, which is nearly every tile.
@@ -70,6 +92,10 @@ export interface ChannelItem {
   name: string;
   avatarUrl: string;
   subscriberText: string | null;
+  /** Same badge as {@link VideoItem.isVerified}, read off the channel's own tile. */
+  isVerified: boolean;
+  /** Same badge as {@link VideoItem.isArtistChannel}, read off the channel's own tile. */
+  isArtistChannel: boolean;
 }
 
 export interface Chip {
@@ -80,10 +106,51 @@ export interface Chip {
   scope: 'feed' | 'shelf';
 }
 
+/**
+ * The "official artist channel" panel a search for an artist's name returns
+ * above the ordinary results (Task 21 §3) — `officialCardViewModel`, live-
+ * confirmed **absent** for an ordinary creator search, so its presence is
+ * itself the artist-channel signal.
+ *
+ * A separate field on `search.query`'s result rather than a new `FeedItem`
+ * kind, per the task's own preference: `FeedItem` is a sealed union every
+ * grid switches over, and a panel is not a grid item — widening the union
+ * would make every surface responsible for skipping it.
+ */
+export interface ArtistPanel {
+  channelId: string;
+  name: string;
+  /** "@Ado1024". */
+  handle: string | null;
+  avatarUrl: string;
+  /** "9.51M subscribers". */
+  subscriberText: string | null;
+  /** "739 videos". */
+  videoCountText: string | null;
+  description: string | null;
+  isSubscribed: boolean;
+  /**
+   * The `RD…` id behind the panel's own "Mix" action, or null if the panel
+   * carried none. Carried because reconstructing it later costs a `/next`
+   * round trip the panel response already answers for free — the same
+   * reasoning as `VideoItem.premiereAtMs`.
+   */
+  mixPlaylistId: string | null;
+}
+
 export interface FeedResult {
   chips: Chip[];
   items: FeedItem[];
   continuation: string | null;
+  /**
+   * Populated only when the response carried an `officialCardViewModel` —
+   * in practice, only ever on a `search.query` response. `null` everywhere
+   * else. Kept on the shared parser return type rather than a bespoke one
+   * because `parseFeed` is one function for every surface; callers that have
+   * no use for it (`feed.home`, `feed.subscriptions`) simply don't forward
+   * it onto the wire — see `rpc/server.ts`.
+   */
+  artistPanel: ArtistPanel | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +192,10 @@ export interface VideoDetail {
   publishedText: string | null;
   likeText: string | null;
   isSubscribed: boolean;
+  /** The uploading channel's verified checkmark. Same badge as {@link VideoItem.isVerified}. */
+  isVerified: boolean;
+  /** Whether the channel holds an Official Artist Channel badge. Same badge as {@link VideoItem.isArtistChannel}. */
+  isArtistChannel: boolean;
   badges: string[];
   /**
    * When a premiere starts, unix ms — null for anything already published.

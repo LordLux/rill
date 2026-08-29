@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:isolate';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
+import '../domain/artist_panel.dart';
 import '../domain/feed_item.dart';
 import '../domain/search_filters.dart';
 import '../data/rpc/client.dart';
@@ -74,6 +76,20 @@ const SurfaceConfig subscriptionsSurface = SurfaceConfig(
   checkAuthOnEmpty: true,
 );
 
+/// The channel list (Task 21 §4) — a different browse endpoint from the video
+/// feed above (`subscriptions.channels`, not `feed.subscriptions`), reusing
+/// [SurfaceKind.subscriptions] since it needs exactly the same shape: no
+/// chips, no query params beyond `continuation`, and the same
+/// `auth.verify`-on-empty ambiguity between "no subscriptions" and "degraded
+/// session". Its items are `ChannelItem`-kind [FeedItem]s, which [FeedView]
+/// already renders via [ChannelTile] — no new controller or widget needed.
+const SurfaceConfig subscriptionsChannelsSurface = SurfaceConfig(
+  kind: SurfaceKind.subscriptions,
+  surface: 'subscriptions-channels',
+  method: 'subscriptions.channels',
+  checkAuthOnEmpty: true,
+);
+
 const SurfaceConfig searchSurface = SurfaceConfig(
   kind: SurfaceKind.search,
   surface: 'search',
@@ -115,6 +131,11 @@ class FeedState {
   /// every other surface.
   final SearchFilters? filters;
 
+  /// The artist panel `search.query` may carry (Task 21 §3, protocol.md
+  /// §3.3). `null` on every other surface, and `null` on search itself
+  /// whenever the response carried none — most searches.
+  final ArtistPanel? artist;
+
   final List<FeedItem> items;
   final String? continuation;
   final bool isLoading;
@@ -138,6 +159,7 @@ class FeedState {
     this.selectedToken,
     this.query,
     this.filters,
+    this.artist,
     this.items = const [],
     this.continuation,
     this.isLoading = true,
@@ -158,6 +180,7 @@ class FeedState {
     Object? selectedToken = _unchanged,
     Object? query = _unchanged,
     Object? filters = _unchanged,
+    Object? artist = _unchanged,
     List<FeedItem>? items,
     Object? continuation = _unchanged,
     bool? isLoading,
@@ -173,6 +196,7 @@ class FeedState {
           identical(selectedToken, _unchanged) ? this.selectedToken : selectedToken as String?,
       query: identical(query, _unchanged) ? this.query : query as String?,
       filters: identical(filters, _unchanged) ? this.filters : filters as SearchFilters?,
+      artist: identical(artist, _unchanged) ? this.artist : artist as ArtistPanel?,
       items: items ?? this.items,
       continuation:
           identical(continuation, _unchanged) ? this.continuation : continuation as String?,
@@ -384,6 +408,11 @@ class FeedController extends Notifier<FeedState> {
         selectedToken: chipToken,
         query: effectiveQuery,
         filters: effectiveFilters,
+        // Explicit, not left to default to null via `??`: hard invariant 10.
+        // Without this a fresh search that carries no panel would keep
+        // showing the previous search's, since nothing else in this branch
+        // touches it.
+        artist: null,
         isAuthDegraded: false,
         isAnonymous: false,
       );
@@ -444,18 +473,27 @@ class FeedController extends Notifier<FeedState> {
       // `chips` off the response and never writes `chipBars` — `FeedPage`
       // already skips an empty bar, so this only has to make sure one is
       // never stored for a surface that has none.
-      final parsedChips = config.hasChips
-          ? (response['chips'] as List<dynamic>? ?? [])
+      final parsedChips = config.hasChips && response['chips'] != null
+          ? (response['chips'] as List<dynamic>)
               .map((c) => Chip.fromJson(c as Map<String, dynamic>))
               .toList()
           : const <Chip>[];
 
       final rawItems = response['items'] as List<dynamic>? ?? [];
-      final parsedItems = rawItems.map((i) => FeedItem.fromJson(i as Map<String, dynamic>)).toList();
+      final parsedItems = await Isolate.run(
+          () => rawItems.map((i) => FeedItem.fromJson(i as Map<String, dynamic>)).toList());
 
       // An empty token is the "All" chip, which the sidecar treats as a base
       // browse — so it comes back with a bar, and is one.
       final isBaseBrowse = config.hasChips && !isLoadMore && (chipToken == null || chipToken.isEmpty);
+
+      // Only search.query's *first-page* response ever carries this key
+      // (protocol.md §3.3) — a continuation response carries no panel at
+      // all, so a load-more must keep whatever the base load found rather
+      // than overwriting it with the absence on this page.
+      final rawArtist = response['artist'] as Map<String, dynamic>?;
+      final parsedArtist =
+          isLoadMore ? state.artist : (rawArtist != null ? ArtistPanel.fromJson(rawArtist) : null);
 
       _autoAttempt = 0;
       state = state.copyWith(
@@ -465,6 +503,7 @@ class FeedController extends Notifier<FeedState> {
             : state.chipBars,
         items: isLoadMore ? [...state.items, ...parsedItems] : parsedItems,
         continuation: response['continuation'] as String?,
+        artist: parsedArtist,
       );
     } on RpcException catch (e) {
       if (generation != _generation) return;
@@ -589,4 +628,8 @@ final searchProvider = NotifierProvider<FeedController, FeedState>(() {
 
 final subscriptionsProvider = NotifierProvider<FeedController, FeedState>(() {
   return FeedController(subscriptionsSurface);
+});
+
+final subscriptionsChannelsProvider = NotifierProvider<FeedController, FeedState>(() {
+  return FeedController(subscriptionsChannelsSurface);
 });

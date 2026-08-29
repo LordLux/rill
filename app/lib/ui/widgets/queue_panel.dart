@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/feed_item.dart';
 import '../queue_controller.dart';
+import 'channel_badge.dart';
 import 'silky_scroll_absorber.dart';
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
@@ -766,11 +767,26 @@ class _QueueItemTileState extends State<_QueueItemTile> {
             color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
           ),
         ),
-        subtitle: Text(
-          widget.item.channelName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+        subtitle: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                widget.item.channelName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+              ),
+            ),
+            if (widget.item.isArtistChannel || widget.item.isVerified) ...[
+              const SizedBox(width: 4),
+              ChannelBadge(
+                isArtistChannel: widget.item.isArtistChannel,
+                isVerified: widget.item.isVerified,
+                size: 12,
+              ),
+            ],
+          ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,

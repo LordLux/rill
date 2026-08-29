@@ -554,6 +554,86 @@ describe('parseVideoDetail — the owner block', () => {
     expect(detail.channelName).toBe('Somewhere New');
     expect(detail.channelId).toBe('UCSMOQeBJ2RAnuFungnQOxLg');
   });
+
+  test('a verified channel sets isVerified on the VideoDetail', () => {
+    const body = {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoSecondaryInfoRenderer: {
+                    owner: {
+                      videoOwnerRenderer: {
+                        title: { runs: [{ text: 'Verified Channel' }] },
+                        navigationEndpoint: { browseEndpoint: { browseId: 'UCSMOQeBJ2RAnuFungnQOxLg' } },
+                        ownerBadges: [
+                          {
+                            metadataBadgeRenderer: {
+                              style: 'BADGE_STYLE_TYPE_VERIFIED',
+                              tooltip: 'Verified',
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const detail = parseVideoDetail(body, 'verified');
+    expect(detail.isVerified).toBe(true);
+    expect(detail.isArtistChannel).toBe(false);
+  });
+
+  test('an official artist channel sets isArtistChannel and not isVerified', () => {
+    const body = {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoSecondaryInfoRenderer: {
+                    owner: {
+                      videoOwnerRenderer: {
+                        title: { runs: [{ text: 'Artist Channel' }] },
+                        navigationEndpoint: { browseEndpoint: { browseId: 'UCSMOQeBJ2RAnuFungnQOxLg' } },
+                        ownerBadges: [
+                          {
+                            metadataBadgeRenderer: {
+                              style: 'BADGE_STYLE_TYPE_VERIFIED_ARTIST',
+                              tooltip: 'Official Artist Channel',
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const detail = parseVideoDetail(body, 'artist');
+    expect(detail.isArtistChannel).toBe(true);
+    expect(detail.isVerified).toBe(false);
+  });
+
+  test('no ownerBadges yields false for both flags', () => {
+    // Mutation guard: a hardcoded false would also pass the positive tests above
+    // only if someone added the right badge — this confirms the default path.
+    const detail = parseVideoDetail(rawNextBody(), 'no-badge');
+    expect(detail.isVerified).toBe(false);
+    expect(detail.isArtistChannel).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

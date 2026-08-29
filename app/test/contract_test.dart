@@ -39,6 +39,8 @@ const videoDetailKeys = <String>{
   'publishedText',
   'likeText',
   'isSubscribed',
+  'isVerified',
+  'isArtistChannel',
   'badges',
   'premiereAtMs',
   'related',

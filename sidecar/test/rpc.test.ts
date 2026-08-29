@@ -341,6 +341,13 @@ describe('RPC Transport', () => {
         { sessionId: 's1', positionMs: 0, state: 'scrubbing' },
       ],
       ['playback.close with no sessionId', 'playback.close', {}],
+      [
+        // Task 21 §4 — same `optionalString` validation as every other
+        // continuation-taking method.
+        'subscriptions.channels with a non-string continuation',
+        'subscriptions.channels',
+        { continuation: 42 },
+      ],
       ['search.query with no q', 'search.query', {}],
       ['search.query with a blank q', 'search.query', { q: '   ' }],
       [
