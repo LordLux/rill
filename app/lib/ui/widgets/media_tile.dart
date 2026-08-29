@@ -741,17 +741,15 @@ class _MediaTileState extends State<MediaTile> {
                       ),
                     ),
                   ),
-                  if (widget.spec.isArtistChannel ||
-                      widget.spec.isVerified) ...[
-                    const SizedBox(width: 4),
-                    Transform.translate(
-                      offset: const Offset(0, 1),
-                      child: ChannelBadge(
-                        isArtistChannel: widget.spec.isArtistChannel,
-                        isVerified: widget.spec.isVerified,
-                      ),
+                  Transform.translate(
+                    offset: const Offset(0, 1),
+                    child: ChannelBadge(
+                      channelName: widget.spec.primaryLine,
+                      isArtistChannel: widget.spec.isArtistChannel,
+                      isVerified: widget.spec.isVerified,
+                      paddingLeft: 4,
                     ),
-                  ],
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -893,13 +891,12 @@ class _MediaTileState extends State<MediaTile> {
                           ),
                         ),
                       ),
-                      if (widget.spec.isArtistChannel || widget.spec.isVerified) ...[
-                        const SizedBox(width: 4),
-                        ChannelBadge(
-                          isArtistChannel: widget.spec.isArtistChannel,
-                          isVerified: widget.spec.isVerified,
-                        ),
-                      ],
+                      ChannelBadge(
+                        channelName: widget.spec.primaryLine,
+                        isArtistChannel: widget.spec.isArtistChannel,
+                        isVerified: widget.spec.isVerified,
+                        paddingLeft: 4,
+                      ),
                     ],
                   ),
                 // Secondary line (view count + published date)

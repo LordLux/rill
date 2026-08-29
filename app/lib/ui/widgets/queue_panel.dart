@@ -778,14 +778,13 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                 style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
               ),
             ),
-            if (widget.item.isArtistChannel || widget.item.isVerified) ...[
-              const SizedBox(width: 4),
-              ChannelBadge(
-                isArtistChannel: widget.item.isArtistChannel,
-                isVerified: widget.item.isVerified,
-                size: 12,
-              ),
-            ],
+            ChannelBadge(
+              channelName: widget.item.channelName,
+              isArtistChannel: widget.item.isArtistChannel,
+              isVerified: widget.item.isVerified,
+              size: 12,
+              paddingLeft: 4,
+            ),
           ],
         ),
         trailing: Row(

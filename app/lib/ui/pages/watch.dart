@@ -614,15 +614,13 @@ class _Meta extends ConsumerWidget {
                                 color: scheme.onSurface,
                               ),
                             ),
-                            if ((detail?.isArtistChannel ?? item.isArtistChannel) ||
-                                (detail?.isVerified ?? item.isVerified)) ...[
-                              const SizedBox(width: 4),
-                              ChannelBadge(
-                                isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
-                                isVerified: detail?.isVerified ?? item.isVerified,
-                                size: 14,
-                              ),
-                            ],
+                            ChannelBadge(
+                              channelName: channel,
+                              isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
+                              isVerified: detail?.isVerified ?? item.isVerified,
+                              size: 14,
+                              paddingLeft: 4,
+                            ),
                           ],
                         ),
                       ),

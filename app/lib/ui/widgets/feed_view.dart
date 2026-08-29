@@ -570,6 +570,7 @@ class ChannelTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
       child: Row(
@@ -621,15 +622,13 @@ class ChannelTile extends StatelessWidget {
                               ),
                             ),
                           ),
-                          if (channel.isArtistChannel ||
-                              channel.isVerified) ...[
-                            const SizedBox(width: 6),
-                            ChannelBadge(
-                              isArtistChannel: channel.isArtistChannel,
-                              isVerified: channel.isVerified,
-                              size: 16,
-                            ),
-                          ],
+                          ChannelBadge(
+                            channelName: channel.name,
+                            isArtistChannel: channel.isArtistChannel,
+                            isVerified: channel.isVerified,
+                            size: 16,
+                            paddingLeft: 6,
+                          ),
                         ],
                       ),
                       if (channel.subscriberText != null) ...[
