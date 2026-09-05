@@ -1,17 +1,20 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/widgets/media_tile.dart';
 
 void main() {
   Widget buildTile(TileSpec spec) {
-    return MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: SizedBox(
-            width: 340, // maxCrossAxisExtent from feed.dart (430 max, but ~340 is a realistic tile size)
-            child: MediaTile(spec: spec),
+    return ProviderScope(
+      child: MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 340, // maxCrossAxisExtent from feed.dart (430 max, but ~340 is a realistic tile size)
+              child: MediaTile(spec: spec),
+            ),
           ),
         ),
       ),

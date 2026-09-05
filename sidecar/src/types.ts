@@ -92,6 +92,7 @@ export interface ChannelItem {
   name: string;
   avatarUrl: string;
   subscriberText: string | null;
+  descriptionSnippet: string | null;
   /** Same badge as {@link VideoItem.isVerified}, read off the channel's own tile. */
   isVerified: boolean;
   /** Same badge as {@link VideoItem.isArtistChannel}, read off the channel's own tile. */
@@ -117,6 +118,17 @@ export interface Chip {
  * grid switches over, and a panel is not a grid item — widening the union
  * would make every surface responsible for skipping it.
  */
+/**
+ * A colour YouTube supplies for both themes, as ARGB ints (`0xAARRGGBB`).
+ *
+ * Carried verbatim rather than resolved here: which one applies is a client
+ * question, and the sidecar has no idea what theme Flutter is painting.
+ */
+export interface ThemedColor {
+  light: number;
+  dark: number;
+}
+
 export interface ArtistPanel {
   channelId: string;
   name: string;
@@ -136,6 +148,34 @@ export interface ArtistPanel {
    * reasoning as `VideoItem.premiereAtMs`.
    */
   mixPlaylistId: string | null;
+  /**
+   * The panel's own tint, straight off `officialCardViewModel` — YouTube
+   * already derives it from the artist's imagery server-side, so the client
+   * has no reason to sample the avatar itself. `backgroundColor` is the card
+   * fill; `baseBackgroundColor` is the much darker page wash behind it.
+   * Null when the payload omits them.
+   */
+  backgroundColor: ThemedColor | null;
+  baseBackgroundColor: ThemedColor | null;
+  /**
+   * The wide artwork strip behind the header — `cinematicContainerViewModel`'s
+   * `backgroundImageConfig`, a genuinely different image from `avatarUrl`
+   * (measured: a 600x176 banner, against the avatar's square). It is what
+   * bleeds off the top-right corner of YouTube's own panel; a blurred copy of
+   * the avatar is not the same picture and does not look like one.
+   */
+  backdropUrl: string | null;
+  /**
+   * The panel's embedded "top videos" shelf — a `horizontalShelfViewModel` of
+   * ordinary `lockupViewModel` tiles, so these are the same flat `FeedItem`
+   * DTOs every grid already renders (a leading `MixItem`, then `VideoItem`s).
+   *
+   * Extracted **here** rather than by letting the walker descend into the
+   * panel: descending would also splice these tiles into the surrounding
+   * search results, where YouTube does not show them and where they would
+   * read as duplicates of the artist's own videos further down.
+   */
+  shelfItems: FeedItem[];
 }
 
 export interface FeedResult {

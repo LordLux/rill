@@ -11,6 +11,7 @@ import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart';
+import 'subscribe_button.dart';
 
 /// The grid, chip bar, and every loading/error/empty state — generalised out
 /// of `FeedPage` (Task 20 §1) so home, search and subscriptions share one
@@ -30,11 +31,23 @@ class FeedView extends ConsumerStatefulWidget {
     this.isWideLayout = false,
     this.itemFilter,
     this.header,
+    this.assumeChannelsSubscribed = false,
+    this.scrollController,
   });
 
   final NotifierProvider<FeedController, FeedState> provider;
   final Widget? header;
   final bool isWideLayout;
+
+  /// An external controller a caller needs to drive scrolling itself — e.g.
+  /// `AllSubscriptionsPage`'s letter index (Task 22). `null` keeps the
+  /// previous behaviour: [FeedView] owns and disposes its own.
+  final ScrollController? scrollController;
+
+  /// True on a surface whose every `ChannelItem` is, by definition of the
+  /// page, already a subscription (`all_subscriptions.dart`) — see
+  /// [ChannelTile.assumeSubscribed].
+  final bool assumeChannelsSubscribed;
 
   /// Restricts the grid to items this predicate accepts, applied before every
   /// layout computation (row math, the footer, the load-more trigger) — so a
@@ -56,11 +69,12 @@ class FeedView extends ConsumerStatefulWidget {
 }
 
 class _FeedViewState extends ConsumerState<FeedView> {
-  final ScrollController _scroll = ScrollController();
+  ScrollController? _ownedScroll;
+  ScrollController get _scroll => widget.scrollController ?? (_ownedScroll ??= ScrollController());
 
   @override
   void dispose() {
-    _scroll.dispose();
+    _ownedScroll?.dispose();
     super.dispose();
   }
 
@@ -123,9 +137,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
 
   Widget _buildBody(BuildContext context, FeedState state, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final items = widget.itemFilter == null
-        ? state.items
-        : state.items.where(widget.itemFilter!).toList();
+    final items = widget.itemFilter == null ? state.items : state.items.where(widget.itemFilter!).toList();
 
     if (state.error != null && items.isEmpty) {
       return Center(
@@ -185,8 +197,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
             ),
             const SizedBox(height: 8),
             Text(
-              widget.anonymousMessage ??
-                  'Log in to see your personalized home feed.',
+              widget.anonymousMessage ?? 'Log in to see your personalized home feed.',
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 24),
@@ -240,8 +251,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
 
     return NotificationListener<ScrollNotification>(
       onNotification: (scrollInfo) {
-        if (scrollInfo.metrics.pixels >=
-            scrollInfo.metrics.maxScrollExtent - 400) {
+        if (scrollInfo.metrics.pixels >= scrollInfo.metrics.maxScrollExtent - 400) {
           ref.read(widget.provider.notifier).loadMore();
         }
         return false;
@@ -249,17 +259,16 @@ class _FeedViewState extends ConsumerState<FeedView> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           const double maxExtent = 430.0;
-          const double spacing = 2.0;
+          // The grid (home, subscriptions, all-subscriptions) gets real breathing
+          // room between rows; a wide, single-column surface (search results, and
+          // any future one) sits closer to a list and stays tight instead.
+          final double spacing = widget.isWideLayout ? 2.0 : 16.0;
           const double hSpacing = 16.0;
 
-          int crossAxisCount = widget.isWideLayout
-              ? 1
-              : ((constraints.maxWidth + hSpacing) / (maxExtent + hSpacing))
-                    .ceil();
+          int crossAxisCount = widget.isWideLayout ? 1 : ((constraints.maxWidth + hSpacing) / (maxExtent + hSpacing)).ceil();
           crossAxisCount = math.max(1, crossAxisCount);
 
-          final bool hasFooter =
-              items.isNotEmpty && (state.isLoading || state.error != null);
+          final bool hasFooter = items.isNotEmpty && (state.isLoading || state.error != null);
 
           List<Widget> rows = [];
           if (widget.header != null) {
@@ -322,46 +331,54 @@ class _FeedViewState extends ConsumerState<FeedView> {
                 i++;
               }
 
-              Widget rowContent = Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                spacing: hSpacing,
-                children: List.generate(crossAxisCount, (colIndex) {
-                  if (colIndex >= rowItems.length)
-                    return const Expanded(child: SizedBox.shrink());
+              // `IntrinsicHeight` only when every item in the row is a
+              // channel: that's what lets `ChannelTile.small`'s bottom-pinned
+              // Subscribe button (a `Spacer` in a min-size `Column`, which
+              // needs a bounded height from somewhere) line up across a row.
+              // `MediaTile` puts a `LayoutBuilder` at the top of its own
+              // build — which cannot answer an intrinsic-height query, by
+              // Flutter's design — so a row that mixes in even one video item
+              // must stay a plain `Row`, sized-per-child, or `IntrinsicHeight`
+              // throws while walking that subtree.
+              final bool rowIsAllChannels = rowItems.every((item) => specFor(item) == null);
 
-                  final feedItem = rowItems[colIndex];
-                  final spec = specFor(feedItem);
-                  final Widget child = spec != null
-                      ? (widget.isWideLayout
-                            ? MediaTile.wide(
-                                spec: spec,
-                                size: MediaTileSize.large,
-                                onTap: watchTargetFor(feedItem) == null
-                                    ? null
-                                    : () => openFromTile(ref, feedItem),
-                                onAddToQueue: () =>
-                                    queueFromTile(ref, feedItem),
-                                onWatchLater: () =>
-                                    addToWatchLater(context, feedItem),
-                              )
-                            : MediaTile(
-                                spec: spec,
-                                onTap: watchTargetFor(feedItem) == null
-                                    ? null
-                                    : () => openFromTile(ref, feedItem),
-                                onAddToQueue: () =>
-                                    queueFromTile(ref, feedItem),
-                                onWatchLater: () =>
-                                    addToWatchLater(context, feedItem),
-                              ))
-                      : feedItem.maybeMap(
-                          channel: (c) => ChannelTile(channel: c),
-                          orElse: () => const SizedBox.shrink(),
-                        );
+              Widget buildRow() {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: hSpacing,
+                  children: List.generate(crossAxisCount, (colIndex) {
+                    if (colIndex >= rowItems.length) return const Expanded(child: SizedBox.shrink());
 
-                  return Expanded(child: child);
-                }),
-              );
+                    final feedItem = rowItems[colIndex];
+                    final spec = specFor(feedItem);
+                    final Widget child = spec != null
+                        ? (widget.isWideLayout
+                              ? MediaTile.wide(
+                                  spec: spec,
+                                  size: MediaTileSize.large,
+                                  onTap: watchTargetFor(feedItem) == null ? null : () => openFromTile(ref, feedItem),
+                                  onAddToQueue: () => queueFromTile(ref, feedItem),
+                                  onWatchLater: () => addToWatchLater(context, feedItem),
+                                )
+                              : MediaTile(
+                                  spec: spec,
+                                  onTap: watchTargetFor(feedItem) == null ? null : () => openFromTile(ref, feedItem),
+                                  onAddToQueue: () => queueFromTile(ref, feedItem),
+                                  onWatchLater: () => addToWatchLater(context, feedItem),
+                                ))
+                        : feedItem.maybeMap(
+                            channel: (c) => widget.isWideLayout
+                                ? ChannelTile(channel: c, assumeSubscribed: widget.assumeChannelsSubscribed)
+                                : ChannelTile.small(channel: c, assumeSubscribed: widget.assumeChannelsSubscribed),
+                            orElse: () => const SizedBox.shrink(),
+                          );
+
+                    return Expanded(child: child);
+                  }),
+                );
+              }
+
+              Widget rowContent = rowIsAllChannels ? IntrinsicHeight(child: buildRow()) : buildRow();
 
               if (widget.isWideLayout) {
                 rowContent = Center(
@@ -476,9 +493,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
               // mismatch here doesn't crop wrong, it just leaves dead space
               // (or overflows) below a thumbnail sized for a different ratio.
               // Add ~62.5px for the title and view count below it.
-              final double itemHeight =
-                  (itemWidth * (1 / ScreenValues.shortAspectRatioSecondary)) +
-                  85.5;
+              final double itemHeight = (itemWidth * (1 / ScreenValues.shortAspectRatioSecondary)) + 85.5;
 
               return SizedBox(
                 height: itemHeight,
@@ -497,9 +512,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                         width: itemWidth,
                         child: MediaTile.shorts(
                           spec: spec,
-                          onTap: watchTargetFor(item) == null
-                              ? null
-                              : () => openFromTile(ref, item),
+                          onTap: watchTargetFor(item) == null ? null : () => openFromTile(ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                         ),
@@ -563,12 +576,43 @@ class _FeedFooter extends ConsumerWidget {
   }
 }
 
+enum ChannelTileSize { wide, small }
+
 class ChannelTile extends StatelessWidget {
   final ChannelItem channel;
-  const ChannelTile({super.key, required this.channel});
+  final ChannelTileSize size;
+
+  /// True on pages that only ever list channels the user is already
+  /// subscribed to (`all_subscriptions.dart`) — the `ChannelItem` DTO itself
+  /// carries no `isSubscribed` field (it's a fixed cross-process shape, per
+  /// `CLAUDE.md`), so a caller with that context has to say so explicitly.
+  final bool assumeSubscribed;
+
+  const ChannelTile({
+    super.key,
+    required this.channel,
+    this.size = ChannelTileSize.wide,
+    this.assumeSubscribed = false,
+  });
+
+  const ChannelTile.small({
+    super.key,
+    required this.channel,
+    this.size = ChannelTileSize.small,
+    this.assumeSubscribed = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    switch (size) {
+      case ChannelTileSize.small:
+        return _buildSmall(context);
+      case ChannelTileSize.wide:
+        return _buildWide(context);
+    }
+  }
+
+  Widget _buildWide(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
     return Padding(
@@ -585,15 +629,9 @@ class ChannelTile extends StatelessWidget {
                 alignment: Alignment.center,
                 child: CircleAvatar(
                   radius: 64,
-                  backgroundImage: channel.avatarUrl.isEmpty
-                      ? null
-                      : NetworkImage(channel.avatarUrl),
-                  onBackgroundImageError: channel.avatarUrl.isEmpty
-                      ? null
-                      : (error, stackTrace) {},
-                  child: channel.avatarUrl.isEmpty
-                      ? const Icon(Icons.person, size: 64)
-                      : null,
+                  backgroundImage: channel.avatarUrl.isEmpty ? null : NetworkImage(channel.avatarUrl),
+                  onBackgroundImageError: channel.avatarUrl.isEmpty ? null : (error, stackTrace) {},
+                  child: channel.avatarUrl.isEmpty ? const Icon(Icons.person, size: 64) : null,
                 ),
               ),
             ),
@@ -623,7 +661,7 @@ class ChannelTile extends StatelessWidget {
                             ),
                           ),
                           ChannelBadge(
-                            channelName: channel.name,
+                            channelId: channel.id,
                             isArtistChannel: channel.isArtistChannel,
                             isVerified: channel.isVerified,
                             size: 16,
@@ -643,29 +681,123 @@ class ChannelTile extends StatelessWidget {
                           ),
                         ),
                       ],
+                      if (channel.descriptionSnippet != null && channel.descriptionSnippet!.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          channel.descriptionSnippet!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
                 const SizedBox(width: 16),
-                FilledButton.tonal(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Not implemented')),
-                    );
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: scheme.onSurface,
-                    foregroundColor: scheme.surface,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 0,
-                    ),
-                    minimumSize: const Size(0, 36),
-                  ),
-                  child: const Text('Subscribe'),
+                SubscribeButton(
+                  key: ValueKey(channel.id),
+                  channelId: channel.id,
+                  initiallySubscribed: assumeSubscribed,
                 ),
                 const SizedBox(width: 24),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSmall(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 32,
+                backgroundImage: channel.avatarUrl.isEmpty ? null : NetworkImage(channel.avatarUrl),
+                onBackgroundImageError: channel.avatarUrl.isEmpty ? null : (error, stackTrace) {},
+                child: channel.avatarUrl.isEmpty ? const Icon(Icons.person, size: 32) : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            channel.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        ChannelBadge(
+                          channelId: channel.id,
+                          isArtistChannel: channel.isArtistChannel,
+                          isVerified: channel.isVerified,
+                          size: 14,
+                          paddingLeft: 4,
+                        ),
+                      ],
+                    ),
+                    if (channel.subscriberText != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        channel.subscriberText!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (channel.descriptionSnippet != null && channel.descriptionSnippet!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              channel.descriptionSnippet!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            ),
+          ],
+          
+          const SizedBox(height: 16.0),
+          
+          const Spacer(flex: 2),
+
+          SizedBox(
+            height: 36,
+            width: double.infinity,
+            child: SubscribeButton(
+              key: ValueKey(channel.id),
+              channelId: channel.id,
+              initiallySubscribed: assumeSubscribed,
             ),
           ),
         ],

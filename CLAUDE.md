@@ -121,6 +121,7 @@ interface PlaylistItem { kind: 'playlist'; id: string; title: string;
 
 interface ChannelItem { kind: 'channel'; id: string; name: string;
   avatarUrl: string; subscriberText: string | null;
+  descriptionSnippet: string | null;
   isVerified: boolean; isArtistChannel: boolean; }
 
 interface Chip {
@@ -156,7 +157,24 @@ view-based surface.
 | Hover actions | — | `ThumbnailHoverOverlayToggleActionsView` |
 | Continuation | `continuationItemRenderer` | `ContinuationItem` |
 
-Shorts are stripped, never rendered.
+**Shorts are split, not simply stripped** (revised by Task 21 §1; this line
+used to read "stripped, never rendered" and both halves of that are now
+false). A Shorts *shelf* — `shortsLockupViewModel`, `reelItemRenderer`,
+`reelShelfRenderer`, `richShelfShorts` — is still stripped whole by the
+vocabulary. A Short arriving as an **ordinary video renderer carrying a
+`SHORTS`-styled duration overlay**, which is how search returns them, is
+classified instead: `VideoItem.isShort`, with `"SHORTS"` deliberately kept
+out of `badges[]` so the fact ships once. The client decides what to do with
+the flag, and `feed_view.dart` does render them, in a shelf of their own.
+
+**A fact with a DTO field of its own does not also travel as a label.** That is
+the general rule `isShort` is one case of, and `isLive` is the other. `LIVE`
+used to be pushed into `BadgeScan.labels` and then filtered back out by each
+mapper separately — redundant, and with a hole in it exactly the size of the
+next mapper someone writes. `scanBadges` now never emits either, so there is
+one route for each fact and no filter to forget. `parser.test.ts` asserts it
+across the whole corpus rather than per mapper, so the rule also covers mappers
+that do not exist yet.
 
 ---
 
@@ -247,10 +265,12 @@ the answer.
   to nothing, as the scrubber's input: at ~6 s between frames they are good for
   showing one frame at a pointer position and nothing else.
 - **Browse and resolve are different clients.** Browse and report as `WEB` with
-  cookies; resolve streams anonymously, asking as `ANDROID_VR` (ladder tier 1)
-  and falling back to `MWEB` (tier 2). Do not attempt to bridge CPNs between
+  cookies; resolve streams anonymously, asking as `VISIONOS` (ladder tier 1)
+  and falling back to `MWEB` (tier 2). **Tier 1 was `ANDROID_VR` until
+  2026-08-18** — it now requires a PO token and is no longer viable
+  (`architecture.md` F11), so any note here still naming it is stale. Do not attempt to bridge CPNs between
   them — issue two independent calls.
-- **The resolution session needs a server-issued visitor id.** `ANDROID_VR`
+- **The resolution session needs a server-issued visitor id.** `VISIONOS`
   refuses a locally fabricated one on ~93% of attempts, with
   `LOGIN_REQUIRED — "Sign in to confirm you're not a bot"`, which reads like an
   age gate and is not. `createSession` fetches a real one by default. Tier 1
@@ -331,6 +351,26 @@ the answer.
   tool eats one level, so `\an1` reaches the file as a BEL byte and libass
   silently ignores the override — a probe that then "measures" the default style
   and looks like a real result. Write such files with the Write tool.
+- **The docs restate the contract in five places, and one test checks they
+  agree.** `CLAUDE.md`, `architecture.md`, `protocol.md`, `parser.test.ts`'s
+  `SHAPES` and `corpus.test.ts`'s auditor each hold part of it independently.
+  Twice a change landed in the code and one doc while the rest went stale in
+  silence — `ChannelItem.descriptionSnippet`, and `ANDROID_VR` surviving as
+  "ladder tier 1" in thirteen places after `VISIONOS` replaced it (F11). Since
+  CLAUDE.md is loaded into every session, that one taught the wrong client for
+  months. `sidecar/test/contract-docs.test.ts` compares the DTO block here
+  against `types.ts` field by field, and fails on any doc sentence naming an
+  InnerTube client that appears nowhere in `sidecar/src`. **A sentence carrying
+  an `F<n>` reference or an ISO date is exempt** — that is how this repo writes
+  history, and history about a retired client has to survive. The cost is real
+  and worth knowing: adding a dated note to a sentence also stops it being
+  checked.
+- **`bun run export-contract-corpus` runs the auditor itself, and exits 1 if it
+  is red.** Not a courtesy — the export is what breaks `corpus.test.ts`, by
+  writing a field with no sanitiser, and it breaks it *in a different file from
+  the one being edited*. Run after the last `bun run check` of a session, it
+  reports success while leaving the suite red and possibly real capture data in
+  `corpus/`. Measured 2026-09-04, which is how this note exists.
 
 ## Current state
 

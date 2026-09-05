@@ -81,6 +81,12 @@ class TileSpec {
   /// The uploading channel's "Official Artist Channel" badge.
   final bool isArtistChannel;
 
+  /// The uploading channel's id, where the item has one — the key
+  /// `ChannelBadge` caches the verified observation under. Null for mix and
+  /// playlist tiles, whose `primaryLine` is a subtitle or an owner name with
+  /// no id attached.
+  final String? channelId;
+
   const TileSpec({
     required this.title,
     required this.thumbnailUrl,
@@ -99,6 +105,7 @@ class TileSpec {
     this.descriptionSnippet,
     this.isVerified = false,
     this.isArtistChannel = false,
+    this.channelId,
   });
 }
 
@@ -143,6 +150,7 @@ TileSpec? specFor(FeedItem item) {
         descriptionSnippet: v.descriptionSnippet,
         isVerified: v.isVerified,
         isArtistChannel: v.isArtistChannel,
+        channelId: v.channelId,
       );
     },
     mix: (m) => TileSpec(
@@ -744,7 +752,7 @@ class _MediaTileState extends State<MediaTile> {
                   Transform.translate(
                     offset: const Offset(0, 1),
                     child: ChannelBadge(
-                      channelName: widget.spec.primaryLine,
+                      channelId: widget.spec.channelId,
                       isArtistChannel: widget.spec.isArtistChannel,
                       isVerified: widget.spec.isVerified,
                       paddingLeft: 4,
@@ -892,7 +900,7 @@ class _MediaTileState extends State<MediaTile> {
                         ),
                       ),
                       ChannelBadge(
-                        channelName: widget.spec.primaryLine,
+                        channelId: widget.spec.channelId,
                         isArtistChannel: widget.spec.isArtistChannel,
                         isVerified: widget.spec.isVerified,
                         paddingLeft: 4,

@@ -325,6 +325,7 @@
       "name": "Sanitised Channel 16",
       "avatarUrl": "https://fake.url/avatar16.jpg",
       "subscriberText": "Sanitised Subscribers 16",
+      "descriptionSnippet": "Sanitised Snippet 16",
       "isVerified": false,
       "isArtistChannel": true
     },

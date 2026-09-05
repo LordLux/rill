@@ -988,10 +988,17 @@ describe('format selection', () => {
     }
   });
 
-  test.if(hasFixture('player-vr'))('every ANDROID_VR adaptive URL is plain — no cipher, no n', () => {
+  test.if(hasFixture('player-vr'))('every VISIONOS adaptive URL is plain — no cipher, no n', () => {
     // Tier 1's premise, on a captured response rather than on the recommendation
     // that produced the reorder. A `LOGIN_REQUIRED` here is not a broken video:
     // it means the capture session carried a fabricated visitor id (F5).
+    //
+    // **The client is `VISIONOS`, not `ANDROID_VR`** — `architecture.md` F11,
+    // amended 2026-08-18: `ANDROID_VR` now requires a PO token and is no
+    // longer viable. The code and the `player-vr` capture both moved with it;
+    // this assertion did not, and sat red long enough to be treated as
+    // background noise. The fixture name is the last thing still carrying the
+    // old client's initials.
     const response = parsePlayer(fixture('player-vr'));
     expect(response.playabilityStatus).toBe('OK');
 
@@ -1001,7 +1008,7 @@ describe('format selection', () => {
     for (const format of adaptive) {
       expect(format.signatureCipher).toBeNull();
       const url = new URL(format.rawUrl!);
-      expect(url.searchParams.get('c')).toBe('ANDROID_VR');
+      expect(url.searchParams.get('c')).toBe('VISIONOS');
       // The whole reason this client leads the ladder: nothing to get wrong.
       expect(url.searchParams.has('n')).toBe(false);
     }

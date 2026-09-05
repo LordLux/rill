@@ -195,7 +195,7 @@ on a single field name.
 | Purpose | Client | Auth |
 | --- | --- | --- |
 | Browse — feed, chips, search, playlists, history | `WEB` | cookies |
-| Stream resolution — ladder tier 1 | `ANDROID_VR` | anonymous, server-issued visitor id |
+| Stream resolution — ladder tier 1 | `VISIONOS` | anonymous, server-issued visitor id |
 | Stream resolution — ladder tier 2 | `MWEB` | anonymous |
 | Watch reporting | `WEB` | cookies |
 
@@ -207,7 +207,7 @@ entirely.
 The resolution client is chosen per `/player` call, not per session: one
 anonymous session serves both tiers, and youtubei.js rewrites `context.client`
 to the named client before sending. What that session must carry is a
-server-issued visitor id — **F5** puts `ANDROID_VR` at 13/13 with one and 2/28
+server-issued visitor id — **F5** puts tier 1 at 13/13 with one and 2/28
 with a fabricated one, so `createSession` fetches one by default
 (`generate_session_locally: false`).
 
@@ -235,8 +235,8 @@ media_kit (libmpv) receives two URLs — video and audio — and merges them via
 **Resolved 2026-08-02.** F10 left this open; F11, F12 and F13 close it, and the
 answer needs none of the three options that were on the table.
 
-- **`ANDROID_VR` is ladder tier 1.** F10 is a property of `c=MWEB` URLs, not of
-  YouTube: `ANDROID_VR` URLs answer ffmpeg's open-ended `Range: bytes=0-` with
+- **`VISIONOS` is ladder tier 1.** F10 is a property of `c=MWEB` URLs, not of
+  YouTube: tier-1 URLs answer ffmpeg's open-ended `Range: bytes=0-` with
   206 at every offset, answer a bare GET with 200, sustain well above the bar,
   and carry no `n` to decipher (**F11**). `MWEB` stays tier 2 — F10 constrains
   how its URLs can be *consumed*, not whether they resolve, and it is the only
@@ -1158,7 +1158,7 @@ thread:**
 
 ## 3. Phasing
 
-**Phase 1 — plain URLs.** Browse as `WEB`, resolve as `ANDROID_VR` with `MWEB`
+**Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with `MWEB`
 behind it, hand mpv two URLs. No SABR, no manifest generation, no media proxy.
 This is the current build target.
 
@@ -1182,7 +1182,7 @@ identical across both so the swap touches only the transport.
 | Undeciphered `n` | ~50 KB/s, constant buffering | Never let a raw URL cross the RPC boundary |
 | Age-restricted / Vevo | `playback.open` fails | Fall through to yt-dlp with PO token provider |
 | `yt-dlp` not installed | Ladder is four rungs; the videos tier 4 exists for fail as "Unavailable" with nothing naming the cause | Probed and warned at startup, and reported in the `event.ready` handshake as `capabilities.ytDlp` (`protocol.md` §2) |
-| ffmpeg opens with `Range: bytes=0-` | HTTP 403 on an `MWEB` URL that fetches fine under a bounded range | Resolve as `ANDROID_VR` — ladder tier 1, whose URLs answer 206 at every offset (F11). `MWEB` remains tier 2; F10 constrains consumption, not resolution |
+| ffmpeg opens with `Range: bytes=0-` | HTTP 403 on an `MWEB` URL that fetches fine under a bounded range | Resolve as `VISIONOS` — ladder tier 1, whose URLs answer 206 at every offset (F11). `MWEB` remains tier 2; F10 constrains consumption, not resolution |
 | The visitor id stops convincing YouTube | `LOGIN_REQUIRED`, or some other status, or `OK` with an empty adaptive ladder — nobody has observed an expired id, so the shape is unknown (F14) | Mint a fresh server-issued id and retry once on **any** non-`OK` or empty-ladder tier-1 response, then decline to tier 2. Gating on `LOGIN_REQUIRED` alone would let an unknown expiry shape stop resolution silently |
 | A libmpv pin bump lands modern FFmpeg | Playback looks perfect until the first seek, then freezes at the target with nothing logged | `stream-lavf-o=request_size=1048576` is set unconditionally (F11, F13); the exact pin that would keep the bump from arriving unnoticed is specified in §2.4 and waits on `app/` existing |
 | Audio attach race condition | Video buffers forever, progress bar spins | Await `stream.duration.firstWhere((d) => d > 0)` only if `state.duration <= 0` because if the load was fast, the stream already fired the event. On a timeout failure, surface the error and explicitly hide the `Video` widget so the spinner doesn't run forever. (Observed failure rate before fix: 1 in 3 launches; after fix: 0 in 10). **Applied 2026-08-03** |

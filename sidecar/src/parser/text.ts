@@ -143,16 +143,22 @@ export function isPublishedText(value: string): boolean {
 // Badges
 // ---------------------------------------------------------------------------
 
+/**
+ * **A fact with a DTO field of its own does not also travel as a label.**
+ *
+ * That is the whole convention, and it is why `labels` below excludes live and
+ * Shorts. Both used to be pushed into `labels` and then filtered back out by
+ * each mapper individually — redundant, and with a hole in it: a fourth mapper
+ * that forgot the filter would ship `badges: ["LIVE"]` beside `isLive: true`
+ * and nothing would say so. The filter is gone; the flags are the only route.
+ */
 export interface BadgeScan {
   /** Non-duration, non-live, non-Shorts labels: "4K", "New", "Members only", "Upcoming". */
   labels: string[];
   durationSeconds: number | null;
+  /** Ships as `VideoItem.isLive`. Never as a `"LIVE"` entry in `badges[]`. */
   isLive: boolean;
-  /**
-   * A `SHORTS`-styled duration overlay (Task 21 §1). Pulled out of `labels`
-   * the same way `LIVE` already is — leaving `"SHORTS"` in `badges[]` as well
-   * would be the same fact shipped through two fields.
-   */
+  /** Ships as `VideoItem.isShort` (Task 21 §1). Never as `"SHORTS"` in `badges[]`. */
   isShort: boolean;
   /**
    * The `♪` YouTube draws on a music video's duration badge — `imageName:
@@ -192,7 +198,6 @@ export function scanBadges(node: Json): BadgeScan {
     }
     if (LIVE_LABEL.test(value) || (style !== null && /LIVE/i.test(style))) {
       isLive = true;
-      if (!labels.includes('LIVE')) labels.push('LIVE');
       return;
     }
     if (SHORTS_LABEL.test(value) || (style !== null && /SHORTS/i.test(style))) {

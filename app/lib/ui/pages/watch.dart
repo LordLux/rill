@@ -28,6 +28,7 @@ import '../video_info.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
+import '../widgets/subscribe_button.dart';
 import 'watch_layout.dart';
 import '../../theme/screen_values.dart';
 
@@ -615,7 +616,7 @@ class _Meta extends ConsumerWidget {
                               ),
                             ),
                             ChannelBadge(
-                              channelName: channel,
+                              channelId: detail?.channelId ?? item.channelId,
                               isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
                               isVerified: detail?.isVerified ?? item.isVerified,
                               size: 14,
@@ -632,23 +633,11 @@ class _Meta extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(width: 16),
-                  FilledButton.tonal(
-                    onPressed: () {},
-                    style: FilledButton.styleFrom(
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      foregroundColor: scheme.onSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                      minimumSize: const Size(0, 45),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.notifications_active_outlined, size: 18),
-                        SizedBox(width: 6),
-                        Text('Subscribed'),
-                        SizedBox(width: 6),
-                        Icon(Icons.keyboard_arrow_down, size: 18),
-                      ],
-                    ),
+                  SubscribeButton(
+                    key: ValueKey(detail?.channelId ?? item.channelId),
+                    channelId: detail?.channelId ?? item.channelId,
+                    initiallySubscribed: detail?.isSubscribed ?? false,
+                    minHeight: 45,
                   ),
                 ],
               ),

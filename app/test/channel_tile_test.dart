@@ -5,6 +5,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:rill/domain/feed_item.dart';
@@ -23,9 +24,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MaterialApp(
-        theme: buildRillTheme(kDefaultAccent),
-        home: const Scaffold(body: ChannelTile(channel: channel)),
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildRillTheme(kDefaultAccent),
+          home: const Scaffold(body: ChannelTile(channel: channel)),
+        ),
       ),
     );
     await tester.pump();
@@ -46,9 +49,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MaterialApp(
-        theme: buildRillTheme(kDefaultAccent),
-        home: const Scaffold(body: ChannelTile(channel: channel)),
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildRillTheme(kDefaultAccent),
+          home: const Scaffold(body: ChannelTile(channel: channel)),
+        ),
       ),
     );
     await tester.pump();

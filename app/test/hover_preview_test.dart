@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/playback_source.dart';
 import 'package:rill/ui/hover_preview.dart';
@@ -157,24 +158,26 @@ Future<TestGesture> pumpTiles(
   List<TileSpec> tiles = const <TileSpec>[kTile],
 }) async {
   await tester.pumpWidget(
-    MaterialApp(
-      home: HoverPreviewScope(
-        preview: harness.preview,
-        child: Scaffold(
-          // Inset, so there is somewhere to park the pointer that is *not* over a tile —
-          // otherwise `onExit` never fires and every cancellation assertion tests nothing.
-          body: Padding(
-            padding: const EdgeInsets.all(60),
-            child: Row(
-              children: [
-                for (final tile in tiles)
-                  Expanded(
-                    child: MediaTile(
-                      key: ValueKey<String>(tile.previewVideoId ?? ''),
-                      spec: tile,
+    ProviderScope(
+      child: MaterialApp(
+        home: HoverPreviewScope(
+          preview: harness.preview,
+          child: Scaffold(
+            // Inset, so there is somewhere to park the pointer that is *not* over a tile —
+            // otherwise `onExit` never fires and every cancellation assertion tests nothing.
+            body: Padding(
+              padding: const EdgeInsets.all(60),
+              child: Row(
+                children: [
+                  for (final tile in tiles)
+                    Expanded(
+                      child: MediaTile(
+                        key: ValueKey<String>(tile.previewVideoId ?? ''),
+                        spec: tile,
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -201,16 +204,18 @@ Future<void> settle(WidgetTester tester) async {
 /// `ListView` does when it recycles an element.
 Future<void> recycleTile(WidgetTester tester, Harness harness, TileSpec spec) async {
   await tester.pumpWidget(
-    MaterialApp(
-      home: HoverPreviewScope(
-        preview: harness.preview,
-        child: Scaffold(
-          body: Padding(
-            padding: const EdgeInsets.all(60),
-            child: Row(
-              children: [
-                Expanded(child: MediaTile(key: const ValueKey<String>('slot'), spec: spec)),
-              ],
+    ProviderScope(
+      child: MaterialApp(
+        home: HoverPreviewScope(
+          preview: harness.preview,
+          child: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.all(60),
+              child: Row(
+                children: [
+                  Expanded(child: MediaTile(key: const ValueKey<String>('slot'), spec: spec)),
+                ],
+              ),
             ),
           ),
         ),
@@ -969,7 +974,9 @@ void main() {
       // Every other tile test builds a bare `MediaTile`; if absence of a scope did anything but
       // disable previews, those tests would be starting a sidecar and an mpv instance.
       await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: SizedBox(width: 400, child: MediaTile(spec: kTile)))),
+        const ProviderScope(
+          child: MaterialApp(home: Scaffold(body: SizedBox(width: 400, child: MediaTile(spec: kTile)))),
+        ),
       );
 
       final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);

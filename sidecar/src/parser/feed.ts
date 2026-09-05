@@ -151,9 +151,10 @@ function handleRenderer(
       return false;
 
     case 'artist-panel':
-      // First one wins, and never descended into (§3's embedded shelf is not
-      // modelled — see `vocabulary.ts`). Today's vocabulary never produces
-      // more than one per response anyway.
+      // First one wins, and never descended into — `mapArtistPanel` lifts the
+      // embedded shelf out itself (Task 23), so descending here would put the
+      // artist's top videos in the search results as well. Today's vocabulary
+      // never produces more than one panel per response anyway.
       if (isObject(payload)) {
         collector.artistPanel ??= mapArtistPanel(payload, collector.subscriptionEntities);
       }

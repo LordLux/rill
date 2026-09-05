@@ -90,6 +90,13 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // ArtistPanel (Task 21 §3) — its own `channelId`/`mixPlaylistId` reuse
   // `chan_`/`mix_` id shapes; `handle` and `videoCountText` are new.
   handle: /^@sanitised_handle_\d+$/,
+  // Task 23. The panel's `backgroundColor`/`baseBackgroundColor` are not here
+  // and do not need to be: they are numbers, which this auditor does not walk,
+  // and they are YouTube's own palette for a public channel — they identify
+  // nobody, and replacing them would cost the corpus the only field a colour
+  // regression could ever be caught by. The exporter says the same at the
+  // point it lets them through.
+  backdropUrl: /^https:\/\/fake\.url\/backdrop\d+\.jpg$/,
   videoCountText: /^Sanitised Videos \d+$/,
   mixPlaylistId: /^mix_\d{3,}$/,
 

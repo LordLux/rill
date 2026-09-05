@@ -181,10 +181,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     final present = controller.entries.toSet();
 
     try {
-      // 1. Spin the icon 180°.
+      // Spin the icon 180°.
       _iconSpinCtrl.forward();
 
-      // 2. Figure out which items are visible inside the list viewport.
+      // Figure out which items are visible inside the list viewport.
       final entries = controller.entries;
       // The row that survives the sweep is the one `clearUpcoming` keeps, which
       // is the *current* one — not row 0. They are the same only until autoplay
@@ -216,7 +216,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       }
       if (!foundFirst) return; // Nothing visible: skip to the finally and clear.
 
-      // 3. Set up the staggered slide-off, bottom-to-top among visible items.
+      // Set up the staggered slide-off, bottom-to-top among visible items.
       final visibleCount = lastVisible - firstVisible + 1;
       const perItemDelay = Duration(milliseconds: 50);
       const perItemDuration = Duration(milliseconds: 200);
@@ -230,19 +230,19 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
         });
       }
 
-      // 4. Hard cap: after 1 s, move on regardless.
+      // Hard cap: after 1 s, move on regardless.
       final totalStagger = perItemDelay * (visibleCount - 1) + perItemDuration;
       final waitDuration = totalStagger > const Duration(seconds: 1) ? const Duration(seconds: 1) : totalStagger;
 
       await Future.delayed(waitDuration);
       if (!mounted) return;
 
-      // 5. Collapse the panel to its closed header state.
+      // Collapse the panel to its closed header state.
       setState(() => _expanded = false);
       await Future.delayed(const Duration(milliseconds: 320));
       if (!mounted) return;
 
-      // 6. Squeeze → Pop → Shrink.
+      // Squeeze → Pop → Shrink.
       await _popAndShrink();
     } catch (e) {
       // Unmounting mid-animation throws from the controllers; the `finally` still
@@ -779,7 +779,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
               ),
             ),
             ChannelBadge(
-              channelName: widget.item.channelName,
+              channelId: widget.item.channelId,
               isArtistChannel: widget.item.isArtistChannel,
               isVerified: widget.item.isVerified,
               size: 12,

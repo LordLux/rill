@@ -69,6 +69,7 @@ sealed class FeedItem with _$FeedItem {
     required String name,
     required String avatarUrl,
     String? subscriberText,
+    String? descriptionSnippet,
     @Default(false) bool isVerified,
     @Default(false) bool isArtistChannel,
   }) = ChannelItem;

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawnSync } from 'node:child_process';
 import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -153,10 +154,18 @@ function sanitiseArtistPanel(panel: ArtistPanel): ArtistPanel {
     name: 'Sanitised Channel 1',
     handle: panel.handle === null ? null : '@sanitised_handle_1',
     avatarUrl: 'https://fake.url/avatar1.jpg',
+    backdropUrl: panel.backdropUrl === null ? null : 'https://fake.url/backdrop1.jpg',
     subscriberText: panel.subscriberText === null ? null : 'Sanitised Subscribers 1',
     videoCountText: panel.videoCountText === null ? null : 'Sanitised Videos 1',
     description: panel.description === null ? null : 'Sanitised Description 1',
     mixPlaylistId: panel.mixPlaylistId === null ? null : 'mix_001',
+    // The shelf holds real videos, so it goes through the same per-item
+    // sanitiser the surrounding results do. `backgroundColor` and
+    // `baseBackgroundColor` ride the spread untouched on purpose: they are
+    // YouTube's own palette for a public channel, identify nobody, and
+    // replacing them would cost the corpus the one field a colour
+    // regression could ever be caught by.
+    shelfItems: panel.shelfItems.map(sanitiseItem),
   };
 }
 
@@ -196,6 +205,58 @@ async function main() {
     );
     log.info('exported sanitised video-detail.json');
   }
+
+  audit();
 }
 
-main().catch(console.error);
+/**
+ * Run the auditor the export exists to satisfy, and fail if it fails.
+ *
+ * `corpus.test.ts` is a closed world: every string in `corpus/` must match the
+ * synthetic shape its field is supposed to have, so a DTO field added without a
+ * matching branch above ships real data and turns the suite red. That is the
+ * design working — but only if someone runs it. On 2026-09-04 this export ran
+ * after the last `bun run check` of a session, and the session was reported
+ * green while the auditor was red. The export had broken the suite that
+ * validates it, and the failure surfaced in a file nobody had touched.
+ *
+ * So the export runs it itself, rather than trusting the next person to. It is
+ * spawned here rather than only chained in `package.json` because the direct
+ * invocation — `bun run src/export-contract-corpus.ts` — is the one that
+ * actually gets typed, and a script-level `&&` does nothing for it.
+ */
+function audit(): void {
+  log.info('running the corpus auditor over what was just exported…');
+  const result = spawnSync('bun', ['test', 'test/corpus.test.ts'], {
+    cwd: join(ROOT, 'sidecar'),
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+
+  if (result.error) {
+    // Not fatal by itself, but it must not read as a pass: the corpus is
+    // written and unverified, which is exactly the state this guards against.
+    log.error(
+      `could not run the corpus auditor (${result.error.message}). ` +
+        'The corpus is exported but UNVERIFIED — run `bun test test/corpus.test.ts`.',
+    );
+    process.exit(1);
+  }
+
+  if (result.status !== 0) {
+    log.error(
+      'the corpus auditor is RED against the corpus just exported. A new DTO field ' +
+        'almost certainly needs a branch in this file and a shape in SANITISED_SHAPE — ' +
+        'until then `corpus/` may contain real capture data. Do not commit it.',
+    );
+    process.exit(result.status ?? 1);
+  }
+
+  log.info('corpus auditor green');
+}
+
+main().catch((error: unknown) => {
+  // `.catch(console.error)` printed the error and exited 0, so a failed export
+  // was indistinguishable from a successful one to anything downstream.
+  log.error(`export failed: ${error instanceof Error ? error.stack : String(error)}`);
+  process.exit(1);
+});

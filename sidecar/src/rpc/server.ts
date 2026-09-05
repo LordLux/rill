@@ -345,6 +345,25 @@ async function handleRequest(request: RpcRequest) {
         ? await session.execute('/browse', { continuation })
         : await fetchBaseBrowse(session, 'FEchannels');
       const result = parseFeed(raw, 'channels');
+
+      // The app's A–Z scrubber depends on that fixed order, and nothing in the
+      // request asks for it — so if YouTube's default ever changes, every
+      // letter jump silently lands on the wrong row. Check the base page (a
+      // continuation resumes mid-alphabet and has no first bucket to compare
+      // against) and say so on stderr rather than let it be a wrong answer
+      // nobody notices.
+      if (!continuation) {
+        const { firstChannelOrderViolation } = await import('../parser/channel-order.ts');
+        const violation = firstChannelOrderViolation(result.items);
+        if (violation) {
+          log.error(
+            `subscriptions.channels is NOT alphabetical: channel ${violation.index} buckets to ` +
+              `'${violation.bucket}' after '${violation.previousBucket}'. The A–Z index in the ` +
+              `app assumes this order (protocol.md §3.3) and will jump to the wrong rows.`,
+          );
+        }
+      }
+
       emitResponse(id, { items: result.items, continuation: result.continuation });
     } else if (method === 'search.query') {
       // Browse-generation, per §2.3's client table: `WEB` with cookies, same

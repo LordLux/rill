@@ -39,6 +39,79 @@ Windows process: `lib/probe_task19.dart`, one level up from this directory.
   drag. Four runs at different pointer speeds/cadences (M4–M4d), plus a
   post-release catch-up trace.
 
+- **`probe_tile_height.dart`** — `flutter test test/probe_tile_height.dart --reporter expanded`.
+  Answers the one question a `MediaTile` cannot be asked at layout time: how
+  tall is its metadata block. Every horizontal strip in the app
+  (`artist_panel_card.dart`'s artist shelf, `feed_view.dart`'s Shorts shelf)
+  has to carry that number as a constant, because the tile puts a
+  `LayoutBuilder` at the root of its own build and a `LayoutBuilder` cannot
+  answer an intrinsic-height query — so the strip's `SizedBox` height is
+  computed, and a constant that is 1.5 px short is a visible overflow stripe.
+  Renders a real tile under an unbounded constraint across widths, title
+  lengths and badge states. Measured 2026-09-01: **93.5** with no badges
+  (two lines of title, the cap, at every width from 180 to 320) and **115.5**
+  with them — a flat **+22.0** for the badge row. Re-run it after any change
+  to `MediaTile`'s `bottomArea`.
+
+- **`probe_blur_edges.dart`** — `flutter test test/probe_blur_edges.dart --reporter expanded`.
+  Renders a blurred image to a bitmap and reads the pixels along its edge, to
+  settle which blur strategy leaves the dark rim the artist panel's backdrop
+  was showing. Measured 2026-09-01 at sigma 8: an unfiltered reference holds
+  255 at the edge, `TileMode.decal` drops to 134 (the artefact, reproduced),
+  `TileMode.clamp` holds 255 (no rim), and a `BackdropFilter` in a `Stack`
+  drops to the same 134 — so the mode is the fix and the backdrop is not.
+  Blurring a composited scene still blurs across the artwork's boundary.
+
+  Two traps this probe walked into, both of which made every strategy look
+  identical and neither of which announced itself: the ground and the image
+  must differ in the channel being read (pure red and pure white share a full
+  red channel), and `toImage` on the boundary returns the **whole view**, not
+  the harness box — so the scan geometry has to be derived from the captured
+  size rather than from the widget's own padding.
+
+- **`probe_backdrop_edge.dart`** — `flutter test test/probe_backdrop_edge.dart --reporter expanded`.
+  The same question as `probe_blur_edges.dart` but against the artist panel's
+  **real** composition — fractional box, two nested gradient masks, blurred
+  image, over the tint — because the bare-square probe and the widget disagree
+  about what is safe, and the widget is what ships. Stands the artwork in as a
+  ramp with a dark left edge, which is the case that bites.
+
+  Measured 2026-09-01, as delta from the flat tint (0 = bare card):
+
+  | | outside the left edge | top edge, y=0→12 |
+  |---|---|---|
+  | `decal`, clip outside the box | 2, 5, 14, 23 | 37→69 ramp |
+  | `clamp`, clip outside the box | **66, 66, 66, 66** | 69 flat |
+  | `decal`, clip inside the box | 0, 0, 0, 0 | 37→69 ramp |
+  | `clamp`, clip inside the box | 0, 0, 0, 0 | 69 flat |
+
+  Two independent defects, and the first is not a blur setting at all. **A
+  blurred layer paints past its own bounds and a `ShaderMask` masks only
+  within its rect, so whatever escapes is composited with no mask on it** — a
+  clip outside the fractional box clips to the whole card and contains none of
+  it. With `clamp` (which repeats the edge pixel outward) that escaped band is
+  a solid hard-edged bar, the flat 66. The second is the tile mode itself: at
+  the top edge, where the card's boundary cuts the artwork, `decal` lets the
+  tint through over ~10 px — the original "shadow" — while `clamp` is opaque
+  from the first row. So the shipping answer is `clamp` **and** a tight clip;
+  either alone leaves one of the two artefacts.
+
+- **`probe_artist_header.dart`** — `flutter test test/probe_artist_header.dart --reporter expanded`.
+  Measures the artist panel's two header columns across window widths: what
+  each action pill costs, what a single row of them would need, and where each
+  column lands. Exists because that split is driven by two constants
+  (`_avatarBlockWidth`, `_minIdentityWidth`) whose only justification is that
+  the pills keep a single row wherever one fits.
+
+  **Read its numbers with the font in mind.** `flutter test` renders in Ahem,
+  where every glyph is a full em square, so text-derived widths come out
+  roughly double the shipped ones — the probe prints `text=` and `chrome=`
+  separately so the two are distinguishable. Measured 2026-09-01: four pills
+  report 782 px here, of which ~490 is Ahem glyph width; the same row is
+  ~516 px in Roboto, against roughly 500 on youtube.com. A pixel target read
+  straight off this probe will be wrong by a factor of two, which is why the
+  regression tests in `artist_panel_test.dart` assert proportions instead.
+
 - **`probe_fixtures/karaoke-L-BgxLtMxh0.ass`**, **`probe_fixtures/asr-dQw4w9WgXcQ.ass`**
   — real captured documents, not hand-authored. The karaoke one carries
   `L-BgxLtMxh0`'s real ~200 ms color-split steps; the ASR one is a real

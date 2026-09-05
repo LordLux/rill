@@ -224,7 +224,9 @@ ROLES.set('chip', 'chip-shelf');
 ROLES.set('continuationitem', 'continuation');
 // The artist-search panel (Task 21 §3) — `officialCardViewModel`, live-
 // confirmed absent for an ordinary creator query. Mapped whole, not
-// descended into: its embedded video/mix shelf is not modelled.
+// descended into: its embedded video/mix shelf *is* modelled now (Task 23),
+// but by `mapArtistPanel` reaching into it, not by the walker — descending
+// would splice those tiles into the surrounding search results too.
 ROLES.set('officialcard', 'artist-panel');
 
 /** Role of a renderer key, or null when we have never seen it before. */

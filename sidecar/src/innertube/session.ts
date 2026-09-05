@@ -242,10 +242,10 @@ export async function refreshVisitorId(session: Session): Promise<string> {
  * second `/player` round trip per open, and `video.info` now shares tier 1's
  * `VISIONOS` response instead. See `video/info.ts`.
  */
-export type PlayerClient = 'WEB' | 'MWEB' | 'VISIONOS' | 'VISIONOS' | 'ANDROID';
+export type PlayerClient = 'WEB' | 'MWEB' | 'VISIONOS' | 'ANDROID';
 
 /** Every value of `PlayerClient`, for anything that has to sweep them all. */
-export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'VISIONOS', 'VISIONOS', 'ANDROID'];
+export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'VISIONOS', 'ANDROID'];
 
 /**
  * The payload a raw `/player` call needs.

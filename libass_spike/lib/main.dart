@@ -179,7 +179,7 @@ class _SubtitleTestPageState extends State<SubtitleTestPage>
   /// Installs [raw] as the current script: pads it, reconfigures the renderer
   /// for the padded frame, and rebuilds the track.
   void _installScript(String raw) {
-    // 1. Strip libass backgrounds (force BorderStyle=1)
+    // Strip libass backgrounds (force BorderStyle=1)
     final styleRegex = RegExp(r'^(Style:(?:[^,]*,){15})3(,)', multiLine: true);
     final strippedRaw = raw.replaceAllMapped(styleRegex, (m) => '${m.group(1)}1${m.group(2)}');
 
@@ -190,8 +190,7 @@ class _SubtitleTestPageState extends State<SubtitleTestPage>
     // Margins are deliberately zero. They do not widen the crop rect — they
     // move the origin and shrink the content box by the same amount, so they
     // cancel. All the padding lives in the script now.
-    _libass.ass_set_frame_size(
-        _assRenderer!, _padded.frameWidth, _padded.frameHeight);
+    _libass.ass_set_frame_size(_assRenderer!, _padded.frameWidth, _padded.frameHeight);
     _libass.ass_set_margins(_assRenderer!, 0, 0, 0, 0);
     _libass.ass_set_use_margins(_assRenderer!, 0);
     // The padded frame is no longer an isotropic scale of the video, so libass'

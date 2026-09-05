@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,14 +33,14 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
           builder: (context, constraints) {
             final screenWidth = constraints.maxWidth;
             // Define the breakpoint for when the search bar collapses
-            final bool showFullSearch = screenWidth > 700;
+            final bool showFullSearch = screenWidth > 634;
 
             return SizedBox(
               height: preferredSize.height,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  // 1. LEFT SECTION (Menu & Title)
+                  // LEFT SECTION (Menu & Title)
                   Positioned(
                     left: 0,
                     child: Row(
@@ -57,17 +59,23 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                     ),
                   ),
 
-                  // 2. CENTER SECTION (Search Bar - ABSOLUTE CENTER)
+                  // CENTER SECTION: Search Bar
                   // The horizontal padding guarantees it shrinks on medium screens
                   // without overlapping the left/right sections.
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 280.0),
-                    child: showFullSearch
-                        ? const _SearchField()
-                        : _buildCollapsedSearchButton(scheme),
-                  ),
+                  showFullSearch
+                      ? Padding(
+                          padding: EdgeInsets.only(left: 280.0, right: 200.0),
+                          child: const _SearchField(),
+                        )
+                      : Align(
+                          alignment: Alignment.centerRight,
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 120.0),
+                            child: _buildCollapsedSearchButton(scheme),
+                          ),
+                        ),
 
-                  // 3. RIGHT SECTION (Actions)
+                  // RIGHT SECTION (Actions)
                   Positioned(
                     right: 16,
                     child: Row(
@@ -225,9 +233,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
   void _submitHighlightedOrText(String text) {
     final suggestState = ref.read(searchSuggestProvider);
     final index = suggestState.highlightedIndex;
-    final chosen = (index != null && index < suggestState.suggestions.length)
-        ? suggestState.suggestions[index]
-        : text;
+    final chosen = (index != null && index < suggestState.suggestions.length) ? suggestState.suggestions[index] : text;
     _submit(chosen);
   }
 
@@ -310,9 +316,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
     });
 
     ref.listen(searchSuggestProvider, (previous, next) {
-      if (previous?.suggestions != next.suggestions ||
-          previous?.isOpen != next.isOpen ||
-          previous?.highlightedIndex != next.highlightedIndex) {
+      if (previous?.suggestions != next.suggestions || previous?.isOpen != next.isOpen || previous?.highlightedIndex != next.highlightedIndex) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _syncOverlay();
         });
@@ -354,15 +358,19 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                     },
                     child: Actions(
                       actions: {
-                        _CloseSearchIntent: CallbackAction<_CloseSearchIntent>(onInvoke: (_) {
-                          ref.read(searchSuggestProvider.notifier).close();
-                          _focus.unfocus();
-                          return null;
-                        }),
-                        _MoveHighlightIntent: CallbackAction<_MoveHighlightIntent>(onInvoke: (intent) {
-                          ref.read(searchSuggestProvider.notifier).moveHighlight(intent.delta);
-                          return null;
-                        }),
+                        _CloseSearchIntent: CallbackAction<_CloseSearchIntent>(
+                          onInvoke: (_) {
+                            ref.read(searchSuggestProvider.notifier).close();
+                            _focus.unfocus();
+                            return null;
+                          },
+                        ),
+                        _MoveHighlightIntent: CallbackAction<_MoveHighlightIntent>(
+                          onInvoke: (intent) {
+                            ref.read(searchSuggestProvider.notifier).moveHighlight(intent.delta);
+                            return null;
+                          },
+                        ),
                       },
                       child: TextField(
                         controller: _controller,
@@ -379,8 +387,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(vertical: 10),
                         ),
-                        onChanged: (text) =>
-                            ref.read(searchSuggestProvider.notifier).onTextChanged(text),
+                        onChanged: (text) => ref.read(searchSuggestProvider.notifier).onTextChanged(text),
                         onSubmitted: _submitHighlightedOrText,
                       ),
                     ),

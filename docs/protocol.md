@@ -202,11 +202,67 @@ official artist channel" signal; nothing else needs to gate it.
   "videoCountText": "739 videos",
   "description": "Ado is a Japanese singer.",
   "isSubscribed": true,
-  "mixPlaylistId": "RDEMCI2wPNzV0xPhm5R9l6ofvw"
+  "mixPlaylistId": "RDEMCI2wPNzV0xPhm5R9l6ofvw",
+  // Task 23 — the panel's own palette, backdrop, and top-videos shelf.
+  "backdropUrl": "https://yt3.googleusercontent.com/...=w600-h176-p",
+  "backgroundColor":     {"light": 4287945716, "dark": 4278999928},
+  "baseBackgroundColor": {"light": 4293983231, "dark": 4278261278},
+  "shelfItems": [ /* one MixItem, then VideoItems — ordinary flat DTOs */ ]
 }}
 // or "artist": null on an ordinary search — every other list method's
 // response is unchanged; this field exists only on search.query's.
 ```
+
+**The panel carries its own colour, and it is YouTube's, not a sampled one
+— Task 23.** `officialCardViewModel` ships `backgroundColor` and
+`baseBackgroundColor`, each an ARGB int (`0xAARRGGBB`) per theme, already
+derived server-side from the artist's imagery: measured for `"Ado"` as
+`#FF0C5B78` / `#FF01161E` on dark and `#FF94DBF4` / `#FFF0FBFF` on light.
+Both halves ship because the sidecar has no idea which theme Flutter is
+painting. This is why the client samples nothing: a palette pass over the
+avatar would cost a decode, and would paint the first frame in the wrong
+colour while it ran. Null when the payload omits them, which the client
+renders as an ordinary untinted card.
+
+**The backdrop is its own image, and it is not the avatar — Task 23.**
+`pageHeaderViewModel.background.cinematicContainerViewModel.backgroundImageConfig`
+carries a wide artwork strip (measured 600x176 for `"Ado"`, against the
+avatar's square) that YouTube bleeds off the panel's top-right corner,
+alongside `gradualBlurConfig` and `fadeToThemeConfig` describing how it fades
+into the tint. Shipped as `backdropUrl`, null when absent. Worth stating
+because the obvious substitute — blurring the avatar — renders artwork the
+artist never chose for that slot, and looks like it.
+
+**The panel's embedded shelf is modelled, and it is lifted out rather than
+walked into — Task 23.** `officialCardViewModel.contents[]` holds a
+`horizontalShelfViewModel` whose `items[]` are ordinary `lockupViewModel`
+tiles: for `"Ado"`, one `RD…` mix followed by ten of the artist's
+most-viewed videos. They map through the *existing* lockup mapper with no
+new parsing, so `shelfItems` is `FeedItem[]` — the same flat DTOs every grid
+already renders. `mapArtistPanel` reaches into the panel for them instead of
+letting the renderer walker descend, because descending would also splice
+those tiles into the surrounding search results, where YouTube does not show
+them and where they would read as duplicates.
+
+**Their metadata sits in one row, not two, and that was a live parser bug.**
+An ordinary feed or search lockup splits its metadata across two rows —
+channel on row 0, view count and date on row 1 — while the shelf packs all
+three into a single row. `mapLockup` scanned only `rows.slice(1)` for the
+detail fields, so every shelf tile arrived with `viewCountText: null` and
+`publishedText: null` while the strings sat right there in row 0. The scan
+is now row-agnostic (flatten first, then classify), which yields the
+identical result for the two-row layout and recovers both fields for the
+one-row one. The channel name stays row-0-scoped: widening it would let a
+view count win that field on a tile carrying no channel at all.
+
+**Shelf tiles carry no avatar, so the panel's is filled in.** Measured: the
+shelf's lockups have no `image` key and no avatar host anywhere in the
+subtree, so `channelAvatarUrl` maps to null and every tile draws a
+placeholder glyph. These are the artist's uploads on the artist's own panel,
+so `mapArtistPanel` backfills `avatarUrl` — but only onto items whose
+`channelId` matches the panel's, leaving a guest upload (or a tile whose
+channel could not be extracted) with its honest null rather than the wrong
+face.
 
 Shipped as a field on the search response rather than a new `FeedItem` kind,
 per the task's own preference: `FeedItem` is a sealed union every surface
@@ -325,9 +381,28 @@ task, and this method ships `ItemListResult` only, with no `chips[]`, matching
 `feed.subscriptions` and `search.query`. Client-side search over the already-
 loaded list is UI work, not a request parameter (the task's own framing).
 
+**The A–Z scrubber depends on that unspecified default order, so the sidecar
+checks it.** `AllSubscriptionsPage`'s letter index (Task 22) has no ordering of
+its own: it maps a letter to a scroll offset by trusting that the response
+already arrives `#`, then A–Z. That was confirmed empirically — across a page
+boundary, on a real account — and it is specified *nowhere*. There is no sort
+parameter to pin it with, so if YouTube's default ever changes, every letter
+jump lands on the wrong row while the list still renders and the scrubber still
+scrolls: a wrong answer with no error attached to it.
+
+`parser/channel-order.ts` holds the rule (`channelBucket` must stay in step
+with `letterBucketOf` in `app/lib/ui/widgets/alphabet_index.dart`), the
+`subscriptions.channels` handler runs it on every **base** page and logs an
+error to stderr when the order goes backwards, and `parser.test.ts` asserts it
+against the real capture. The check is bucket-wise, not a full string compare:
+collation *within* a letter is YouTube's business, and only `M` landing after
+`N` breaks the index. Note that the corpus cannot carry this assertion —
+`export-contract-corpus` rewrites every channel name to
+`Sanitised Channel <n>`, which is sorted by construction.
+
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The
-`/player` half asks as **`ANDROID_VR` over the anonymous resolve session**, which
+`/player` half asks as **`VISIONOS` over the anonymous resolve session**, which
 is the same client and the same cached response ladder tier 1 uses, so opening a
 video costs **one** `/player` call rather than two. Reading a length out of a
 response already fetched is not the cross-client CPN bridging A5 rejects; nothing
@@ -414,7 +489,7 @@ Flutter never learns which tier served the request. `transport` is telemetry;
 
 **Resolution ladder**, tried in order inside `playback.open`:
 
-1. `ANDROID_VR` plain adaptive URLs — the primary path; no `n`, and libmpv can
+1. `VISIONOS` plain adaptive URLs — the primary path; no `n`, and libmpv can
    consume them directly (F5, F11, F13)
 2. `MWEB` plain adaptive URLs — the decipher path, kept as a fallback
 3. SABR → local DASH bridge — Phase 2
@@ -528,7 +603,7 @@ rather than deleted because the substitution below was measured against real
 responses and verified by fetching, and re-deriving it from the shape would be
 expensive.
 
-It reads one field out of the **`ANDROID_VR` `/player` response that
+It reads one field out of the **`VISIONOS` `/player` response that
 `video.info` and ladder tier 1 already share** (§3.3), so it opens no session,
 resolves no stream, and needs no PO token.
 
@@ -656,7 +731,7 @@ one real track beside ~156 `translationLanguages`; those are machine
 translations of that track, reachable by appending `&tlang=`, and they are not
 tracks. Translations are out of scope.
 
-**`tracks: []` is a settled answer, not a not-yet.** The `ANDROID_VR` → `MWEB`
+**`tracks: []` is a settled answer, not a not-yet.** The `VISIONOS` → `MWEB`
 fallback has already run by the time `captions.list` answers, so an empty array
 means the UI hides the CC control rather than waiting. Measured 2026-08-18 over
 a 45-video feed sample: 32 videos carried tracks, 13 carried none, and no video
@@ -669,7 +744,7 @@ below.
 **The fallback asks `MWEB`, not `WEB`.** A `WEB` `/player` signs its caption URLs
 with `exp=xpe` inside `sparams`, and every one of them answers **HTTP 200 with a
 zero-byte body** — isolated to that one parameter, since removing it invalidates
-the signature and answers 404 while the same URLs from `ANDROID_VR` and `MWEB`,
+the signature and answers 404 while the same URLs from `VISIONOS` and `MWEB`,
 which carry no `exp`, return the document. A `WEB` fallback would therefore
 populate a language picker in which every entry renders nothing, which reads as
 broken captions rather than as absent ones. `WEB` `/player` is also reserved by
