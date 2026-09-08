@@ -44,7 +44,7 @@ class FakePlayback extends PlaybackController {
   );
 }
 
-const rootPlaceholders = ['Sleep timer', 'Audio track', 'Subtitle track / CC', 'Playback speed'];
+const rootPlaceholders = ['Sleep timer', 'Audio track', 'Playback speed'];
 const morePlaceholders = ['Audio channel', 'Sticky player', 'Annotations', 'Ambient mode'];
 
 late ProviderContainer container;
@@ -112,7 +112,7 @@ void main() {
           reason: 'reopening must not land on the subpage it was left in');
     });
 
-    test('back walks out of More options only', () {
+    test('back walks out of subpages', () {
       final menu = container.read(playerMenuProvider.notifier);
 
       menu.go(SettingsPage.moreOptions);
@@ -120,6 +120,12 @@ void main() {
       expect(container.read(playerMenuProvider),
           const PlayerMenuState(open: true, page: SettingsPage.root),
           reason: 'back leaves the menu open — it is not a close');
+
+      menu.go(SettingsPage.captions);
+      expect(menu.back(), isTrue);
+      expect(container.read(playerMenuProvider),
+          const PlayerMenuState(open: true, page: SettingsPage.root),
+          reason: 'back out of captions returns to root');
 
       expect(menu.back(), isFalse, reason: 'nothing above the root');
 
