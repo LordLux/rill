@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<tt xml:lang="en" xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:profile="http://www.w3.org/TR/profile/sdp-us" >
+<head>
+<styling>
+<style xml:id="s1" tts:textAlign="center" tts:extent="90% 90%" tts:origin="5% 5%" tts:displayAlign="after"/>
+<style xml:id="s2" tts:fontSize=".72c" tts:backgroundColor="black" tts:color="white"/>
+</styling>
+<layout>
+<region xml:id="r1" style="s1"/>
+</layout>
+</head>
+<body region="r1">
+<div>
+<p begin="00:00:01.360" end="00:00:03.040" style="s2">[♪♪♪]</p>
+<p begin="00:00:18.640" end="00:00:21.880" style="s2">♪ We&#39;re no strangers to love ♪</p>
+<p begin="00:00:22.640" end="00:00:26.960" style="s2">♪ You know the rules<br />and so do I ♪</p>
+<p begin="00:00:27.040" end="00:00:31.040" style="s2">♪ A full commitment&#39;s<br />what I&#39;m thinking of ♪</p>
+<p begin="00:00:31.120" end="00:00:35.080" style="s2">♪ You wouldn&#39;t get this<br />from any other guy ♪</p>
+<p begin="00:00:35.160" end="00:00:39.520" style="s2">♪ I just wanna tell you<br />how I&#39;m feeling ♪</p>
+<p begin="00:00:40.520" end="00:00:42.920" style="s2">♪ Gotta make you understand ♪</p>
+<p begin="00:00:43.000" end="00:00:45.120" style="s2">♪ Never gonna give you up ♪</p>
+<p begin="00:00:45.200" end="00:00:47.080" style="s2">♪ Never gonna let you down ♪</p>
+<p begin="00:00:47.320" end="00:00:51.120" style="s2">♪ Never gonna run around<br />and desert you ♪</p>
+<p begin="00:00:51.480" end="00:00:53.480" style="s2">♪ Never gonna make you cry ♪</p>
+<p begin="00:00:53.600" end="00:00:55.520" style="s2">♪ Never gonna say goodbye ♪</p>
+<p begin="00:00:55.720" end="00:00:59.360" style="s2">♪ Never gonna tell a lie<br />and hurt you ♪</p>
+<p begin="00:01:00.800" end="00:01:04.800" style="s2">♪ We&#39;ve known each other<br />for so long ♪</p>
+<p begin="00:01:04.880" end="00:01:09.040" style="s2">♪ Your heart&#39;s been aching<br />but you&#39;re too shy to say it ♪</p>
+<p begin="00:01:09.120" end="00:01:12.960" style="s2">♪ Inside we both know<br />what&#39;s been going ♪</p>
+<p begin="00:01:13.360" end="00:01:17.200" style="s2">♪ We know the game<br />and we&#39;re gonna play it ♪</p>
+<p begin="00:01:17.400" end="00:01:22.040" style="s2">♪ And if you ask me<br />how I&#39;m feeling ♪</p>
+<p begin="00:01:22.400" end="00:01:25.240" style="s2">♪ Don&#39;t tell me<br />you&#39;re too blind to see ♪</p>
+<p begin="00:01:25.320" end="00:01:27.280" style="s2">♪ Never gonna give you up ♪</p>
+<p begin="00:01:27.360" end="00:01:29.320" style="s2">♪ Never gonna let you down ♪</p>
+<p begin="00:01:29.440" end="00:01:33.720" style="s2">♪ Never gonna run around<br />and desert you ♪</p>
+<p begin="00:01:33.800" end="00:01:35.600" style="s2">♪ Never gonna make you cry ♪</p>
+<p begin="00:01:35.760" end="00:01:38.000" style="s2">♪ Never gonna say goodbye ♪</p>
+<p begin="00:01:38.080" end="00:01:42.040" style="s2">♪ Never gonna tell a lie<br />and hurt you ♪</p>
+<p begin="00:01:42.200" end="00:01:44.120" style="s2">♪ Never gonna give you up ♪</p>
+<p begin="00:01:44.280" end="00:01:46.360" style="s2">♪ Never gonna let you down ♪</p>
+<p begin="00:01:46.480" end="00:01:50.080" style="s2">♪ Never gonna run around<br />and desert you ♪</p>
+<p begin="00:01:50.760" end="00:01:52.720" style="s2">♪ Never gonna make you cry ♪</p>
+<p begin="00:01:52.800" end="00:01:54.680" style="s2">♪ Never gonna say goodbye ♪</p>
+<p begin="00:01:54.960" end="00:01:58.760" style="s2">♪ Never gonna tell a lie<br />and hurt you ♪</p>
+<p begin="00:01:59.840" end="00:02:02.960" style="s2">♪ (Ooh, give you up) ♪</p>
+<p begin="00:02:03.720" end="00:02:07.360" style="s2">♪ (Ooh, give you up) ♪</p>
+<p begin="00:02:08.480" end="00:02:10.120" style="s2">♪ Never gonna give,<br />never gonna give ♪</p>
+<p begin="00:02:10.240" end="00:02:11.560" style="s2">♪ (Give you up) ♪</p>
+<p begin="00:02:12.480" end="00:02:14.240" style="s2">♪ Never gonna give,<br />never gonna give ♪</p>
+<p begin="00:02:14.360" end="00:02:15.920" style="s2">♪ (Give you up) ♪</p>
+<p begin="00:02:16.760" end="00:02:21.080" style="s2">♪ We&#39;ve known each other<br />for so long ♪</p>
+<p begin="00:02:21.200" end="00:02:25.200" style="s2">♪ Your heart&#39;s been aching<br />but you&#39;re too shy to say it ♪</p>
+<p begin="00:02:25.280" end="00:02:29.120" style="s2">♪ Inside we both know<br />what&#39;s been going ♪</p>
+<p begin="00:02:29.520" end="00:02:33.200" style="s2">♪ We know the game<br />and we&#39;re gonna play it ♪</p>
+<p begin="00:02:33.360" end="00:02:38.040" style="s2">♪ I just wanna tell you<br />how I&#39;m feeling ♪</p>
+<p begin="00:02:38.640" end="00:02:41.320" style="s2">♪ Gotta make you understand ♪</p>
+<p begin="00:02:41.400" end="00:02:43.360" style="s2">♪ Never gonna give you up ♪</p>
+<p begin="00:02:43.440" end="00:02:45.640" style="s2">♪ Never gonna let you down ♪</p>
+<p begin="00:02:45.720" end="00:02:49.720" style="s2">♪ Never gonna run around<br />and desert you ♪</p>
+<p begin="00:02:49.800" end="00:02:51.640" style="s2">♪ Never gonna make you cry ♪</p>
+<p begin="00:02:51.800" end="00:02:53.960" style="s2">♪ Never gonna say goodbye ♪</p>
+<p begin="00:02:54.040" end="00:02:57.600" style="s2">♪ Never gonna tell a lie<br />and hurt you ♪</p>
+<p begin="00:02:58.200" end="00:03:00.240" style="s2">♪ Never gonna give you up ♪</p>
+<p begin="00:03:00.320" end="00:03:02.440" style="s2">♪ Never gonna let you down ♪</p>
+<p begin="00:03:02.520" end="00:03:06.640" style="s2">♪ Never gonna run around<br />and desert you ♪</p>
+<p begin="00:03:06.720" end="00:03:08.720" style="s2">♪ Never gonna make you cry ♪</p>
+<p begin="00:03:08.840" end="00:03:10.720" style="s2">♪ Never gonna say goodbye ♪</p>
+<p begin="00:03:10.840" end="00:03:15.200" style="s2">♪ Never gonna tell a lie<br />and hurt you ♪</p>
+<p begin="00:03:15.280" end="00:03:17.120" style="s2">♪ Never gonna give you up ♪</p>
+<p begin="00:03:17.200" end="00:03:19.240" style="s2">♪ Never gonna let you down ♪</p>
+<p begin="00:03:19.400" end="00:03:23.120" style="s2">♪ Never gonna run around<br />and desert you ♪</p>
+<p begin="00:03:23.360" end="00:03:25.600" style="s2">♪ Never gonna make you cry ♪</p>
+<p begin="00:03:25.680" end="00:03:27.840" style="s2">♪ Never gonna say goodbye ♪</p>
+<p begin="00:03:27.920" end="00:03:31.320" style="s2">♪ Never gonna tell a lie<br />and hurt you ♪</p>
+</div>
+</body>
+</tt>

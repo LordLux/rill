@@ -190,6 +190,28 @@ async function main() {
 
     await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
     log.info(`exported sanitised ${file}`);
+    
+    // Also export VideoDetail for watch responses
+    if (file === 'watch.json') {
+      const { parseVideoDetail } = await import('./parser/video.ts');
+      // For testing, we mock the player response if parseVideoDetail needs it, but watch.json has it in the tree
+      const detail = parseVideoDetail(raw);
+      if (detail) {
+        // Sanitize detail
+        const sanitisedDetail = {
+          ...detail,
+          id: 'vid_001',
+          title: 'Sanitised Title 1',
+          channelName: 'Sanitised Channel 1',
+          channelId: 'chan_001',
+          channelAvatarUrl: 'https://fake.url/avatar1.jpg',
+          related: detail.related.map(sanitiseItem),
+          relatedContinuation: sanitiseContinuation(detail.relatedContinuation, fileIndex),
+        };
+        await writeFile(join(CORPUS, 'video-detail.json'), JSON.stringify(sanitisedDetail, null, 2), 'utf8');
+        log.info(`exported sanitised video-detail.json`);
+      }
+    }
   }
 
   // The watch fixture twice: once as the sidebar feed above, once as the
