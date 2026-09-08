@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
 import 'player_shell.dart';
 import 'queue_controller.dart';
@@ -21,6 +23,28 @@ void queueFromTile(WidgetRef ref, FeedItem item) {
   final video = watchTargetFor(item);
   if (video == null) return;
   ref.read(queueProvider.notifier).addToQueue(video);
+}
+
+/// The tile's Watch Later button. Shared rather than duplicated per surface —
+/// `FeedView` and the search results page's Shorts shelf both draw tiles with
+/// this action. `AUTH_REQUIRED` gets its own line because "sign in" is
+/// actionable and the raw envelope message is not.
+Future<void> addToWatchLater(BuildContext context, FeedItem item) async {
+  final target = watchTargetFor(item);
+  if (target == null) return;
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await RpcClient.instance.call('action.addToWatchLater', {'videoId': target.id});
+    messenger.showSnackBar(const SnackBar(content: Text('Saved to Watch Later')));
+  } on RpcException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to save to Watch Later' : e.message),
+      ),
+    );
+  } on Object catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
+  }
 }
 
 /// The video a tile opens, or null if the tile is not watchable.

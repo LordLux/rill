@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/playback_source.dart';
 import 'package:rill/ui/hover_preview.dart';
@@ -137,6 +138,17 @@ double? previewOpacity(WidgetTester tester) {
   return tester.widget<Opacity>(opacity.first).opacity;
 }
 
+/// The thumbnail *inside* a tile, not the tile as a whole — the preview-
+/// triggering `MouseRegion` in `media_tile.dart` wraps only the thumbnail
+/// (`AspectRatio`), while the metadata text below it sits under a different,
+/// outer one. A tile's own geometric centre lands inside the thumbnail only
+/// when the tile is wide enough that a 16:9 slice of its width outgrows the
+/// metadata below — true for a single full-width tile, false the moment two
+/// or more share a row (measured: a two-tile row's centre lands 47 px *below*
+/// the thumbnail's bottom edge). Hovering this instead of the tile itself is
+/// correct in both cases and costs nothing in the common one.
+Finder tileThumbnail(Finder tile) => find.descendant(of: tile, matching: find.byType(AspectRatio));
+
 /// Somewhere on screen no tile covers — see the padding in [pumpTiles].
 const Offset kAwayFromTiles = Offset(5, 5);
 
@@ -146,24 +158,26 @@ Future<TestGesture> pumpTiles(
   List<TileSpec> tiles = const <TileSpec>[kTile],
 }) async {
   await tester.pumpWidget(
-    MaterialApp(
-      home: HoverPreviewScope(
-        preview: harness.preview,
-        child: Scaffold(
-          // Inset, so there is somewhere to park the pointer that is *not* over a tile —
-          // otherwise `onExit` never fires and every cancellation assertion tests nothing.
-          body: Padding(
-            padding: const EdgeInsets.all(60),
-            child: Row(
-              children: [
-                for (final tile in tiles)
-                  Expanded(
-                    child: MediaTile(
-                      key: ValueKey<String>(tile.previewVideoId ?? ''),
-                      spec: tile,
+    ProviderScope(
+      child: MaterialApp(
+        home: HoverPreviewScope(
+          preview: harness.preview,
+          child: Scaffold(
+            // Inset, so there is somewhere to park the pointer that is *not* over a tile —
+            // otherwise `onExit` never fires and every cancellation assertion tests nothing.
+            body: Padding(
+              padding: const EdgeInsets.all(60),
+              child: Row(
+                children: [
+                  for (final tile in tiles)
+                    Expanded(
+                      child: MediaTile(
+                        key: ValueKey<String>(tile.previewVideoId ?? ''),
+                        spec: tile,
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -190,16 +204,18 @@ Future<void> settle(WidgetTester tester) async {
 /// `ListView` does when it recycles an element.
 Future<void> recycleTile(WidgetTester tester, Harness harness, TileSpec spec) async {
   await tester.pumpWidget(
-    MaterialApp(
-      home: HoverPreviewScope(
-        preview: harness.preview,
-        child: Scaffold(
-          body: Padding(
-            padding: const EdgeInsets.all(60),
-            child: Row(
-              children: [
-                Expanded(child: MediaTile(key: const ValueKey<String>('slot'), spec: spec)),
-              ],
+    ProviderScope(
+      child: MaterialApp(
+        home: HoverPreviewScope(
+          preview: harness.preview,
+          child: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.all(60),
+              child: Row(
+                children: [
+                  Expanded(child: MediaTile(key: const ValueKey<String>('slot'), spec: spec)),
+                ],
+              ),
             ),
           ),
         ),
@@ -208,11 +224,23 @@ Future<void> recycleTile(WidgetTester tester, Harness harness, TileSpec spec) as
   );
 }
 
+/// `MediaTile` debounces a hover for 50 ms (`_updatePreviewState`) *before* it
+/// ever calls `HoverPreview.enter()` — so the real wait between a pointer
+/// landing on a tile and a preview resolving is the debounce plus
+/// [HoverPreview.hoverDelay], not [HoverPreview.hoverDelay] alone. `+ 1ms` was
+/// enough before that debounce existed; every `pump` right after a `moveTo`
+/// needs this bigger buffer instead, or the newly-scheduled `hoverDelay` timer
+/// — created partway through the debounce, inside the same `pump` call — is
+/// still short of its own deadline when the pump returns. Kept well above
+/// 50 ms rather than tuned to it, so it is not a second copy of a constant
+/// that has to agree with the production debounce.
+const Duration kHoverSettleBuffer = Duration(milliseconds: 60);
+
 /// Hover a tile and get all the way to a playing, visible preview.
 Future<TestGesture> startPreview(WidgetTester tester, Harness harness) async {
   final gesture = await pumpTiles(tester, harness);
-  await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-  await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+  await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+  await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
   await settle(tester);
   harness.firstFrame();
   await settle(tester);
@@ -228,7 +256,7 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
 
       // MUTATION CHECK. One millisecond short: the obvious version hovers, waits a second and
       // asserts a preview started, which passes with no delay implemented at all.
@@ -246,8 +274,8 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
 
       expect(h.backend.resolved, <String>['aaaaaaaaaaa']);
@@ -262,8 +290,8 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
 
       // Opened and playing, but nothing decoded yet: mounted so media_kit has somewhere to
@@ -283,8 +311,8 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       expect(previewOpacity(tester), 0);
 
@@ -302,7 +330,7 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
       await tester.pump(const Duration(milliseconds: 400));
       await gesture.moveTo(kAwayFromTiles);
 
@@ -343,7 +371,7 @@ void main() {
 
       // A pointer crossing a row spends far less than the delay over each tile.
       for (final tile in tiles) {
-        await gesture.moveTo(tester.getCenter(find.byKey(ValueKey<String>(tile.previewVideoId!))));
+        await gesture.moveTo(tester.getCenter(tileThumbnail(find.byKey(ValueKey<String>(tile.previewVideoId!)))));
         await tester.pump(const Duration(milliseconds: 120));
       }
       await gesture.moveTo(kAwayFromTiles);
@@ -361,8 +389,8 @@ void main() {
       final tiles = [tileFor('video0'), tileFor('video1')];
       final gesture = await pumpTiles(tester, h, tiles: tiles);
 
-      await gesture.moveTo(tester.getCenter(find.byKey(const ValueKey<String>('video0'))));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byKey(const ValueKey<String>('video0')))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -370,12 +398,12 @@ void main() {
       expect(previewSurface, findsOneWidget);
 
       // Straight onto the neighbour: the first must stop before the second's delay begins.
-      await gesture.moveTo(tester.getCenter(find.byKey(const ValueKey<String>('video1'))));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byKey(const ValueKey<String>('video1')))));
       await tester.pump();
       expect(h.preview.activeVideoId, isNull);
       expect(previewSurface, findsNothing);
 
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -398,7 +426,7 @@ void main() {
       h.shell.setPlaying(true);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
       await tester.pump(const Duration(seconds: 3));
       await settle(tester);
 
@@ -448,7 +476,7 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
       await tester.pumpAndSettle();
 
       // Before the preview: the two ordinary actions.
@@ -456,7 +484,7 @@ void main() {
       expect(find.byIcon(Icons.playlist_play), findsOneWidget);
       expect(find.byIcon(Icons.volume_off), findsNothing);
 
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -470,7 +498,7 @@ void main() {
       // And they come back when it stops.
       await gesture.moveTo(kAwayFromTiles);
       await tester.pumpAndSettle();
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
       await tester.pumpAndSettle();
       expect(find.byIcon(Icons.schedule), findsOneWidget);
       expect(find.byIcon(Icons.volume_off), findsNothing);
@@ -502,11 +530,11 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
       await tester.pumpAndSettle();
       expect(find.text('4:20'), findsOneWidget);
 
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       // Still showing while the stream opens — the thumbnail is still what is on screen.
       expect(find.text('4:20'), findsOneWidget);
@@ -545,8 +573,8 @@ void main() {
 
       await gesture.moveTo(kAwayFromTiles);
       await tester.pumpAndSettle();
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -747,8 +775,8 @@ void main() {
 
       await gesture.moveTo(kAwayFromTiles);
       await tester.pump();
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -808,8 +836,8 @@ void main() {
       final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await gesture.addPointer(location: Offset.zero);
       addTearDown(gesture.removePointer);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -848,8 +876,8 @@ void main() {
       final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await gesture.addPointer(location: Offset.zero);
       addTearDown(gesture.removePointer);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -859,7 +887,7 @@ void main() {
       // Still nothing until the delay elapses again — recycling is not a shortcut past it.
       expect(h.backend.resolved, <String>['first']);
 
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -885,14 +913,14 @@ void main() {
       final tiles = [tileFor('slow'), tileFor('quick')];
       final gesture = await pumpTiles(tester, h, tiles: tiles);
 
-      await gesture.moveTo(tester.getCenter(find.byKey(const ValueKey<String>('slow'))));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byKey(const ValueKey<String>('slow')))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
 
       // Move on while the first open is still hanging, and let the second one finish.
       h.engine.openGate = null;
-      await gesture.moveTo(tester.getCenter(find.byKey(const ValueKey<String>('quick'))));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byKey(const ValueKey<String>('quick')))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
       h.firstFrame();
       await settle(tester);
@@ -916,8 +944,8 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
 
       expect(h.backend.resolved, <String>['aaaaaaaaaaa']);
@@ -933,8 +961,8 @@ void main() {
       addTearDown(h.dispose);
 
       final gesture = await pumpTiles(tester, h);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
-      await tester.pump(HoverPreview.hoverDelay + const Duration(milliseconds: 1));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
+      await tester.pump(HoverPreview.hoverDelay + kHoverSettleBuffer);
       await settle(tester);
 
       expect(previewSurface, findsNothing);
@@ -946,13 +974,15 @@ void main() {
       // Every other tile test builds a bare `MediaTile`; if absence of a scope did anything but
       // disable previews, those tests would be starting a sidecar and an mpv instance.
       await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: SizedBox(width: 400, child: MediaTile(spec: kTile)))),
+        const ProviderScope(
+          child: MaterialApp(home: Scaffold(body: SizedBox(width: 400, child: MediaTile(spec: kTile)))),
+        ),
       );
 
       final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await gesture.addPointer(location: Offset.zero);
       addTearDown(gesture.removePointer);
-      await gesture.moveTo(tester.getCenter(find.byType(MediaTile)));
+      await gesture.moveTo(tester.getCenter(tileThumbnail(find.byType(MediaTile))));
       await tester.pump(const Duration(seconds: 3));
 
       expect(previewSurface, findsNothing);

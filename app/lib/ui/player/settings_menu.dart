@@ -15,10 +15,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/playback_source.dart';
+import '../widgets/silky_scroll_absorber.dart';
+import '../../domain/caption_style.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
-import '../video_info.dart';
-import '../widgets/silky_scroll_absorber.dart';
 
 const Key playerSettingsButtonKey = ValueKey('player-settings-button');
 const Key playerQualityButtonKey = ValueKey('player-quality-button');
@@ -28,6 +28,16 @@ const Key playerSettingsBackKey = ValueKey('player-settings-back');
 
 /// The decoded height, on the quality page's header.
 const Key playerQualityHeaderKey = ValueKey('player-quality-header');
+
+/// The caption page and its Off row — `player_captions_test.dart` finds them by
+/// these rather than by label, so wording changes do not break the suite.
+const Key playerCaptionsMenuKey = ValueKey('player-captions-menu');
+const Key playerCaptionsOffKey = ValueKey('player-captions-off');
+
+/// The row into the style page, and the page's *Reset*.
+const Key playerCaptionStyleRowKey = ValueKey('player-caption-style');
+const Key playerCaptionStyleMenuKey = ValueKey('player-caption-style-menu');
+const Key playerCaptionStyleResetKey = ValueKey('player-caption-style-reset');
 
 /// The tallest the panel may get, subpage included.
 const double settingsMenuMaxHeight = 400;
@@ -48,7 +58,13 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 /// bar, so it is not reached *through* the root and has nothing to go back to —
 /// which is why [PlayerMenuController.back] answers false for it and its header
 /// carries no chevron. [moreOptions] is the only real subpage.
-enum SettingsPage { root, moreOptions, quality, captions }
+/// The panel's pages.
+///
+/// `captions` is a third *top level*, not a child of `root`: it has its own bar
+/// button beside quality's, so reaching it through the gear would be a second
+/// route to a place that already has a door. [_depthOf] and [back] both encode
+/// that — only `moreOptions` is under anything.
+enum SettingsPage { root, moreOptions, quality, captions, captionStyle, forceStyle }
 
 @immutable
 class PlayerMenuState {
@@ -69,8 +85,10 @@ class PlayerMenuController extends Notifier<PlayerMenuState> {
   PlayerMenuState build() {
     // Losing the video takes the menu with it. Otherwise a menu opened on the
     // last video in a queue outlives the thing every one of its rows is about.
-    ref.listen(playbackProvider.select((playback) => playback.item == null), (previous, next) {
-      if (next) close();
+    // This also ensures that if a new video starts, the menu is closed, so
+    // reopening it remounts the pages (like CaptionsPage) and triggers their initState.
+    ref.listen(playbackProvider.select((playback) => playback.item?.id), (previous, next) {
+      if (previous != next) close();
     });
     return const PlayerMenuState();
   }
@@ -108,10 +126,10 @@ class PlayerMenuController extends Notifier<PlayerMenuState> {
   /// The subpage's back arrow. Returns whether there was anywhere to go, so a
   /// caller can tell "went back" from "nothing to do".
   ///
-  /// [SettingsPage.moreOptions] and [SettingsPage.captions] live under the root.
-  /// Quality is its own top level — see [SettingsPage].
+  /// Only [SettingsPage.moreOptions] is under anything. Quality is its own top
+  /// level — see [SettingsPage].
   bool back() {
-    if (state.page == SettingsPage.root || state.page == SettingsPage.quality) return false;
+    if (state.page != SettingsPage.moreOptions) return false;
     state = const PlayerMenuState(open: true, page: SettingsPage.root);
     return true;
   }
@@ -144,12 +162,24 @@ final GlobalKey settingsMenuAnchorKey = GlobalKey();
 /// it cannot if the press already closed on the way down.
 final GlobalKey qualityButtonAnchorKey = GlobalKey();
 
+/// The CC button, the menu's third anchor, for the same reason as the second.
+///
+/// Unlike the other two this one is **not always mounted** — it is absent on a
+/// video with no caption tracks — and [_hits] answers false for an unmounted
+/// key, which is the right answer: a button that is not there cannot have been
+/// clicked.
+final GlobalKey captionsButtonAnchorKey = GlobalKey();
+
 /// Whether a global pointer position landed on the menu — the panel, or either
 /// of the buttons that open it.
 ///
 /// False when none is mounted, which is the case the caller wants anyway: with
 /// no menu up there is no click-outside to detect.
-bool pointerIsOnSettingsMenu(Offset globalPosition) => _hits(settingsMenuPanelKey, globalPosition) || _hits(settingsMenuAnchorKey, globalPosition) || _hits(qualityButtonAnchorKey, globalPosition);
+bool pointerIsOnSettingsMenu(Offset globalPosition) =>
+    _hits(settingsMenuPanelKey, globalPosition) || //
+    _hits(settingsMenuAnchorKey, globalPosition) ||
+    _hits(qualityButtonAnchorKey, globalPosition) ||
+    _hits(captionsButtonAnchorKey, globalPosition);
 
 bool _hits(GlobalKey key, Offset globalPosition) {
   final box = key.currentContext?.findRenderObject();
@@ -264,7 +294,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   /// Root and Quality are both top levels — quality has its own button and is
   /// not reached through the root — so moving between them is sideways and gets
   /// no slide at all. Only *More options* is under anything.
-  static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions ? 1 : 0;
+  static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions || page == SettingsPage.captionStyle ? 1 : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -287,6 +317,8 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.moreOptions => const _MoreOptionsPage(),
         SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
         SettingsPage.captions => const _CaptionsPage(),
+        SettingsPage.captionStyle => const CaptionStylePage(),
+        SettingsPage.forceStyle => const _ForceStylePage(),
       },
     );
 
@@ -360,17 +392,27 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   }
 }
 
-/// The rows that have nowhere to go yet.
+/// The rows that have nowhere to go yet — here and in [_morePlaceholders].
 ///
-/// Present and **disabled**, the same call the captions button and the premiere
-/// slate's *Notify me* make: a row that says "later" is honest, and a row that
-/// opens an empty subpage is a bug report waiting to be filed. Nothing here has
-/// anything behind it — *Playback speed* included, because the engine has no
-/// rate control to drive it and wiring one is a `data/playback/engine.dart`
-/// change rather than a menu change.
+/// **Drawn as ordinary rows and inert, not disabled.** `_MenuRow` greys out on a
+/// null `onTap`, and a page on which every row is grey reads as a menu that
+/// broke rather than one that is unfinished — so these take `onTap: () {}` and
+/// keep the full contrast, the click cursor and the ripple. The cost is the
+/// obvious one and it is accepted knowingly: a click here answers and then does
+/// nothing.
+///
+/// *Auto* on the quality page is the opposite call for the opposite reason. It
+/// sits under a ladder of rows that all work, so grey is what separates it from
+/// them — and it carries no `InkWell` at all, because a lone dead row among live
+/// ones must not take the click that would otherwise reach the video.
+///
+/// Nothing here has anything behind it — *Playback speed* included, because the
+/// engine has no rate control to drive it and wiring one is a
+/// `data/playback/engine.dart` change rather than a menu change.
 const List<({IconData icon, String label})> _rootPlaceholders = [
   (icon: Icons.bedtime_outlined, label: 'Sleep timer'),
   (icon: Icons.multitrack_audio, label: 'Audio track'),
+  (icon: Icons.subtitles_outlined, label: 'Subtitle track / CC'),
   (icon: Icons.slow_motion_video, label: 'Playback speed'),
 ];
 
@@ -381,13 +423,28 @@ const List<({IconData icon, String label})> _morePlaceholders = [
   (icon: Icons.brightness_medium_outlined, label: 'Ambient mode'),
 ];
 
-/// The width the panel settles at.
+/// The width the panel settles at when nothing needs more.
 ///
-/// **One width for every page, rather than each page asking for its own.** The
-/// panel morphs its height between pages because the pages genuinely differ in
-/// length; letting the width move too made the whole thing appear to breathe
-/// sideways on every navigation, which reads as the menu being unsure of itself.
+/// **One width for every page that fits in it.** The panel morphs its height
+/// between pages because the pages genuinely differ in length; letting the width
+/// float freely made the whole thing appear to breathe sideways on every
+/// navigation, which reads as the menu being unsure of itself. So this is a
+/// *floor*, not a fixed size — a page whose content does not fit grows past it
+/// (see [_menuMaxWidth]) and every page that does fit still agrees on one width.
 const double _menuWidth = 248;
+
+/// How far the panel may grow to fit its content.
+///
+/// A caption row can carry a long language name, a sub-name and a badge —
+/// "English (United Kingdom)" with *Styled* is already past the floor — and
+/// truncating the language is worse than a wider menu, because the truncated
+/// part is the bit that tells two rows apart.
+///
+/// Capped rather than unbounded so a pathological label cannot turn the menu
+/// into a sheet; past this the label ellipsises as before. The real player width
+/// caps it again — `ConstrainedBox` enforces against the incoming constraints —
+/// so this never overflows a narrow window.
+const double _menuMaxWidth = 380;
 
 class _RootPage extends ConsumerWidget {
   const _RootPage();
@@ -406,59 +463,13 @@ class _RootPage extends ConsumerWidget {
           key: playerSettingsMoreRowKey,
           icon: Icons.tune,
           label: 'More options',
-          trailing: Icons.chevron_right,
+          trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.moreOptions),
         ),
         SizedBox(height: 3),
         Divider(height: 9, indent: 14, endIndent: 14, color: scheme.outlineVariant),
         SizedBox(height: 2),
-        _MenuRow(
-          icon: Icons.subtitles_outlined,
-          label: 'Captions',
-          trailing: Icons.chevron_right,
-          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captions),
-        ),
-        SizedBox(height: 2),
         for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
-      ],
-    );
-  }
-}
-
-class _CaptionsPage extends ConsumerWidget {
-  const _CaptionsPage();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(captionsProvider);
-    final videoId = ref.watch(playbackProvider.select((p) => p.item?.id));
-    final info = videoId != null ? ref.watch(videoInfoProvider(videoId)).value : null;
-    final tracks = info?.captionTracks ?? [];
-
-    return _MenuBody(
-      header: _MenuHeader(
-        title: 'Captions',
-        onBack: () => ref.read(playerMenuProvider.notifier).back(),
-      ),
-      children: [
-        _MenuRow(
-          icon: Icons.subtitles_off,
-          label: 'Off',
-          selected: !state.enabled,
-          onTap: () {
-            ref.read(captionsProvider.notifier).setTrack(null);
-            ref.read(playerMenuProvider.notifier).toggle();
-          },
-        ),
-        for (final track in tracks)
-          _MenuRow(
-            label: track.label,
-            selected: state.enabled && state.selectedTrack?.vssId == track.vssId,
-            onTap: () {
-              ref.read(captionsProvider.notifier).setTrack(track);
-              ref.read(playerMenuProvider.notifier).toggle();
-            },
-          ),
       ],
     );
   }
@@ -475,9 +486,236 @@ class _MoreOptionsPage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).back(),
       ),
       children: [
+        _MenuRow(
+          icon: Icons.format_paint_outlined,
+          label: 'Keep caption style',
+          trailing: Switch(
+            value: ref.watch(keepCaptionStyleProvider),
+            onChanged: (value) => ref.read(keepCaptionStyleProvider.notifier).toggle(),
+          ),
+          onTap: () {
+            ref.read(keepCaptionStyleProvider.notifier).toggle();
+          },
+        ),
+        _MenuRow(
+          icon: Icons.info_outline,
+          label: 'About & Licenses',
+          onTap: () {
+            ref.read(playerMenuProvider.notifier).close();
+            showAboutDialog(
+              context: context,
+              applicationName: 'NativeYouTube',
+              applicationLegalese: 'Includes LGPL-2.1 libraries. See THIRD_PARTY_LICENSES for full compliance details.',
+            );
+          },
+        ),
         for (final row in _morePlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );
+  }
+}
+
+/// Track list with the current one ticked, plus Off.
+///
+/// **Off is a row rather than a switch**, and it is first. The list is one
+/// question — "which words, if any" — and a toggle beside a list makes it two,
+/// with a state where the toggle says on and no track is ticked. Ticking Off is
+/// the same gesture as ticking a language.
+///
+/// The page is never reachable with an empty list: the bar button that opens it
+/// is not drawn at all when the video has no tracks (`protocol.md` §3.8 — an
+/// empty list is settled, not pending). The empty branch below is for the video
+/// changing underneath an already-open panel.
+class _CaptionsPage extends ConsumerStatefulWidget {
+  const _CaptionsPage();
+
+  @override
+  ConsumerState<_CaptionsPage> createState() => _CaptionsPageState();
+}
+
+class _CaptionsPageState extends ConsumerState<_CaptionsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Opening this page is what pays for the `Styled` badge: a caption document
+    // per track. Deliberately here rather than on the video-open path — see
+    // `CaptionsController.loadStyled`. Fired once per mount, and a no-op when
+    // the answers are already cached.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(ref.read(captionsProvider.notifier).loadStyled());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final captions = ref.watch(captionsProvider);
+    final controller = ref.read(captionsProvider.notifier);
+
+    return _MenuBody(
+      key: playerCaptionsMenuKey,
+      // No back arrow, for the same reason quality has none: this is a top
+      // level with its own button. The header carries the current language so
+      // the answer is readable without scanning the list for a tick.
+      header: _MenuHeader(
+        title: 'Subtitles',
+        value: captions.selected?.label ?? 'Off',
+      ),
+      children: [
+        if (captions.tracks.isEmpty)
+          _MenuRow(
+            icon: Icons.closed_caption_disabled_outlined,
+            label: captions.error != null ? 'Unavailable' : 'None for this video',
+            onTap: null,
+          )
+        else ...[
+          for (final track in captions.tracks)
+            _CaptionRow(
+              label: track.label,
+              // Null for `plain`, for "not asked yet", and for a category this
+              // build does not know — see `CaptionTrack.styleBadge`. A row that
+              // flickers a badge in as the answers land would be worse than one
+              // that never had it.
+              badge: track.styleBadge,
+              trackName: track.trackName,
+              selected: captions.selectedId == track.id,
+              onTap: () => controller.select(track.id),
+            ),
+          // **Last, under a divider, exactly where quality puts *Auto*.** The
+          // languages above are the choices; turning them off is the end of the
+          // list rather than a language above the first one.
+          Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+          _CaptionRow(
+            key: playerCaptionsOffKey,
+            label: 'Off',
+            selected: !captions.isOn,
+            onTap: () => controller.select(null),
+          ),
+        ],
+        // **Under the list, and reachable with captions off.** The style is a
+        // session preference (`CaptionsState.style`), so setting it up before
+        // turning captions on is a reasonable thing to do — and the page's
+        // *Reset* is the one control a user goes looking for when something
+        // looks wrong, which is exactly when captions might be off.
+        Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _MenuRow(
+          key: playerCaptionStyleRowKey,
+          icon: Icons.format_paint_outlined,
+          // **'Style', not 'Caption style'.** The panel takes the width of its
+          // widest row and holds it for every page (see [_menuWidth]); the
+          // longer label pushed the subtitle page past the shared floor, so the
+          // menu would have been visibly wider on this page than on every other
+          // one. The page it opens says 'Caption style' in its header, where
+          // there is room and no context to supply the noun.
+          label: 'Style',
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captionStyle),
+        ),
+      ],
+    );
+  }
+}
+
+/// A tick and a label — deliberately the same shape as `_QualityRow`.
+///
+/// Not shared with it: `_QualityRow` carries a resolution badge and a nullable
+/// variant, and generalising the two into one widget would mean a row that knows
+/// about both. Two small widgets that look alike beat one that has to ask which
+/// menu it is in.
+class _CaptionRow extends StatelessWidget {
+  const _CaptionRow({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.badge,
+    this.trackName = '',
+  });
+
+  final String label;
+  final bool selected;
+
+  /// *Styled* or *Karaoke*, already decided — see `CaptionTrack.styleBadge`.
+  /// Null draws nothing, which covers plain, not-yet-asked and unrecognised.
+  final String? badge;
+
+  /// YouTube's sub-name, or `''`. Worn like a quality row's `4K`.
+  final String trackName;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check,
+            size: 16,
+            // Transparent rather than absent, so the marked row is the one that
+            // does not move — same reasoning as `_QualityRow`.
+            color: selected ? scheme.primary : Colors.transparent,
+          ),
+          const SizedBox(width: 8),
+          // `Flexible`, so the badges sit exactly after the text rather than
+          // being pushed to the right edge. Under `IntrinsicWidth` it still reports the
+          // label's full width, which is what lets the panel grow to fit.
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+            ),
+          ),
+          // **The derived qualifier wears what a resolution wears** — raised,
+          // small, muted — because it is the same kind of thing as `4K`: not
+          // part of the track's name, but something read off it.
+          // `_QualityRow._badge` is the other half of that pairing.
+          //
+          // **Shown only when there is no `trackName`.** The badge is *our*
+          // guess at how this track differs from the others — styled,
+          // karaoke — for when the uploader never said. A `trackName` is the
+          // uploader's own answer to that same question ("Commentary",
+          // "Director's cut"), and it wins: showing both would be the app's
+          // inference sitting next to the source's own label, disagreeing or
+          // redundant either way.
+          if (badge != null && trackName.isEmpty) ...[
+            const SizedBox(width: 4),
+            Transform.translate(
+              offset: const Offset(0, -5),
+              child: Text(
+                badge!,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+          // The sub-name gets the chip, because it *is* part of the name — a
+          // second label rather than a note about the first, and a chip reads as
+          // its own thing where a superscript reads as an annotation.
+          if (trackName.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                trackName,
+                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (onTap == null) return row;
+    return InkWell(onTap: onTap, child: row);
   }
 }
 
@@ -547,17 +785,40 @@ class _QualityPage extends ConsumerWidget {
 /// different insets depending on which page you are on is a menu that looks
 /// broken without anything being wrong.
 class _MenuBody extends StatelessWidget {
-  const _MenuBody({this.header, required this.children});
+  const _MenuBody({
+    super.key,
+    this.header,
+    required this.children,
+    EdgeInsetsGeometry? padding,
+  }) : _padding = padding ?? const EdgeInsets.symmetric(vertical: 6);
 
   final Widget? header;
   final List<Widget> children;
+  final EdgeInsetsGeometry _padding;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: _menuWidth,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: settingsMenuMaxHeight),
+    return ConstrainedBox(
+      // A floor and a ceiling rather than a fixed width. `enforce` against the
+      // incoming constraints happens for free, so a player narrower than
+      // [_menuMaxWidth] clamps this without anyone measuring the window.
+      constraints: const BoxConstraints(
+        minWidth: _menuWidth,
+        maxWidth: _menuMaxWidth,
+        maxHeight: settingsMenuMaxHeight,
+      ),
+      // **Measured, not calculated.** The alternative is adding up a label's
+      // `TextPainter` width plus the icon, the gaps, the sub-name and the badge
+      // — a second copy of the row's layout, in a different file, that goes
+      // wrong the first time anyone adds a widget to the row and reports it by
+      // truncating text rather than by failing. `IntrinsicWidth` asks the rows
+      // themselves, so a new element is accounted for by existing.
+      //
+      // The cost is a second layout pass over the page's rows, on a menu of at
+      // most a couple of dozen; the panel's `AnimatedSize` is what turns the
+      // resulting width change into a movement instead of a jump, and it is
+      // anchored bottom-**right**, so a wider panel grows to the left.
+      child: IntrinsicWidth(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -583,7 +844,7 @@ class _MenuBody extends StatelessWidget {
                 // edge. It is inside the scrollable rather than around it, so a
                 // long ladder scrolls *through* the gap instead of stopping
                 // short of one.
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: _padding,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -667,13 +928,12 @@ const Key playerQualityAutoKey = ValueKey('player-quality-auto');
 
 /// A row on the root page: icon, label, optional trailing value and chevron.
 class _MenuRow extends StatelessWidget {
-  const _MenuRow({super.key, this.icon, required this.label, this.trailing, required this.onTap, this.selected = false});
+  const _MenuRow({super.key, required this.icon, required this.label, this.trailing, required this.onTap});
 
-  final IconData? icon;
+  final IconData icon;
   final String label;
-  final IconData? trailing;
+  final Widget? trailing;
   final VoidCallback? onTap;
-  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -688,28 +948,19 @@ class _MenuRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
         child: Row(
           children: [
-            if (selected)
-              Icon(Icons.check, size: 18, color: foreground)
-            else if (icon != null)
-              Icon(icon, size: 18, color: foreground)
-            else
-              const SizedBox(width: 18),
+            Icon(icon, size: 18, color: foreground),
             const SizedBox(width: 14),
             Expanded(
               child: Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w500,
-                ),
+                style: TextStyle(fontSize: 13, color: foreground),
               ),
             ),
-            if (trailing != null) ...[
-              const SizedBox(width: 8),
-              Icon(trailing, size: 18, color: foreground),
-            ],
+            SizedBox(
+              child: trailing,
+            ),
           ],
         ),
       ),
@@ -719,7 +970,7 @@ class _MenuRow extends StatelessWidget {
 
 /// A rung, with the badge the resolution earns.
 ///
-/// `4K` and `HD` are derived from the height here rather than sent by the
+/// `16K`, `8K`, `4K` and `HD` are derived from the height here rather than sent by the
 /// sidecar — they are a *rendering* of a number the DTO already carries, and a
 /// badge field on `PlaybackVariant` would be the UI asking the protocol to hold
 /// its opinions for it.
@@ -810,4 +1061,592 @@ List<PlaybackVariant> distinctQualities(List<PlaybackVariant> variants) {
     for (final variant in variants)
       if (seen.add('${variant.height}x${variant.fps}')) variant,
   ];
+}
+
+/// The caption style menu — Task 19.
+///
+/// **Every control here works on every track, and that is the whole reason it
+/// is shaped this way.** The obvious implementation is mpv's live properties —
+/// `sub-color`, `sub-font`, `sub-back-color` — and they cannot be used: they act
+/// on the ASS `Style`, and `sub-ass-override=force`, the switch that is supposed
+/// to make them win, overrides the `Style` too and **not** the inline override
+/// tags a styled track is made of. A user setting a font colour would see it
+/// apply to plain tracks and silently do nothing on the styled ones, which is
+/// exactly the class of failure this project keeps finding. So every value here
+/// is sent to the sidecar and folded into the ASS document as it is generated:
+/// one mechanism, no track on which a control is a no-op. `captions/style.ts`
+/// carries the measurement.
+///
+/// Two of YouTube's entries are missing rather than faked. **Raised** and
+/// **Depressed** edge styles are one result in ASS (`\bord` and `\shad`, no
+/// bevel), and the background's **rounded corners** are not expressible at all —
+/// both ASS boxes are rectangles. Recorded in `architecture.md` §2.9 as
+/// knowingly dropped.
+class _ForceStylePage extends ConsumerStatefulWidget {
+  const _ForceStylePage();
+
+  @override
+  ConsumerState<_ForceStylePage> createState() => _ForceStylePageState();
+}
+
+class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
+  String _hoverProperty = 'style';
+  bool? _hoverActive;
+
+  @override
+  Widget build(BuildContext context) {
+    final captions = ref.watch(captionsProvider);
+    final controller = ref.read(captionsProvider.notifier);
+    final style = captions.style;
+    final scheme = Theme.of(context).colorScheme;
+
+    // Its own field, independent of the nine tiles — see CaptionStyle.
+    // forceStyleEnabled's doc. A switch derived from the nine (their AND)
+    // used to read false the moment any single tile did, which both looked
+    // like a switch nobody touched had turned itself off and, downstream,
+    // collapsed the whole grid away for the same reason.
+    final masterSwitch = style.forceStyleEnabled;
+
+    Widget buildTile(String label, IconData icon, bool active, ValueChanged<bool> onChanged) {
+      final isHovered = _hoverProperty == label;
+      // Gated on the (now independent) master too: a tile the master has
+      // disabled should not look selectable, whatever its own flag says.
+      final isEnabled = masterSwitch && active;
+      final backgroundColor = isHovered
+          ? (isEnabled ? scheme.primary : scheme.secondaryContainer)
+          : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
+      final foregroundColor = isHovered
+          ? (isEnabled ? scheme.onPrimary : scheme.onSecondaryContainer)
+          : (isEnabled ? scheme.onPrimaryContainer : scheme.onSurfaceVariant);
+      // The label reads too close to full contrast when disabled — the icon
+      // stays as-is, just the text underneath it dims further.
+      final labelColor = isEnabled ? foregroundColor : foregroundColor.withValues(alpha: 0.6);
+      // No hover, no click, while the master is off — the tiles depend on
+      // it rather than the other way around.
+      return IgnorePointer(
+        ignoring: !masterSwitch,
+        child: MouseRegion(
+        onEnter: (_) => setState(() {
+          _hoverProperty = label;
+          _hoverActive = active;
+        }),
+        onExit: (_) => setState(() {
+          _hoverProperty = 'style';
+          _hoverActive = null;
+        }),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            onChanged(!active);
+            if (_hoverProperty == label) setState(() => _hoverActive = !active);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isHovered ? scheme.outline : scheme.outlineVariant,
+                width: isHovered ? 1.5 : 0,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: foregroundColor,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  style: TextStyle(
+                    fontSize: 10,
+                    height: 1.1,
+                    fontWeight: FontWeight.w500,
+                    color: labelColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        ),
+      );
+    }
+
+    // The hovered tile's own state when one is hovered — not gated on
+    // `masterSwitch` too, for the same reason `isEnabled` above isn't: the
+    // explanation is about *this* property, not about whether all nine
+    // happen to agree.
+    final isActive = _hoverActive ?? masterSwitch;
+    final prefix = isActive ? 'Overrides all subtitle ' : 'Allows for a different subtitle ';
+    final suffix = isActive ? ', even if a different value is specified by the video.' : ' specified by the video.';
+
+    return _MenuBody(
+      header: _MenuHeader(
+        title: 'Video overrides',
+        onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captionStyle),
+      ),
+      children: [
+        SizedBox(
+          height: 50,
+          child: _MenuRow(
+            icon: Icons.auto_fix_high,
+            label: 'Force Style',
+            trailing: Switch(
+              value: masterSwitch,
+              onChanged: (v) => onForceStyleChanged(v, controller, style),
+            ),
+            onTap: () => onForceStyleChanged(!masterSwitch, controller, style),
+          ),
+        ),
+        // Always shown — this is the page a user reaches specifically to set
+        // these nine, and it used to collapse away (behind an
+        // `AnimatedCrossFade`) the moment any one of them stopped matching
+        // the other eight, since `masterSwitch` reads false then by
+        // construction. That's what made turning off a single tile look like
+        // the whole feature had switched off.
+        SizedBox(
+          width: _menuMaxWidth,
+          child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Font', Icons.font_download_outlined, style.forceFontFamily, (v) => controller.setStyle(style.copyWith(forceFontFamily: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Size', Icons.format_size, style.forceFontSize, (v) => controller.setStyle(style.copyWith(forceFontSize: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Text Color', Icons.format_color_text, style.forceTextColor, (v) => controller.setStyle(style.copyWith(forceTextColor: v), immediate: true))),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Text Opacity', Icons.opacity, style.forceTextOpacity, (v) => controller.setStyle(style.copyWith(forceTextOpacity: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Background Color', Icons.format_color_fill, style.forceBackgroundColor, (v) => controller.setStyle(style.copyWith(forceBackgroundColor: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Background Opacity', Icons.blur_on, style.forceBackgroundOpacity, (v) => controller.setStyle(style.copyWith(forceBackgroundOpacity: v), immediate: true))),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Window Color', Icons.picture_in_picture, style.forceWindowColor, (v) => controller.setStyle(style.copyWith(forceWindowColor: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Window Opacity', Icons.picture_in_picture_alt, style.forceWindowOpacity, (v) => controller.setStyle(style.copyWith(forceWindowOpacity: v), immediate: true))),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(height: 54, child: buildTile('Edge', Icons.border_style, style.forceEdgeStyle, (v) => controller.setStyle(style.copyWith(forceEdgeStyle: v), immediate: true))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: _menuMaxWidth - 28,
+            // Sized to which string is showing (the "Overrides…" one is the
+            // longer of the two and wraps), not to `masterSwitch` — the box
+            // used to double as "is the grid even open", which it no longer
+            // needs to answer.
+            height: isActive ? 48 : 28,
+            alignment: Alignment.center,
+            child: RichText(
+              textAlign: TextAlign.center,
+              text: TextSpan(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+                children: [
+                  TextSpan(text: prefix),
+                  TextSpan(
+                    text: _hoverProperty,
+                    style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
+                  ),
+                  TextSpan(text: suffix),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Just the one field now — the nine tiles are untouched, forced or not,
+  /// so turning the master back on restores exactly what they said before.
+  void onForceStyleChanged(bool v, CaptionsController controller, CaptionStyle style) {
+    controller.setStyle(style.copyWith(forceStyleEnabled: v), immediate: true);
+  }
+}
+
+/// The caption style submenu: font, size, and colours.
+///
+/// Public because `player_caption_style_test.dart` builds it directly; nothing
+/// else outside this file mounts it.
+class CaptionStylePage extends ConsumerWidget {
+  const CaptionStylePage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final captions = ref.watch(captionsProvider);
+    final controller = ref.read(captionsProvider.notifier);
+    final style = captions.style;
+
+    void apply(CaptionStyle next, {bool immediate = true}) {
+      unawaited(controller.setStyle(next, immediate: immediate));
+    }
+
+    return _MenuBody(
+      key: playerCaptionStyleMenuKey,
+      header: _MenuHeader(
+        title: 'Caption style',
+        onBack: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.captions),
+      ),
+      children: [
+        _MenuRow(
+          icon: Icons.auto_fix_high,
+          label: 'Video overrides',
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.forceStyle),
+        ),
+        SizedBox(height: 6),
+        Divider(height: 1, color: scheme.outlineVariant),
+        _StyleSection(label: 'Font'),
+        _StyleChoices<String?>(
+          value: style.fontFamily,
+          options: _fontOptions,
+          onPicked: (family) => apply(style.copyWith(fontFamily: family)),
+        ),
+        _StyleSlider(
+          label: 'Size',
+          value: style.fontSizePercent ?? 100,
+          min: 50,
+          max: 300,
+          divisions: 50, // (300 - 50) / 5% per tick
+          format: (value) => '${value.round()}%',
+          // A slider fires per frame and every change is a round trip plus a
+          // `sub-add`; the controller debounces trailing so a drag commits a
+          // handful of times instead of sixty.
+          onChanged: (value) => apply(style.copyWith(fontSizePercent: value), immediate: false),
+        ),
+        // Colour and opacity are independent fields on CaptionStyle
+        // (textColor / textOpacity) precisely so that resetting either one
+        // to "Default" here does not clear the other.
+        _StyleColors(
+          label: 'Colour',
+          value: style.textColor,
+          onPicked: (colour) => apply(style.copyWith(textColor: colour)),
+        ),
+        _StyleSlider(
+          label: 'Opacity',
+          value: style.textOpacity != null ? style.textOpacity! * 100 : -25,
+          min: -25,
+          max: 100,
+          divisions: 5,
+          format: (value) => value < 0 ? 'Default' : '${value.round()}%',
+          onChanged: (value) {
+            apply(
+              style.copyWith(textOpacity: value < 0 ? null : value / 100),
+              immediate: false,
+            );
+          },
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _StyleSection(label: 'Background'),
+        _StyleColors(
+          label: 'Colour',
+          value: style.background,
+          onPicked: (colour) => apply(style.copyWith(background: colour)),
+        ),
+        _StyleSlider(
+          label: 'Opacity',
+          value: style.backgroundOpacity != null ? style.backgroundOpacity! * 100 : -25,
+          min: -25,
+          max: 100,
+          divisions: 5,
+          format: (value) => value < 0 ? 'Default' : '${value.round()}%',
+          onChanged: (value) {
+            apply(
+              style.copyWith(backgroundOpacity: value < 0 ? null : value / 100),
+              immediate: false,
+            );
+          },
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        // The *window* is the rectangle around every caption on screen at once,
+        // as distinct from the per-line background above. YouTube draws both and
+        // ships this one at zero opacity, which is why it looks absent until
+        // someone turns it up.
+        _StyleSection(label: 'Window'),
+        _StyleColors(
+          label: 'Colour',
+          value: style.window,
+          onPicked: (colour) => apply(style.copyWith(window: colour)),
+        ),
+        _StyleSlider(
+          label: 'Opacity',
+          value: style.windowOpacity != null ? style.windowOpacity! * 100 : -25,
+          min: -25,
+          max: 100,
+          divisions: 5,
+          format: (value) => value < 0 ? 'Default' : '${value.round()}%',
+          onChanged: (value) {
+            apply(
+              style.copyWith(windowOpacity: value < 0 ? null : value / 100),
+              immediate: false,
+            );
+          },
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _StyleSection(label: 'Character edge'),
+        _StyleChoices<CaptionEdgeStyle?>(
+          value: style.edgeStyle,
+          options: _edgeOptions,
+          onPicked: (edge) => apply(style.copyWith(edgeStyle: edge)),
+        ),
+
+        Divider(height: 13, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        // **Resets the drag as well as the style**, which is why it lives here
+        // rather than beside the caption: those are the two things a user can
+        // put into a state they cannot easily undo by hand.
+        _MenuRow(
+          key: playerCaptionStyleResetKey,
+          icon: Icons.restart_alt,
+          label: 'Reset',
+          onTap: style.isDefault && captions.offset.isZero ? null : () => unawaited(controller.resetStyle()),
+        ),
+      ],
+    );
+  }
+}
+
+/// `null` is "the track decides", which is a real choice and the first one.
+const List<({String label, String? value})> _fontOptions = [
+  (label: 'Default', value: null),
+  (label: 'Arial', value: 'Arial'),
+  (label: 'Georgia', value: 'Georgia'),
+  (label: 'Courier New', value: 'Courier New'),
+  (label: 'Comic Sans MS', value: 'Comic Sans MS'),
+];
+
+/// Three, not five. See the class doc for the two that ASS cannot tell apart.
+const List<({String label, CaptionEdgeStyle? value})> _edgeOptions = [
+  (label: 'Default', value: null),
+  (label: 'None', value: CaptionEdgeStyle.none),
+  (label: 'Drop shadow', value: CaptionEdgeStyle.dropShadow),
+  (label: 'Outline', value: CaptionEdgeStyle.outline),
+];
+
+class _StyleSection extends StatelessWidget {
+  const _StyleSection({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          fontSize: 12,
+          letterSpacing: 0.8,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// A wrapping row of chips — the menu is 248 px wide and a `DropdownButton`
+/// inside a panel that is itself an overlay is a second overlay to position.
+class _StyleChoices<T> extends StatelessWidget {
+  const _StyleChoices({required this.value, required this.options, required this.onPicked});
+
+  final T value;
+  final List<({String label, T value})> options;
+  final ValueChanged<T> onPicked;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final option in options)
+            InkWell(
+              onTap: () => onPicked(option.value),
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: option.value == value ? scheme.primary : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  option.label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: option.value == value ? scheme.onPrimary : scheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Swatches, with the first one struck through for "leave it to the track".
+class _StyleColors extends StatelessWidget {
+  const _StyleColors({required this.label, required this.value, required this.onPicked});
+
+  final String label;
+  final Color? value;
+  final ValueChanged<Color?> onPicked;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // Compared on RGB alone: the opacity slider owns the alpha channel, and a
+    // swatch that stopped looking selected when the user moved the slider would
+    // read as the colour having been forgotten.
+    bool isPicked(Color? swatch) {
+      if (swatch == null || value == null) return swatch == null && value == null;
+      return swatch.r == value!.r && swatch.g == value!.g && swatch.b == value!.b;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 12, 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final swatch in captionPalette)
+                  InkWell(
+                    onTap: () => onPicked(swatch),
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: swatch ?? scheme.surfaceContainerHighest,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isPicked(swatch) ? scheme.primary : scheme.outlineVariant,
+                          width: isPicked(swatch) ? 2 : 1,
+                        ),
+                      ),
+                      child: swatch == null ? Icon(Icons.remove, size: 12, color: scheme.onSurfaceVariant) : null,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StyleSlider extends StatelessWidget {
+  const _StyleSlider({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    this.divisions,
+    required this.format,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final String Function(double) format;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(trackHeight: 2),
+              child: Slider(
+                value: value.clamp(min, max),
+                min: min,
+                max: max,
+                divisions: divisions,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 38,
+            child: Text(
+              format(value),
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

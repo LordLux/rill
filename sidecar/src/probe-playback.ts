@@ -34,7 +34,7 @@ const videoId = process.argv[2] ?? process.env['YT_VIDEO_STANDARD'] ?? 'aqz-KE-b
 
 // Streams resolve through an anonymous session (§2.3). No cookie, on purpose —
 // the browse session is a separate concern and a separate call. The client is
-// chosen per `/player` call (tier 1 asks as `ANDROID_VR`), so `clientType` only
+// chosen per `/player` call (tier 1 asks as `VISIONOS`), so `clientType` only
 // sets the base context; what the ladder needs from this session is the
 // server-issued visitor id `createSession` fetches by default (F5).
 const session = await createSession({ clientType: 'MWEB' });
@@ -75,3 +75,19 @@ log.info('play it:');
 // Carries `--stream-lavf-o=request_size=…`, same as the app will. The shipped
 // libmpv ignores it (F13); a newer one needs it to seek. See `mpv-options.ts`.
 log.info(mpvCommand(best.videoUrl, best.audioUrl));
+
+if (process.env['YT_DUMP_ASS']) {
+  const { listCaptionTracks, getCaptionTrack } = await import('./captions/service.ts');
+  const fs = await import('fs');
+  const list = await listCaptionTracks(session, videoId);
+  const sources = list.sources;
+  const first = sources[0];
+  if (first !== undefined) {
+    const track = await getCaptionTrack(session, videoId, first.track.id);
+    const file = process.env['YT_DUMP_ASS'];
+    fs.writeFileSync(file, track.content);
+    log.info(`\nwrote first caption track to ${file}`);
+  } else {
+    log.info(`\nno caption tracks found for ${videoId}`);
+  }
+}

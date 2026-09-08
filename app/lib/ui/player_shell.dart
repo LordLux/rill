@@ -6,19 +6,17 @@ import '../theme/tokens.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
 import 'player/controls.dart';
+import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
 import 'player/settings_menu.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
+import 'widgets/topbar.dart';
 
-
-/// The watch route's name. The mini-player hides while this is on top.
 const String watchRouteName = 'watch';
 
-/// The app's one `Navigator`, reachable from the shell above it.
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
-/// Which route is on top, as a provider.
 class CurrentRoute extends Notifier<String?> {
   @override
   String? build() => null;
@@ -30,12 +28,6 @@ class CurrentRoute extends Notifier<String?> {
 
 final currentRouteProvider = NotifierProvider<CurrentRoute, String?>(CurrentRoute.new);
 
-/// Keeps [currentRouteProvider] in step with the navigator stack.
-///
-/// The post-frame deferral is not optional: the *first* route is pushed during
-/// the `Navigator`'s own first build, and writing to a provider from inside a
-/// build throws. Every later push and pop happens outside a build and would be
-/// fine either way — the initial one is what forces this.
 class RouteTracker extends NavigatorObserver {
   RouteTracker(this._onChange);
 
@@ -63,34 +55,95 @@ final routeTrackerProvider = Provider<RouteTracker>((ref) {
   return RouteTracker((name) => ref.read(currentRouteProvider.notifier).set(name));
 });
 
-/// Play [item] and show it — two independent halves. Moving the cursor starts
-/// playback; pushing the route shows it. A related tile does only the first.
+// Polls the leader size once per rendered frame — see `_scheduleCheck` for
+// why that is not a `Ticker` (any more).
+// Completely eliminates the 1-frame fullscreen freeze bug!
+class LayerLinkFollower extends StatefulWidget {
+  final LayerLink link;
+  final Widget child;
+  final bool fullscreen;
+
+  const LayerLinkFollower({super.key, required this.link, required this.child, required this.fullscreen});
+
+  @override
+  State<LayerLinkFollower> createState() => _LayerLinkFollowerState();
+}
+
+class _LayerLinkFollowerState extends State<LayerLinkFollower> {
+  Size _lastSize = Size.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleCheck();
+  }
+
+  /// Re-checks `widget.link.leaderSize` after every frame the app renders,
+  /// for any reason — and only after such a frame, never on its own.
+  ///
+  /// **This used to be a raw `Ticker`.** A `Ticker` requests a fresh frame on
+  /// every tick for as long as it runs — invisible in a real app, but it means
+  /// `SchedulerBinding` never reports "nothing pending" while this widget is
+  /// mounted, which is always: `PlayerShell` mounts it above the entire app
+  /// (`main.dart`'s `MaterialApp.builder`), unconditionally, whether or not a
+  /// video is even open. Every `pumpAndSettle` in a test that builds through
+  /// `PlayerShell` timed out the instant it existed — confirmed by disabling
+  /// libass entirely and getting the identical timeout, which ruled out
+  /// captions as the cause and pointed here instead (measured 2026-08-27).
+  ///
+  /// `leaderSize` is a layout/paint *output* — `CompositedTransformTarget`
+  /// only reports a new one because Flutter already laid out and painted a
+  /// frame that changed it, which only happens because something (fullscreen
+  /// toggling, an aspect-ratio provider, a window resize) already triggered a
+  /// rebuild and therefore already scheduled that frame. So riding
+  /// `addPostFrameCallback` — fire once after a frame that was going to
+  /// happen anyway, check, `setState` if the size moved (which schedules the
+  /// *next* frame for the corrected size), then re-register for whatever
+  /// frame comes after that — catches the same change the Ticker did, at the
+  /// same one-frame-later timing, without ever asking the engine for a frame
+  /// nothing else needed. Once nothing is changing `leaderSize` any more, no
+  /// frame is scheduled, this callback simply waits, and `pumpAndSettle`
+  /// converges like it is supposed to.
+  void _scheduleCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final leaderSize = widget.link.leaderSize;
+      if (leaderSize != null && leaderSize != _lastSize) {
+        setState(() {
+          _lastSize = leaderSize;
+        });
+      }
+      _scheduleCheck();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.fullscreen
+        ? MediaQuery.sizeOf(context)
+        : (widget.link.leaderSize ?? Size.zero);
+
+    return CompositedTransformFollower(
+      link: widget.link,
+      showWhenUnlinked: false,
+      child: SizedBox(
+        width: size.width,
+        height: size.height,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 void openWatch(WidgetRef ref, VideoItem item) => openWatchIn(_containerOf(ref), item);
 
-/// Bring the watch page up, if it is not already the top route.
-///
-/// `push`, never `pushReplacement` and never into a nested navigator: either
-/// unmounts the feed, and the user comes back to the top of a grid they had
-/// paged four continuations into. (`maintainState` belongs to the route being
-/// *covered*, so setting it here would do nothing.)
 void showWatchPage(WidgetRef ref) => showWatchPageIn(_containerOf(ref));
 
-/// The container-taking forms — split out so navigation can be driven from a
-/// test without inventing a `WidgetRef`.
 void openWatchIn(ProviderContainer container, VideoItem item) {
   container.read(queueProvider.notifier).play(item);
   showWatchPageIn(container);
 }
 
-/// Leave the watch page and let the mini-player take over — the `i` key and the
-/// mini-player button.
-///
-/// **A pop, not a mode** — the shell already draws the mini-player whenever
-/// something is playing off the watch route, so this needs no state of its own
-/// and lands on whichever page the video was opened from.
-///
-/// Fullscreen is dropped first, or popping leaves a borderless window covering
-/// the monitor with a feed in it.
 void toMiniPlayer(WidgetRef ref) => toMiniPlayerIn(_containerOf(ref));
 
 void toMiniPlayerIn(ProviderContainer container) {
@@ -112,13 +165,6 @@ void showWatchPageIn(ProviderContainer container) {
 ProviderContainer _containerOf(WidgetRef ref) =>
     ProviderScope.containerOf(ref.context, listen: false);
 
-/// Everything that outlives a route: the mini-player, and the fullscreen layer.
-///
-/// Mounted through `MaterialApp.builder`, so its child **is** the `Navigator`
-/// (task §1). The player itself lives higher still, in a provider on the
-/// `ProviderScope` — architecture §2.8. Nothing here stops playback on a route
-/// change or a window blur; background audio falls out of where the player
-/// lives rather than being a feature.
 class PlayerShell extends ConsumerWidget {
   const PlayerShell({super.key, required this.child});
 
@@ -131,25 +177,18 @@ class PlayerShell extends ConsumerWidget {
     final view = ref.watch(playerViewProvider);
     final fullscreen = view.fullscreen && playback.item != null;
     final showMini = playback.item != null && !onWatchPage && !fullscreen;
+    final engine = ref.read(playbackEngineProvider);
 
     return PlayerShortcuts(
-      // The settings menu's click-outside, as an **ancestor** rather than a
-      // barrier on top. A translucent `Listener` over the app would swallow
-      // every click it closed the menu on; an ancestor is on the hit-test path
-      // of every descendant, so it sees the click and the target still gets it.
       child: Listener(
         onPointerDown: (event) {
           if (!ref.read(playerMenuProvider).open) return;
-          // The gear counts as "on the menu" too, or pressing it while open
-          // would close here and reopen on the tap. See `settingsMenuAnchorKey`.
           if (pointerIsOnSettingsMenu(event.position)) return;
           ref.read(playerMenuProvider.notifier).close();
         },
         child: Stack(
           children: [
             Positioned.fill(child: child),
-            // The third mount point for the one texture (architecture §2.8):
-            // the same surface the watch page draws, moved rather than rebuilt.
             if (fullscreen) const Positioned.fill(child: _FullscreenPlayer()),
             if (showMini)
               Positioned(
@@ -161,6 +200,55 @@ class PlayerShell extends ConsumerWidget {
                   child: MiniPlayer(),
                 ),
               ),
+            // The only caption renderer (§2.9). It hides mpv's own on mount, so
+            // nothing here has to keep `sub-visibility` in step with a toggle.
+            //
+            // **Clipped below the page's own TopBar when not fullscreen.** The
+            // caption paints last in this Stack — above everything, including
+            // `page_wrapper.dart`'s `Scaffold(appBar: TopBar(...))` — and
+            // `CompositedTransformFollower` repositions it purely at the
+            // compositing layer, so scrolling the watch page's video up under
+            // a sticky bar does not stop the caption from following it there
+            // too. The clip has to be `Positioned.fill` over the *whole* Stack
+            // (screen coordinates) rather than sized to the follower's own
+            // box: the follower's transform is a descendant of this clip, so a
+            // fixed rect here stays fixed on screen regardless of where the
+            // transform later moves the caption to.
+            //
+            // **`OverflowBox` is load-bearing, not decoration.** `Positioned.fill`
+            // gives `ClipRect` tight constraints spanning the whole Stack, and
+            // constraints flow straight through `ClipRect` and
+            // `CompositedTransformFollower` — both are plain proxies for layout
+            // purposes — to `LayerLinkFollower`'s inner `SizedBox(width:
+            // leaderSize.width, height: leaderSize.height)`. A `SizedBox`
+            // cannot be smaller than a tight incoming constraint, so without
+            // this the caption was laid out at the *window's* size instead of
+            // the video's, rendering at several times its correct scale over
+            // the whole page — measured 2026-08-26, this is what shipped for
+            // one round before being caught. `OverflowBox` reports whatever
+            // size its parent (`ClipRect`) imposes upward, unrelated to its
+            // child's, while handing the child its own unconstrained (0..∞)
+            // constraints — restoring exactly the free sizing `LayerLinkFollower`
+            // had before this clip existed, with the clip still applied.
+            Positioned.fill(
+              child: ClipRect(
+                clipper: _BelowTopBarClipper(
+                  fullscreen ? 0 : MediaQuery.paddingOf(context).top + TopBar.preferredHeight,
+                ),
+                child: OverflowBox(
+                  alignment: Alignment.topLeft,
+                  minWidth: 0,
+                  minHeight: 0,
+                  maxWidth: double.infinity,
+                  maxHeight: double.infinity,
+                  child: LayerLinkFollower(
+                    link: engine.videoLayerLink,
+                    fullscreen: fullscreen,
+                    child: LibassLayer(aspectRatio: ref.watch(fullscreenAspectRatioProvider)),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -168,11 +256,20 @@ class PlayerShell extends ConsumerWidget {
   }
 }
 
-/// The player filling the window, with the app chrome behind it.
-///
-/// The OS window is made borderless by `PlayerViewController`; this is only the
-/// part of fullscreen that is pixels. Both halves are needed and neither implies
-/// the other.
+/// Cuts off everything above [top], leaving the rest of the clipped subtree's
+/// own coordinates untouched. Used to keep the caption layer off the TopBar.
+class _BelowTopBarClipper extends CustomClipper<Rect> {
+  const _BelowTopBarClipper(this.top);
+
+  final double top;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(0, top, size.width, size.height);
+
+  @override
+  bool shouldReclip(covariant _BelowTopBarClipper oldClipper) => oldClipper.top != top;
+}
+
 class _FullscreenPlayer extends ConsumerWidget {
   const _FullscreenPlayer();
 
@@ -183,10 +280,6 @@ class _FullscreenPlayer extends ConsumerWidget {
 
     return ColoredBox(
       color: theme.tokens.scrim,
-      // Its own `Overlay`, and not decoration: this subtree is above the
-      // `Navigator` so it inherits none, and `Slider`'s value indicator needs
-      // one. Architecture §2.8 — the same absence is why nothing here has a
-      // tooltip.
       child: Overlay(
         initialEntries: [
           OverlayEntry(
@@ -204,13 +297,6 @@ class _FullscreenPlayer extends ConsumerWidget {
   }
 }
 
-/// The collapsed player: live video, title, transport controls, progress.
-///
-/// Shows the **same surface** the watch page does, not a thumbnail — one
-/// texture, one mount point at a time (architecture §2.8). It draws only when
-/// the watch route is not on top, so the two are exclusive by construction.
-///
-/// TODO: a chevron here opens `EmbeddedQueuePanel` underneath this card, expanding in place.
 class MiniPlayer extends ConsumerWidget {
   const MiniPlayer({super.key});
 
@@ -241,9 +327,6 @@ class MiniPlayer extends ConsumerWidget {
                   SizedBox(
                     width: 96,
                     height: 54,
-                    // Letterboxed against the scrim rather than cropped: a
-                    // 96×54 box is 16:9 and most video is, but a 4:3 upload
-                    // cropped to fill loses its edges rather than its bars.
                     child: ColoredBox(
                       color: theme.tokens.scrim,
                       child: engine.videoSurface(),
@@ -270,9 +353,6 @@ class MiniPlayer extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  // No `tooltip:` on any of these — this widget is above the
-                  // `Navigator`, so there is no `Overlay` to host one and it
-                  // throws the first time the mini-player is drawn.
                   StreamBuilder<bool>(
                     stream: engine.playingStream,
                     initialData: engine.playing,
@@ -292,9 +372,6 @@ class MiniPlayer extends ConsumerWidget {
                   ),
                 ],
               ),
-              // From the stream, never a property read (invariant 9), with the
-              // quality-switch hold ahead of it — a reopened media reports zero
-              // for both position and duration until the seek back lands.
               StreamBuilder<Duration>(
                 stream: engine.positionStream,
                 initialData: engine.position,

@@ -21,13 +21,12 @@ import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
+import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
 import '../captions_controller.dart';
-import '../video_info.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
-import 'captions_overlay.dart';
 import 'settings_menu.dart';
 import 'shortcuts.dart' show volumeStep;
 import 'view_mode.dart';
@@ -36,6 +35,12 @@ import 'view_mode.dart';
 /// the menu that is their only caller. Re-exported so `controls_probe.dart` and
 /// anything else that reached for them here still can.
 export 'settings_menu.dart' show describeVariant, distinctQualities;
+
+/// `playerControlsBarKey` lives in `domain/player_controls_visibility.dart` now
+/// — `LibassLayer` needs it too, and that is the file with no reason to import
+/// this one. Re-exported so existing callers (this file's own tests included)
+/// do not need to know it moved.
+export '../../domain/player_controls_visibility.dart' show playerControlsBarKey;
 
 /// How long the pointer must be still before the controls go away.
 const Duration autoHideDelay = Duration(seconds: 1);
@@ -46,8 +51,6 @@ const Duration autoHideDelay = Duration(seconds: 1);
 /// rather than incidental — see [_PlayerControlsState._onTap].
 const Duration doubleClickWindow = kDoubleTapTimeout;
 
-/// The bar, for tests that need to read its opacity rather than infer it.
-const Key playerControlsBarKey = ValueKey('player-controls-bar');
 const Key playerScrubberKey = ValueKey('player-scrubber');
 const Key playerSwitchCoverKey = ValueKey('player-switch-cover');
 const Key playerBusySpinnerKey = ValueKey('player-busy-spinner');
@@ -133,6 +136,15 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     super.dispose();
   }
 
+  /// The one place `_visible` changes, so `playerControlsVisibleProvider` — the
+  /// copy `LibassLayer` reads to nudge captions off the bar — cannot drift from
+  /// what this widget actually shows.
+  void _setVisible(bool value) {
+    if (_visible == value) return;
+    setState(() => _visible = value);
+    ref.read(playerControlsVisibleProvider.notifier).set(value);
+  }
+
   /// The auto-hide rule, in one place.
   ///
   /// Hides only while **playing**, only after [autoHideDelay], and never while
@@ -142,17 +154,17 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     _hideTimer?.cancel();
     _hideTimer = null;
     if (!_playing || ref.read(playerMenuProvider).open) {
-      if (!_visible) setState(() => _visible = true);
+      _setVisible(true);
       return;
     }
     _hideTimer = Timer(autoHideDelay, () {
       if (!mounted) return;
-      setState(() => _visible = false);
+      _setVisible(false);
     });
   }
 
   void _wake() {
-    if (!_visible) setState(() => _visible = true);
+    _setVisible(true);
     _restartHideTimer();
   }
 
@@ -164,6 +176,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   void _toggleMenu() => _toggleMenuAt(SettingsPage.root);
 
   void _toggleQuality() => _toggleMenuAt(SettingsPage.quality);
+  void _toggleCaptions() => _toggleMenuAt(SettingsPage.captions);
+
+  /// Whether a page belongs to the gear rather than to one of the two buttons
+  /// with their own door. Listed positively so a fourth page defaults to *not*
+  /// lighting the gear up, which is the safe direction.
+  static bool _isGearPage(SettingsPage page) =>
+      page == SettingsPage.root || page == SettingsPage.moreOptions;
 
   void _toggleMenuAt(SettingsPage page) {
     ref.read(playerMenuProvider.notifier).toggleAt(page);
@@ -281,7 +300,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               key: const ValueKey('player-busy'),
               child: _BusySpinner(engine: widget.engine),
             ),
-            CaptionsOverlay(controlsVisible: _visible),
             // **Mounted unconditionally now that it fades.** The `if` used to
             // be here, and an `if` cannot animate an exit: the panel was gone
             // from the tree on the same frame it was told to close, with nothing
@@ -351,7 +369,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         decoration: BoxDecoration(
                           color: tokens.scrim.withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(52),
-                          border: Border.all(color: Colors.white12),
+                          // ignore: rill_lints/no_color_literals
+                          border: Border.all(color: const Color(0x1FFFFFFF)),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
@@ -364,6 +383,25 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                 onChanged: _wake,
                               ),
                               const SizedBox(height: 2),
+                              if (ref.watch(captionsProvider.select((c) => c.hasTracks))) ...[
+                                KeyedSubtree(
+                                  key: captionsButtonAnchorKey,
+                                  child: _MenuButton(
+                                    key: playerCaptionsKey,
+                                    icon: ref.watch(captionsProvider.select((c) => c.isOn))
+                                        ? Icons.closed_caption
+                                        : Icons.closed_caption_outlined,
+                                    busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
+                                    open: ref.watch(
+                                      playerMenuProvider.select(
+                                        (menu) => menu.open && menu.page == SettingsPage.captions,
+                                      ),
+                                    ),
+                                    onPressed: _toggleCaptions,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                              ],
                               KeyedSubtree(
                                 key: qualityButtonAnchorKey,
                                 child: _MenuButton(
@@ -379,27 +417,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              Consumer(
-                                builder: (context, ref, child) {
-                                  final videoId = ref.watch(playbackProvider.select((p) => p.item?.id));
-                                  final info = videoId != null ? ref.watch(videoInfoProvider(videoId)).value : null;
-                                  final hasCaptions = info?.captionTracks.isNotEmpty == true;
-                                  
-                                  return IconButton(
-                                    key: playerCaptionsKey,
-                                    icon: ref.watch(captionsProvider.select((c) => c.enabled))
-                                        ? const Icon(Icons.closed_caption)
-                                        : const Icon(Icons.closed_caption_outlined),
-                                    color: ref.watch(captionsProvider.select((c) => c.enabled))
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Colors.white,
-                                    onPressed: hasCaptions
-                                        ? () => ref.read(captionsProvider.notifier).toggle()
-                                        : null,
-                                    tooltip: 'Captions',
-                                  );
-                                },
-                              ),
                               KeyedSubtree(
                                 key: settingsMenuAnchorKey,
                                 child: _MenuButton(
@@ -407,7 +424,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                   icon: Icons.settings,
                                   open: ref.watch(
                                     playerMenuProvider.select(
-                                      (menu) => menu.open && menu.page != SettingsPage.quality,
+                                      (menu) => menu.open && _isGearPage(menu.page),
                                     ),
                                   ),
                                   onPressed: _toggleMenu,
@@ -474,6 +491,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     final queue = ref.watch(queueProvider);
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
+    final captions = ref.watch(captionsProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -568,6 +586,38 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
+                  // **Captions, and absent entirely when the video has none.**
+                  // Not disabled: an empty track list is a settled answer once
+                  // `captions.list` has answered (`protocol.md` §3.8 — the
+                  // `MWEB` fallback has already run), so a greyed button would
+                  // promise something that is never coming for this video. The
+                  // gap left in Task 16 was the placeholder for this.
+                  //
+                  // Filled when captions are on, outlined when off — the one
+                  // other control here that reports state rather than action is
+                  // theatre, and for the same reason: "on" is the fact worth
+                  // reading at a glance.
+                  if (captions.hasTracks)
+                    KeyedSubtree(
+                      key: captionsButtonAnchorKey,
+                      child: _MenuButton(
+                        key: playerCaptionsKey,
+                        icon: captions.isOn
+                            ? Icons.closed_caption
+                            : Icons.closed_caption_outlined,
+                        busy: captions.isLoadingTrack,
+                        open: ref.watch(
+                          playerMenuProvider.select(
+                            (menu) => menu.open && menu.page == SettingsPage.captions,
+                          ),
+                        ),
+                        onPressed: _toggleCaptions,
+                      ),
+                    ),
+                  // **Quality, then the gear** — specific before general. It is
+                  // the one picker anybody changes mid-video, so a row two taps
+                  // deep inside the settings menu was the wrong depth for it.
+                  //
                   // `KeyedSubtree` because each button needs two keys: the
                   // `ValueKey` the tests find it by, and the `GlobalKey` the
                   // click-outside measures it by. See `settingsMenuAnchorKey`.
@@ -590,9 +640,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     child: _MenuButton(
                       key: playerSettingsButtonKey,
                       icon: Icons.settings,
+                      // The two pages that are *not* the gear's, named rather
+                      // than `!= quality`: adding the captions page to that
+                      // test would have lit the gear up whenever the caption
+                      // panel was open, which reads as two menus at once.
                       open: ref.watch(
                         playerMenuProvider.select(
-                          (menu) => menu.open && menu.page != SettingsPage.quality,
+                          (menu) => menu.open && _isGearPage(menu.page),
                         ),
                       ),
                       onPressed: _toggleMenu,
@@ -748,13 +802,12 @@ extension on Widget {
 }
 
 class _ControlIcon extends StatelessWidget {
-  const _ControlIcon({required this.iconKey, required this.icon, required this.label, required this.onPressed, this.color});
+  const _ControlIcon({required this.iconKey, required this.icon, required this.label, required this.onPressed});
 
   final Key iconKey;
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
-  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -766,7 +819,7 @@ class _ControlIcon extends StatelessWidget {
       // in front of the user, the first time the controls are drawn.
       mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
       icon: Icon(icon, semanticLabel: label),
-      color: color ?? tokens.onScrim,
+      color: tokens.onScrim,
       disabledColor: tokens.onScrim.withValues(alpha: 0.35),
       onPressed: onPressed,
     );

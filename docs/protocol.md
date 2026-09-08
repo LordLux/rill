@@ -94,6 +94,7 @@ flag derived from cookie presence.
 | `feed.subscriptions` | `{continuation?}` | `{items[], continuation?}` |
 | `feed.watchLater` | `{continuation?}` | `{items[], continuation?}` |
 | `feed.history` | `{continuation?}` | `{items[], continuation?}` |
+| `subscriptions.channels` | `{continuation?}` | `{items[], continuation?}` — Task 21 §4 |
 
 `continuation` is a parameter on every list method rather than a separate
 `*.more` method — first page and infinite scroll share one path, and chips are
@@ -114,19 +115,294 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | --- | --- | --- |
 | `video.info` | `{videoId}` | `VideoDetail` |
 | `video.storyboard` | `{videoId}` | `{storyboard}` — §3.7 |
+| `captions.list` | `{videoId}` | `{tracks[]}` — §3.8 |
+| `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` |
 | `mix.start` | `{videoId}` | `{playlistId, items[], continuation?}` |
-| `search.query` | `{q, continuation?}` | `{items[], continuation?}` |
+| `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
 Mixes are `RD*` radio playlists that auto-extend; fetch the continuation as the
 user nears the end. Same code path as queue autoplay.
 
+**`search.query`'s `filters` — decided in Task 20 §3, not chips.** A chip is a
+token the server hands back in a response; a filter (upload date, type,
+duration, sort by) is a token the client *constructs* from a closed set the
+sidecar owns. Reusing `chips[]` with a different `scope` was rejected: nothing
+about a filter comes from the response, so shipping one there would invite a
+caller to render it as if the server had suggested it. A distinct `filters[]`
+was also rejected — it implies a set of *options* the server offers, and there
+is no such response to read them from. What ships is the third option: an
+opaque, client-constructed request parameter.
+
+```jsonc
+// search.query {q, continuation?, filters?}
+{"q": "lofi hip hop", "filters": {"type": "playlist", "sortBy": "viewCount"}}
+```
+
+```ts
+interface SearchFilters {
+  uploadDate?: 'hour' | 'today' | 'week' | 'month' | 'year';
+  type?: 'video' | 'channel' | 'playlist' | 'movie';
+  duration?: 'short' | 'medium' | 'long';
+  /** The only verified value — see below. */
+  sortBy?: 'viewCount';
+}
+```
+
+`filters` is client vocabulary, not YouTube's. `search-filters.ts` is the only
+place that turns it into the `params` string `/search` actually reads, and
+every value in it was **measured against the live endpoint on 2026-08-27**, not
+derived from a spec — `capture.ts` already leaned on one of these
+(`EgIQAw%3D%3D`, type=playlist) before this task generalised it. Each
+single-dimension filter is a small protobuf entry (`uploadDate`/`type`/
+`duration` nest inside one field-2 submessage at inner tags 1/2/3; `sortBy` is
+a bare top-level field-1 varint), and dimensions **compose by concatenating
+their raw bytes** — confirmed live: protobuf merges repeated entries of an
+embedded-message field as if the submessages were merged, so `type=playlist`
+bytes followed by `sortBy=viewCount` bytes decode server-side as both at once.
+
+**`duration`'s values are not 1=short, 2=medium, 3=long — they are short=1,
+long=2, medium=3.** Trusting the UI's presentation order here would have
+silently swapped medium and long; the real mapping was pinned by checking the
+resolved videos' own `durationSeconds` (short: 66–186s, long: 1466–12202s,
+medium: 254–1170s).
+
+**`sortBy` ships only `'viewCount'`.** YouTube's picker has four options —
+relevance (the default, sent as no filter at all), upload date, view count and
+rating — and repeated live probes against the other three candidate field
+values could not distinguish any of them from relevance by result ordering.
+Most likely a search response interleaves an unsorted shelf (a live-news card
+was one observed case) ahead of the sorted list, which defeats ordering as a
+verification method from outside the response. `viewCount`'s effect was
+unambiguous (the top results are consistently the account's highest-view
+videos in the set) and is the only value shipped; the other three are a known
+gap, not an oversight — see the Task 20 report.
+
+**`search.query` carries an optional `artist` field alongside `items[]` —
+Task 21 §3.** A search for an official artist's name (confirmed live with
+`"Ado"`, matching `sidecar/scratch/task21-probe.ts`) returns
+`officialCardViewModel`, a distinct panel above the ordinary results: avatar,
+handle, subscriber/video count, description, a Subscribe action and the same
+"Official Artist Channel" badge described below. Confirmed **absent** for an
+ordinary creator search (`"MrBeast"` — the top result is a plain
+`channelRenderer` item instead), so the panel's presence *is* the "is an
+official artist channel" signal; nothing else needs to gate it.
+
+```jsonc
+// search.query {q: "Ado"} → {items[], continuation?, artist}
+{"items": [...], "continuation": "...", "artist": {
+  "channelId": "UCln9P4Qm3-EAY4aiEPmRwEA",
+  "name": "Ado",
+  "handle": "@Ado1024",
+  "avatarUrl": "https://yt3.googleusercontent.com/…",
+  "subscriberText": "9.51M subscribers",
+  "videoCountText": "739 videos",
+  "description": "Ado is a Japanese singer.",
+  "isSubscribed": true,
+  "mixPlaylistId": "RDEMCI2wPNzV0xPhm5R9l6ofvw",
+  // Task 23 — the panel's own palette, backdrop, and top-videos shelf.
+  "backdropUrl": "https://yt3.googleusercontent.com/...=w600-h176-p",
+  "backgroundColor":     {"light": 4287945716, "dark": 4278999928},
+  "baseBackgroundColor": {"light": 4293983231, "dark": 4278261278},
+  "shelfItems": [ /* one MixItem, then VideoItems — ordinary flat DTOs */ ]
+}}
+// or "artist": null on an ordinary search — every other list method's
+// response is unchanged; this field exists only on search.query's.
+```
+
+**The panel carries its own colour, and it is YouTube's, not a sampled one
+— Task 23.** `officialCardViewModel` ships `backgroundColor` and
+`baseBackgroundColor`, each an ARGB int (`0xAARRGGBB`) per theme, already
+derived server-side from the artist's imagery: measured for `"Ado"` as
+`#FF0C5B78` / `#FF01161E` on dark and `#FF94DBF4` / `#FFF0FBFF` on light.
+Both halves ship because the sidecar has no idea which theme Flutter is
+painting. This is why the client samples nothing: a palette pass over the
+avatar would cost a decode, and would paint the first frame in the wrong
+colour while it ran. Null when the payload omits them, which the client
+renders as an ordinary untinted card.
+
+**The backdrop is its own image, and it is not the avatar — Task 23.**
+`pageHeaderViewModel.background.cinematicContainerViewModel.backgroundImageConfig`
+carries a wide artwork strip (measured 600x176 for `"Ado"`, against the
+avatar's square) that YouTube bleeds off the panel's top-right corner,
+alongside `gradualBlurConfig` and `fadeToThemeConfig` describing how it fades
+into the tint. Shipped as `backdropUrl`, null when absent. Worth stating
+because the obvious substitute — blurring the avatar — renders artwork the
+artist never chose for that slot, and looks like it.
+
+**The panel's embedded shelf is modelled, and it is lifted out rather than
+walked into — Task 23.** `officialCardViewModel.contents[]` holds a
+`horizontalShelfViewModel` whose `items[]` are ordinary `lockupViewModel`
+tiles: for `"Ado"`, one `RD…` mix followed by ten of the artist's
+most-viewed videos. They map through the *existing* lockup mapper with no
+new parsing, so `shelfItems` is `FeedItem[]` — the same flat DTOs every grid
+already renders. `mapArtistPanel` reaches into the panel for them instead of
+letting the renderer walker descend, because descending would also splice
+those tiles into the surrounding search results, where YouTube does not show
+them and where they would read as duplicates.
+
+**Their metadata sits in one row, not two, and that was a live parser bug.**
+An ordinary feed or search lockup splits its metadata across two rows —
+channel on row 0, view count and date on row 1 — while the shelf packs all
+three into a single row. `mapLockup` scanned only `rows.slice(1)` for the
+detail fields, so every shelf tile arrived with `viewCountText: null` and
+`publishedText: null` while the strings sat right there in row 0. The scan
+is now row-agnostic (flatten first, then classify), which yields the
+identical result for the two-row layout and recovers both fields for the
+one-row one. The channel name stays row-0-scoped: widening it would let a
+view count win that field on a tile carrying no channel at all.
+
+**Shelf tiles carry no avatar, so the panel's is filled in.** Measured: the
+shelf's lockups have no `image` key and no avatar host anywhere in the
+subtree, so `channelAvatarUrl` maps to null and every tile draws a
+placeholder glyph. These are the artist's uploads on the artist's own panel,
+so `mapArtistPanel` backfills `avatarUrl` — but only onto items whose
+`channelId` matches the panel's, leaving a guest upload (or a tile whose
+channel could not be extracted) with its honest null rather than the wrong
+face.
+
+Shipped as a field on the search response rather than a new `FeedItem` kind,
+per the task's own preference: `FeedItem` is a sealed union every surface
+switches over, and a panel is not a grid item — widening the union would make
+every surface responsible for skipping it, and `UnknownItem`'s fallback-union
+behaviour is unaffected either way since nothing here touches that union.
+
+**The panel does not carry its own subscription state inline, and reading the
+obvious field is wrong.** `subscribeButtonContent.subscribeState.subscribed`
+and `unsubscribeButtonContent.subscribeState.subscribed` both ship on every
+response — `false` and `true` respectively — because each describes what
+*that* button variant represents, not which one is currently showing. The real
+answer is resolved server-side into the response's own entity store,
+`frameworkUpdates.entityBatchUpdate.mutations[]`, keyed by the panel's
+`stateEntityStoreKey`; `parser/feed.ts` resolves that map once per response
+before mapping the panel. Confirmed live against this account's own
+subscription to Ado (`isSubscribed: true`), matching the account's real state.
+
+**`mixPlaylistId` is found structurally, not by the button's label.** The
+panel's "Mix" action is a `buttonViewModel` alongside "View Channel" and
+"YouTube Music", and matching on `title === "Mix"` would be matching a
+localised string (the same trap `search-filters.ts` avoids elsewhere in this
+document). It is found instead by shape: the one action whose endpoint carries
+a `playlistId` starting `RD`, the same discriminator `isMixId` already uses
+throughout `parser/items.ts`.
+
+**Verified and "Official Artist Channel" badges — Task 21 §2, on `VideoItem`
+and `ChannelItem` both.** Two closed-vocabulary signals, both
+`metadataBadgeRenderer` (under `ownerBadges` on a classic search tile, or the
+panel's title attachment above), disambiguated by `style` rather than
+`tooltip`/`accessibilityData.label` — those are localised (this account
+browses `tz=Europe.Rome`), `style` is not:
+
+| Badge | `style` | `icon.iconType` |
+| --- | --- | --- |
+| Verified | `BADGE_STYLE_TYPE_VERIFIED` | `CHECK_CIRCLE_THICK` |
+| Official Artist Channel | `BADGE_STYLE_TYPE_VERIFIED_ARTIST` | `AUDIO_BADGE` |
+
+`isVerified` is the uploading/owning channel's checkmark; `isArtistChannel` is
+the artist badge. Neither duplicates `badges[]` — confirmed live, no
+`"Verified"`/`"Official Artist Channel"` string has ever appeared there.
+
+**The `♪` on a music video's duration badge — Task 21 §2, `VideoItem.isMusic`,
+per video rather than per channel.** Distinct from `isArtistChannel`: an
+artist channel can upload a non-music video, and — confirmed on a real capture
+— an ordinary channel's upload can carry the music note too.
+`thumbnailBadgeViewModel.icon.sources[].clientResource.imageName === "MUSIC"`,
+co-located with the duration text on the same badge node. Seen only on the
+view-based badge shape in this corpus; classic tiles carry no equivalent icon
+field, so `isMusic` stays `false` for anything that never reaches that node —
+a real answer, not a gap, per the task's own "say so plainly" instruction.
+
+**Shorts are classified, not stripped — Task 21 §1, and this reverses the
+original "no Shorts" requirement deliberately.** Two structurally different
+shapes carry a Short, and only one is changed:
+
+- An ordinary `videoRenderer`/`lockupViewModel` carrying a `SHORTS`-styled
+  duration overlay (`thumbnailOverlayTimeStatusRenderer.style === "SHORTS"`)
+  is the leak this task is about — confirmed reaching search interleaved with
+  ordinary videos, previously landing in `badges: ["SHORTS"]` unflagged. Now
+  extracted into `VideoItem.isShort`, the same way the existing `LIVE` badge
+  is pulled out rather than left as a label, and no longer duplicated in
+  `badges[]`.
+- The dedicated Shorts shelf (`reelShelfRenderer` → `shortsLockupViewModel`)
+  is a structurally different renderer — no `content_id`, no
+  `lockupMetadataViewModel` — that the existing video mapper cannot produce a
+  tile from at all. It stays stripped; building a second mapper for a shelf
+  this app still does not render is out of this task's scope.
+
+**`search.suggest` is not an InnerTube endpoint — Task 20 §2 asked to confirm
+rather than assume, and it does not hold.** There is no `/youtubei/v1/*` POST,
+no session, and nothing to run `parse: false` over. It is a plain,
+unauthenticated `GET` against Google's classic suggest service, answering
+JSONP:
+
+```
+GET https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&q=<query>
+
+window.google.ac.h(["lofi hip h",[["lofi hip hop",0,[512,433]], …]])
+```
+
+— confirmed live 2026-08-27. Only the first element of each triple
+(the suggestion text) is read; the rest is client-side telemetry hinting this
+project has no use for. youtubei.js has its own wrapper
+(`Innertube.getSearchSuggestions`), but it sits outside hard invariant 1's
+session/auth/decipher boundary — not a renderer parser, so not the failure
+mode that invariant guards against, but fetching and unwrapping the JSONP
+directly (`sidecar/src/search/suggest.ts`) keeps this endpoint's shape inside
+code this project owns, the same as every other network boundary in
+`sidecar/src`.
+
+**`feed.subscriptions`'s empty-page ambiguity is handled exactly like
+`feed.home`'s.** No chip bar (it never had one), same
+`auth.verify`-after-an-empty-base-load check §3.1 already specifies, driven
+client-side by the same generalised surface config Task 20 §1 built —
+`checkAuthOnEmpty` in `FeedController`'s `SurfaceConfig`. Search opts out of
+it: an empty search result is a real, un-ambiguous answer ("no results"), not
+a signal worth spending an `auth.verify` round trip on.
+
+**`subscriptions.channels` is a different browse endpoint from
+`feed.subscriptions`, not a parameter on it — Task 21 §4.** `feed.subscriptions`
+returns the video feed (`browseId: 'FEsubscriptions'`); this returns every
+channel the user is subscribed to (`browseId: 'FEchannels'`, confirmed live by
+its own `GetChannels_rid` tracking param and a page title of "All
+subscriptions"). Items are plain `channelRenderer` nodes — the existing
+`ChannelItem` mapper, Task 20's protocol-relative-avatar and
+`videoCountText`-carries-subscribers fixes included, all confirmed live on
+this endpoint too, so it needed no parser code beyond the badge fields §5
+below adds to every surface. **Pagination is confirmed working**: a live
+continuation round-trip returned a second page of 100 more channels through
+the same generic `parseFeed`/`contentRoots` machinery, unchanged. **Sort order
+is not exposed as a request parameter.** The response does carry a single
+`A-Z`-labelled shelf-scope chip — a sort-menu trigger, not a set of
+alternatives to pick between — but replaying it was not explored for this
+task, and this method ships `ItemListResult` only, with no `chips[]`, matching
+`feed.subscriptions` and `search.query`. Client-side search over the already-
+loaded list is UI work, not a request parameter (the task's own framing).
+
+**The A–Z scrubber depends on that unspecified default order, so the sidecar
+checks it.** `AllSubscriptionsPage`'s letter index (Task 22) has no ordering of
+its own: it maps a letter to a scroll offset by trusting that the response
+already arrives `#`, then A–Z. That was confirmed empirically — across a page
+boundary, on a real account — and it is specified *nowhere*. There is no sort
+parameter to pin it with, so if YouTube's default ever changes, every letter
+jump lands on the wrong row while the list still renders and the scrubber still
+scrolls: a wrong answer with no error attached to it.
+
+`parser/channel-order.ts` holds the rule (`channelBucket` must stay in step
+with `letterBucketOf` in `app/lib/ui/widgets/alphabet_index.dart`), the
+`subscriptions.channels` handler runs it on every **base** page and logs an
+error to stderr when the order goes backwards, and `parser.test.ts` asserts it
+against the real capture. The check is bucket-wise, not a full string compare:
+collation *within* a letter is YouTube's business, and only `M` landing after
+`N` breaks the index. Note that the corpus cannot carry this assertion —
+`export-contract-corpus` rewrites every channel name to
+`Sanitised Channel <n>`, which is sorted by construction.
+
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The
-`/player` half asks as **`ANDROID_VR` over the anonymous resolve session**, which
+`/player` half asks as **`VISIONOS` over the anonymous resolve session**, which
 is the same client and the same cached response ladder tier 1 uses, so opening a
 video costs **one** `/player` call rather than two. Reading a length out of a
 response already fetched is not the cross-client CPN bridging A5 rejects; nothing
@@ -213,7 +489,7 @@ Flutter never learns which tier served the request. `transport` is telemetry;
 
 **Resolution ladder**, tried in order inside `playback.open`:
 
-1. `ANDROID_VR` plain adaptive URLs — the primary path; no `n`, and libmpv can
+1. `VISIONOS` plain adaptive URLs — the primary path; no `n`, and libmpv can
    consume them directly (F5, F11, F13)
 2. `MWEB` plain adaptive URLs — the decipher path, kept as a fallback
 3. SABR → local DASH bridge — Phase 2
@@ -327,7 +603,7 @@ rather than deleted because the substitution below was measured against real
 responses and verified by fetching, and re-deriving it from the shape would be
 expensive.
 
-It reads one field out of the **`ANDROID_VR` `/player` response that
+It reads one field out of the **`VISIONOS` `/player` response that
 `video.info` and ladder tier 1 already share** (§3.3), so it opens no session,
 resolves no stream, and needs no PO token.
 
@@ -357,6 +633,192 @@ Three things about that URL are not obvious and are all load-bearing:
 **`intervalMs` is what a frame *represents*, not how fast to show it.** Level 0
 spreads a fixed frame count across the whole runtime, so a 10-minute video puts
 6.35 s behind every frame.
+
+
+### 3.8 Captions
+
+**Added 2026-08-18.** Two methods, because the two questions have different
+costs: *does this video have captions* is answered from a response already in
+hand, and *give me this one* is a fetch.
+
+```jsonc
+// captions.list {videoId, allowFallback?, includeStyled?}
+{"tracks": [
+  {"id": ".en", "languageCode": "en", "label": "English",
+   "isAutoGenerated": false, "styled": null, "isTranslatable": true},
+  {"id": "a.en", "languageCode": "en", "label": "English (auto-generated)",
+   "isAutoGenerated": true, "styled": null, "isTranslatable": true}
+]}
+
+// captions.get {videoId, trackId, style?, offset?}
+{"trackId": "a.en", "languageCode": "en", "format": "ass",
+ "content": "[Script Info]
+…", "cueCount": 402,
+ // Task 19. Eight numbers per *track*, not per cue.
+ "layout": {"fontFamily": "Arial", "fontSize": 48,
+            "playResX": 1920, "playResY": 1080, "margin": 60,
+            "outlineWidth": 2.5, "boxPadding": 6,
+            "defaultAlignment": 2, "defaultX": 960, "defaultY": 1020,
+            "lineSpacing": 1.2},
+ // §2.10. The same values as on the track entry in captions.list, but
+ // populated here unconditionally — captions.get always fetches the document,
+ // so classification is never deferred. null only if classification threw.
+ "styled": "plain",          // plain | styled | karaoke | null
+ "positional": false}        // true → multiple anchors; drag is suppressed
+```
+
+**Both optional parameters are Task 19's, and both change the *document* rather
+than anything about the fetch.** Each is omitted by a client that has not touched
+the style menu or dragged a caption, and a request without them is
+byte-identical to what §3.8 returned before they existed.
+
+There were two more. `metrics` carried a client-measured advance table so the
+sidecar could estimate a cue's width and clamp a dragged `\pos` inside the frame,
+and `renderer` told it which of two caption pipelines the document was for. Both
+were removed with the mpv pipeline in phase 5 — see `architecture.md` §2.9 — and
+a request that still sends either is not an error, only ignored: they are read
+nowhere.
+
+```jsonc
+// style — the caption style menu. `null` on a field means "the track decides".
+{"fontFamily": null, "fontSizePercent": 150,
+ "textColor": {"r": 255, "g": 255, "b": 0, "a": 1},
+ "background": {"r": 0, "g": 0, "b": 0, "a": 0.75},
+ "window": {"r": 0, "g": 0, "b": 0, "a": 0},
+ "edgeStyle": "outline"}          // none | outline | dropShadow
+
+// offset — the drag, as a fraction of the frame. Added to whatever position
+// the source gives, so one rule covers plain, ASR and styled tracks alike.
+{"dx": -0.2, "dy": -0.3}
+```
+
+**They are applied here and not through mpv properties**, and that is measured
+rather than preferred: `sub-ass-override=force` overrides the ASS `Style` and not
+the inline override tags a styled track is made of, so the property route works
+on plain tracks and silently does nothing on styled ones — on exactly the tracks
+a style menu is aimed at. `architecture.md` §2.9 has the rest.
+
+**`offset` is a delta and the sidecar does not clamp it.** The position it
+produces is the cue's own anchor plus the delta, rounded, and nothing else. It
+used to be pulled back inside the frame against the estimated width `metrics`
+supplied, because the mpv pipeline could not see where libass had put the line;
+the client renders the document itself now and clamps against the boxes
+`ass_render_frame` returns, so the no-overflow rule is enforced where the real
+geometry is. A client that sends an offset is asking for a position, and gets it.
+
+**`layout` is the document's own constants**, sent rather than duplicated in the
+client because two copies of a layout constant are two things that have to agree
+and eventually will not. Always populated — the document is in hand, so it costs
+nothing — whether or not the caller reads it. Absent from an older sidecar, and
+the client falls back to these defaults.
+
+**No URL crosses this boundary.** A `timedtext` address is signed —
+`sparams`, `signature`, `expire` — and the sidecar is what fetches it. `id` is
+YouTube's `vssId`, an opaque handle the client hands back. This is hard
+invariant 2's reasoning applied to a second endpoint: nothing outside the
+sidecar holds a URL whose signing it does not own. `id` rather than
+`languageCode` because a language has up to two tracks — `.en` manual and `a.en`
+auto-generated — and a code cannot address them separately.
+
+**Every format converts to ASS in the sidecar; Flutter draws no captions.**
+`content` is a complete ASS document the client hands to libmpv. The decision and
+what it rules out are in `architecture.md` §2.9. `format` is `"ass"` today and is
+sent anyway, because the client passes the body straight to a subtitle demuxer
+and a silent format change renders as nothing at all rather than as an error.
+
+**A track list far shorter than youtube.com's picker is correct.** YouTube ships
+one real track beside ~156 `translationLanguages`; those are machine
+translations of that track, reachable by appending `&tlang=`, and they are not
+tracks. Translations are out of scope.
+
+**`tracks: []` is a settled answer, not a not-yet.** The `VISIONOS` → `MWEB`
+fallback has already run by the time `captions.list` answers, so an empty array
+means the UI hides the CC control rather than waiting. Measured 2026-08-18 over
+a 45-video feed sample: 32 videos carried tracks, 13 carried none, and no video
+had tracks on one client and not another — the fallback fired 13 times and
+rescued nothing. It is kept because the gap was observed before and a fire rate
+that moves is how a client-behaviour change gets noticed; the INFO line it logs
+per fire is what makes that visible. It is **not** on the video-open path — see
+below.
+
+**The fallback asks `MWEB`, not `WEB`.** A `WEB` `/player` signs its caption URLs
+with `exp=xpe` inside `sparams`, and every one of them answers **HTTP 200 with a
+zero-byte body** — isolated to that one parameter, since removing it invalidates
+the signature and answers 404 while the same URLs from `VISIONOS` and `MWEB`,
+which carry no `exp`, return the document. A `WEB` fallback would therefore
+populate a language picker in which every entry renders nothing, which reads as
+broken captions rather than as absent ones. `WEB` `/player` is also reserved by
+§3.5 for the authenticated report path.
+
+**Captions are not on `VideoDetail`, and that is what keeps §3.3 true.** The
+track list is free — it rides on the `/player` response `video.info` already
+fetches — but a *complete* list costs the fallback's second `/player` call, and
+on the ~29% of videos with no captions that would fire on every open. §3.3's
+"opening a video costs **one** `/player` call rather than two" would stop
+holding. So the watch page issues `captions.list` **alongside** `video.info`
+rather than reading a field out of it: the fallback runs concurrently with the
+open instead of inside it, and nothing about playback waits for captions.
+
+**`styled` is opt-in, and `null` is its ordinary value.** It is `'plain'`,
+`'styled'` or `'karaoke'` — a closed set rather than a bag of flags, because the
+picker badges it with one word and deciding *which* word belongs on the side that
+can see the document.
+
+**`'karaoke'` is a subset of `'styled'` and is only answered when nothing wider
+is true** — a track that karaokes *and* changes font is `'styled'`. It is also
+not a field: the first attempt keyed on a `pPenId` on a `seg` and badged all
+three styled test videos, because per-segment pens are equally how a track
+colours one word or sweeps a gradient across 23 000 pens. What karaoke actually
+is, is temporal — the same line re-emitted with the split between two pens moving
+forward. Measured 2026-08-19, that finds the two cues in `L-BgxLtMxh0` that
+visibly karaoke and nothing in `1S7uIQmkRzk` or `8Oos6D4_Bjo`.
+
+A client that meets a value it does not know **badges nothing** rather than
+printing the token — the set is expected to grow.
+
+It cannot be answered from the `/player` response: the styling arrays are in the *caption document*, one
+`timedtext` GET per track. Measured 2026-08-19 on `dQw4w9WgXcQ`: six real tracks,
+**69 KB and 73 ms** fetched together, because they parallelise into one round
+trip's latency. That is affordable for a menu and not for a video open, so the
+caller asks with `includeStyled: true` and the watch page's own call does not.
+The sidecar caches the answer per track, so reopening the menu is free.
+
+**The predicate is `pens`, and the obvious one is wrong.** *Every*
+auto-generated track has `wsWinStyles` and `wpWinPositions` populated — that is
+how its rolling window is expressed — so "any of the three styling arrays" marks
+every ASR track in the app as styled and means nothing. On that same six-track
+sample, `pens` was empty on all six and the two window arrays were populated on
+the ASR track alone.
+
+There is no equivalent flag for auto-generated, and none is needed: `label` is
+YouTube's own and already reads `English (auto-generated)`.
+
+**`trackName` is the only other thing YouTube declares, and it is usually `''`.**
+Measured 2026-08-19, a caption track entry carries exactly `name`, `vssId`,
+`languageCode`, `kind`, `isTranslatable` and `trackName` — nothing about styling,
+which is why the flag above needs the document. `trackName` is how a channel
+tells apart two tracks in one language ("Commentary", "Forced"); when it is set,
+`label` alone renders two identical rows.
+
+Two tracklist-level fields are read by nothing today and are worth knowing about:
+`captionsInitialState` (YouTube's own recommendation for whether captions start
+on) and `audioTracks[].defaultCaptionTrackIndex`.
+
+**`cueCount` counts lines on screen, not events in the document.** A styled track
+transmits one caption as several overlapping events with different pens, and the
+sidecar merges them — `L-BgxLtMxh0` is 511 events and 265 cues. See
+`architecture.md` §2.9; nothing on the wire changed, but a client comparing the
+two numbers would find them unequal on every styled track.
+
+`captions.get` caches **parsed cues** per video and track, and rendered documents
+per track *and render options* — so switching between two languages costs one
+fetch each and nothing after that, and a style change or a drag costs a render
+rather than a fetch and a parse. Measured 2026-08-20: ~1.2 ms of render on an
+ordinary document, 33 ms on the largest in the corpus. The options are part of
+the document cache's key on purpose; keyed on the track alone it would hand back
+the previous colour and the menu would appear not to work. Asking for a
+`trackId` the video does not have is `BAD_REQUEST` — a stale track list or a
+constructed id, and the same request fails identically forever.
 
 ---
 

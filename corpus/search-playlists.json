@@ -1,0 +1,167 @@
+{
+  "chips": [],
+  "items": [
+    {
+      "kind": "playlist",
+      "id": "list_001",
+      "title": "Sanitised Title 1",
+      "thumbnailUrl": "https://fake.url/img1.jpg",
+      "videoCount": 24,
+      "channelName": "Sanitised Channel 1"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_002",
+      "title": "Sanitised Title 2",
+      "thumbnailUrl": "https://fake.url/img2.jpg",
+      "videoCount": 24,
+      "channelName": "Sanitised Channel 2"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_003",
+      "title": "Sanitised Title 3",
+      "thumbnailUrl": "https://fake.url/img3.jpg",
+      "videoCount": 47,
+      "channelName": "Sanitised Channel 3"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_004",
+      "title": "Sanitised Title 4",
+      "thumbnailUrl": "https://fake.url/img4.jpg",
+      "videoCount": 2,
+      "channelName": "Sanitised Channel 4"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_005",
+      "title": "Sanitised Title 5",
+      "thumbnailUrl": "https://fake.url/img5.jpg",
+      "videoCount": 24,
+      "channelName": "Sanitised Channel 5"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_006",
+      "title": "Sanitised Title 6",
+      "thumbnailUrl": "https://fake.url/img6.jpg",
+      "videoCount": 48,
+      "channelName": "Sanitised Channel 6"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_007",
+      "title": "Sanitised Title 7",
+      "thumbnailUrl": "https://fake.url/img7.jpg",
+      "videoCount": 3,
+      "channelName": "Sanitised Channel 7"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_008",
+      "title": "Sanitised Title 8",
+      "thumbnailUrl": "https://fake.url/img8.jpg",
+      "videoCount": 3,
+      "channelName": "Sanitised Channel 8"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_009",
+      "title": "Sanitised Title 9",
+      "thumbnailUrl": "https://fake.url/img9.jpg",
+      "videoCount": 1,
+      "channelName": "Sanitised Channel 9"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_010",
+      "title": "Sanitised Title 10",
+      "thumbnailUrl": "https://fake.url/img10.jpg",
+      "videoCount": 3,
+      "channelName": "Sanitised Channel 10"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_011",
+      "title": "Sanitised Title 11",
+      "thumbnailUrl": "https://fake.url/img11.jpg",
+      "videoCount": 34,
+      "channelName": "Sanitised Channel 11"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_012",
+      "title": "Sanitised Title 12",
+      "thumbnailUrl": "https://fake.url/img12.jpg",
+      "videoCount": 2,
+      "channelName": "Sanitised Channel 12"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_013",
+      "title": "Sanitised Title 13",
+      "thumbnailUrl": "https://fake.url/img13.jpg",
+      "videoCount": 19,
+      "channelName": "Sanitised Channel 13"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_014",
+      "title": "Sanitised Title 14",
+      "thumbnailUrl": "https://fake.url/img14.jpg",
+      "videoCount": 3,
+      "channelName": "Sanitised Channel 14"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_015",
+      "title": "Sanitised Title 15",
+      "thumbnailUrl": "https://fake.url/img15.jpg",
+      "videoCount": 24,
+      "channelName": "Sanitised Channel 15"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_016",
+      "title": "Sanitised Title 16",
+      "thumbnailUrl": "https://fake.url/img16.jpg",
+      "videoCount": 35,
+      "channelName": "Sanitised Channel 16"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_017",
+      "title": "Sanitised Title 17",
+      "thumbnailUrl": "https://fake.url/img17.jpg",
+      "videoCount": 1,
+      "channelName": "Sanitised Channel 17"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_018",
+      "title": "Sanitised Title 18",
+      "thumbnailUrl": "https://fake.url/img18.jpg",
+      "videoCount": 40,
+      "channelName": "Sanitised Channel 18"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_019",
+      "title": "Sanitised Title 19",
+      "thumbnailUrl": "https://fake.url/img19.jpg",
+      "videoCount": 40,
+      "channelName": "Sanitised Channel 19"
+    },
+    {
+      "kind": "playlist",
+      "id": "list_020",
+      "title": "Sanitised Title 20",
+      "thumbnailUrl": "https://fake.url/img20.jpg",
+      "videoCount": 33,
+      "channelName": "Sanitised Channel 20"
+    }
+  ],
+  "continuation": "CONTINUATION_TOKEN_8",
+  "artistPanel": null
+}

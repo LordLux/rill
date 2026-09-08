@@ -43,6 +43,13 @@ const STAGING = join(ROOT, 'fixtures.partial');
 /** A video that is safe to resolve: long, public, not age-restricted. */
 const PLAYER_VIDEO = process.env.YT_VIDEO_STANDARD ?? 'aqz-KE-bpKQ';
 const SEARCH_QUERY = process.env.YT_SEARCH_QUERY ?? 'lofi hip hop';
+/**
+ * A separate, purpose-built search query for Task 21 §3's artist panel
+ * (`officialCardViewModel`) — kept independent of `SEARCH_QUERY` because the
+ * mix/playlist chaining below depends on that query's own result shape, and
+ * an artist-name query is a worse source for either.
+ */
+const ARTIST_SEARCH_QUERY = process.env.YT_ARTIST_QUERY ?? 'Ado';
 
 interface ManifestEntry {
   file: string;
@@ -164,6 +171,13 @@ async function main(): Promise<void> {
     session.execute('/browse', { browseId: 'FEsubscriptions' }),
   );
 
+  // Task 21 §4 — the channel list, a different browse endpoint from the video
+  // feed above. Confirmed live: its own `GetChannels_rid` tracking param, page
+  // title "All subscriptions".
+  await capture('channels', '/browse', { browseId: 'FEchannels' }, () =>
+    session.execute('/browse', { browseId: 'FEchannels' }),
+  );
+
   await capture('history', '/browse', { browseId: 'FEhistory' }, () =>
     session.execute('/browse', { browseId: 'FEhistory' }),
   );
@@ -175,6 +189,13 @@ async function main(): Promise<void> {
   // --- Search --------------------------------------------------------------
   const search = await capture('search', '/search', { query: SEARCH_QUERY }, () =>
     session.execute('/search', { query: SEARCH_QUERY }),
+  );
+
+  // Task 21 §3 — a search for an artist's name, to capture the
+  // officialCardViewModel panel. Live-confirmed absent for a topic query
+  // (SEARCH_QUERY above) and for an ordinary creator's name.
+  await capture('search-artist', '/search', { query: ARTIST_SEARCH_QUERY }, () =>
+    session.execute('/search', { query: ARTIST_SEARCH_QUERY }),
   );
 
   // --- Playlist and Mix ----------------------------------------------------
@@ -255,9 +276,9 @@ async function main(): Promise<void> {
   await capture(
     'player-vr',
     '/player',
-    { videoId: PLAYER_VIDEO, client: 'ANDROID_VR' },
-    () => anonymous.execute('/player', playerPayload(anonymous, PLAYER_VIDEO, 'ANDROID_VR')),
-    'ANDROID_VR',
+    { videoId: PLAYER_VIDEO, client: 'VISIONOS' },
+    () => anonymous.execute('/player', playerPayload(anonymous, PLAYER_VIDEO, 'VISIONOS')),
+    'VISIONOS',
   );
 
   // --- Manifest ------------------------------------------------------------

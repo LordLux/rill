@@ -3,14 +3,14 @@
  *
  * One option, and it is a hedge rather than a requirement. F13 measured the
  * libmpv `media_kit_libs_windows_video` actually ships — mpv v0.36.0-403 /
- * FFmpeg n6.0 — seeking `ANDROID_VR` streams 4/4 with nothing set at all, five
+ * FFmpeg n6.0 — seeking `VISIONOS` streams 4/4 with nothing set at all, five
  * runs. So this changes nothing today. It matters the day the pin moves: on
  * FFmpeg from Lavf 62.10.101 onward, ffmpeg soft-seeks instead of repositioning
  * — it drains hundreds of megabytes through the open connection rather than
  * issuing a new range request — and the same four seeks go 0/4, frozen at
  * exactly the target position while nothing advances. With this option they go
  * 4/4 (F11, F13, and spike 03's matrix, which measured `request_size` alone
- * sufficient on `ANDROID_VR`).
+ * sufficient on `VISIONOS`).
  *
  * The shipped build accepts the option, returns success, echoes it back on read,
  * and ignores it entirely, because its FFmpeg has no such AVOption. That is why

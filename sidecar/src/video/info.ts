@@ -13,10 +13,10 @@
  * `playback.open` resolves from**, not a second call. That is the whole reason
  * `innertube/player-response.ts` exists, and it only works if both consumers ask
  * as the same client: the cache is keyed `client:videoId`. Ladder tier 1 asks as
- * `ANDROID_VR`, so this does too, over the same anonymous resolve session.
+ * `VISIONOS`, so this does too, over the same anonymous resolve session.
  *
  * **That is a deliberate reading of §2.3.** The table there assigns `WEB` to
- * "browse" and `ANDROID_VR` to "stream resolution"; a `/player` call for a
+ * "browse" and `VISIONOS` to "stream resolution"; a `/player` call for a
  * duration is resolution-shaped, not browse-shaped, and asking as `WEB` here
  * would buy a SABR-only response (F3) nothing reads, on a second round trip, for
  * a number both responses carry identically. `/next` stays on the authenticated
@@ -46,9 +46,6 @@ export interface VideoDeps {
   resolve: Session;
 }
 
-const missingCaptionsCache = new Map<string, number>();
-const CAPTION_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-
 /**
  * The `/player` duration, or `null` if this video will not give us one.
  *
@@ -60,40 +57,20 @@ const CAPTION_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 async function fromPlayer(
   deps: VideoDeps,
   videoId: string,
-): Promise<{ durationSeconds: number | null; premiereAtMs: number | null; captionTracks: any[] }> {
+): Promise<{ durationSeconds: number | null; premiereAtMs: number | null }> {
   try {
-    const response = await getPlayerResponse(deps.resolve, videoId, 'ANDROID_VR');
-    let captionTracks = response.captionTracks || [];
-
-    // Fallback for when ANDROID_VR returns zero tracks
-    const now = Date.now();
-    const cachedExpiry = missingCaptionsCache.get(videoId);
-    const isCachedNegative = cachedExpiry !== undefined && now < cachedExpiry;
-
-    if (captionTracks.length === 0 || isCachedNegative) {
-      if (!isCachedNegative) {
-        log.info(`${videoId}: ANDROID_VR returned 0 caption tracks, trying WEB fallback`);
-      }
-      const webResponse = await getPlayerResponse(deps.session, videoId, 'WEB');
-      captionTracks = webResponse.captionTracks || [];
-
-      if (captionTracks.length === 0) {
-        // Genuinely captionless, cache the negative result for an hour
-        missingCaptionsCache.set(videoId, now + CAPTION_CACHE_TTL_MS);
-      } else {
-        // We found captions on WEB that ANDROID_VR missed
-        missingCaptionsCache.delete(videoId);
-      }
-    }
-
+    const response = await getPlayerResponse(deps.resolve, videoId, 'VISIONOS');
     return {
       durationSeconds: response.durationSeconds,
+      // The premiere's start time, from the response that actually knows it.
+      // `/next` carries the prose ("Premieres Aug 22, 2026") and not always a
+      // timestamp; `/player` carries the timestamp. Read out of a response this
+      // call already makes, so a premiere costs no extra round trip.
       premiereAtMs: response.scheduledStartMs,
-      captionTracks,
     };
   } catch (error) {
     log.warn(`${videoId}: /player gave no duration (${messageOf(error)})`);
-    return { durationSeconds: null, premiereAtMs: null, captionTracks: [] };
+    return { durationSeconds: null, premiereAtMs: null };
   }
 }
 
@@ -103,6 +80,14 @@ async function fromPlayer(
  * Both halves are issued together. They are independent requests to different
  * sessions, and awaiting them in sequence would put the `/player` round trip
  * behind the `/next` one for no reason.
+ *
+ * **Captions are not here, and that is a decision rather than an omission.** The
+ * track list is on the `/player` response this already has, so reading it would
+ * be free — but a list is only useful once the `VISIONOS` → `MWEB` fallback has
+ * run (`captions/service.ts`), and that fallback is a second `/player` call. On
+ * the ~29% of videos with no captions it would fire on every open, for a
+ * measured rescue rate of zero, and §3.3's one-`/player`-call property would be
+ * gone. `captions.list` owns it; the watch page calls both at once.
  */
 export async function getVideoInfo(deps: VideoDeps, videoId: string): Promise<VideoDetail> {
   const [raw, player] = await Promise.all([
@@ -125,7 +110,6 @@ export async function getVideoInfo(deps: VideoDeps, videoId: string): Promise<Vi
     // place the parser does not know about would otherwise produce a detail
     // nothing can act on, silently.
     id: detail.id || videoId,
-    captionTracks: player.captionTracks,
   };
 }
 

@@ -3,7 +3,7 @@
  * unused: it was built for hover previews, which now play real video, and is kept for the
  * scrubber.
  *
- * Reads the spec out of the `ANDROID_VR` `/player` response `video.info` and ladder tier 1
+ * Reads the spec out of the `VISIONOS` `/player` response `video.info` and ladder tier 1
  * already share, so it opens no session and resolves no stream. No `MWEB` fallback: measured
  * 2026-08-11, `MWEB` carries one extra level (320×180) that `selectSheet` would decline anyway,
  * and a second round trip is the expense this is not allowed to have.
@@ -127,7 +127,7 @@ export async function getStoryboard(session: Session, videoId: string): Promise<
   if (pending) return pending;
 
   const request = (async (): Promise<StoryboardResult> => {
-    const response = await getPlayerResponse(session, videoId, 'ANDROID_VR');
+    const response = await getPlayerResponse(session, videoId, 'VISIONOS');
     const result = storyboardFrom(response);
 
     if (result.storyboard === null) {

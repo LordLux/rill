@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
+import { spawnSync } from 'node:child_process';
 import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFeed } from './parser/feed.ts';
-import type { Chip, FeedItem } from './types.ts';
+import { parseVideoDetail } from './parser/video.ts';
+import type { ArtistPanel, Chip, FeedItem, VideoDetail } from './types.ts';
 import { logger } from './log.ts';
 
 const log = logger('corpus');
@@ -62,6 +64,11 @@ function sanitiseItem(item: FeedItem, index: number): FeedItem {
   if (sanitised.channelId) sanitised.channelId = `chan_${seq}`;
 
   if (sanitised.title) sanitised.title = `Sanitised Title ${n}`;
+  // Free text from an arbitrary uploader — the same reasoning as `title`, and
+  // a pre-existing gap: this field shipped without an exporter branch, so it
+  // was passing every real snippet straight into the corpus until the first
+  // re-export after it landed exercised the auditor for the first time.
+  if (sanitised.descriptionSnippet) sanitised.descriptionSnippet = `Sanitised Snippet ${n}`;
   if (sanitised.channelName) sanitised.channelName = `Sanitised Channel ${n}`;
   // ChannelItem carries the channel's own name here rather than in
   // `channelName`. Branch added before a re-export that includes channel tiles
@@ -70,6 +77,10 @@ function sanitiseItem(item: FeedItem, index: number): FeedItem {
   // A mix subtitle is a track/artist list — "Daft Punk, Todd Terje, and more" —
   // which is the same taste profile the chip labels leak.
   if (sanitised.subtitle) sanitised.subtitle = `Sanitised Subtitle ${n}`;
+  // Public, but not the point of the corpus — same call as `title`. First hit
+  // 2026-08-27: no fixture had ever produced a `ChannelItem` before the search
+  // filter fix that let real ones through.
+  if (sanitised.subscriberText) sanitised.subscriberText = `Sanitised Subscribers ${n}`;
 
   if (sanitised.thumbnailUrl) sanitised.thumbnailUrl = `https://fake.url/img${n}.jpg`;
   if (sanitised.avatarUrl) sanitised.avatarUrl = `https://fake.url/avatar${n}.jpg`;
@@ -97,6 +108,67 @@ function sanitiseContinuation(continuation: string | null, index: number): strin
   return continuation === null ? null : `CONTINUATION_TOKEN_${index + 1}`;
 }
 
+/**
+ * A `VideoDetail`, sanitised, so the Flutter contract test has one to check.
+ *
+ * `VideoDetail` was the one DTO the corpus did not cover, and it is the one
+ * where being uncovered costs most: it is the payload the watch page is built
+ * out of, and a field added here and not mirrored in `app/lib/domain` is dropped
+ * by `fromJson` in silence — nothing throws, the field is simply absent.
+ *
+ * `related` keeps the same per-item sanitisation the feeds get, so the tiles a
+ * watch page ships are audited by exactly the rule that audits a home feed
+ * rather than by a second copy of it.
+ */
+function sanitiseVideoDetail(detail: VideoDetail): VideoDetail {
+  return {
+    ...detail,
+    id: 'vid_001',
+    title: 'Sanitised Title 1',
+    // A description is free text from an arbitrary uploader — links, handles,
+    // and on a personalised page sometimes the viewer's own locale formatting.
+    // Replaced wholesale rather than truncated.
+    description: 'Sanitised Description 1',
+    channelName: 'Sanitised Channel 1',
+    channelId: 'chan_001',
+    channelAvatarUrl: 'https://fake.url/avatar1.jpg',
+    subscriberText: detail.subscriberText === null ? null : 'Sanitised Subscribers 1',
+    likeText: detail.likeText === null ? null : 'Sanitised Likes 1',
+    related: detail.related.map(sanitiseItem),
+    relatedContinuation: sanitiseContinuation(detail.relatedContinuation, 0),
+  };
+}
+
+/**
+ * The artist panel (Task 21 §3), sanitised the same way an item is:
+ * `channelId`/`mixPlaylistId` are ids (reuses the item shapes so
+ * `corpus.test.ts` needs no bespoke pattern for either), `name`/`avatarUrl`/
+ * `subscriberText`/`description` reuse the shapes those fields already have
+ * on other DTOs, and `handle`/`videoCountText` are the two genuinely new
+ * string fields this panel introduces.
+ */
+function sanitiseArtistPanel(panel: ArtistPanel): ArtistPanel {
+  return {
+    ...panel,
+    channelId: 'chan_001',
+    name: 'Sanitised Channel 1',
+    handle: panel.handle === null ? null : '@sanitised_handle_1',
+    avatarUrl: 'https://fake.url/avatar1.jpg',
+    backdropUrl: panel.backdropUrl === null ? null : 'https://fake.url/backdrop1.jpg',
+    subscriberText: panel.subscriberText === null ? null : 'Sanitised Subscribers 1',
+    videoCountText: panel.videoCountText === null ? null : 'Sanitised Videos 1',
+    description: panel.description === null ? null : 'Sanitised Description 1',
+    mixPlaylistId: panel.mixPlaylistId === null ? null : 'mix_001',
+    // The shelf holds real videos, so it goes through the same per-item
+    // sanitiser the surrounding results do. `backgroundColor` and
+    // `baseBackgroundColor` ride the spread untouched on purpose: they are
+    // YouTube's own palette for a public channel, identify nobody, and
+    // replacing them would cost the corpus the one field a colour
+    // regression could ever be caught by.
+    shelfItems: panel.shelfItems.map(sanitiseItem),
+  };
+}
+
 async function main() {
   await mkdir(CORPUS, { recursive: true });
   const files = (await readdir(FIXTURES)).filter(
@@ -113,6 +185,7 @@ async function main() {
       chips: parsed.chips.map(sanitiseChip()),
       items: parsed.items.map(sanitiseItem),
       continuation: sanitiseContinuation(parsed.continuation, fileIndex),
+      artistPanel: parsed.artistPanel ? sanitiseArtistPanel(parsed.artistPanel) : null,
     };
 
     await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
@@ -140,6 +213,72 @@ async function main() {
       }
     }
   }
+
+  // The watch fixture twice: once as the sidebar feed above, once as the
+  // `VideoDetail` the watch page actually renders. Same capture, two DTOs, and
+  // the second one had no corpus coverage at all until now.
+  const watch = join(FIXTURES, 'watch.json');
+  if (files.includes('watch.json')) {
+    const detail = parseVideoDetail(JSON.parse(await readFile(watch, 'utf8')), 'video-detail');
+    await writeFile(
+      join(CORPUS, 'video-detail.json'),
+      JSON.stringify(sanitiseVideoDetail(detail), null, 2),
+      'utf8',
+    );
+    log.info('exported sanitised video-detail.json');
+  }
+
+  audit();
 }
 
-main().catch(console.error);
+/**
+ * Run the auditor the export exists to satisfy, and fail if it fails.
+ *
+ * `corpus.test.ts` is a closed world: every string in `corpus/` must match the
+ * synthetic shape its field is supposed to have, so a DTO field added without a
+ * matching branch above ships real data and turns the suite red. That is the
+ * design working — but only if someone runs it. On 2026-09-04 this export ran
+ * after the last `bun run check` of a session, and the session was reported
+ * green while the auditor was red. The export had broken the suite that
+ * validates it, and the failure surfaced in a file nobody had touched.
+ *
+ * So the export runs it itself, rather than trusting the next person to. It is
+ * spawned here rather than only chained in `package.json` because the direct
+ * invocation — `bun run src/export-contract-corpus.ts` — is the one that
+ * actually gets typed, and a script-level `&&` does nothing for it.
+ */
+function audit(): void {
+  log.info('running the corpus auditor over what was just exported…');
+  const result = spawnSync('bun', ['test', 'test/corpus.test.ts'], {
+    cwd: join(ROOT, 'sidecar'),
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+
+  if (result.error) {
+    // Not fatal by itself, but it must not read as a pass: the corpus is
+    // written and unverified, which is exactly the state this guards against.
+    log.error(
+      `could not run the corpus auditor (${result.error.message}). ` +
+        'The corpus is exported but UNVERIFIED — run `bun test test/corpus.test.ts`.',
+    );
+    process.exit(1);
+  }
+
+  if (result.status !== 0) {
+    log.error(
+      'the corpus auditor is RED against the corpus just exported. A new DTO field ' +
+        'almost certainly needs a branch in this file and a shape in SANITISED_SHAPE — ' +
+        'until then `corpus/` may contain real capture data. Do not commit it.',
+    );
+    process.exit(result.status ?? 1);
+  }
+
+  log.info('corpus auditor green');
+}
+
+main().catch((error: unknown) => {
+  // `.catch(console.error)` printed the error and exited 0, so a failed export
+  // was indistinguishable from a successful one to anything downstream.
+  log.error(`export failed: ${error instanceof Error ? error.stack : String(error)}`);
+  process.exit(1);
+});

@@ -29,6 +29,8 @@ build/
 *.exe
 # Interrupted bun build leftovers
 *.bun-build
+/*.ass
+/???????????.json
 
 # Editor / OS
 .agents/
@@ -45,3 +47,7 @@ auth.txt
 auth.json
 sidecar/auth.txt
 sidecar/auth.json
+# Throwaway probe output and raw captures — sidecar/scratch/ holds unsanitised
+# session data (channel lists, feeds), which must never reach the repo.
+scratch/
+sidecar/scratch/

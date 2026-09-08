@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url';
 import { parseFeed, parsePlayer, parseVideoDetail } from '../src/parser/index.ts';
 import { resetUnknownRenderers, unknownRendererCounts } from '../src/log.ts';
 import { countTiles } from '../src/innertube/session.ts';
+import { isPublishedText, isViewCountText } from '../src/parser/text.ts';
 import { walk, type JsonObject } from '../src/parser/tree.ts';
+import { firstChannelOrderViolation } from '../src/parser/channel-order.ts';
 import type { FeedItem } from '../src/types.ts';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
@@ -49,7 +51,7 @@ const history = HAS_CAPTURES ? fixture('history') : null;
 
 /** Every feed-shaped fixture this capture produced, for corpus-wide invariants. */
 const CORPUS: Record<string, unknown> = Object.fromEntries(
-  ['home', 'home-continuation', 'subscriptions', 'history', 'watch-later', 'search', 'mix', 'playlist']
+  ['home', 'home-continuation', 'subscriptions', 'channels', 'history', 'watch-later', 'search', 'search-artist', 'search-playlists', 'mix', 'playlist']
     .filter(hasFixture)
     .map((name) => [name, fixture(name)]),
 );
@@ -74,7 +76,12 @@ const SHAPES = {
     isLive: 'boolean',
     viewCountText: 'string?',
     publishedText: 'string?',
+    descriptionSnippet: 'string?',
     badges: 'string[]',
+    isShort: 'boolean',
+    isMusic: 'boolean',
+    isVerified: 'boolean',
+    isArtistChannel: 'boolean',
     premiereAtMs: 'number?',
     canWatchLater: 'boolean',
     canAddToQueue: 'boolean',
@@ -98,6 +105,9 @@ const SHAPES = {
     name: 'string',
     avatarUrl: 'string',
     subscriberText: 'string?',
+    descriptionSnippet: 'string?',
+    isVerified: 'boolean',
+    isArtistChannel: 'boolean',
   },
 } as const;
 
@@ -279,7 +289,9 @@ describe.if(HAS_CAPTURES)('parseFeed — history', () => {
     // A rewatched video is a real repeat entry; de-duplicating would lose it.
     expect(items.length).toBeGreaterThan(new Set(items.map((item) => item.id)).size);
     // Every entry comes from a tile, and no tile is emitted twice.
-    expect(items.length).toBeLessThanOrEqual(countKey(history, 'lockupViewModel'));
+    expect(items.length).toBeLessThanOrEqual(
+      countKey(history, 'lockupViewModel') + countKey(history, 'videoRenderer')
+    );
   });
 
   test('shelf-scoped chips are collected with their browse params', () => {
@@ -448,6 +460,69 @@ describe.if(HAS_CAPTURES)('renderer generations', () => {
     }
   });
 
+  describe('subscriptions.channels ordering', () => {
+    // The app's A–Z scrubber has no ordering of its own: it trusts the order
+    // `FEchannels` arrives in. That is an undocumented dependency on a server
+    // default with no request parameter behind it, so it gets asserted rather
+    // than assumed.
+
+    test('the rule itself catches a list that goes backwards', () => {
+      const named = (...names: string[]): FeedItem[] =>
+        names.map((name) => ({
+          kind: 'channel',
+          id: `UC${name}`,
+          name,
+          avatarUrl: '',
+          subscriberText: null,
+          descriptionSnippet: null,
+          isVerified: false,
+          isArtistChannel: false,
+        }));
+
+      expect(firstChannelOrderViolation(named('3Blue1Brown', 'Acme', 'Ada', 'Zed'))).toBeNull();
+      expect(firstChannelOrderViolation(named('Acme', 'Zed', 'Beta'))).toEqual({
+        index: 2,
+        previousBucket: 'Z',
+        bucket: 'B',
+      });
+      // Digits and symbols bucket to `#` and sort first, matching
+      // `letterBucketOf` in the Flutter index.
+      expect(firstChannelOrderViolation(named('Acme', '3Blue1Brown'))).toEqual({
+        index: 1,
+        previousBucket: 'A',
+        bucket: '#',
+      });
+    });
+
+    test('the captured first page really is non-decreasing by first character', () => {
+      // Against the capture, not the corpus: `export-contract-corpus` replaces
+      // every channel name with "Sanitised Channel <n>", which is ordered by
+      // construction and would assert nothing at all.
+      if (!hasFixture('channels')) return;
+      const items = parseFeed(fixture('channels'), 'channels').items;
+      expect(items.length).toBeGreaterThan(0);
+      expect(firstChannelOrderViolation(items)).toBeNull();
+    });
+  });
+
+  test('no flagged fact is also shipped as a badge label', () => {
+    // The convention `BadgeScan` states: a fact with a DTO field of its own
+    // does not also travel in `badges[]`. It used to be enforced by each
+    // mapper filtering `"LIVE"` back out of the labels it had just been
+    // handed, which is redundant and leaves a hole the size of the next
+    // mapper someone writes. Asserting it here instead means the hole closes
+    // for mappers that do not exist yet.
+    const flagged = /^(live|live now|shorts)$/i;
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      for (const item of parseFeed(raw, name).items) {
+        if (item.kind !== 'video') continue;
+        for (const badge of item.badges) {
+          expect(`${name}:${badge}`).not.toMatch(flagged);
+        }
+      }
+    }
+  });
+
   test('continuation is read from ContinuationItem as well as continuationItemRenderer', () => {
     // The view-based/typed spelling, which a parsed tree would use.
     const token = 'x'.repeat(64);
@@ -524,20 +599,269 @@ describe.if(HAS_CAPTURES)('mixes', () => {
 
 describe.if(HAS_CAPTURES)('shorts', () => {
   test('are stripped from every feed', () => {
-    const shortsIds = idsOf(home, 'shortsLockupViewModel', 'entityId');
-    expect(shortsIds.size).toBeGreaterThan(0);
+    // Across the whole corpus, not just `home`: which fixture carries a
+    // Shorts shelf on a given capture is YouTube's choice on the day
+    // (`corpusIsolate`'s own doc comment above), and this capture happened to
+    // put it in `mix`/`search`/`search-artist`/`subscriptions` instead.
+    let checked = 0;
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const shortsIds = idsOf(raw, 'shortsLockupViewModel', 'entityId');
+      if (shortsIds.size === 0) continue;
+      checked += shortsIds.size;
 
-    const emitted = new Set(parseFeed(home, 'home').items.map((item) => item.id));
-    for (const entityId of shortsIds) {
-      // entityId is `shorts-shelf-item-<videoId>`.
-      const videoId = entityId.replace(/^shorts-shelf-item-/, '');
-      expect(emitted.has(videoId)).toBe(false);
+      const emitted = new Set(parseFeed(raw, name).items.map((item) => item.id));
+      for (const entityId of shortsIds) {
+        // entityId is `shorts-shelf-item-<videoId>`.
+        const videoId = entityId.replace(/^shorts-shelf-item-/, '');
+        expect(emitted.has(videoId)).toBe(false);
+      }
     }
+    expect(checked).toBeGreaterThan(0);
   });
 
   test('a Shorts shelf does not become an empty item', () => {
     const shelf = isolate(home, 'reelShelfRenderer');
     expect(parseFeed(shelf, 'shorts').items).toEqual([]);
+  });
+
+  // Task 21 §1: the *other* Shorts shape — an ordinary videoRenderer carrying
+  // a SHORTS-styled duration overlay — is classified, not stripped. By id,
+  // per the task's own mutation-check instruction: a hardcoded `false` would
+  // pass a test that only checked "the field exists".
+  // `search-artist.json` (query "Ado"), not `history`: this capture's watch
+  // history happened to carry no SHORTS-badged entry, and the task's own
+  // premise (§1) is that Shorts interleave with ordinary videos in *search*.
+  test.skipIf(!hasFixture('search-artist'))('a SHORTS-badged video is flagged isShort, and the badge is not duplicated', () => {
+    const raw = fixture('search-artist');
+    const items = parseFeed(raw, 'search-artist').items;
+    const short = items.find((item) => item.kind === 'video' && item.id === 'T0oRfI3PYCU');
+    expect(short?.kind).toBe('video');
+    if (short?.kind !== 'video') return;
+    expect(short.isShort).toBe(true);
+    expect(short.badges).not.toContain('SHORTS');
+  });
+
+  test.skipIf(!hasFixture('search-artist'))('an ordinary video is not flagged isShort', () => {
+    const raw = fixture('search-artist');
+    const items = parseFeed(raw, 'search-artist').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'MhViuFoLkbs');
+    expect(ordinary?.kind).toBe('video');
+    if (ordinary?.kind !== 'video') return;
+    expect(ordinary.isShort).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 21 — music note, verified / artist channel badges
+// ---------------------------------------------------------------------------
+
+describe.if(HAS_CAPTURES)('music note (per video)', () => {
+  test('a video with a MUSIC-badged thumbnail is flagged isMusic, by id', () => {
+    const items = parseFeed(history, 'history').items;
+    const musicVideo = items.find((item) => item.kind === 'video' && item.id === '7i_nc5GGIsI');
+    expect(musicVideo?.kind).toBe('video');
+    if (musicVideo?.kind !== 'video') return;
+    expect(musicVideo.isMusic).toBe(true);
+  });
+
+  test('an ordinary video is not flagged isMusic', () => {
+    const items = parseFeed(history, 'history').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'EgpLbFbC_4o');
+    expect(ordinary?.kind).toBe('video');
+    if (ordinary?.kind !== 'video') return;
+    expect(ordinary.isMusic).toBe(false);
+  });
+});
+
+describe.if(HAS_CAPTURES)('verified / artist-channel badges', () => {
+  test('an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    const search = fixture('search');
+    const items = parseFeed(search, 'search').items;
+    const lofiGirl = items.find((item) => item.kind === 'channel' && item.id === 'UCSJ4gkVC6NrvII8umztf0Ow');
+    expect(lofiGirl?.kind).toBe('channel');
+    if (lofiGirl?.kind !== 'channel') return;
+    expect(lofiGirl.isArtistChannel).toBe(true);
+    expect(lofiGirl.isVerified).toBe(false);
+  });
+
+  test('a video from an official artist channel is flagged isArtistChannel', () => {
+    const search = fixture('search');
+    const items = parseFeed(search, 'search').items;
+    const artistVideo = items.find((item) => item.kind === 'video' && item.id === 'rFZHOHl-L8A');
+    expect(artistVideo?.kind).toBe('video');
+    if (artistVideo?.kind !== 'video') return;
+    expect(artistVideo.isArtistChannel).toBe(true);
+    expect(artistVideo.isVerified).toBe(false);
+  });
+
+  test('a video from a plain verified channel is flagged isVerified, not isArtistChannel', () => {
+    const search = fixture('search');
+    const items = parseFeed(search, 'search').items;
+    const verifiedVideo = items.find((item) => item.kind === 'video' && item.id === 'mG1aeD7odqk');
+    expect(verifiedVideo?.kind).toBe('video');
+    if (verifiedVideo?.kind !== 'video') return;
+    expect(verifiedVideo.isVerified).toBe(true);
+    expect(verifiedVideo.isArtistChannel).toBe(false);
+  });
+
+  test('an unbadged channel/video is flagged neither', () => {
+    const items = parseFeed(history, 'history').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'EgpLbFbC_4o');
+    expect(ordinary?.kind).toBe('video');
+    if (ordinary?.kind !== 'video') return;
+    expect(ordinary.isVerified).toBe(false);
+    expect(ordinary.isArtistChannel).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 21 §3 — the artist search panel
+// ---------------------------------------------------------------------------
+
+describe.if(hasFixture('search-artist'))('artist panel (officialCardViewModel)', () => {
+  test('an artist-name search carries the panel, populated', () => {
+    const raw = fixture('search-artist');
+    const result = parseFeed(raw, 'search-artist');
+    const panel = result.artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+    expect(panel.channelId).toMatch(/^UC[\w-]{20,}$/);
+    expect(panel.name.length).toBeGreaterThan(0);
+    expect(panel.avatarUrl).toMatch(/^https:\/\//);
+    expect(typeof panel.isSubscribed).toBe('boolean');
+  });
+
+  test('an ordinary search carries no panel', () => {
+    const search = fixture('search');
+    expect(parseFeed(search, 'search').artistPanel).toBeNull();
+  });
+
+  // Task 23 — the panel's palette and its embedded shelf.
+
+  test('the panel carries the colours YouTube ships, both themes, as ARGB ints', () => {
+    const panel = parseFeed(fixture('search-artist'), 'search-artist').artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+
+    for (const themed of [panel.backgroundColor, panel.baseBackgroundColor]) {
+      expect(themed).not.toBeNull();
+      if (!themed) continue;
+      // Opaque ARGB, both halves. A partial pair is rejected outright by
+      // `themedColor`, so a non-null value here is always a complete one.
+      for (const value of [themed.light, themed.dark]) {
+        expect(Number.isInteger(value)).toBe(true);
+        expect(value).toBeGreaterThan(0);
+        expect(value >>> 24).toBe(0xff);
+      }
+    }
+
+    // The card fill is the lighter of the two on dark — `baseBackgroundColor`
+    // is the page wash behind it, and swapping them would tint the hero
+    // almost black. Asserted as an ordering rather than as literals, which
+    // would be asserting the weather (an artist can restyle their channel).
+    const luminance = (argb: number) => {
+      const r = (argb >> 16) & 0xff;
+      const g = (argb >> 8) & 0xff;
+      const b = argb & 0xff;
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    expect(luminance(panel.backgroundColor!.dark)).toBeGreaterThan(
+      luminance(panel.baseBackgroundColor!.dark),
+    );
+  });
+
+  test('the backdrop is its own image, not the avatar', () => {
+    // The header carries a `cinematicContainerViewModel` whose background is a
+    // wide banner (measured 600x176) — a different picture from the square
+    // avatar. Blurring the avatar instead, which is what the panel did before
+    // this was extracted, renders artwork the artist never chose.
+    const panel = parseFeed(fixture('search-artist'), 'search-artist').artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+
+    expect(panel.backdropUrl).toMatch(/^https:\/\//);
+    expect(panel.backdropUrl).not.toBe(panel.avatarUrl);
+  });
+
+  test('the embedded shelf maps to flat DTOs, mix first', () => {
+    const panel = parseFeed(fixture('search-artist'), 'search-artist').artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+
+    expect(panel.shelfItems.length).toBeGreaterThan(1);
+    expect(panel.shelfItems.flatMap(validateItem)).toEqual([]);
+    // The panel leads with the artist's radio mix, then their videos — the
+    // order YouTube ships, preserved rather than re-sorted.
+    expect(panel.shelfItems[0]!.kind).toBe('mix');
+    expect(panel.shelfItems.slice(1).every((item) => item.kind === 'video')).toBe(true);
+  });
+
+  test('the shelf does not leak into the surrounding search results', () => {
+    // The walker must map the panel whole and never descend into it: these
+    // tiles are the panel's, and splicing them into `items[]` would show the
+    // artist's top videos twice on one screen.
+    const result = parseFeed(fixture('search-artist'), 'search-artist');
+    const panel = result.artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+
+    const shelfMixIds = new Set(
+      panel.shelfItems.filter((item) => item.kind === 'mix').map((item) => item.id),
+    );
+    // Videos legitimately recur — YouTube ranks the artist's own uploads into
+    // the results below as well — but the shelf's *mix* exists only on the
+    // panel, so it is the one id whose presence in `items[]` could only mean
+    // the walker descended.
+    expect(result.items.filter((item) => shelfMixIds.has(item.id))).toEqual([]);
+  });
+
+  test('a one-row lockup still yields its view count and date', () => {
+    // Regression: the shelf packs channel/views/date into a single metadata
+    // row where an ordinary lockup uses two. Scanning `rows.slice(1)` found
+    // nothing there and dropped both fields silently — no throw, no log,
+    // just every shelf tile missing its metadata line.
+    const panel = parseFeed(fixture('search-artist'), 'search-artist').artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+
+    const videos = panel.shelfItems.filter((item) => item.kind === 'video');
+    expect(videos.length).toBeGreaterThan(0);
+    expect(videos.every((video) => video.viewCountText !== null)).toBe(true);
+    expect(videos.every((video) => video.publishedText !== null)).toBe(true);
+    expect(videos.every((video) => video.channelName.length > 0)).toBe(true);
+    // The channel must not have been taken from a detail part - the exact
+    // failure the old channelRow[0] would produce on a tile whose row 0
+    // starts with the view count.
+    expect(videos.every((video) => !isViewCountText(video.channelName))).toBe(true);
+    expect(videos.every((video) => !isPublishedText(video.channelName))).toBe(true);
+  });
+
+  test('shelf videos inherit the panel avatar, and only the artist own ones', () => {
+    // The shelf's lockups carry no avatar anywhere in their subtree (measured
+    // — no `image` key, no avatar host in the whole node), so every tile drew
+    // the placeholder person glyph. These are the artist's uploads on the
+    // artist's own panel, so the panel avatar is the missing value.
+    const panel = parseFeed(fixture('search-artist'), 'search-artist').artistPanel;
+    expect(panel).not.toBeNull();
+    if (!panel) return;
+    expect(panel.avatarUrl).toMatch(/^https:\/\//);
+
+    const videos = panel.shelfItems.filter((item) => item.kind === 'video');
+    expect(videos.length).toBeGreaterThan(0);
+
+    for (const video of videos) {
+      if (video.channelId === panel.channelId) {
+        expect(video.channelAvatarUrl).toBe(panel.avatarUrl);
+      } else {
+        // Never stamped onto someone else's upload — a guest video, or one
+        // whose channel could not be extracted, keeps its honest null rather
+        // than wearing the wrong face.
+        expect(video.channelAvatarUrl).not.toBe(panel.avatarUrl);
+      }
+    }
+
+    // The mix is not a video and has no such field to fill.
+    expect(panel.shelfItems.filter((item) => item.kind === 'mix').length).toBeGreaterThan(0);
   });
 });
 

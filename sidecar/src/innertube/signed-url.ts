@@ -44,9 +44,9 @@ export type SignedUrl = string & { readonly [brand]: 'SignedUrl' };
 /**
  * Clients whose stream URLs carry an `n` challenge.
  *
- * `ANDROID_VR` and `TV` hand out unthrottled URLs with no `n` at all, so
+ * `VISIONOS` and `TV` hand out unthrottled URLs with no `n` at all, so
  * asserting one there rejects a perfectly good URL. That is not a theoretical
- * allowance any more: `ANDROID_VR` is ladder tier 1, so the ordinary path
+ * allowance any more: `VISIONOS` is ladder tier 1, so the ordinary path
  * through here now has nothing to decipher, and this gate is what keeps `sign`
  * from refusing it. The `c=` parameter on a `videoplayback` URL names the client
  * that requested it, so the gate reads itself off the URL rather than needing to

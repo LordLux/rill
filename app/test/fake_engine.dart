@@ -84,16 +84,65 @@ class FakeEngine implements PlaybackEngine {
   static const Key surfaceKey = ValueKey('fake-video-surface');
 
   @override
+  final LayerLink videoLayerLink = LayerLink();
+
+  @override
+  Widget videoWidget({BoxFit fit = BoxFit.contain}) {
+    return const SizedBox.shrink();
+  }
+
+  @override
   Widget videoSurface({BoxFit fit = BoxFit.contain}) =>
-      const SizedBox.expand(key: surfaceKey);
+      CompositedTransformTarget(
+        link: videoLayerLink,
+        child: SizedBox.expand(key: surfaceKey, child: videoWidget(fit: fit)),
+      );
 
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
   /// take ~20 s here, waiting on a duration before it attaches the audio track.
   Future<void>? openGate;
 
+  /// Every ASS document handed to [setSubtitle], nulls included.
+  ///
+  /// A log rather than just the current value: "the caption survived a quality
+  /// switch" is a claim about the *sequence* — detached by the reopen, then put
+  /// back — and a test reading only the final value cannot tell that from one
+  /// where nothing ever happened.
+  final List<String?> subtitles = [];
+
+  String? _subtitle;
+
   @override
-  Future<void> open(PlaybackVariant variant, {bool play = true}) async {
+  String? get subtitle => _subtitle;
+
+  @override
+  Future<void> setSubtitle(String? ass) async {
+    _subtitle = ass;
+    subtitles.add(ass);
+  }
+
+  @override
+  Future<void> setSubtitleVisible(bool visible) async {}
+
+  /// What a test pushes to stand in for mpv's `sub-text`.
+  ///
+  /// Broadcast, because the drag layer and a test can both be listening, and a
+  /// single-subscription stream would make the second listener an error rather
+  /// than a second listener.
+  final StreamController<String?> subtitleText = StreamController<String?>.broadcast();
+
+  @override
+  Stream<String?> get subtitleTextStream => subtitleText.stream;
+
+  @override
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {
     opened.add(variant);
+    // Exactly `MediaKitEngine`'s behaviour: the reopen drops mpv's external
+    // subtitle track, and only `retainSubtitle` puts it back. Modelled here
+    // rather than assumed away, because "captions survive a quality switch" is
+    // otherwise a test that passes against an engine that never dropped them.
+    final retained = retainSubtitle ? _subtitle : null;
+    _subtitle = null;
 
     // **Cleared on the way in, before anything is awaited — as `MediaKitEngine`
     // does.** A reopened media reports nothing valid until it loads, and that is
@@ -119,6 +168,7 @@ class FakeEngine implements PlaybackEngine {
     setWidth(variant.height * 16 ~/ 9); // Best guess for fake
     setHeight(variant.height);
     setPlaying(play);
+    if (retained != null) await setSubtitle(retained);
   }
 
   @override

@@ -163,6 +163,24 @@ class RpcClient {
           ? const <String>[]
           : (mockCommand ?? ['run', 'sidecar/src/main.ts']);
 
+      // **Say which sidecar this is, and how old.**
+      //
+      // `findSidecarRoot` prefers the directory beside the executable, so a
+      // release build runs the copy `flutter build windows` bundled — and that
+      // copy step does not re-run for an already-populated bundle. Rebuilding
+      // `sidecar/dist/` therefore changes nothing the release app executes, in
+      // silence. Diagnosed twice now from behaviour that looked like a
+      // half-finished feature: a caption track rendering position and outline
+      // but no colour, because the bundled binary predated the change that reads
+      // per-segment pens. One line at startup turns "which code am I running"
+      // from an archaeology exercise into something a log answers.
+      if (compiled != null) {
+        final at = compiled.statSync().modified.toIso8601String();
+        stderr.writeln('rill: sidecar $executable (built $at)');
+      } else {
+        stderr.writeln('rill: sidecar via bun, from $root (no dist/ build)');
+      }
+
       final process = await _spawn(executable, command, root);
       _process = process;
 

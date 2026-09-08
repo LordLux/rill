@@ -21,9 +21,9 @@
  */
 
 import { logger, noteUnknownRenderer } from '../log.ts';
-import type { Chip, FeedItem, FeedResult } from '../types.ts';
-import { mapChip, mapItem } from './items.ts';
-import { contentRoots, get, isObject, str, type Json, type JsonObject } from './tree.ts';
+import type { ArtistPanel, Chip, FeedItem, FeedResult } from '../types.ts';
+import { mapArtistPanel, mapChip, mapItem } from './items.ts';
+import { asArray, contentRoots, get, isObject, str, type Json, type JsonObject } from './tree.ts';
 import { isRendererKey, normaliseRendererName, roleOf } from './vocabulary.ts';
 
 const log = logger('parser');
@@ -34,6 +34,26 @@ interface Collector {
   continuation: string | null;
   seenChips: Set<string>;
   stripped: { shorts: number; ads: number };
+  artistPanel: ArtistPanel | null;
+  /** `entityKey → subscribed`, resolved once from `frameworkUpdates.entityBatchUpdate` — see `mapArtistPanel`. */
+  subscriptionEntities: ReadonlyMap<string, boolean>;
+}
+
+/**
+ * The response-level entity store `officialCardViewModel`'s subscribe button
+ * reads from — its own subtree carries no current-state boolean, only what
+ * each button variant would produce. Resolved once per response rather than
+ * per panel, though today's vocabulary only ever produces one.
+ */
+function subscriptionEntitiesFrom(raw: Json): Map<string, boolean> {
+  const map = new Map<string, boolean>();
+  const mutations = asArray(get(raw, 'frameworkUpdates', 'entityBatchUpdate', 'mutations'));
+  for (const mutation of mutations) {
+    const key = str(get(mutation, 'entityKey'));
+    const subscribed = get(mutation, 'payload', 'subscriptionStateEntity', 'subscribed');
+    if (key && typeof subscribed === 'boolean') map.set(key, subscribed);
+  }
+  return map;
 }
 
 const SHORTS = /^(shortslockup|reelitem|reelshelf|richshelfshorts)$/;
@@ -130,6 +150,16 @@ function handleRenderer(
       if (isObject(payload)) collector.continuation ??= continuationToken(payload);
       return false;
 
+    case 'artist-panel':
+      // First one wins, and never descended into — `mapArtistPanel` lifts the
+      // embedded shelf out itself (Task 23), so descending here would put the
+      // artist's top videos in the search results as well. Today's vocabulary
+      // never produces more than one panel per response anyway.
+      if (isObject(payload)) {
+        collector.artistPanel ??= mapArtistPanel(payload, collector.subscriptionEntities);
+      }
+      return false;
+
     case 'ignore':
       return false;
 
@@ -198,6 +228,8 @@ export function parseFeed(raw: Json, context = 'feed'): FeedResult {
     continuation: null,
     seenChips: new Set(),
     stripped: { shorts: 0, ads: 0 },
+    artistPanel: null,
+    subscriptionEntities: subscriptionEntitiesFrom(raw),
   };
 
   for (const root of contentRoots(raw)) {
@@ -213,5 +245,6 @@ export function parseFeed(raw: Json, context = 'feed'): FeedResult {
     chips: collector.chips,
     items: collector.items,
     continuation: collector.continuation,
+    artistPanel: collector.artistPanel,
   };
 }
