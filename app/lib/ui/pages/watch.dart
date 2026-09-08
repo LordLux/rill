@@ -770,31 +770,9 @@ class _ActionsState extends ConsumerState<_Actions> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        // Views
-        if (views.isNotEmpty) ...[
-          Icon(Icons.visibility_outlined, size: 18, color: scheme.onSurface),
-          const SizedBox(width: 6),
-          SelectionArea(
-            child: Text(
-              views,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-            ),
-          ),
-          const SizedBox(width: 16),
-        ],
-
-        // Date
-        if (date.isNotEmpty) ...[
-          Icon(Icons.calendar_today_outlined, size: 18, color: scheme.onSurface),
-          const SizedBox(width: 6),
-          SelectionArea(
-            child: Text(
-              date,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-            ),
-          ),
-          const SizedBox(width: 16),
-        ],
+        // The read-outs, one `Wrap` child each — see [_MetaStat].
+        if (views.isNotEmpty) _MetaStat(icon: Icons.visibility_outlined, text: views),
+        if (date.isNotEmpty) _MetaStat(icon: Icons.calendar_today_outlined, text: date),
 
         // Like & Dislike
         Container(
@@ -991,6 +969,54 @@ const Duration _chipMorph = Duration(milliseconds: 140);
 
 /// How long the Watch Later pill stays loud before settling.
 const Duration _watchLaterSettleDelay = Duration(seconds: 2);
+
+/// One read-out under the video: a glyph and the number it labels.
+///
+/// **One `Wrap` child, not four.** Spread as icon, gap, text, gap — which is
+/// what `...[ ]` into the parent's `children` produces — the row's glyph and its
+/// number are separate children, and `Wrap` starts a new run wherever the next
+/// child will not fit. It has no notion of two children that belong together, so
+/// there is a band of widths at which the eye lands at the end of one line and
+/// "1.2M views" opens the next, labelling nothing. The like/dislike group never
+/// had the problem because it was always a single child.
+///
+/// **The trailing gap is `Padding` inside this widget rather than a `SizedBox`
+/// beside it**, for the same reason. A spacer child is a child: `Wrap.spacing`
+/// is inserted on *both* sides of it, so a `SizedBox(width: 16)` rendered as 32,
+/// and at a run boundary it strands as an empty offset at the end of a line.
+/// Padding carried inside the pair cannot be separated from it, and the gap is
+/// stated once.
+class _MetaStat extends StatelessWidget {
+  const _MetaStat({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      // Plus the `Wrap`'s own 8, so the read-outs sit further from the pills
+      // than the pills sit from each other — which is the grouping the row is
+      // trying to show.
+      padding: const EdgeInsets.only(right: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: scheme.onSurface),
+          const SizedBox(width: 6),
+          SelectionArea(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// One pill under the video: an icon, and its label.
 ///

@@ -392,14 +392,23 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   }
 }
 
-/// The rows that have nowhere to go yet.
+/// The rows that have nowhere to go yet — here and in [_morePlaceholders].
 ///
-/// Present and **disabled**, the same call the captions button and the premiere
-/// slate's *Notify me* make: a row that says "later" is honest, and a row that
-/// opens an empty subpage is a bug report waiting to be filed. Nothing here has
-/// anything behind it — *Playback speed* included, because the engine has no
-/// rate control to drive it and wiring one is a `data/playback/engine.dart`
-/// change rather than a menu change.
+/// **Drawn as ordinary rows and inert, not disabled.** `_MenuRow` greys out on a
+/// null `onTap`, and a page on which every row is grey reads as a menu that
+/// broke rather than one that is unfinished — so these take `onTap: () {}` and
+/// keep the full contrast, the click cursor and the ripple. The cost is the
+/// obvious one and it is accepted knowingly: a click here answers and then does
+/// nothing.
+///
+/// *Auto* on the quality page is the opposite call for the opposite reason. It
+/// sits under a ladder of rows that all work, so grey is what separates it from
+/// them — and it carries no `InkWell` at all, because a lone dead row among live
+/// ones must not take the click that would otherwise reach the video.
+///
+/// Nothing here has anything behind it — *Playback speed* included, because the
+/// engine has no rate control to drive it and wiring one is a
+/// `data/playback/engine.dart` change rather than a menu change.
 const List<({IconData icon, String label})> _rootPlaceholders = [
   (icon: Icons.bedtime_outlined, label: 'Sleep timer'),
   (icon: Icons.multitrack_audio, label: 'Audio track'),
