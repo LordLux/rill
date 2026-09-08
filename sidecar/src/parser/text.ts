@@ -12,7 +12,7 @@
  * Every reader below accepts all four and returns `string | null`.
  */
 
-import { asArray, deepFind, get, isObject, num, str, walk, type Json } from './tree.ts';
+import { asArray, deepFind, get, isObject, num, str, walk, type Json, type JsonObject } from './tree.ts';
 
 // ---------------------------------------------------------------------------
 // Text
@@ -79,8 +79,12 @@ export function bestImageUrl(node: Json): string | null {
       for (const entry of list) {
         if (!isObject(entry)) continue;
         const url = str(entry['url']);
-        if (!url || !/^https?:\/\//.test(url)) continue;
-        sources.push({ url, width: num(entry['width']) ?? 0 });
+        if (!url) continue;
+        // Channel avatars (`yt3.ggpht.com`) arrive protocol-relative — `//host/…`
+        // — where video thumbnails do not. Measured on a search channel result
+        // 2026-08-27: rejecting these left every `ChannelItem.avatarUrl` empty.
+        if (/^\/\//.test(url)) sources.push({ url: `https:${url}`, width: num(entry['width']) ?? 0 });
+        else if (/^https?:\/\//.test(url)) sources.push({ url, width: num(entry['width']) ?? 0 });
       }
     }
     return true;
@@ -139,24 +143,52 @@ export function isPublishedText(value: string): boolean {
 // Badges
 // ---------------------------------------------------------------------------
 
+/**
+ * **A fact with a DTO field of its own does not also travel as a label.**
+ *
+ * That is the whole convention, and it is why `labels` below excludes live and
+ * Shorts. Both used to be pushed into `labels` and then filtered back out by
+ * each mapper individually — redundant, and with a hole in it: a fourth mapper
+ * that forgot the filter would ship `badges: ["LIVE"]` beside `isLive: true`
+ * and nothing would say so. The filter is gone; the flags are the only route.
+ */
 export interface BadgeScan {
-  /** Non-duration, non-live labels: "4K", "New", "Members only", "Upcoming". */
+  /** Non-duration, non-live, non-Shorts labels: "4K", "New", "Members only", "Upcoming". */
   labels: string[];
   durationSeconds: number | null;
+  /** Ships as `VideoItem.isLive`. Never as a `"LIVE"` entry in `badges[]`. */
   isLive: boolean;
+  /** Ships as `VideoItem.isShort` (Task 21 §1). Never as `"SHORTS"` in `badges[]`. */
+  isShort: boolean;
+  /**
+   * The `♪` YouTube draws on a music video's duration badge — `imageName:
+   * "MUSIC"` on the badge's own icon, not its text. Only ever seen on
+   * `thumbnailBadgeViewModel` (view-based) in the corpus; classic tiles carry
+   * no equivalent icon field, so this stays false for them.
+   */
+  hasMusicNote: boolean;
 }
 
 const LIVE_LABEL = /^(live|live now|in diretta)$/i;
+const SHORTS_LABEL = /^shorts$/i;
+
+/** `thumbnailBadgeViewModel.icon.sources[].clientResource.imageName === 'MUSIC'`. */
+function badgeHasMusicIcon(badge: JsonObject): boolean {
+  const sources = asArray(get(badge, 'icon', 'sources'));
+  return sources.some((source) => str(get(source, 'clientResource', 'imageName')) === 'MUSIC');
+}
 
 /**
- * Sweep every badge-ish node in a tile and split it into duration, live flag and
- * display labels. Covers `thumbnailBadgeViewModel` (view-based),
- * `metadataBadgeRenderer` (classic) and `thumbnailOverlayTimeStatusRenderer`.
+ * Sweep every badge-ish node in a tile and split it into duration, live/Shorts
+ * flags, the music-note icon and display labels. Covers `thumbnailBadgeViewModel`
+ * (view-based), `metadataBadgeRenderer` (classic) and
+ * `thumbnailOverlayTimeStatusRenderer`.
  */
 export function scanBadges(node: Json): BadgeScan {
   const labels: string[] = [];
   let durationSeconds: number | null = null;
   let isLive = false;
+  let isShort = false;
 
   const consider = (value: string | null, style: string | null): void => {
     if (!value) return;
@@ -166,16 +198,22 @@ export function scanBadges(node: Json): BadgeScan {
     }
     if (LIVE_LABEL.test(value) || (style !== null && /LIVE/i.test(style))) {
       isLive = true;
-      if (!labels.includes('LIVE')) labels.push('LIVE');
+      return;
+    }
+    if (SHORTS_LABEL.test(value) || (style !== null && /SHORTS/i.test(style))) {
+      isShort = true;
       return;
     }
     if (!labels.includes(value)) labels.push(value);
   };
 
+  let hasMusicNote = false;
+
   walk(node, (candidate) => {
     const badge = candidate['thumbnailBadgeViewModel'];
     if (isObject(badge)) {
       consider(text(badge['text']), str(badge['badgeStyle']));
+      if (badgeHasMusicIcon(badge)) hasMusicNote = true;
     }
 
     const metadataBadge = candidate['metadataBadgeRenderer'];
@@ -191,7 +229,47 @@ export function scanBadges(node: Json): BadgeScan {
     return true;
   });
 
-  return { labels, durationSeconds, isLive };
+  return { labels, durationSeconds, isLive, isShort, hasMusicNote };
+}
+
+const VERIFIED_STYLE = 'BADGE_STYLE_TYPE_VERIFIED';
+const VERIFIED_ARTIST_STYLE = 'BADGE_STYLE_TYPE_VERIFIED_ARTIST';
+
+export interface OwnerBadgeScan {
+  isVerified: boolean;
+  isArtistChannel: boolean;
+}
+
+/**
+ * The channel-level verified checkmark and "Official Artist Channel" badge
+ * (Task 21 §2). Both are `metadataBadgeRenderer`, under `ownerBadges` on a
+ * classic video/channel tile — but keyed on `style` rather than that wrapper
+ * key, since `officialCardViewModel`'s title carries the same badge under a
+ * different shape entirely, and `style` is the one thing constant across
+ * both generations.
+ *
+ * Not folded into `scanBadges`: that function's `metadataBadgeRenderer`
+ * branch reads `label`, which an owner badge never sets (only `tooltip`/
+ * `accessibilityData.label` — both localised, and deliberately not read
+ * here). Sharing one walk would mean every owner-badge node also passing
+ * through `consider()` with a null label, which is harmless but couples two
+ * unrelated extraction rules for no reason.
+ */
+export function scanOwnerBadges(node: Json): OwnerBadgeScan {
+  let isVerified = false;
+  let isArtistChannel = false;
+
+  walk(node, (candidate) => {
+    const badge = candidate['metadataBadgeRenderer'];
+    if (isObject(badge)) {
+      const style = str(badge['style']);
+      if (style === VERIFIED_STYLE) isVerified = true;
+      else if (style === VERIFIED_ARTIST_STYLE) isArtistChannel = true;
+    }
+    return true;
+  });
+
+  return { isVerified, isArtistChannel };
 }
 
 /**

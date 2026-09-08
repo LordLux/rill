@@ -4,6 +4,9 @@ import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { announceCapabilities } from '../capabilities.ts';
 import { PLAYBACK_REPORT_STATES } from '../types.ts';
+import type { CaptionOffset, CaptionStyle } from '../types.ts';
+import type { RgbaColor } from '../captions/cues.ts';
+import type { SearchFilters } from '../parser/search-filters.ts';
 
 const log = logger('rpc');
 
@@ -301,6 +304,100 @@ async function handleRequest(request: RpcRequest) {
         ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
         : await fetchBaseBrowse(session, 'FEwhat_to_watch');
       const result = parseFeed(raw, 'home');
+      // Explicit rather than `emitResponse(id, result)`: `FeedResult` carries
+      // an internal `artistPanel` field search.query uses (below), and the
+      // wire contract for `feed.home` is exactly `{chips, items,
+      // continuation}` — picking fields here is what keeps a field added to
+      // the parser's return type from silently widening every surface's
+      // response.
+      emitResponse(id, { chips: result.chips, items: result.items, continuation: result.continuation });
+    } else if (method === 'feed.subscriptions') {
+      // Same base-browse cache as `feed.home` (`auth.verify`-then-`feed.home`
+      // is exactly the pattern the app also runs on this surface for the
+      // anonymous/degraded check — Task 20 §1), and the same continuation
+      // shape §3.2 already promises. No chip bar: `feed.subscriptions` never
+      // carried one, so this never calls `mapChip` and the result omits it —
+      // `ItemListResult`, not `FeedResult`, per the table in `types.ts`.
+      const { parseFeed } = await import('../parser/feed.ts');
+      const session = await getBrowseSession();
+      const continuation = optionalString(params, 'continuation', 'feed.subscriptions');
+      const raw = continuation
+        ? await session.execute('/browse', { continuation })
+        : await fetchBaseBrowse(session, 'FEsubscriptions');
+      const result = parseFeed(raw, 'subscriptions');
+      emitResponse(id, { items: result.items, continuation: result.continuation });
+    } else if (method === 'subscriptions.channels') {
+      // Task 21 §4. A different browse endpoint entirely from the video feed
+      // above — `FEchannels` (confirmed live: its own `GetChannels_rid`
+      // tracking param, page title "All subscriptions") rather than
+      // `FEsubscriptions`. Items are plain `channelRenderer` nodes, so this
+      // needs no parser code of its own: `mapClassicChannel` already handles
+      // the shape, including Task 20's protocol-relative-avatar and
+      // videoCountText-carries-subscribers fixes, both confirmed live on this
+      // endpoint too. Same base-browse cache and continuation shape as every
+      // other list method here. Sort order is fixed (server returns
+      // alphabetical, confirmed stable across a page boundary) — there is no
+      // sort parameter to expose.
+      const { parseFeed } = await import('../parser/feed.ts');
+      const session = await getBrowseSession();
+      const continuation = optionalString(params, 'continuation', 'subscriptions.channels');
+      const raw = continuation
+        ? await session.execute('/browse', { continuation })
+        : await fetchBaseBrowse(session, 'FEchannels');
+      const result = parseFeed(raw, 'channels');
+
+      // The app's A–Z scrubber depends on that fixed order, and nothing in the
+      // request asks for it — so if YouTube's default ever changes, every
+      // letter jump silently lands on the wrong row. Check the base page (a
+      // continuation resumes mid-alphabet and has no first bucket to compare
+      // against) and say so on stderr rather than let it be a wrong answer
+      // nobody notices.
+      if (!continuation) {
+        const { firstChannelOrderViolation } = await import('../parser/channel-order.ts');
+        const violation = firstChannelOrderViolation(result.items);
+        if (violation) {
+          log.error(
+            `subscriptions.channels is NOT alphabetical: channel ${violation.index} buckets to ` +
+              `'${violation.bucket}' after '${violation.previousBucket}'. The A–Z index in the ` +
+              `app assumes this order (protocol.md §3.3) and will jump to the wrong rows.`,
+          );
+        }
+      }
+
+      emitResponse(id, { items: result.items, continuation: result.continuation });
+    } else if (method === 'search.query') {
+      // Browse-generation, per §2.3's client table: `WEB` with cookies, same
+      // session `feed.home` uses. A continuation carries its own context —
+      // verified live 2026-08-27, `{continuation}` alone pages a search result
+      // exactly like a browse continuation does — so `q` and `filters` are not
+      // resent on page 2 even though the caller may still be holding them.
+      const q = requireString(params, 'q', 'search.query');
+      const continuation = optionalString(params, 'continuation', 'search.query');
+      const filters = searchFiltersParam(params);
+      const { parseFeed } = await import('../parser/feed.ts');
+      const { buildSearchParams } = await import('../parser/search-filters.ts');
+      const session = await getBrowseSession();
+      const raw = continuation
+        ? await session.execute('/search', { continuation })
+        : await session.execute('/search', {
+            query: q,
+            ...(buildSearchParams(filters) ? { params: buildSearchParams(filters) } : {}),
+          });
+      const result = parseFeed(raw, 'search');
+      // ItemListResult, not FeedResult: search carries no chip bar of its own
+      // (protocol.md §3.3), so `chips` is dropped here rather than shipped
+      // empty — an empty `chips: []` would invite a caller to render one.
+      // `artist` is Task 21 §3: populated only when the response carried an
+      // `officialCardViewModel`, `null` on every ordinary search.
+      emitResponse(id, { items: result.items, continuation: result.continuation, artist: result.artistPanel });
+    } else if (method === 'search.suggest') {
+      // Not InnerTube — a different, unauthenticated endpoint entirely. See
+      // `search/suggest.ts` for what was actually measured here; §3.3's
+      // assumption that this rides the same `/search` surface as
+      // `search.query` does not hold.
+      const q = requireString(params, 'q', 'search.suggest');
+      const { getSearchSuggestions } = await import('../search/suggest.ts');
+      const result = await getSearchSuggestions(q, abortController.signal);
       emitResponse(id, result);
     } else if (method === 'playback.open') {
       // Validate *before* the dynamic import. `videoId` is the one parameter the
@@ -331,6 +428,44 @@ async function handleRequest(request: RpcRequest) {
       const videoId = requireString(params, 'videoId', 'video.storyboard');
       const { getStoryboard } = await import('../video/storyboard.ts');
       const result = await getStoryboard(await getResolveSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'captions.list') {
+      // The resolve session only, like `video.storyboard`: the track list comes
+      // off the `VISIONOS` `/player` response ladder tier 1 already cached, so
+      // this must not wait on — or wake — the authenticated browse session.
+      const videoId = requireString(params, 'videoId', 'captions.list');
+      // `allowFallback: false` is the hover preview's mode — the free answer off
+      // the cached tier-1 response, never the fallback's second `/player`. Any
+      // value but an explicit `false` keeps the full behaviour, so a caller that
+      // omits it gets the complete list.
+      const allowFallback = params?.allowFallback !== false;
+      // Opt-in, and the caption menu is the only caller that opts in. It costs a
+      // `timedtext` GET per track — 69 KB and 73 ms for six, measured — which is
+      // a menu's budget and not a video open's. §3.8 keeps this call off the
+      // open path, and defaulting it on would put that cost on every video.
+      const includeStyled = params?.includeStyled === true;
+      const { getCaptionList } = await import('../captions/service.ts');
+      const result = await getCaptionList(await getResolveSession(), videoId, {
+        allowFallback,
+        includeStyled,
+        signal: abortController.signal,
+      });
+      emitResponse(id, result);
+    } else if (method === 'captions.get') {
+      const videoId = requireString(params, 'videoId', 'captions.get');
+      const trackId = requireString(params, 'trackId', 'captions.get');
+      // Task 19. Both are optional and both change the *document* rather than
+      // anything about the fetch — `protocol.md` §3.8. They are applied here and
+      // not through mpv properties because `sub-ass-override=force` overrides the
+      // ASS `Style` and not the inline tags task 18 emits, so the property route
+      // works on plain tracks and silently does nothing on styled ones. See
+      // `captions/style.ts`.
+      const { getCaptionTrack } = await import('../captions/service.ts');
+      const result = await getCaptionTrack(await getResolveSession(), videoId, trackId, {
+        signal: abortController.signal,
+        style: captionStyleParam(params),
+        offset: captionOffsetParam(params),
+      });
       emitResponse(id, result);
     } else if (method === 'video.related') {
       const videoId = requireString(params, 'videoId', 'video.related');
@@ -417,4 +552,153 @@ export function startRpcServer() {
   rl.on('close', () => {
     process.exit(0);
   });
+}
+
+// ---------------------------------------------------------------------------
+// `captions.get`'s task-19 parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Three optional parameters, validated the same way the rest of this file
+ * validates: shape-checked here so a malformed one is a `BAD_REQUEST` naming the
+ * field, rather than a document rendered with a `NaN` in a `\pos`.
+ *
+ * A `NaN` matters more here than it looks. `\pos(NaN,1020)` is not a parse error
+ * in ASS — libass drops the tag and the cue reverts to the default position, so
+ * a broken drag would present as "the caption sometimes ignores where I put it".
+ */
+function captionStyleParam(
+  params: Record<string, unknown> | undefined,
+): CaptionStyle | null {
+  const raw = params?.['style'];
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') {
+    throw new RpcError('BAD_REQUEST', "captions.get: 'style' must be an object if present");
+  }
+  const record = raw as Record<string, unknown>;
+  const edge = record['edgeStyle'];
+  if (edge != null && edge !== 'none' && edge !== 'outline' && edge !== 'dropShadow') {
+    throw new RpcError(
+      'BAD_REQUEST',
+      "captions.get: 'style.edgeStyle' must be none, outline or dropShadow",
+    );
+  }
+  // Every forceXxx field was missing here entirely until this fix: none of
+  // them were ever read off `record`, so `resolved.style?.forceTextColor ??
+  // true` (and the other eight, plus the master) always saw `undefined` and
+  // read as force-on regardless of what the client actually sent. Silent —
+  // nothing threw, nothing logged — and unnoticed because force is a no-op
+  // on any track with nothing authored to defer to (ASR, most plain tracks),
+  // which is what every prior check of "does force do anything" happened to
+  // be tested against.
+  const boolOrUndefined = (value: unknown): boolean | undefined =>
+    typeof value === 'boolean' ? value : undefined;
+  return {
+    fontFamily: typeof record['fontFamily'] === 'string' ? record['fontFamily'] : null,
+    fontSizePercent: finiteOrNull(record['fontSizePercent']),
+    textColor: colorOrNull(record['textColor'], 'style.textColor'),
+    textOpacity: opacityOrNull(record['textOpacity']),
+    background: colorOrNull(record['background'], 'style.background'),
+    backgroundOpacity: opacityOrNull(record['backgroundOpacity']),
+    window: colorOrNull(record['window'], 'style.window'),
+    windowOpacity: opacityOrNull(record['windowOpacity']),
+    edgeStyle: (edge ?? null) as CaptionStyle['edgeStyle'],
+    forceStyleEnabled: boolOrUndefined(record['forceStyleEnabled']),
+    forceFontFamily: boolOrUndefined(record['forceFontFamily']),
+    forceFontSize: boolOrUndefined(record['forceFontSize']),
+    forceTextColor: boolOrUndefined(record['forceTextColor']),
+    forceTextOpacity: boolOrUndefined(record['forceTextOpacity']),
+    forceBackgroundColor: boolOrUndefined(record['forceBackgroundColor']),
+    forceBackgroundOpacity: boolOrUndefined(record['forceBackgroundOpacity']),
+    forceWindowColor: boolOrUndefined(record['forceWindowColor']),
+    forceWindowOpacity: boolOrUndefined(record['forceWindowOpacity']),
+    forceEdgeStyle: boolOrUndefined(record['forceEdgeStyle']),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// `search.query`'s `filters` parameter
+// ---------------------------------------------------------------------------
+
+/**
+ * `search.query`'s `filters` object, or `BAD_REQUEST` naming the bad field —
+ * same shape-checked-before-use policy as every other param here, and the same
+ * reason: an unvalidated filter value would otherwise reach
+ * `buildSearchParams` as `undefined`, silently searching unfiltered rather than
+ * failing loudly on a client bug.
+ */
+function searchFiltersParam(
+  params: Record<string, unknown> | undefined,
+): SearchFilters | null {
+  const raw = params?.['filters'];
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') {
+    throw new RpcError('BAD_REQUEST', "search.query: 'filters' must be an object if present");
+  }
+  const record = raw as Record<string, unknown>;
+
+  function enumOrUndefined<T extends string>(field: string, allowed: readonly T[]): T | undefined {
+    const value = record[field];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string' || !allowed.includes(value as T)) {
+      throw new RpcError(
+        'BAD_REQUEST',
+        `search.query: 'filters.${field}' must be one of ${allowed.join(', ')}`,
+      );
+    }
+    return value as T;
+  }
+
+  return {
+    uploadDate: enumOrUndefined('uploadDate', ['hour', 'today', 'week', 'month', 'year'] as const),
+    type: enumOrUndefined('type', ['video', 'channel', 'playlist', 'movie'] as const),
+    duration: enumOrUndefined('duration', ['short', 'medium', 'long'] as const),
+    sortBy: enumOrUndefined('sortBy', ['viewCount'] as const),
+  };
+}
+
+function captionOffsetParam(
+  params: Record<string, unknown> | undefined,
+): CaptionOffset | null {
+  const raw = params?.['offset'];
+  if (raw === undefined || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const dx = finiteOrNull(record['dx']);
+  const dy = finiteOrNull(record['dy']);
+  if (dx === null || dy === null) {
+    throw new RpcError('BAD_REQUEST', "captions.get: 'offset' needs finite 'dx' and 'dy'");
+  }
+  return { dx, dy };
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * RGB only — `a` is not read here. Opacity is `textOpacity`/
+ * `backgroundOpacity`/`windowOpacity`'s job now, sent and parsed
+ * separately (`opacityOrNull`), so a colour picked without touching opacity
+ * cannot smuggle a stale or default alpha back in through this object. The
+ * returned `RgbaColor.a` is a placeholder (`1`) that nothing downstream may
+ * read.
+ */
+function colorOrNull(value: unknown, name: string): RgbaColor | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object') {
+    throw new RpcError('BAD_REQUEST', `captions.get: '${name}' must be an object if present`);
+  }
+  const record = value as Record<string, unknown>;
+  const channel = (key: string) => Math.max(0, Math.min(255, finiteOrNull(record[key]) ?? 0));
+  return {
+    r: channel('r'),
+    g: channel('g'),
+    b: channel('b'),
+    a: 1,
+  };
+}
+
+function opacityOrNull(value: unknown): number | null {
+  const n = finiteOrNull(value);
+  return n === null ? null : Math.max(0, Math.min(1, n));
 }

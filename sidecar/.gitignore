@@ -5,6 +5,16 @@ fixtures.partial/
 raw/
 nodes/
 
+# What the probes in `scratch/` write. The probes themselves are tracked — they
+# are how a caption change gets re-checked — but their output is not, for the
+# reason `test/captions.test.ts` gives about its own payloads: **a caption
+# document is the transcript of a copyrighted work.** `out/` is four of them
+# verbatim, one of them 3.2 MB. `frames/` is rendered evidence for a task report,
+# which is a thing to attach to the report rather than to carry in the tree.
+scratch/out/
+scratch/frames/
+scratch/*.json
+
 # Phase 2 tripwire history — now kept per machine, not per checkout, in the
 # user state dir (%LOCALAPPDATA%\NativeYouTube on Windows). These two patterns
 # cover checkouts predating that move: the old in-repo log, and the `.migrated`

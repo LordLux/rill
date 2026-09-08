@@ -16,7 +16,7 @@
  *      means nobody has to re-learn it from a confusing bug report.
  *
  * No cookie required: streams resolve through an anonymous session (§2.3),
- * asking as `ANDROID_VR` at tier 1 and `MWEB` at tier 2. What that session does
+ * asking as `VISIONOS` at tier 1 and `MWEB` at tier 2. What that session does
  * need is a server-issued visitor id, which is `createSession`'s default and the
  * first thing to check if tier 1 starts declining (F5).
  *
@@ -334,7 +334,7 @@ async function measure(url: string): Promise<Throughput> {
 
 describe.if(ONLINE)('the resolution session', () => {
   test('carries a server-issued visitor id, not a fabricated one', () => {
-    // F5: a fabricated id is 32 characters and gets ANDROID_VR refused on ~93%
+    // F5: a fabricated id is 32 characters and gets VISIONOS refused on ~93%
     // of attempts; a server-issued one is ~558 and passed 13/13. youtubei.js
     // falls back to fabricating one when `/sw.js_data` fails and does not raise,
     // so this is the assertion that says which one we actually got.
@@ -345,7 +345,7 @@ describe.if(ONLINE)('the resolution session', () => {
 
 // ---------------------------------------------------------------------------
 
-describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
+describe.if(ONLINE)('tier 1 — VISIONOS', () => {
   test(
     'a real video resolves to two plain URLs, with no n on either',
     async () => {
@@ -364,7 +364,7 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
       // and something below it served, which the ladder does silently by design.
       for (const url of [best.videoUrl, best.audioUrl!]) {
         const parsed = new URL(url);
-        expect(parsed.searchParams.get('c')).toBe('ANDROID_VR');
+        expect(parsed.searchParams.get('c')).toBe('VISIONOS');
         // The point of the reorder: no `n` on the primary path, so the silent
         // ~50 KB/s throttle cannot happen there at all.
         expect(parsed.searchParams.has('n')).toBe(false);
@@ -402,7 +402,7 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
     'an open-ended range is answered — the F10 property that made this tier 1',
     async () => {
       // ffmpeg opens every HTTP stream with `Range: bytes=0-`. An `MWEB` URL
-      // answers that with 403 at every offset (F10); an `ANDROID_VR` URL answers
+      // answers that with 403 at every offset (F10); an `VISIONOS` URL answers
       // 206 (F11), and that single difference is why the ladder was reordered.
       // If it ever regresses, playback breaks in libmpv while every other test
       // here stays green, because a bounded range keeps working.
@@ -454,7 +454,7 @@ describe.if(ONLINE)('tier 1 — ANDROID_VR', () => {
 
       if (statuses[0] !== 206) {
         log.warn(
-          `an ANDROID_VR URL answered HTTP ${statuses[0]} to an open-ended range; ` +
+          `an VISIONOS URL answered HTTP ${statuses[0]} to an open-ended range; ` +
             `retry gave ${statuses[1] ?? '(not attempted)'}. One-off refusals are known ` +
             '(2026-08-02); a persistent one means F11 no longer holds and the ladder ' +
             'is serving URLs libmpv cannot open.',
@@ -484,7 +484,7 @@ describe.if(ONLINE)('tier 2 — MWEB, and the decipher path', () => {
   test(
     'a deciphered n streams unthrottled',
     async () => {
-      // With `ANDROID_VR` leading, nothing on the default path deciphers
+      // With `VISIONOS` leading, nothing on the default path deciphers
       // anything — so this is the only test that proves the `n` transform
       // lands, and hard invariant 2 has no other live evidence. It is called
       // directly rather than through `openPlayback`, because the ladder is
@@ -881,7 +881,7 @@ describe.if(ONLINE)('the Phase 2 tripwire, live', () => {
           `MWEB returned SABR-only on ${sabrCount}/${samples.length} samples. F3 says ` +
             'MWEB still serves plain adaptive URLs; that is now partly untrue. Phase 2 ' +
             '(SABR → DASH) is becoming relevant — ladder tier 2 is what degrades, and ' +
-            'tier 1 (ANDROID_VR) is unaffected. Re-read F3 before trusting it.',
+            'tier 1 (VISIONOS) is unaffected. Re-read F3 before trusting it.',
         );
       }
       if (history !== null) log.info(`tripwire history: ${history}`);

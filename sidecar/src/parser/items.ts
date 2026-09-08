@@ -7,7 +7,7 @@
  * fields go to `null` and the item still ships.
  */
 
-import type { ChannelItem, FeedItem, MixItem, PlaylistItem, VideoItem } from '../types.ts';
+import type { ArtistPanel, ChannelItem, FeedItem, MixItem, PlaylistItem, ThemedColor, VideoItem } from '../types.ts';
 import { premiereStartMs } from './premiere.ts';
 import {
   asArray,
@@ -28,10 +28,12 @@ import {
   isViewCountText,
   metadataRowTexts,
   scanBadges,
+  scanOwnerBadges,
   scanTileActions,
   text,
   tileId,
 } from './text.ts';
+import { isRendererKey, normaliseRendererName } from './vocabulary.ts';
 
 /** A Mix is a radio playlist. Its id always starts `RD`. */
 function isMixId(id: string): boolean {
@@ -91,26 +93,50 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   }
 
   if (/CHANNEL/i.test(contentType)) {
+    const ownerBadges = scanOwnerBadges(node);
     return {
       kind: 'channel',
       id,
       name: title,
       avatarUrl: bestImageUrl(node['contentImage']) ?? '',
       subscriberText: flatRows.find((row) => /subscriber/i.test(row)) ?? null,
+      // No lockup channel exists anywhere in the corpus (every captured
+      // channel tile is a classic `channelRenderer`), so there is no live
+      // example to learn a description's location from. `null` is the
+      // honest answer until one turns up, not a placeholder for a field
+      // that is known to be somewhere else.
+      descriptionSnippet: null,
+      isVerified: ownerBadges.isVerified,
+      isArtistChannel: ownerBadges.isArtistChannel,
     } satisfies ChannelItem;
   }
 
   // Everything else is a video: LOCKUP_CONTENT_TYPE_VIDEO, and anything new that
   // carries a title and an id. Shipping it as a video beats dropping it.
+  //
+  // **The detail scan is row-agnostic on purpose.** An ordinary feed/search
+  // lockup splits its metadata over two rows — channel on row 0, view count
+  // and date on row 1 — but the artist panel's shelf (Task 23) packs all
+  // three into a *single* row, so a scan of `rows.slice(1)` finds nothing
+  // there and silently drops both. That is not a different renderer; it is
+  // the same `lockupViewModel` laid out differently, which is exactly the
+  // case §"Renderer vocabulary" warns against keying on. Flattening first
+  // yields the same three strings in the same order for the two-row layout,
+  // so this is a generalisation rather than a behaviour change.
+  //
+  // The channel name stays row-0-scoped, because that is true of both
+  // layouts and widening it would let a view count win the field on a tile
+  // that happens to carry no channel at all.
   const channelRow = rows[0] ?? [];
-  const detailRows = rows.slice(1).flat();
+  const detailRows = flatRows;
   const actions = scanTileActions(node);
+  const ownerBadges = scanOwnerBadges(node);
 
   return {
     kind: 'video',
     id,
     title,
-    channelName: channelRow[0] ?? '',
+    channelName: channelRow.find((part) => !isViewCountText(part) && !isPublishedText(part)) ?? '',
     channelId: channelIdFrom(metadata),
     channelAvatarUrl: bestImageUrl(get(metadata, 'image')),
     thumbnailUrl: thumbnailUrl ?? '',
@@ -118,7 +144,12 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     isLive: badges.isLive || detailRows.some((row) => /watching now/i.test(row)),
     viewCountText: detailRows.find(isViewCountText) ?? null,
     publishedText: detailRows.find(isPublishedText) ?? null,
-    badges: badges.labels.filter((label) => label !== 'LIVE'),
+    descriptionSnippet: null,
+    badges: badges.labels,
+    isShort: badges.isShort,
+    isMusic: badges.hasMusicNote,
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),
     canWatchLater: actions.canWatchLater,
     canAddToQueue: actions.canAddToQueue,
@@ -139,6 +170,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
   const byline = node['longBylineText'] ?? node['ownerText'] ?? node['shortBylineText'];
   const badges = scanBadges(node);
   const actions = scanTileActions(node);
+  const ownerBadges = scanOwnerBadges(node);
 
   const lengthSeconds =
     durationToSeconds(node['lengthText']) ??
@@ -164,7 +196,15 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     isLive,
     viewCountText,
     publishedText: text(node['publishedTimeText']),
-    badges: badges.labels.filter((label) => label !== 'LIVE'),
+    descriptionSnippet:
+      text(get(asArray(node['detailedMetadataSnippets'])[0], 'snippetText')) ??
+      text(node['descriptionSnippet']) ??
+      null,
+    badges: badges.labels,
+    isShort: badges.isShort,
+    isMusic: badges.hasMusicNote,
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),
     canWatchLater: actions.canWatchLater,
     canAddToQueue: actions.canAddToQueue,
@@ -217,16 +257,154 @@ export function mapClassicChannel(node: JsonObject): ChannelItem | null {
   const name = text(node['title']) ?? text(node['displayName']);
   if (!name) return null;
 
+  const ownerBadges = scanOwnerBadges(node);
+
   return {
     kind: 'channel',
     id,
     name,
     avatarUrl: bestImageUrl(node['thumbnail']) ?? '',
-    subscriberText:
-      text(node['subscriberCountText']) ??
-      text(node['videoCountText']) ??
-      null,
+    subscriberText: subscriberishText(node),
+    descriptionSnippet: text(node['descriptionSnippet']) ?? null,
+    isVerified: ownerBadges.isVerified,
+    isArtistChannel: ownerBadges.isArtistChannel,
   } satisfies ChannelItem;
+}
+
+/**
+ * `channelRenderer`'s subscriber count, from whichever field actually holds it.
+ *
+ * `videoCountText`, despite the name, is where a search channel result puts
+ * "21.2M subscribers" — measured 2026-08-27. `subscriberCountText` is *not* a
+ * fallback for it; on that same node it held `"@mkbhd"`, the handle. Trusting
+ * field-name order the way `mapClassicVideo`'s byline does would have shipped
+ * a handle as a subscriber count, silently — nothing throws, the string is
+ * just wrong. So this checks shape instead of name: a handle starts with `@`
+ * and is skipped rather than trusted.
+ */
+function subscriberishText(node: JsonObject): string | null {
+  for (const value of [node['videoCountText'], node['subscriberCountText']]) {
+    const candidate = text(value);
+    if (candidate && !candidate.startsWith('@')) return candidate;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// officialCardViewModel — the artist panel (Task 21 §3)
+// ---------------------------------------------------------------------------
+
+/**
+ * `officialCardViewModel` → `ArtistPanel`. Live-confirmed the top item of a
+ * search-results `itemSectionRenderer` for an artist-name query, and absent
+ * for an ordinary creator query — its presence is itself the "is an official
+ * artist channel" fact, so unlike every other mapper here this one has no
+ * badge check of its own to gate on.
+ *
+ * `subscriptionEntities` resolves `isSubscribed`: this view-model does **not**
+ * carry the current subscription state inline. `subscribeButtonContent` and
+ * `unsubscribeButtonContent` both ship, each with its own hardcoded
+ * `subscribeState.subscribed` (`false` and `true` respectively) describing
+ * what clicking *that* variant would produce — not which variant is active.
+ * The real answer is the response's `frameworkUpdates.entityBatchUpdate`
+ * entity store, looked up by `stateEntityStoreKey`; `parseFeed` resolves that
+ * map once per response and threads it down here.
+ */
+export function mapArtistPanel(
+  node: JsonObject,
+  subscriptionEntities: ReadonlyMap<string, boolean>,
+): ArtistPanel | null {
+  const header = get(node, 'header', 'pageHeaderViewModel');
+  if (!isObject(header)) return null;
+
+  const channelId = channelIdFrom(header);
+  if (!channelId) return null;
+
+  const name = text(get(header, 'title', 'dynamicTextViewModel', 'text'));
+  if (!name) return null;
+
+  const avatarUrl = bestImageUrl(get(header, 'image')) ?? '';
+  const rows = metadataRowTexts(get(header, 'metadata', 'contentMetadataViewModel')).flat();
+  const handle = rows.find((row) => row.startsWith('@')) ?? null;
+  const subscriberText = rows.find((row) => /subscriber/i.test(row)) ?? null;
+  const videoCountText = rows.find((row) => /video/i.test(row)) ?? null;
+  const description = text(get(header, 'description', 'descriptionPreviewViewModel', 'description'));
+
+  const subscribeVm = deepFind(header, (candidate) => typeof candidate['stateEntityStoreKey'] === 'string');
+  const stateKey = subscribeVm ? str(subscribeVm['stateEntityStoreKey']) : null;
+  const isSubscribed = stateKey !== null ? (subscriptionEntities.get(stateKey) ?? false) : false;
+
+  // The panel's "Mix" action, found by its `RD…` playlist id rather than by
+  // button title — `buttonViewModel.title` is the localised label ("Mix" is
+  // English-only), and the id shape is the same structural check `isMixId`
+  // uses everywhere else in this file.
+  const mixHolder = deepFind(get(header, 'actions'), (candidate) => {
+    const playlistId = candidate['playlistId'];
+    return typeof playlistId === 'string' && isMixId(playlistId);
+  });
+  const mixPlaylistId = mixHolder ? str(mixHolder['playlistId']) : null;
+
+  // The shelf hangs off the card, not the header — `contents[]`, holding a
+  // single `horizontalShelfViewModel` whose `items[]` are ordinary lockups.
+  // Found structurally (an object with an `items` array) rather than by
+  // index or key name, for the usual reason: the surrounding shape is
+  // YouTube's to change, and one renamed wrapper should cost the shelf, not
+  // the whole panel.
+  const shelf = deepFind(node['contents'], (candidate) => Array.isArray(candidate['items']));
+  const shelfItems: FeedItem[] = [];
+  for (const entry of asArray(shelf?.['items'])) {
+    if (!isObject(entry)) continue;
+    // Dispatch per tile through the shared vocabulary, never assuming the
+    // shelf is all one generation — the same rule the rest of the parser
+    // follows. An unrecognised tile is skipped, not thrown on (invariant 4).
+    for (const [key, payload] of Object.entries(entry)) {
+      if (!isRendererKey(key) || !isObject(payload)) continue;
+      const mapped = mapItem(normaliseRendererName(key), payload);
+      if (!mapped) continue;
+
+      // **The shelf's tiles carry no avatar of their own** — measured: the
+      // lockup here has no `image`, and the whole subtree contains no avatar
+      // host at all, so `channelAvatarUrl` maps to null and every tile draws
+      // the placeholder person glyph. The panel's own avatar is the missing
+      // value: these are the artist's uploads, on the artist's panel. Filled
+      // only when the tile's channel *is* this panel's, so a guest upload or
+      // a tile whose channel could not be extracted keeps its honest null
+      // rather than being stamped with the wrong face.
+      if (mapped.kind === 'video' && mapped.channelAvatarUrl === null && mapped.channelId === channelId && avatarUrl !== '') {
+        mapped.channelAvatarUrl = avatarUrl;
+      }
+      shelfItems.push(mapped);
+    }
+  }
+
+  return {
+    channelId,
+    name,
+    handle,
+    avatarUrl,
+    subscriberText,
+    videoCountText,
+    description,
+    isSubscribed,
+    mixPlaylistId,
+    backdropUrl: bestImageUrl(get(header, 'background', 'cinematicContainerViewModel', 'backgroundImageConfig')),
+    backgroundColor: themedColor(node['backgroundColor']),
+    baseBackgroundColor: themedColor(node['baseBackgroundColor']),
+    shelfItems,
+  } satisfies ArtistPanel;
+}
+
+/**
+ * `{ lightTheme, darkTheme }` → [ThemedColor]. Both halves must be numbers:
+ * a partial pair is not a colour anyone can paint with, and shipping half of
+ * one would leave the client silently picking a default for the other theme.
+ */
+function themedColor(value: Json): ThemedColor | null {
+  if (!isObject(value)) return null;
+  const light = value['lightTheme'];
+  const dark = value['darkTheme'];
+  if (typeof light !== 'number' || typeof dark !== 'number') return null;
+  return { light, dark };
 }
 
 // ---------------------------------------------------------------------------

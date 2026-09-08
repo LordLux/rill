@@ -87,6 +87,14 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# --- libass native subtitle renderer and its MSYS2 dependencies ----------
+# Every .dll in this directory is a pre-built MSYS2 MINGW64 binary.
+# See THIRD_PARTY_LICENSES in the repository root for versions and terms.
+file(GLOB LIBASS_DLLS "${CMAKE_CURRENT_SOURCE_DIR}/libass_bundle/*.dll")
+install(FILES ${LIBASS_DLLS}
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

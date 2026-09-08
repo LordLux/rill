@@ -6,12 +6,12 @@
  * drifts away from the real one — which defeats the point of the app. So this
  * path fails loudly. Nothing here swallows an error to keep a report quiet.
  *
- * **Two calls, never bridged.** Streams resolve anonymously as `ANDROID_VR`;
+ * **Two calls, never bridged.** Streams resolve anonymously as `VISIONOS`;
  * reporting goes over the authenticated `WEB` session with a CPN of its own
  * (F6, and A5 which rejects propagating a resolution client's CPN). The
  * consequence worth naming, because it contradicts a reasonable reading of the
  * task brief's "one player response": reporting needs a **`WEB`** `/player`
- * response, and ladder tier 1 fetched an `ANDROID_VR` one. The tracking URLs
+ * response, and ladder tier 1 fetched an `VISIONOS` one. The tracking URLs
  * carry request-scoped `ei` / `of` / `vm` parameters minted for the call that
  * produced them, so the anonymous response's URLs are not a substitute — using
  * them would be precisely the cross-client bridging A5 rejects.

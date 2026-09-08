@@ -7,12 +7,16 @@ library;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/domain/caption_style.dart';
+import 'package:rill/domain/caption_track.dart';
 import 'package:rill/domain/playback_source.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import 'package:rill/theme/app_theme.dart';
+import 'package:rill/ui/captions_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/settings_menu.dart';
 
@@ -177,7 +181,15 @@ void main() {
       await tester.pumpAndSettle();
       final moreSize = tester.getSize(find.byKey(settingsMenuPanelKey));
 
-      expect(moreSize.width, rootSize.width, reason: 'one width for every page');
+      // **No longer "one width for every page" unconditionally.** The panel
+      // sizes to its widest row above a shared floor, so two pages match only
+      // while both fit in it — which every page authored in this file does under
+      // a normal UI font, and none does under the test font, whose glyphs are
+      // one em wide. Asserting equality here would pin the test font rather than
+      // the design. What the floor guarantees is asserted directly below, and
+      // the growth rule has its own group.
+      expect(moreSize.width, greaterThanOrEqualTo(248));
+      expect(rootSize.width, greaterThanOrEqualTo(248));
       // No claim about the height *changing*: these two pages happen to be the
       // same length, and whether they are is a content decision. The panel's
       // resize is pinned on the root/quality pair instead, where the difference
@@ -356,9 +368,18 @@ void main() {
   });
 
   group('page transitions', () {
-    /// Where a page's content sits relative to where it settles.
+    /// Where a page's content sits, **measured from the panel's own left edge**.
+    ///
+    /// Relative rather than absolute because the panel is no longer one fixed
+    /// width: it sizes to its widest row and is anchored on the right, so a page
+    /// whose content needs more room puts its left edge somewhere else on
+    /// screen. An absolute reading then moves for a reason that has nothing to
+    /// do with the slide these tests are about — and it does so only under a
+    /// font wide enough to push a page past the floor, which is exactly the kind
+    /// of failure that shows up on one machine and not another.
     double offsetOf(WidgetTester tester, String text) =>
-        tester.getTopLeft(find.text(text)).dx;
+        tester.getTopLeft(find.text(text)).dx -
+        tester.getRect(find.byKey(settingsMenuPanelKey)).left;
 
     testWidgets('a push brings the new page in from the right and takes the old out left',
         (tester) async {
@@ -414,19 +435,26 @@ void main() {
       menu.go(SettingsPage.quality);
       await tester.pumpWidget(host());
       await tester.pumpAndSettle();
-      final qualityAtRest = offsetOf(tester, '480p');
 
       menu.go(SettingsPage.root);
       await tester.pumpAndSettle();
-      final rootAtRest = offsetOf(tester, 'Sleep timer');
 
       menu.go(SettingsPage.quality);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 70));
 
       expect(find.text('Sleep timer'), findsOneWidget, reason: 'both are live, it is a fade');
-      expect(offsetOf(tester, 'Sleep timer'), rootAtRest, reason: 'the old page does not travel');
-      expect(offsetOf(tester, '480p'), qualityAtRest, reason: 'nor does the new one');
+
+      // **The slide itself, not where the glyphs land.** Since the panel sizes
+      // to its content it can also be morphing *width* through this frame, and
+      // that moves a right-anchored page's contents sideways for a reason that
+      // is not a slide. Reading the `SlideTransition` asks the question the test
+      // is named for: both pages are at zero offset, so neither travelled.
+      final slides = tester.widgetList<SlideTransition>(find.byType(SlideTransition));
+      expect(slides, isNotEmpty, reason: 'both pages are wrapped, moving or not');
+      for (final slide in slides) {
+        expect(slide.position.value, Offset.zero);
+      }
       await tester.pumpAndSettle();
     });
 
@@ -612,4 +640,275 @@ void main() {
       expect(pointerIsOnSettingsMenu(const Offset(20, 20)), isFalse);
     });
   });
+
+  /// The panel widens to fit a caption row rather than truncating it.
+  ///
+  /// Measured through the real widget rather than argued about: the width comes
+  /// from `IntrinsicWidth` asking the rows, so the only way to know a badge and
+  /// a sub-name are counted is to put them on a row and read the panel back.
+  group('the panel grows to fit its widest row', () {
+    Future<void> pumpCaptions(WidgetTester tester, List<CaptionTrack> tracks) async {
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          playbackProvider.overrideWith(FakePlayback.new),
+          playbackEngineProvider.overrideWithValue(FakeEngine()),
+          captionsProvider.overrideWith(() => _FixedCaptions(tracks)),
+        ],
+      );
+      container.read(playerMenuProvider.notifier).go(SettingsPage.captions);
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+    }
+
+    CaptionTrack track(String label, {String badge = '', String name = ''}) => CaptionTrack(
+          id: '.$label',
+          languageCode: 'en',
+          label: label,
+          isAutoGenerated: false,
+          trackName: name,
+          styled: badge.isEmpty ? 'plain' : badge,
+        );
+
+    testWidgets('Off is the last row, under a divider, as Auto is on quality',
+        (tester) async {
+      await pumpCaptions(tester, [track('English'), track('German')]);
+      final off = tester.getTopLeft(find.byKey(playerCaptionsOffKey)).dy;
+      for (final label in ['English', 'German']) {
+        expect(tester.getTopLeft(find.text(label)).dy, lessThan(off),
+            reason: '$label is a choice; Off comes after all of them');
+      }
+      // The page carries three rules — under the header, above Off, and above
+      // the *Style* row — so this picks the one it is about by position rather
+      // than by index. `.last` used to work and stopped the moment task 19 added
+      // a row after Off, which is the kind of silent drift an index invites.
+      final german = tester.getTopLeft(find.text('German')).dy;
+      final between = tester
+          .widgetList<Divider>(find.byType(Divider))
+          .map((divider) => tester.getTopLeft(find.byWidget(divider)).dy)
+          .where((dy) => dy > german && dy < off);
+      expect(between, isNotEmpty, reason: 'a rule separates the languages from Off');
+    });
+
+    testWidgets('short labels leave it at the shared width', (tester) async {
+      await pumpCaptions(tester, [track('English'), track('German')]);
+      expect(tester.getSize(find.byKey(settingsMenuPanelKey)).width, 248);
+    });
+
+    testWidgets('a long label widens it, and the label is not truncated', (tester) async {
+      // 'English (Ireland)' plus a badge sits between the floor and the ceiling
+      // under the test font, which is what makes the two bounds below real
+      // assertions rather than either one being trivially satisfied.
+      await pumpCaptions(tester, [
+        track('English'),
+        track('English (Ireland)', badge: 'styled'),
+      ]);
+      final width = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+      expect(width, greaterThan(248), reason: 'the row does not fit in the floor width');
+      expect(width, lessThanOrEqualTo(380));
+
+      // The claim that matters: the text is laid out at its full width, so no
+      // ellipsis is reached. `didExceedMaxLines` is false when it all fits.
+      final text = tester.renderObject<RenderParagraph>(find.text('English (Ireland)'));
+      expect(text.didExceedMaxLines, isFalse);
+    });
+
+    testWidgets(
+        'MUTATION: the badge and the sub-name are counted, and a name suppresses the badge',
+        (tester) async {
+      // The failure this guards is two-sided now. The first is the original
+      // one: a *manual* width calculation that adds up the label and forgets
+      // what sits beside it — the panel then looks right until a track
+      // carries a badge or a sub-name, and truncates the language rather than
+      // growing. The second is the priority rule itself: a `trackName` is the
+      // uploader's own answer to "how is this track different", and it wins
+      // over the app's own guess — the badge exists only for when the
+      // uploader never said, so it must disappear the moment a name shows up
+      // rather than stacking additional width on top of it.
+      await pumpCaptions(tester, [track('English (Ireland)')]);
+      final bare = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled')]);
+      final badgeOnly = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      await pumpCaptions(tester, [track('English (Ireland)', name: 'X')]);
+      final nameOnly = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled', name: 'X')]);
+      final both = tester.getSize(find.byKey(settingsMenuPanelKey)).width;
+
+      expect(badgeOnly, greaterThan(bare),
+          reason: 'the badge takes room when nothing else distinguishes the track');
+      expect(nameOnly, greaterThan(bare), reason: 'so does the sub-name, on its own');
+      expect(both, nameOnly,
+          reason: 'a trackName suppresses the badge — width with both must equal name-only, '
+              'not grow further');
+
+      // Inside the band, so neither bound is doing the work: at the floor
+      // every reading would be 248, at the ceiling every reading 380, and the
+      // test would pass while measuring nothing.
+      expect(bare, greaterThan(248));
+      expect(both, lessThan(380));
+    });
+
+    testWidgets('a pathological label stops at the ceiling and ellipsises', (tester) async {
+      await pumpCaptions(tester, [track('E' * 200, badge: 'styled')]);
+      expect(tester.getSize(find.byKey(settingsMenuPanelKey)).width, 380);
+      expect(tester.renderObject<RenderParagraph>(find.text('E' * 200)).didExceedMaxLines, isTrue);
+    });
+
+    testWidgets('the style page is reachable, and offers only the edges ASS can draw',
+        (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(playerCaptionStyleMenuKey), findsOneWidget);
+      // **Three, not five.** ASS has `\bord` and `\shad` and no bevel, so
+      // YouTube's *Raised* and *Depressed* are one result — offering both would
+      // be two entries that do the same thing. `architecture.md` §2.9 records it
+      // as knowingly dropped rather than quietly missed.
+      expect(find.text('Drop shadow'), findsOneWidget);
+      expect(find.text('Outline'), findsOneWidget);
+      expect(find.text('Raised'), findsNothing);
+      expect(find.text('Depressed'), findsNothing);
+    });
+
+    testWidgets('reset is disabled until there is something to reset', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      final ink = tester.widget<InkWell>(
+        find.descendant(
+          of: find.byKey(playerCaptionStyleResetKey),
+          matching: find.byType(InkWell),
+        ),
+      );
+      expect(ink.onTap, isNull,
+          reason: 'a fresh session has nothing to undo, and a live Reset would say otherwise');
+    });
+
+    testWidgets('a discrete control commits at once, without a debounce', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      // **The style page is the longest in the menu** — four sections and a
+      // reset, against a 400 px panel — so it scrolls, and the edge chips are
+      // below the fold. Scrolling to a control before using it is what a user
+      // does too.
+      await tester.ensureVisible(find.text('Outline'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Outline'));
+      await tester.pumpAndSettle();
+
+      final captions = container.read(captionsProvider.notifier) as _FixedCaptions;
+      expect(captions.applied.single.edgeStyle, CaptionEdgeStyle.outline);
+      expect(captions.appliedImmediately.single, isTrue,
+          reason: 'a chip has nothing to debounce — a delay there is only a delay');
+    });
+
+    testWidgets('a slider is debounced instead', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      // Any slider on the page; they all take the same path, and each frame of a
+      // drag is a re-render plus a `sub-add` on the other side of it.
+      await tester.ensureVisible(find.byType(Slider).first);
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(Slider).first, const Offset(30, 0));
+      await tester.pumpAndSettle();
+
+      final captions = container.read(captionsProvider.notifier) as _FixedCaptions;
+      expect(captions.appliedImmediately, isNotEmpty);
+      expect(captions.appliedImmediately.every((immediate) => !immediate), isTrue);
+    });
+
+    testWidgets('two separate, fully-settled taps each carry their own target, not the one before',
+        (tester) async {
+      // Reported: a slider commit is one step behind the one before it —
+      // opacity 100 -> 0 does nothing, then 0 -> 50 shows 0. Absolute taps at
+      // known positions, rather than relative drags (whose synthesized start
+      // point is a test-harness detail, not app behaviour), so the expected
+      // target of each tap is known independently of what the previous one did.
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+
+      final sizeSlider = find.byType(Slider).first; // 'Size' — fontSizePercent, 50..300
+      await tester.ensureVisible(sizeSlider);
+      await tester.pumpAndSettle();
+      final trackRect = tester.getRect(sizeSlider);
+
+      await tester.tapAt(Offset(trackRect.left + trackRect.width * 0.05, trackRect.center.dy));
+      await tester.pumpAndSettle();
+      final captions = container.read(captionsProvider.notifier) as _FixedCaptions;
+      expect(captions.applied, isNotEmpty);
+      final firstTarget = captions.applied.last.fontSizePercent!;
+      expect(firstTarget, lessThan(100), reason: 'a tap near the left edge must land near the low end');
+
+      await tester.tapAt(Offset(trackRect.left + trackRect.width * 0.95, trackRect.center.dy));
+      await tester.pumpAndSettle();
+      final secondTarget = captions.applied.last.fontSizePercent!;
+      expect(secondTarget, greaterThan(200),
+          reason: 'a tap near the right edge must land near the high end, not repeat the first tap\'s target');
+    });
+
+    testWidgets('back returns to the track list, not to the root', (tester) async {
+      await pumpCaptions(tester, [track('English')]);
+      await tester.tap(find.byKey(playerCaptionStyleRowKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(playerSettingsBackKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(playerCaptionsMenuKey), findsOneWidget);
+    });
+
+    testWidgets('it grows leftward — the right edge does not move', (tester) async {
+      // The panel hangs off a button at its bottom-right, so that corner is the
+      // anchor. A wider panel that moved it would drag the menu off its control.
+      await pumpCaptions(tester, [track('English')]);
+      final narrow = tester.getRect(find.byKey(settingsMenuPanelKey));
+
+      await pumpCaptions(tester, [track('English (Ireland)', badge: 'styled')]);
+      final wide = tester.getRect(find.byKey(settingsMenuPanelKey));
+
+      expect(wide.right, narrow.right);
+      expect(wide.left, lessThan(narrow.left));
+    });
+  });
+}
+
+/// A `CaptionsController` that never talks to a sidecar.
+class _FixedCaptions extends CaptionsController {
+  _FixedCaptions(this._tracks);
+
+  final List<CaptionTrack> _tracks;
+
+  /// Every style the menu handed over, and whether it asked for it immediately.
+  ///
+  /// The debounce lives in the real controller, so a menu test cannot observe it
+  /// by counting round trips — what it *can* observe is which of the two the
+  /// control asked for, which is the decision the menu owns.
+  final List<CaptionStyle> applied = [];
+  final List<bool> appliedImmediately = [];
+
+  @override
+  CaptionsState build() => CaptionsState(tracks: _tracks);
+
+  @override
+  Future<void> loadStyled() async {}
+
+  @override
+  Future<void> setStyle(CaptionStyle style, {bool immediate = false}) async {
+    applied.add(style);
+    appliedImmediately.add(immediate);
+    state = state.copyWith(style: style);
+  }
+
+  @override
+  Future<void> resetStyle() async {
+    state = state.copyWith(style: CaptionStyle.none, offset: CaptionOffset.zero);
+  }
 }

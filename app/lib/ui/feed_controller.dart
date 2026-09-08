@@ -1,9 +1,101 @@
 import 'dart:async';
+import 'dart:isolate';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
+import '../domain/artist_panel.dart';
 import '../domain/feed_item.dart';
+import '../domain/search_filters.dart';
 import '../data/rpc/client.dart';
+
+/// Which RPC family a surface needs beyond `{method, hasChips}`.
+///
+/// Every surface shares one request/response shape *except* which extra
+/// parameter it needs: home's chip token, search's `q` and `filters`.
+/// `SurfaceKind` is what [FeedController.load] branches on to add that one
+/// extra thing — everything else (generation guard, supersede, retry budget,
+/// paging) is identical across all three and does not know this enum exists.
+enum SurfaceKind { home, search, subscriptions }
+
+/// A feed surface, generalised per Task 20 §1: which RPC method, whether it
+/// has chips, and what an empty first page means.
+///
+/// This is the abstraction `FeedController` was built for in Task 12 — a
+/// surface is a value now, not the `static const String surface = 'home'` and
+/// the hardcoded `feed.home` call this replaces.
+class SurfaceConfig {
+  const SurfaceConfig({
+    required this.kind,
+    required this.surface,
+    required this.method,
+    this.hasChips = false,
+    this.checkAuthOnEmpty = false,
+    this.autoLoadOnBuild = true,
+  });
+
+  final SurfaceKind kind;
+
+  /// The key into [FeedState.chipBars] and the value [FeedState.surface] carries.
+  final String surface;
+
+  /// The RPC method this surface loads through.
+  final String method;
+
+  /// Whether a base browse on this surface carries a chip bar at all. A
+  /// surface with none must never render an empty strip — `FeedPage` already
+  /// gates on `state.chips.isNotEmpty`, so this only has to make sure
+  /// `chipBars[surface]` is never written for a surface that has none.
+  final bool hasChips;
+
+  /// Whether an empty, unfiltered first page is ambiguous enough to need
+  /// `auth.verify` — home and subscriptions both go empty for "no
+  /// recommendations yet" and for "the session is degraded", and only
+  /// `auth.verify` tells those apart (protocol.md §3.1). Search's empty page
+  /// means "no results for this query"; asking `auth.verify` about it would
+  /// answer a question nobody asked.
+  final bool checkAuthOnEmpty;
+
+  /// Whether `build()` should fetch the first page on its own. Home and
+  /// subscriptions have nothing else to wait for; search has no query yet —
+  /// the caller supplies one via [FeedController.search].
+  final bool autoLoadOnBuild;
+}
+
+const SurfaceConfig homeSurface = SurfaceConfig(
+  kind: SurfaceKind.home,
+  surface: 'home',
+  method: 'feed.home',
+  hasChips: true,
+  checkAuthOnEmpty: true,
+);
+
+const SurfaceConfig subscriptionsSurface = SurfaceConfig(
+  kind: SurfaceKind.subscriptions,
+  surface: 'subscriptions',
+  method: 'feed.subscriptions',
+  checkAuthOnEmpty: true,
+);
+
+/// The channel list (Task 21 §4) — a different browse endpoint from the video
+/// feed above (`subscriptions.channels`, not `feed.subscriptions`), reusing
+/// [SurfaceKind.subscriptions] since it needs exactly the same shape: no
+/// chips, no query params beyond `continuation`, and the same
+/// `auth.verify`-on-empty ambiguity between "no subscriptions" and "degraded
+/// session". Its items are `ChannelItem`-kind [FeedItem]s, which [FeedView]
+/// already renders via [ChannelTile] — no new controller or widget needed.
+const SurfaceConfig subscriptionsChannelsSurface = SurfaceConfig(
+  kind: SurfaceKind.subscriptions,
+  surface: 'subscriptions-channels',
+  method: 'subscriptions.channels',
+  checkAuthOnEmpty: true,
+);
+
+const SurfaceConfig searchSurface = SurfaceConfig(
+  kind: SurfaceKind.search,
+  surface: 'search',
+  method: 'search.query',
+  autoLoadOnBuild: false,
+);
 
 /// `copyWith` sentinel: tells "leave this alone" apart from "set this to null".
 ///
@@ -32,6 +124,18 @@ class FeedState {
   /// the filter actually applied.
   final String? selectedToken;
 
+  /// The search surface's query text. `null` on every other surface.
+  final String? query;
+
+  /// The search surface's active filters, or `null` for unfiltered. `null` on
+  /// every other surface.
+  final SearchFilters? filters;
+
+  /// The artist panel `search.query` may carry (Task 21 §3, protocol.md
+  /// §3.3). `null` on every other surface, and `null` on search itself
+  /// whenever the response carried none — most searches.
+  final ArtistPanel? artist;
+
   final List<FeedItem> items;
   final String? continuation;
   final bool isLoading;
@@ -53,6 +157,9 @@ class FeedState {
     required this.surface,
     this.chipBars = const {},
     this.selectedToken,
+    this.query,
+    this.filters,
+    this.artist,
     this.items = const [],
     this.continuation,
     this.isLoading = true,
@@ -71,6 +178,9 @@ class FeedState {
   FeedState copyWith({
     Map<String, List<Chip>>? chipBars,
     Object? selectedToken = _unchanged,
+    Object? query = _unchanged,
+    Object? filters = _unchanged,
+    Object? artist = _unchanged,
     List<FeedItem>? items,
     Object? continuation = _unchanged,
     bool? isLoading,
@@ -84,6 +194,9 @@ class FeedState {
       chipBars: chipBars ?? this.chipBars,
       selectedToken:
           identical(selectedToken, _unchanged) ? this.selectedToken : selectedToken as String?,
+      query: identical(query, _unchanged) ? this.query : query as String?,
+      filters: identical(filters, _unchanged) ? this.filters : filters as SearchFilters?,
+      artist: identical(artist, _unchanged) ? this.artist : artist as ArtistPanel?,
       items: items ?? this.items,
       continuation:
           identical(continuation, _unchanged) ? this.continuation : continuation as String?,
@@ -139,6 +252,12 @@ Map<String, List<Chip>> storeChipBar(
 }
 
 class FeedController extends Notifier<FeedState> {
+  FeedController([this.config = homeSurface]);
+
+  final SurfaceConfig config;
+
+  /// Kept for existing home call sites and tests: always `'home'`, the same
+  /// value `config.surface` carries when [config] is [homeSurface].
   static const String surface = 'home';
 
   /// Bumped by every request. A response whose generation is stale is dropped
@@ -196,12 +315,45 @@ class FeedController extends Notifier<FeedState> {
       _retryTimer?.cancel();
       _retryTimer = null;
     });
-    Future.microtask(loadHome);
-    return const FeedState(surface: surface);
+    if (config.autoLoadOnBuild) Future.microtask(load);
+    // `FeedState.isLoading` defaults to true because home and subscriptions
+    // both start fetching the instant they build. A surface that waits for an
+    // explicit query (search) must not carry that default forward — nothing
+    // would ever clear it, and `isLoading` would read true forever on a page
+    // nobody has searched from yet.
+    return FeedState(surface: config.surface, isLoading: config.autoLoadOnBuild);
   }
 
+  /// Home's entry point, unchanged in name, signature and behaviour — an alias
+  /// for [load] with the shape home has always had. Existing call sites and
+  /// tests use this name directly.
   Future<void> loadHome({
     String? chipToken,
+    bool isLoadMore = false,
+    bool isAutoRetry = false,
+  }) {
+    return load(chipToken: chipToken, isLoadMore: isLoadMore, isAutoRetry: isAutoRetry);
+  }
+
+  /// The search surface's entry point. A fresh query starts a fresh page, the
+  /// same way [selectChip] starts a fresh page on a new chip token — items and
+  /// continuation are cleared, not appended.
+  Future<void> search(String query, {SearchFilters? filters}) {
+    return load(query: query, filters: filters ?? const SearchFilters());
+  }
+
+  /// The search surface's filter menu: keeps the current query, replaces the
+  /// filters, starts a fresh page.
+  Future<void> updateFilters(SearchFilters filters) {
+    final query = state.query;
+    if (query == null) return Future<void>.value();
+    return load(query: query, filters: filters);
+  }
+
+  Future<void> load({
+    String? chipToken,
+    String? query,
+    SearchFilters? filters,
     bool isLoadMore = false,
     /// Set only by the backoff timer in [_fail].
     ///
@@ -212,6 +364,19 @@ class FeedController extends Notifier<FeedState> {
     /// cap exists to prevent, reintroduced by the retry path itself.
     bool isAutoRetry = false,
   }) async {
+    // A load-more or an auto-retry repeats whatever the base load started;
+    // only a fresh, non-paging call may change the query or the filters.
+    final effectiveQuery = isLoadMore || isAutoRetry ? state.query : (query ?? state.query);
+    final effectiveFilters = isLoadMore || isAutoRetry ? state.filters : (filters ?? state.filters);
+
+    // The search surface needs a query to do anything. Asking with none is a
+    // no-op rather than a request the sidecar would refuse as BAD_REQUEST —
+    // this is also what keeps `build()` cheap to leave `autoLoadOnBuild: false`
+    // for, since nothing here fires until [search] supplies one.
+    if (config.kind == SurfaceKind.search && (effectiveQuery == null || effectiveQuery.isEmpty)) {
+      return;
+    }
+
     final generation = ++_generation;
 
     // A pending backoff belongs to the request this one replaces. Left running
@@ -241,6 +406,13 @@ class FeedController extends Notifier<FeedState> {
         items: const [],
         continuation: null,
         selectedToken: chipToken,
+        query: effectiveQuery,
+        filters: effectiveFilters,
+        // Explicit, not left to default to null via `??`: hard invariant 10.
+        // Without this a fresh search that carries no panel would keep
+        // showing the previous search's, since nothing else in this branch
+        // touches it.
+        artist: null,
         isAuthDegraded: false,
         isAnonymous: false,
       );
@@ -248,12 +420,18 @@ class FeedController extends Notifier<FeedState> {
 
     try {
       final params = <String, dynamic>{};
-      if (chipToken != null) params['chipToken'] = chipToken;
+      if (config.hasChips && chipToken != null) params['chipToken'] = chipToken;
+      if (config.kind == SurfaceKind.search) {
+        params['q'] = effectiveQuery;
+        if (effectiveFilters != null && !effectiveFilters.isEmpty) {
+          params['filters'] = effectiveFilters.toJson();
+        }
+      }
       if (isLoadMore && state.continuation != null) {
         params['continuation'] = state.continuation;
       }
 
-      final request = RpcClient.instance.callCancelable('feed.home', params);
+      final request = RpcClient.instance.callCancelable(config.method, params);
       _inFlight = request.id;
 
       dynamic response;
@@ -271,9 +449,14 @@ class FeedController extends Notifier<FeedState> {
       if (!answered || generation != _generation) return;
       _inFlight = null;
 
-      // An empty feed is ambiguous — no recommendations, or a session the
-      // server stopped honouring. Only `auth.verify` tells them apart.
-      if ((response['items'] as List?)?.isEmpty == true && !isLoadMore && chipToken == null) {
+      // An empty first page is ambiguous on a surface `auth.verify` can
+      // explain — no recommendations yet, or a session the server stopped
+      // honouring. Search has no such ambiguity: an empty page just means no
+      // results, so this never runs there (`config.checkAuthOnEmpty`).
+      if (config.checkAuthOnEmpty &&
+          (response['items'] as List?)?.isEmpty == true &&
+          !isLoadMore &&
+          chipToken == null) {
         final authResponse = await RpcClient.instance.call('auth.verify', {});
         if (generation != _generation) return;
         final stateStr = authResponse['state'] as String?;
@@ -286,22 +469,41 @@ class FeedController extends Notifier<FeedState> {
         }
       }
 
-      final rawChips = response['chips'] as List<dynamic>? ?? [];
-      final parsedChips = rawChips.map((c) => Chip.fromJson(c as Map<String, dynamic>)).toList();
+      // A surface with no chip bar (search, subscriptions) never reads
+      // `chips` off the response and never writes `chipBars` — `FeedPage`
+      // already skips an empty bar, so this only has to make sure one is
+      // never stored for a surface that has none.
+      final parsedChips = config.hasChips && response['chips'] != null
+          ? (response['chips'] as List<dynamic>)
+              .map((c) => Chip.fromJson(c as Map<String, dynamic>))
+              .toList()
+          : const <Chip>[];
 
       final rawItems = response['items'] as List<dynamic>? ?? [];
-      final parsedItems = rawItems.map((i) => FeedItem.fromJson(i as Map<String, dynamic>)).toList();
+      final parsedItems = await Isolate.run(
+          () => rawItems.map((i) => FeedItem.fromJson(i as Map<String, dynamic>)).toList());
 
       // An empty token is the "All" chip, which the sidecar treats as a base
       // browse — so it comes back with a bar, and is one.
-      final isBaseBrowse = !isLoadMore && (chipToken == null || chipToken.isEmpty);
+      final isBaseBrowse = config.hasChips && !isLoadMore && (chipToken == null || chipToken.isEmpty);
+
+      // Only search.query's *first-page* response ever carries this key
+      // (protocol.md §3.3) — a continuation response carries no panel at
+      // all, so a load-more must keep whatever the base load found rather
+      // than overwriting it with the absence on this page.
+      final rawArtist = response['artist'] as Map<String, dynamic>?;
+      final parsedArtist =
+          isLoadMore ? state.artist : (rawArtist != null ? ArtistPanel.fromJson(rawArtist) : null);
 
       _autoAttempt = 0;
       state = state.copyWith(
         isLoading: false,
-        chipBars: storeChipBar(state.chipBars, surface, parsedChips, isBaseBrowse: isBaseBrowse),
+        chipBars: config.hasChips
+            ? storeChipBar(state.chipBars, config.surface, parsedChips, isBaseBrowse: isBaseBrowse)
+            : state.chipBars,
         items: isLoadMore ? [...state.items, ...parsedItems] : parsedItems,
         continuation: response['continuation'] as String?,
+        artist: parsedArtist,
       );
     } on RpcException catch (e) {
       if (generation != _generation) return;
@@ -310,14 +512,30 @@ class FeedController extends Notifier<FeedState> {
         state = state.copyWith(isAuthDegraded: true, isLoading: false);
         return;
       }
-      _fail(e.message, e.retry, generation: generation, chipToken: chipToken, isLoadMore: isLoadMore);
+      _fail(
+        e.message,
+        e.retry,
+        generation: generation,
+        chipToken: chipToken,
+        query: effectiveQuery,
+        filters: effectiveFilters,
+        isLoadMore: isLoadMore,
+      );
     } catch (e) {
       if (generation != _generation) return;
       _inFlight = null;
       // Not an envelope — a bug on this side of the boundary. It carries no
       // `retry` of its own, and `user` is the honest reading: nothing will fix
       // itself, but letting the user try again costs nothing.
-      _fail(e.toString(), RpcRetryMode.user, generation: generation, chipToken: chipToken, isLoadMore: isLoadMore);
+      _fail(
+        e.toString(),
+        RpcRetryMode.user,
+        generation: generation,
+        chipToken: chipToken,
+        query: effectiveQuery,
+        filters: effectiveFilters,
+        isLoadMore: isLoadMore,
+      );
     }
   }
 
@@ -328,6 +546,8 @@ class FeedController extends Notifier<FeedState> {
     RpcRetryMode retry, {
     required int generation,
     required String? chipToken,
+    required String? query,
+    required SearchFilters? filters,
     required bool isLoadMore,
   }) {
     if (retry == RpcRetryMode.auto && _autoAttempt < autoBackoff.length) {
@@ -339,7 +559,13 @@ class FeedController extends Notifier<FeedState> {
       _retryTimer?.cancel();
       _retryTimer = Timer(delay, () {
         if (generation != _generation) return;
-        loadHome(chipToken: chipToken, isLoadMore: isLoadMore, isAutoRetry: true);
+        load(
+          chipToken: chipToken,
+          query: query,
+          filters: filters,
+          isLoadMore: isLoadMore,
+          isAutoRetry: true,
+        );
       });
       return;
     }
@@ -366,22 +592,44 @@ class FeedController extends Notifier<FeedState> {
   Future<void> loadMore() async {
     if (state.isLoading || state.continuation == null) return;
     if (state.error != null) return;
-    await loadHome(chipToken: state.selectedToken, isLoadMore: true);
+    await load(
+      chipToken: state.selectedToken,
+      query: state.query,
+      filters: state.filters,
+      isLoadMore: true,
+    );
   }
 
   /// The user answering a `retry: "user"` footer.
   Future<void> retryMore() async {
     if (state.isLoading || state.continuation == null) return;
     _autoAttempt = 0;
-    await loadHome(chipToken: state.selectedToken, isLoadMore: true);
+    await load(
+      chipToken: state.selectedToken,
+      query: state.query,
+      filters: state.filters,
+      isLoadMore: true,
+    );
   }
 
   void selectChip(Chip chip) {
     if (state.selectedChip?.token == chip.token) return;
-    loadHome(chipToken: chip.token);
+    load(chipToken: chip.token);
   }
 }
 
 final feedProvider = NotifierProvider<FeedController, FeedState>(() {
-  return FeedController();
+  return FeedController(homeSurface);
+});
+
+final searchProvider = NotifierProvider<FeedController, FeedState>(() {
+  return FeedController(searchSurface);
+});
+
+final subscriptionsProvider = NotifierProvider<FeedController, FeedState>(() {
+  return FeedController(subscriptionsSurface);
+});
+
+final subscriptionsChannelsProvider = NotifierProvider<FeedController, FeedState>(() {
+  return FeedController(subscriptionsChannelsSurface);
 });

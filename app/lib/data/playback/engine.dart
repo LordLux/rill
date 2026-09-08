@@ -84,9 +84,50 @@ abstract class PlaybackEngine {
   /// That is what lets the watch page and the mini-player show live video from
   /// one player without either of them owning it, and without a texture being
   /// created or freed when the route changes.
+  Widget videoWidget({BoxFit fit = BoxFit.contain});
   Widget videoSurface({BoxFit fit = BoxFit.contain});
 
-  Future<void> open(PlaybackVariant variant, {bool play = true});
+  /// The layer link tied to the video surface, for syncing overlays.
+  LayerLink get videoLayerLink;
+
+  /// The ASS document currently attached, or null.
+  ///
+  /// Engine state rather than controller state, because it is a fact about what
+  /// mpv is holding — and because [open] has to know it in order to put it back
+  /// after a quality switch.
+  String? get subtitle;
+
+  /// Attach an ASS document as an external subtitle track, or detach with null.
+  /// 
+  /// The document is injected entirely in-memory and bypasses the filesystem.
+  /// This is one of the three options identified in the task brief for 
+  /// decoupling track styling from media demuxing.
+  Future<void> setSubtitle(String? ass);
+
+  /// Toggle visibility of the current subtitle track.
+  Future<void> setSubtitleVisible(bool visible);
+
+  /// The plain text of the caption currently on screen, tags stripped.
+  ///
+  /// **The one thing about a caption that mpv does publish**, and Task 19 is
+  /// built on it. libass composites into the video texture and exposes no
+  /// geometry, so there is nothing to hit-test — but `sub-text` stays populated
+  /// while libass is drawing (measured 2026-08-20 with `sub-ass=yes` and
+  /// `sub-visibility=yes`, which is the shipping configuration), and knowing the
+  /// *words* is enough to estimate the rectangle they occupy.
+  ///
+  /// **Nothing renders this.** Drawing it would be the second caption renderer
+  /// that hid a bug for two tasks — see [kNoFlutterSubtitles]. It feeds the hit
+  /// rectangle, the hover cursor and the drag ghost, and the ghost is only ever
+  /// on screen while the real caption is being dragged.
+  Stream<String?> get subtitleTextStream;
+
+  /// [retainSubtitle] puts the attached track back after the media reopens.
+  ///
+  /// A quality switch reopens the media (F19) and mpv drops external subtitle
+  /// tracks with it. Opening a *different video* must not carry the previous
+  /// one's captions, so this is opt-in and only `switchQuality` passes it.
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false});
   Future<void> play();
   Future<void> pause();
   Future<void> playOrPause();
@@ -106,6 +147,47 @@ abstract class PlaybackEngine {
   Future<void> dispose();
 }
 
+/// Why captions need two settings, and what happens with neither.
+///
+/// **media_kit ships with libass off, and draws subtitles in Flutter instead.**
+/// `PlayerConfiguration.libass` defaults to `false`, and media_kit turns that
+/// into `sub-ass=no` *and* `sub-visibility=no` on the mpv side — so mpv strips
+/// every ASS tag and then draws nothing. It observes the resulting plain text on
+/// mpv's `sub-text` property and hands it to `SubtitleView`, a Flutter widget
+/// that `Video` mounts by default (`SubtitleViewConfiguration.visible` is
+/// `true`) and paints with a Flutter `TextStyle`.
+///
+/// So captions *appeared* to work while every override the sidecar emits was
+/// being discarded: no bold, no italic, no font, no size, no colour, no
+/// position. Diagnosed 2026-08-19 from a screenshot of `L-BgxLtMxh0` in which
+/// two cues the document puts at opposite ends of the frame were stacked at the
+/// bottom in document order — which is `SubtitleView` rendering
+/// `player.state.subtitle`, a *list* of strings, and not a layout libass would
+/// ever produce.
+///
+/// It also means Task 17's "stacked duplicates" were never libass colliding two
+/// events. They were two list entries. The sidecar-side merge is still right —
+/// it is what a single caption composited from two pens actually is — but the
+/// symptom that motivated it had this cause.
+///
+/// The two settings have to agree, and each alone is wrong:
+///
+///  - `libass: true` alone leaves `SubtitleView` painting a plain-text copy over
+///    the styled one, which is the same caption twice in two fonts.
+///  - `visible: false` alone leaves `sub-visibility=no`, which is no captions.
+///
+/// `architecture.md` §2.9 is the decision this restores; it said "Flutter draws
+/// no captions" and, until this, the shipped widget did.
+/// Off, so the only thing drawing captions is libass. Half of the pair.
+const kNoFlutterSubtitles = SubtitleViewConfiguration(visible: false);
+
+/// On, so mpv renders them at all. The other half.
+///
+/// Kept beside its partner and named, rather than written inline at the one call
+/// site, because the two are only correct together and a reader who finds one
+/// needs to find the other.
+const kLibassEnabled = true;
+
 /// The real engine: one `media_kit` [Player] for the whole app.
 ///
 /// Owned by the shell above the `Navigator` (task §1), so a route pop cannot
@@ -116,10 +198,12 @@ class MediaKitEngine implements PlaybackEngine {
   /// exposes, because `demuxer-cache-state` describes one demuxer and an
   /// external audio track is a second one. It is off in the app.
   MediaKitEngine({MPVLogLevel? logLevel}) {
+    // `libass: true` is not optional, and its default is the reason captions
+    // rendered as plain text for two tasks. See [kNoFlutterSubtitles].
     _player = Player(
       configuration: logLevel == null
-          ? const PlayerConfiguration()
-          : PlayerConfiguration(logLevel: logLevel),
+          ? const PlayerConfiguration(libass: kLibassEnabled)
+          : PlayerConfiguration(libass: kLibassEnabled, logLevel: logLevel),
     );
     _video = VideoController(_player);
 
@@ -184,17 +268,29 @@ class MediaKitEngine implements PlaybackEngine {
   Stream<String> get errorStream => _player.stream.error;
 
   /// `controls: NoVideoControls` because every caller draws its own.
-  ///
-  /// media_kit_video mounts `AdaptiveVideoControls` by default, and on Windows
-  /// that is a full second transport bar — its own scrubber, clock and volume
-  /// slider painted over ours, both live and both responding to clicks.
   @override
-  Widget videoSurface({BoxFit fit = BoxFit.contain}) {
+  final LayerLink videoLayerLink = LayerLink();
+
+  /// media_kit's `Video` widget, configured for this player.
+  ///
+  /// Built with `NoVideoControls` and `kNoFlutterSubtitles` — it is a *second* renderer for the same
+  /// captions, and the one that was winning.
+  @override
+  Widget videoWidget({BoxFit fit = BoxFit.contain}) {
     return Video(
       controller: _video,
-      controls: NoVideoControls,
       fit: fit,
+      controls: NoVideoControls,
+      subtitleViewConfiguration: kNoFlutterSubtitles,
       fill: const Color(0x00000000), // Colors.transparent
+    );
+  }
+
+  @override
+  Widget videoSurface({BoxFit fit = BoxFit.contain}) {
+    return CompositedTransformTarget(
+      link: videoLayerLink,
+      child: videoWidget(fit: fit),
     );
   }
 
@@ -260,9 +356,73 @@ class MediaKitEngine implements PlaybackEngine {
   /// loaded and the demuxer reports a duration (F15). Guarded on the duration
   /// already being known, because a fast load has already fired the event and
   /// `firstWhere` on a stream that has passed waits forever.
+  String? _subtitle;
+
   @override
-  Future<void> open(PlaybackVariant variant, {bool play = true}) async {
+  String? get subtitle => _subtitle;
+
+  /// `SubtitleTrack.data` — mechanism (1) of the three in the task brief, and the
+  /// cheapest: no file we own, no server, no cleanup path of our own.
+  ///
+  /// Two things about media_kit's implementation are worth knowing and are not
+  /// documented by it. It writes the string to a **temp file with no extension**
+  /// (a bare UUID under `Directory.systemTemp`) and hands mpv the URI, so format
+  /// detection is by content — an ASS document has to start `[Script Info]`, and
+  /// `ass.ts` guarantees it does. And it registers that file for deletion on
+  /// `Player.dispose`, not on the next track change, so a session that switches
+  /// language repeatedly leaves one small file per switch until the app exits.
+  ///
+  /// `SubtitleTrack.no()` rather than a `sub-remove`: media_kit routes the
+  /// non-data case through `sid`, which is the property mpv uses to *select*
+  /// nothing, and leaves the loaded track alone. Turning captions back on
+  /// re-adds them, which costs a temp file and no round trip.
+  bool _isSubtitleVisible = true;
+
+  @override
+  Future<void> setSubtitle(String? ass) async {
+    _subtitle = ass;
+    if (ass == null || !_isSubtitleVisible) {
+      await _player.setSubtitleTrack(SubtitleTrack.no());
+      return;
+    }
+    await _player.setSubtitleTrack(SubtitleTrack.data(ass, title: 'Captions'));
+  }
+
+  @override
+  Future<void> setSubtitleVisible(bool visible) async {
+    _isSubtitleVisible = visible;
+    if (visible && _subtitle != null) {
+      await _player.setSubtitleTrack(SubtitleTrack.data(_subtitle!, title: 'Captions'));
+    } else {
+      await _player.setSubtitleTrack(SubtitleTrack.no());
+    }
+  }
+
+  /// media_kit's own view of mpv's `sub-text`, flattened to one string.
+  ///
+  /// It is a `List<String>` because mpv can report a cue as several lines, so
+  /// they are joined the way ASS joins them and `\N` becomes a newline. Empty
+  /// entries — which is what the stream carries between cues — become null, so
+  /// "no caption" is one value rather than three spellings of it.
+  ///
+  /// **Nothing reads this today.** It was how `CaptionDragLayer` learned what
+  /// libass was drawing, back when that was the only way to find out; `LibassLayer`
+  /// renders the document itself and has the cues in hand. Kept as an engine
+  /// capability rather than deleted with its one caller, but it is dead weight
+  /// if nothing picks it up.
+  @override
+  Stream<String?> get subtitleTextStream => _player.stream.subtitle.map((lines) {
+        final joined = lines.where((line) => line.isNotEmpty).join('\n').trim();
+        return joined.isEmpty ? null : joined;
+      });
+
+  @override
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {
     lastOpened = variant;
+    // Read before the open, applied after it. A reopen drops mpv's external
+    // subtitle tracks, and this is the only place that knows one was attached.
+    final retained = retainSubtitle ? _subtitle : null;
+    _subtitle = null;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffer = Duration.zero;
@@ -276,7 +436,10 @@ class MediaKitEngine implements PlaybackEngine {
     await _player.open(Media(variant.videoUrl), play: play);
 
     final audioUrl = variant.audioUrl;
-    if (audioUrl == null) return;
+    if (audioUrl == null) {
+      if (retained != null) await setSubtitle(retained);
+      return;
+    }
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -301,6 +464,10 @@ class MediaKitEngine implements PlaybackEngine {
       ]).timeout(const Duration(seconds: 20));
     }
     await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+    // After the audio, not before: both go through `sub-add`/`audio-add` against
+    // a freshly loaded file, and attaching a subtitle to a file whose duration is
+    // not known yet is the same race the audio wait above exists for.
+    if (retained != null) await setSubtitle(retained);
   }
 
   @override

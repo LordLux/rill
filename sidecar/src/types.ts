@@ -30,8 +30,30 @@ export interface VideoItem {
   /** Display string as YouTube formatted it ("22K views"), never parsed. */
   viewCountText: string | null;
   publishedText: string | null;
+  descriptionSnippet: string | null;
   /** "4K", "New", "Members only", … */
   badges: string[];
+  /**
+   * A Short, classified rather than stripped (Task 21 §1). Covers the plain
+   * `videoRenderer`/`lockupViewModel` shape carrying a `SHORTS`-styled
+   * duration overlay — the shape that reaches search interleaved with
+   * ordinary videos. The dedicated Shorts shelf (`reelShelfRenderer` /
+   * `shortsLockupViewModel`) is a structurally different renderer with no
+   * `content_id` and no title path this mapper reads; it stays stripped and
+   * never reaches this type.
+   */
+  isShort: boolean;
+  /**
+   * The `♪` on YouTube's own duration badge — `thumbnailBadgeViewModel`'s
+   * icon, not its text. Distinct from [isArtistChannel]: this is per-video,
+   * that is per-channel, and they can disagree (an artist channel can upload
+   * a non-music video).
+   */
+  isMusic: boolean;
+  /** The uploading channel's verified checkmark. Never true alongside {@link isArtistChannel} — YouTube ships one badge per channel. */
+  isVerified: boolean;
+  /** The uploading channel's "Official Artist Channel" badge. */
+  isArtistChannel: boolean;
   /**
    * When a premiere or scheduled stream starts, unix ms — null for everything
    * that has already happened, which is nearly every tile.
@@ -70,6 +92,11 @@ export interface ChannelItem {
   name: string;
   avatarUrl: string;
   subscriberText: string | null;
+  descriptionSnippet: string | null;
+  /** Same badge as {@link VideoItem.isVerified}, read off the channel's own tile. */
+  isVerified: boolean;
+  /** Same badge as {@link VideoItem.isArtistChannel}, read off the channel's own tile. */
+  isArtistChannel: boolean;
 }
 
 export interface Chip {
@@ -80,10 +107,110 @@ export interface Chip {
   scope: 'feed' | 'shelf';
 }
 
+/**
+ * The "official artist channel" panel a search for an artist's name returns
+ * above the ordinary results (Task 21 §3) — `officialCardViewModel`, live-
+ * confirmed **absent** for an ordinary creator search, so its presence is
+ * itself the artist-channel signal.
+ *
+ * A separate field on `search.query`'s result rather than a new `FeedItem`
+ * kind, per the task's own preference: `FeedItem` is a sealed union every
+ * grid switches over, and a panel is not a grid item — widening the union
+ * would make every surface responsible for skipping it.
+ */
+/**
+ * A colour YouTube supplies for both themes, as ARGB ints (`0xAARRGGBB`).
+ *
+ * Carried verbatim rather than resolved here: which one applies is a client
+ * question, and the sidecar has no idea what theme Flutter is painting.
+ */
+export interface ThemedColor {
+  light: number;
+  dark: number;
+}
+
+export interface ArtistPanel {
+  channelId: string;
+  name: string;
+  /** "@Ado1024". */
+  handle: string | null;
+  avatarUrl: string;
+  /** "9.51M subscribers". */
+  subscriberText: string | null;
+  /** "739 videos". */
+  videoCountText: string | null;
+  description: string | null;
+  isSubscribed: boolean;
+  /**
+   * The `RD…` id behind the panel's own "Mix" action, or null if the panel
+   * carried none. Carried because reconstructing it later costs a `/next`
+   * round trip the panel response already answers for free — the same
+   * reasoning as `VideoItem.premiereAtMs`.
+   */
+  mixPlaylistId: string | null;
+  /**
+   * The panel's own tint, straight off `officialCardViewModel` — YouTube
+   * already derives it from the artist's imagery server-side, so the client
+   * has no reason to sample the avatar itself. `backgroundColor` is the card
+   * fill; `baseBackgroundColor` is the much darker page wash behind it.
+   * Null when the payload omits them.
+   */
+  backgroundColor: ThemedColor | null;
+  baseBackgroundColor: ThemedColor | null;
+  /**
+   * The wide artwork strip behind the header — `cinematicContainerViewModel`'s
+   * `backgroundImageConfig`, a genuinely different image from `avatarUrl`
+   * (measured: a 600x176 banner, against the avatar's square). It is what
+   * bleeds off the top-right corner of YouTube's own panel; a blurred copy of
+   * the avatar is not the same picture and does not look like one.
+   */
+  backdropUrl: string | null;
+  /**
+   * The panel's embedded "top videos" shelf — a `horizontalShelfViewModel` of
+   * ordinary `lockupViewModel` tiles, so these are the same flat `FeedItem`
+   * DTOs every grid already renders (a leading `MixItem`, then `VideoItem`s).
+   *
+   * Extracted **here** rather than by letting the walker descend into the
+   * panel: descending would also splice these tiles into the surrounding
+   * search results, where YouTube does not show them and where they would
+   * read as duplicates of the artist's own videos further down.
+   */
+  shelfItems: FeedItem[];
+}
+
 export interface FeedResult {
   chips: Chip[];
   items: FeedItem[];
   continuation: string | null;
+  /**
+   * Populated only when the response carried an `officialCardViewModel` —
+   * in practice, only ever on a `search.query` response. `null` everywhere
+   * else. Kept on the shared parser return type rather than a bespoke one
+   * because `parseFeed` is one function for every surface; callers that have
+   * no use for it (`feed.home`, `feed.subscriptions`) simply don't forward
+   * it onto the wire — see `rpc/server.ts`.
+   */
+  artistPanel: ArtistPanel | null;
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+/**
+ * `search.query`'s filter parameter (`protocol.md` §3.3, Task 20 §3).
+ *
+ * Not a chip: a chip is a token the server hands back in a response, a filter
+ * is a token the client asks for from a closed set the sidecar owns. This
+ * struct is the wire shape; `parser/search-filters.ts` is what turns it into
+ * the opaque `params` string `/search` actually reads, and carries the
+ * measurements behind each value.
+ */
+export type { SearchFilters } from './parser/search-filters.ts';
+
+/** `search.suggest`'s result — a flat, ranked list of query strings. */
+export interface SearchSuggestResult {
+  suggestions: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +232,10 @@ export interface VideoDetail {
   publishedText: string | null;
   likeText: string | null;
   isSubscribed: boolean;
+  /** The uploading channel's verified checkmark. Same badge as {@link VideoItem.isVerified}. */
+  isVerified: boolean;
+  /** Whether the channel holds an Official Artist Channel badge. Same badge as {@link VideoItem.isArtistChannel}. */
+  isArtistChannel: boolean;
   badges: string[];
   /**
    * When a premiere starts, unix ms — null for anything already published.
@@ -120,6 +251,149 @@ export interface VideoDetail {
   related: FeedItem[];
   relatedContinuation: string | null;
 }
+
+/**
+ * **Captions are deliberately not on `VideoDetail`.** They were, briefly, and
+ * `watch.test.ts` caught what it cost: the `VISIONOS` → `MWEB` fallback
+ * (`protocol.md` §3.8) is a second `/player` round trip, and putting it here put
+ * it on the video-open path — breaking §3.3's "opening a video costs **one**
+ * `/player` call" for the ~29% of videos whose primary caption list is empty.
+ *
+ * `captions.list` is the single source of truth instead. The watch page calls it
+ * alongside `video.info` rather than after it, so the fallback runs concurrently
+ * with the open rather than inside it, and the CC control appears when it
+ * answers. Nothing about playback waits for captions.
+ */
+
+// ---------------------------------------------------------------------------
+// Captions
+// ---------------------------------------------------------------------------
+
+/**
+ * One caption track, as the client picks between them (`protocol.md` §3.8).
+ *
+ * **There is no URL here, and that is the point.** A `timedtext` address is
+ * signed — `sparams`, `signature`, `expire` — and the sidecar is what fetches
+ * it. `id` is an opaque handle the client hands back to `captions.get`. Same
+ * reasoning as hard invariant 2 applied to a different endpoint: nothing outside
+ * this process holds a URL whose signing it does not own.
+ */
+/**
+ * How a caption track is styled, as the picker badges it.
+ *
+ * Deliberately a small closed set rather than a bag of flags: the badge has room
+ * for one word, so the question the sidecar has to answer is "which word", and
+ * answering it here keeps the precedence rule in one place instead of in the
+ * widget. `'plain'` earns no badge.
+ */
+export type CaptionStyling = 'plain' | 'styled' | 'karaoke';
+
+/**
+ * Task 19's caption style, drag offset and document geometry.
+ *
+ * Defined in `captions/style.ts` — where the reasons live — and re-exported here
+ * because they are part of the Flutter contract and this file is where that
+ * contract reads as a whole.
+ */
+export type {
+  CaptionEdgeStyle,
+  CaptionLayout,
+  CaptionOffset,
+  CaptionStyle,
+} from './captions/style.ts';
+import type { CaptionLayout } from './captions/style.ts';
+
+
+export interface CaptionTrack {
+  /**
+   * YouTube's `vssId` — the stable key, and the only field that distinguishes
+   * the manual and auto-generated tracks of one language (".en" vs "a.en").
+   */
+  id: string;
+  /** As YouTube reports it: "en", "de-DE", "es-419". Not normalised. */
+  languageCode: string;
+  /** YouTube's own display name: "English", "English (auto-generated)". */
+  label: string;
+  /** `kind: "asr"`. Word-level at the source, grouped into lines before it ships. */
+  isAutoGenerated: boolean;
+  /**
+   * YouTube's own sub-name for the track, or `''`.
+   *
+   * How a channel tells apart two tracks in one language — "Commentary",
+   * "Forced", "Director's cut". Empty on every track measured so far, which is
+   * the ordinary case; when it is not empty, `label` alone shows two identical
+   * rows.
+   */
+  trackName: string;
+  /**
+   * What kind of styling the track carries, or `null` for **not known yet**,
+   * which is the usual answer.
+   *
+   * Two things about it are counter-intuitive and both were measured 2026-08-19.
+   *
+   * **It cannot be answered from the track list.** The list rides on a cached
+   * `/player`; the styling lives in the *document*, one `timedtext` GET per
+   * track. `captions.list` is on the video-open path (`protocol.md` §3.8 keeps it
+   * there deliberately), so it never fetches — the caller opts in with
+   * `includeStyled`, which is what the caption menu does.
+   *
+   * **It is `pens`, not "any of the three arrays".** The obvious predicate is
+   * wrong: *every* auto-generated track has `wsWinStyles` and `wpWinPositions`
+   * populated, because its rolling window is expressed with them. Measured on
+   * `dQw4w9WgXcQ`, all six tracks — `pens` was 0 on every one, and the two window
+   * arrays were 1 each on the ASR track alone. So the loose predicate badges the
+   * most ordinary tracks in the app and nothing else.
+   *
+   * `'karaoke'` is the narrower answer and wins where both apply: a karaoke
+   * track is styled too, so the badge would be true of everything if the more
+   * specific one did not take precedence. It is detected by a `pPenId` on a
+   * `seg` rather than by the pens themselves — that is the one thing only a
+   * karaoke track does, and it is what drives the per-run highlight.
+   */
+  styled: CaptionStyling | null;
+  /** Whether the track uses non-default positions or overlapping cues. */
+  positional: boolean | null;
+  /** YouTube offers machine translations of it. Translations are out of scope. */
+  isTranslatable: boolean;
+}
+
+/** `captions.list`'s result. An empty array means no CC control, after the fallback. */
+export interface CaptionListResult {
+  tracks: CaptionTrack[];
+}
+
+/**
+ * `captions.get`'s result — one track as a subtitle document.
+ *
+ * `format` is `'ass'` and is sent anyway, because the client hands the body
+ * straight to libmpv and a silent format change is the kind that renders as
+ * nothing at all. Every source format converts to ASS in the sidecar
+ * (`architecture.md` §2.9); Flutter draws no captions.
+ */
+export interface CaptionTrackContent {
+  trackId: string;
+  languageCode: string;
+  format: 'ass';
+  /** A complete ASS document, UTF-8, ready for `sub-add`. */
+  content: string;
+  /** Lines in the document. Telemetry — the client renders nothing from it. */
+  cueCount: number;
+  /**
+   * The geometry this document was written with — Task 19.
+   *
+   * The client needs it to put an invisible hit rectangle over a caption whose
+   * real rectangle nothing publishes: libass composites into the video texture
+   * and mpv exposes only the plain text. Eight numbers per *track*, not per cue,
+   * and sent rather than duplicated as constants in Flutter, because two copies
+   * of a layout constant are two things that have to agree and eventually will
+   * not. `architecture.md` §2.9.
+   */
+  layout: CaptionLayout;
+  styled: CaptionStyling | null;
+  positional: boolean | null;
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Player

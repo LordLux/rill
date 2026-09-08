@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/open_video.dart';
@@ -38,11 +39,13 @@ Future<void> hoverTile(WidgetTester tester) async {
 void main() {
   testWidgets('tapping the tile opens it', (tester) async {
     var taps = 0;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SizedBox(
-          width: 400,
-          child: MediaTile(spec: spec, onTap: () => taps++),
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            child: MediaTile(spec: spec, onTap: () => taps++),
+          ),
         ),
       ),
     ));
@@ -56,15 +59,17 @@ void main() {
     var queued = 0;
     var watchLater = 0;
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SizedBox(
-          width: 400,
-          child: MediaTile(
-            spec: spec,
-            onTap: () => taps++,
-            onAddToQueue: () => queued++,
-            onWatchLater: () => watchLater++,
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            child: MediaTile(
+              spec: spec,
+              onTap: () => taps++,
+              onAddToQueue: () => queued++,
+              onWatchLater: () => watchLater++,
+            ),
           ),
         ),
       ),

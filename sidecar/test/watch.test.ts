@@ -253,7 +253,7 @@ function rawNextBody(): unknown {
 function videoDeps(overrides: { next?: unknown; androidVr?: unknown } = {}) {
   const browse = stubSession({ '/next': overrides.next ?? rawNextBody() });
   const resolve = stubSession(
-    { '/player:ANDROID_VR': overrides.androidVr ?? rawPlayerBody('ANDROID_VR') },
+    { '/player:VISIONOS': overrides.androidVr ?? rawPlayerBody('VISIONOS') },
     false,
   );
   return { browse, resolve };
@@ -299,7 +299,7 @@ describe('video.info', () => {
 
     const playerCalls = deps.resolve.calls.filter((c) => c.endpoint === '/player');
     expect(playerCalls).toHaveLength(1);
-    expect(playerCalls[0]!.params['client']).toBe('ANDROID_VR');
+    expect(playerCalls[0]!.params['client']).toBe('VISIONOS');
 
     // And the browse session was asked for `/next` and nothing else. A `/player`
     // here would be the second round trip this design exists to avoid.
@@ -554,6 +554,86 @@ describe('parseVideoDetail — the owner block', () => {
     expect(detail.channelName).toBe('Somewhere New');
     expect(detail.channelId).toBe('UCSMOQeBJ2RAnuFungnQOxLg');
   });
+
+  test('a verified channel sets isVerified on the VideoDetail', () => {
+    const body = {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoSecondaryInfoRenderer: {
+                    owner: {
+                      videoOwnerRenderer: {
+                        title: { runs: [{ text: 'Verified Channel' }] },
+                        navigationEndpoint: { browseEndpoint: { browseId: 'UCSMOQeBJ2RAnuFungnQOxLg' } },
+                        ownerBadges: [
+                          {
+                            metadataBadgeRenderer: {
+                              style: 'BADGE_STYLE_TYPE_VERIFIED',
+                              tooltip: 'Verified',
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const detail = parseVideoDetail(body, 'verified');
+    expect(detail.isVerified).toBe(true);
+    expect(detail.isArtistChannel).toBe(false);
+  });
+
+  test('an official artist channel sets isArtistChannel and not isVerified', () => {
+    const body = {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoSecondaryInfoRenderer: {
+                    owner: {
+                      videoOwnerRenderer: {
+                        title: { runs: [{ text: 'Artist Channel' }] },
+                        navigationEndpoint: { browseEndpoint: { browseId: 'UCSMOQeBJ2RAnuFungnQOxLg' } },
+                        ownerBadges: [
+                          {
+                            metadataBadgeRenderer: {
+                              style: 'BADGE_STYLE_TYPE_VERIFIED_ARTIST',
+                              tooltip: 'Official Artist Channel',
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const detail = parseVideoDetail(body, 'artist');
+    expect(detail.isArtistChannel).toBe(true);
+    expect(detail.isVerified).toBe(false);
+  });
+
+  test('no ownerBadges yields false for both flags', () => {
+    // Mutation guard: a hardcoded false would also pass the positive tests above
+    // only if someone added the right badge — this confirms the default path.
+    const detail = parseVideoDetail(rawNextBody(), 'no-badge');
+    expect(detail.isVerified).toBe(false);
+    expect(detail.isArtistChannel).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -605,7 +685,7 @@ describe('action.addToWatchLater / addToPlaylist', () => {
 
 describe('playback sessions', () => {
   test('a real open registers a reportable session; a preload does not', async () => {
-    const resolve = stubSession({ '/player:ANDROID_VR': rawPlayerBody('ANDROID_VR') }, false);
+    const resolve = stubSession({ '/player:VISIONOS': rawPlayerBody('VISIONOS') }, false);
     const deps = { session: resolve, ytDlpPath: 'yt-dlp-does-not-exist' };
 
     const preloaded = await openPlayback(deps, { videoId: VIDEO_ID, preload: true });

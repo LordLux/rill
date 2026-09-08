@@ -68,7 +68,7 @@ export interface SessionOptions {
    * The session's base context: `WEB` for browsing and reporting (F3/F6).
    *
    * Stream resolution passes `MWEB` here, but the client that matters is the one
-   * named per `/player` call — tier 1 asks as `ANDROID_VR` through this same
+   * named per `/player` call — tier 1 asks as `VISIONOS` through this same
    * session, and youtubei.js rewrites `context.client` before sending.
    */
   clientType?: 'WEB' | 'MWEB';
@@ -79,7 +79,7 @@ export interface SessionOptions {
   /**
    * Fetch the visitor id from YouTube instead of fabricating one locally.
    *
-   * On by default, and the reason is F5: `ANDROID_VR` — ladder tier 1 — answers
+   * On by default, and the reason is F5: `VISIONOS` — ladder tier 1 — answers
    * `LOGIN_REQUIRED / "Sign in to confirm you're not a bot"` to a fabricated id
    * on about 93% of attempts, and `OK` to a server-issued one 13/13. A cookie
    * session already fetched one (youtubei.js used `generate_session_locally:
@@ -144,7 +144,7 @@ export async function createSession(options: SessionOptions | string = {}): Prom
     // id is a bad bet, not a certain refusal).
     log.warn(
       `visitor id looks locally generated (${visitorId?.length ?? 0} chars); ` +
-        'YouTube refuses those on ~93% of ANDROID_VR resolutions (F5)',
+        'YouTube refuses those on ~93% of VISIONOS resolutions (F5)',
     );
   }
 
@@ -196,7 +196,7 @@ export async function mintVisitorId(): Promise<string> {
     throw new RpcError(
       'UPSTREAM_ERROR',
       `minted a visitor id of ${visitorId?.length ?? 0} chars — that is a locally ` +
-        'fabricated one, not the server-issued id ANDROID_VR needs (F5)',
+        'fabricated one, not the server-issued id VISIONOS needs (F5)',
     );
   }
   return visitorId!;
@@ -230,7 +230,7 @@ export async function refreshVisitorId(session: Session): Promise<string> {
 /**
  * The clients the sidecar issues `/player` calls as.
  *
- * `ANDROID_VR` is ladder tier 1 (F5, F11): plain URLs with no `n`, ranges and
+ * `VISIONOS` is ladder tier 1 (F5, F11): plain URLs with no `n`, ranges and
  * bare GETs accepted, and it seeks on the libmpv media_kit ships. `MWEB` is
  * tier 2 and the only client with a proven decipher path.
  *
@@ -240,12 +240,12 @@ export async function refreshVisitorId(session: Session): Promise<string> {
  * authenticated client that will send them (F6, A5). This comment used to say
  * `WEB` existed so `video.info` could read a duration; that would have been a
  * second `/player` round trip per open, and `video.info` now shares tier 1's
- * `ANDROID_VR` response instead. See `video/info.ts`.
+ * `VISIONOS` response instead. See `video/info.ts`.
  */
-export type PlayerClient = 'WEB' | 'MWEB' | 'ANDROID_VR';
+export type PlayerClient = 'WEB' | 'MWEB' | 'VISIONOS' | 'ANDROID';
 
 /** Every value of `PlayerClient`, for anything that has to sweep them all. */
-export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'ANDROID_VR'];
+export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'VISIONOS', 'ANDROID'];
 
 /**
  * The payload a raw `/player` call needs.
@@ -258,9 +258,9 @@ export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'ANDROID_
  *
  * `client` swaps the request context: youtubei.js rewrites `context.client` to
  * that client's identity before sending (F3: browse as `WEB`, resolve as
- * `ANDROID_VR`). `signatureTimestamp` is sent for every client, including the
+ * `VISIONOS`). `signatureTimestamp` is sent for every client, including the
  * ones whose formats need no deciphering — it describes the player script, not
- * the caller, and spike 03 measured `ANDROID_VR` passing with it.
+ * the caller, and spike 03 measured `VISIONOS` passing with it.
  */
 export function playerPayload(
   session: Session,

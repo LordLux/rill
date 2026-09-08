@@ -1,0 +1,1004 @@
+{
+  "chips": [
+    {
+      "label": "Category 1",
+      "token": "CHIP_TOKEN_1",
+      "selected": false,
+      "scope": "shelf"
+    }
+  ],
+  "items": [
+    {
+      "kind": "channel",
+      "id": "chan_001",
+      "name": "Sanitised Channel 1",
+      "avatarUrl": "https://fake.url/avatar1.jpg",
+      "subscriberText": "Sanitised Subscribers 1",
+      "descriptionSnippet": "Sanitised Snippet 1",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_002",
+      "name": "Sanitised Channel 2",
+      "avatarUrl": "https://fake.url/avatar2.jpg",
+      "subscriberText": "Sanitised Subscribers 2",
+      "descriptionSnippet": "Sanitised Snippet 2",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_003",
+      "name": "Sanitised Channel 3",
+      "avatarUrl": "https://fake.url/avatar3.jpg",
+      "subscriberText": "Sanitised Subscribers 3",
+      "descriptionSnippet": "Sanitised Snippet 3",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_004",
+      "name": "Sanitised Channel 4",
+      "avatarUrl": "https://fake.url/avatar4.jpg",
+      "subscriberText": "Sanitised Subscribers 4",
+      "descriptionSnippet": "Sanitised Snippet 4",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_005",
+      "name": "Sanitised Channel 5",
+      "avatarUrl": "https://fake.url/avatar5.jpg",
+      "subscriberText": "Sanitised Subscribers 5",
+      "descriptionSnippet": "Sanitised Snippet 5",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_006",
+      "name": "Sanitised Channel 6",
+      "avatarUrl": "https://fake.url/avatar6.jpg",
+      "subscriberText": "Sanitised Subscribers 6",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_007",
+      "name": "Sanitised Channel 7",
+      "avatarUrl": "https://fake.url/avatar7.jpg",
+      "subscriberText": "Sanitised Subscribers 7",
+      "descriptionSnippet": "Sanitised Snippet 7",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_008",
+      "name": "Sanitised Channel 8",
+      "avatarUrl": "https://fake.url/avatar8.jpg",
+      "subscriberText": "Sanitised Subscribers 8",
+      "descriptionSnippet": "Sanitised Snippet 8",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_009",
+      "name": "Sanitised Channel 9",
+      "avatarUrl": "https://fake.url/avatar9.jpg",
+      "subscriberText": "Sanitised Subscribers 9",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_010",
+      "name": "Sanitised Channel 10",
+      "avatarUrl": "https://fake.url/avatar10.jpg",
+      "subscriberText": "Sanitised Subscribers 10",
+      "descriptionSnippet": "Sanitised Snippet 10",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_011",
+      "name": "Sanitised Channel 11",
+      "avatarUrl": "https://fake.url/avatar11.jpg",
+      "subscriberText": "Sanitised Subscribers 11",
+      "descriptionSnippet": "Sanitised Snippet 11",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_012",
+      "name": "Sanitised Channel 12",
+      "avatarUrl": "https://fake.url/avatar12.jpg",
+      "subscriberText": "Sanitised Subscribers 12",
+      "descriptionSnippet": "Sanitised Snippet 12",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_013",
+      "name": "Sanitised Channel 13",
+      "avatarUrl": "https://fake.url/avatar13.jpg",
+      "subscriberText": "Sanitised Subscribers 13",
+      "descriptionSnippet": "Sanitised Snippet 13",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_014",
+      "name": "Sanitised Channel 14",
+      "avatarUrl": "https://fake.url/avatar14.jpg",
+      "subscriberText": "Sanitised Subscribers 14",
+      "descriptionSnippet": "Sanitised Snippet 14",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_015",
+      "name": "Sanitised Channel 15",
+      "avatarUrl": "https://fake.url/avatar15.jpg",
+      "subscriberText": "Sanitised Subscribers 15",
+      "descriptionSnippet": "Sanitised Snippet 15",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_016",
+      "name": "Sanitised Channel 16",
+      "avatarUrl": "https://fake.url/avatar16.jpg",
+      "subscriberText": "Sanitised Subscribers 16",
+      "descriptionSnippet": "Sanitised Snippet 16",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_017",
+      "name": "Sanitised Channel 17",
+      "avatarUrl": "https://fake.url/avatar17.jpg",
+      "subscriberText": "Sanitised Subscribers 17",
+      "descriptionSnippet": "Sanitised Snippet 17",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_018",
+      "name": "Sanitised Channel 18",
+      "avatarUrl": "https://fake.url/avatar18.jpg",
+      "subscriberText": "Sanitised Subscribers 18",
+      "descriptionSnippet": "Sanitised Snippet 18",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_019",
+      "name": "Sanitised Channel 19",
+      "avatarUrl": "https://fake.url/avatar19.jpg",
+      "subscriberText": "Sanitised Subscribers 19",
+      "descriptionSnippet": "Sanitised Snippet 19",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_020",
+      "name": "Sanitised Channel 20",
+      "avatarUrl": "https://fake.url/avatar20.jpg",
+      "subscriberText": "Sanitised Subscribers 20",
+      "descriptionSnippet": "Sanitised Snippet 20",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_021",
+      "name": "Sanitised Channel 21",
+      "avatarUrl": "https://fake.url/avatar21.jpg",
+      "subscriberText": "Sanitised Subscribers 21",
+      "descriptionSnippet": "Sanitised Snippet 21",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_022",
+      "name": "Sanitised Channel 22",
+      "avatarUrl": "https://fake.url/avatar22.jpg",
+      "subscriberText": "Sanitised Subscribers 22",
+      "descriptionSnippet": "Sanitised Snippet 22",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_023",
+      "name": "Sanitised Channel 23",
+      "avatarUrl": "https://fake.url/avatar23.jpg",
+      "subscriberText": "Sanitised Subscribers 23",
+      "descriptionSnippet": "Sanitised Snippet 23",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_024",
+      "name": "Sanitised Channel 24",
+      "avatarUrl": "https://fake.url/avatar24.jpg",
+      "subscriberText": "Sanitised Subscribers 24",
+      "descriptionSnippet": "Sanitised Snippet 24",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_025",
+      "name": "Sanitised Channel 25",
+      "avatarUrl": "https://fake.url/avatar25.jpg",
+      "subscriberText": "Sanitised Subscribers 25",
+      "descriptionSnippet": "Sanitised Snippet 25",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_026",
+      "name": "Sanitised Channel 26",
+      "avatarUrl": "https://fake.url/avatar26.jpg",
+      "subscriberText": "Sanitised Subscribers 26",
+      "descriptionSnippet": "Sanitised Snippet 26",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_027",
+      "name": "Sanitised Channel 27",
+      "avatarUrl": "https://fake.url/avatar27.jpg",
+      "subscriberText": "Sanitised Subscribers 27",
+      "descriptionSnippet": "Sanitised Snippet 27",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_028",
+      "name": "Sanitised Channel 28",
+      "avatarUrl": "https://fake.url/avatar28.jpg",
+      "subscriberText": "Sanitised Subscribers 28",
+      "descriptionSnippet": "Sanitised Snippet 28",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_029",
+      "name": "Sanitised Channel 29",
+      "avatarUrl": "https://fake.url/avatar29.jpg",
+      "subscriberText": "Sanitised Subscribers 29",
+      "descriptionSnippet": "Sanitised Snippet 29",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_030",
+      "name": "Sanitised Channel 30",
+      "avatarUrl": "https://fake.url/avatar30.jpg",
+      "subscriberText": null,
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_031",
+      "name": "Sanitised Channel 31",
+      "avatarUrl": "https://fake.url/avatar31.jpg",
+      "subscriberText": "Sanitised Subscribers 31",
+      "descriptionSnippet": "Sanitised Snippet 31",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_032",
+      "name": "Sanitised Channel 32",
+      "avatarUrl": "https://fake.url/avatar32.jpg",
+      "subscriberText": "Sanitised Subscribers 32",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_033",
+      "name": "Sanitised Channel 33",
+      "avatarUrl": "https://fake.url/avatar33.jpg",
+      "subscriberText": "Sanitised Subscribers 33",
+      "descriptionSnippet": "Sanitised Snippet 33",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_034",
+      "name": "Sanitised Channel 34",
+      "avatarUrl": "https://fake.url/avatar34.jpg",
+      "subscriberText": "Sanitised Subscribers 34",
+      "descriptionSnippet": "Sanitised Snippet 34",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_035",
+      "name": "Sanitised Channel 35",
+      "avatarUrl": "https://fake.url/avatar35.jpg",
+      "subscriberText": "Sanitised Subscribers 35",
+      "descriptionSnippet": "Sanitised Snippet 35",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_036",
+      "name": "Sanitised Channel 36",
+      "avatarUrl": "https://fake.url/avatar36.jpg",
+      "subscriberText": "Sanitised Subscribers 36",
+      "descriptionSnippet": "Sanitised Snippet 36",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_037",
+      "name": "Sanitised Channel 37",
+      "avatarUrl": "https://fake.url/avatar37.jpg",
+      "subscriberText": "Sanitised Subscribers 37",
+      "descriptionSnippet": "Sanitised Snippet 37",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_038",
+      "name": "Sanitised Channel 38",
+      "avatarUrl": "https://fake.url/avatar38.jpg",
+      "subscriberText": "Sanitised Subscribers 38",
+      "descriptionSnippet": "Sanitised Snippet 38",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_039",
+      "name": "Sanitised Channel 39",
+      "avatarUrl": "https://fake.url/avatar39.jpg",
+      "subscriberText": "Sanitised Subscribers 39",
+      "descriptionSnippet": "Sanitised Snippet 39",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_040",
+      "name": "Sanitised Channel 40",
+      "avatarUrl": "https://fake.url/avatar40.jpg",
+      "subscriberText": "Sanitised Subscribers 40",
+      "descriptionSnippet": "Sanitised Snippet 40",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_041",
+      "name": "Sanitised Channel 41",
+      "avatarUrl": "https://fake.url/avatar41.jpg",
+      "subscriberText": "Sanitised Subscribers 41",
+      "descriptionSnippet": "Sanitised Snippet 41",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_042",
+      "name": "Sanitised Channel 42",
+      "avatarUrl": "https://fake.url/avatar42.jpg",
+      "subscriberText": null,
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_043",
+      "name": "Sanitised Channel 43",
+      "avatarUrl": "https://fake.url/avatar43.jpg",
+      "subscriberText": "Sanitised Subscribers 43",
+      "descriptionSnippet": "Sanitised Snippet 43",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_044",
+      "name": "Sanitised Channel 44",
+      "avatarUrl": "https://fake.url/avatar44.jpg",
+      "subscriberText": "Sanitised Subscribers 44",
+      "descriptionSnippet": "Sanitised Snippet 44",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_045",
+      "name": "Sanitised Channel 45",
+      "avatarUrl": "https://fake.url/avatar45.jpg",
+      "subscriberText": "Sanitised Subscribers 45",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_046",
+      "name": "Sanitised Channel 46",
+      "avatarUrl": "https://fake.url/avatar46.jpg",
+      "subscriberText": "Sanitised Subscribers 46",
+      "descriptionSnippet": "Sanitised Snippet 46",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_047",
+      "name": "Sanitised Channel 47",
+      "avatarUrl": "https://fake.url/avatar47.jpg",
+      "subscriberText": "Sanitised Subscribers 47",
+      "descriptionSnippet": "Sanitised Snippet 47",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_048",
+      "name": "Sanitised Channel 48",
+      "avatarUrl": "https://fake.url/avatar48.jpg",
+      "subscriberText": "Sanitised Subscribers 48",
+      "descriptionSnippet": "Sanitised Snippet 48",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_049",
+      "name": "Sanitised Channel 49",
+      "avatarUrl": "https://fake.url/avatar49.jpg",
+      "subscriberText": "Sanitised Subscribers 49",
+      "descriptionSnippet": "Sanitised Snippet 49",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_050",
+      "name": "Sanitised Channel 50",
+      "avatarUrl": "https://fake.url/avatar50.jpg",
+      "subscriberText": "Sanitised Subscribers 50",
+      "descriptionSnippet": "Sanitised Snippet 50",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_051",
+      "name": "Sanitised Channel 51",
+      "avatarUrl": "https://fake.url/avatar51.jpg",
+      "subscriberText": "Sanitised Subscribers 51",
+      "descriptionSnippet": "Sanitised Snippet 51",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_052",
+      "name": "Sanitised Channel 52",
+      "avatarUrl": "https://fake.url/avatar52.jpg",
+      "subscriberText": "Sanitised Subscribers 52",
+      "descriptionSnippet": "Sanitised Snippet 52",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_053",
+      "name": "Sanitised Channel 53",
+      "avatarUrl": "https://fake.url/avatar53.jpg",
+      "subscriberText": "Sanitised Subscribers 53",
+      "descriptionSnippet": "Sanitised Snippet 53",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_054",
+      "name": "Sanitised Channel 54",
+      "avatarUrl": "https://fake.url/avatar54.jpg",
+      "subscriberText": "Sanitised Subscribers 54",
+      "descriptionSnippet": "Sanitised Snippet 54",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_055",
+      "name": "Sanitised Channel 55",
+      "avatarUrl": "https://fake.url/avatar55.jpg",
+      "subscriberText": "Sanitised Subscribers 55",
+      "descriptionSnippet": "Sanitised Snippet 55",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_056",
+      "name": "Sanitised Channel 56",
+      "avatarUrl": "https://fake.url/avatar56.jpg",
+      "subscriberText": "Sanitised Subscribers 56",
+      "descriptionSnippet": "Sanitised Snippet 56",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_057",
+      "name": "Sanitised Channel 57",
+      "avatarUrl": "https://fake.url/avatar57.jpg",
+      "subscriberText": "Sanitised Subscribers 57",
+      "descriptionSnippet": "Sanitised Snippet 57",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_058",
+      "name": "Sanitised Channel 58",
+      "avatarUrl": "https://fake.url/avatar58.jpg",
+      "subscriberText": "Sanitised Subscribers 58",
+      "descriptionSnippet": "Sanitised Snippet 58",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_059",
+      "name": "Sanitised Channel 59",
+      "avatarUrl": "https://fake.url/avatar59.jpg",
+      "subscriberText": "Sanitised Subscribers 59",
+      "descriptionSnippet": "Sanitised Snippet 59",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_060",
+      "name": "Sanitised Channel 60",
+      "avatarUrl": "https://fake.url/avatar60.jpg",
+      "subscriberText": "Sanitised Subscribers 60",
+      "descriptionSnippet": "Sanitised Snippet 60",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_061",
+      "name": "Sanitised Channel 61",
+      "avatarUrl": "https://fake.url/avatar61.jpg",
+      "subscriberText": "Sanitised Subscribers 61",
+      "descriptionSnippet": "Sanitised Snippet 61",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_062",
+      "name": "Sanitised Channel 62",
+      "avatarUrl": "https://fake.url/avatar62.jpg",
+      "subscriberText": "Sanitised Subscribers 62",
+      "descriptionSnippet": "Sanitised Snippet 62",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_063",
+      "name": "Sanitised Channel 63",
+      "avatarUrl": "https://fake.url/avatar63.jpg",
+      "subscriberText": "Sanitised Subscribers 63",
+      "descriptionSnippet": "Sanitised Snippet 63",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_064",
+      "name": "Sanitised Channel 64",
+      "avatarUrl": "https://fake.url/avatar64.jpg",
+      "subscriberText": "Sanitised Subscribers 64",
+      "descriptionSnippet": "Sanitised Snippet 64",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_065",
+      "name": "Sanitised Channel 65",
+      "avatarUrl": "https://fake.url/avatar65.jpg",
+      "subscriberText": "Sanitised Subscribers 65",
+      "descriptionSnippet": "Sanitised Snippet 65",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_066",
+      "name": "Sanitised Channel 66",
+      "avatarUrl": "https://fake.url/avatar66.jpg",
+      "subscriberText": "Sanitised Subscribers 66",
+      "descriptionSnippet": "Sanitised Snippet 66",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_067",
+      "name": "Sanitised Channel 67",
+      "avatarUrl": "https://fake.url/avatar67.jpg",
+      "subscriberText": "Sanitised Subscribers 67",
+      "descriptionSnippet": "Sanitised Snippet 67",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_068",
+      "name": "Sanitised Channel 68",
+      "avatarUrl": "https://fake.url/avatar68.jpg",
+      "subscriberText": "Sanitised Subscribers 68",
+      "descriptionSnippet": "Sanitised Snippet 68",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_069",
+      "name": "Sanitised Channel 69",
+      "avatarUrl": "https://fake.url/avatar69.jpg",
+      "subscriberText": "Sanitised Subscribers 69",
+      "descriptionSnippet": "Sanitised Snippet 69",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_070",
+      "name": "Sanitised Channel 70",
+      "avatarUrl": "https://fake.url/avatar70.jpg",
+      "subscriberText": "Sanitised Subscribers 70",
+      "descriptionSnippet": "Sanitised Snippet 70",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_071",
+      "name": "Sanitised Channel 71",
+      "avatarUrl": "https://fake.url/avatar71.jpg",
+      "subscriberText": "Sanitised Subscribers 71",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_072",
+      "name": "Sanitised Channel 72",
+      "avatarUrl": "https://fake.url/avatar72.jpg",
+      "subscriberText": "Sanitised Subscribers 72",
+      "descriptionSnippet": "Sanitised Snippet 72",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_073",
+      "name": "Sanitised Channel 73",
+      "avatarUrl": "https://fake.url/avatar73.jpg",
+      "subscriberText": "Sanitised Subscribers 73",
+      "descriptionSnippet": "Sanitised Snippet 73",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_074",
+      "name": "Sanitised Channel 74",
+      "avatarUrl": "https://fake.url/avatar74.jpg",
+      "subscriberText": "Sanitised Subscribers 74",
+      "descriptionSnippet": "Sanitised Snippet 74",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_075",
+      "name": "Sanitised Channel 75",
+      "avatarUrl": "https://fake.url/avatar75.jpg",
+      "subscriberText": "Sanitised Subscribers 75",
+      "descriptionSnippet": "Sanitised Snippet 75",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_076",
+      "name": "Sanitised Channel 76",
+      "avatarUrl": "https://fake.url/avatar76.jpg",
+      "subscriberText": "Sanitised Subscribers 76",
+      "descriptionSnippet": "Sanitised Snippet 76",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_077",
+      "name": "Sanitised Channel 77",
+      "avatarUrl": "https://fake.url/avatar77.jpg",
+      "subscriberText": "Sanitised Subscribers 77",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_078",
+      "name": "Sanitised Channel 78",
+      "avatarUrl": "https://fake.url/avatar78.jpg",
+      "subscriberText": "Sanitised Subscribers 78",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_079",
+      "name": "Sanitised Channel 79",
+      "avatarUrl": "https://fake.url/avatar79.jpg",
+      "subscriberText": "Sanitised Subscribers 79",
+      "descriptionSnippet": "Sanitised Snippet 79",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_080",
+      "name": "Sanitised Channel 80",
+      "avatarUrl": "https://fake.url/avatar80.jpg",
+      "subscriberText": "Sanitised Subscribers 80",
+      "descriptionSnippet": null,
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_081",
+      "name": "Sanitised Channel 81",
+      "avatarUrl": "https://fake.url/avatar81.jpg",
+      "subscriberText": "Sanitised Subscribers 81",
+      "descriptionSnippet": "Sanitised Snippet 81",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_082",
+      "name": "Sanitised Channel 82",
+      "avatarUrl": "https://fake.url/avatar82.jpg",
+      "subscriberText": "Sanitised Subscribers 82",
+      "descriptionSnippet": "Sanitised Snippet 82",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_083",
+      "name": "Sanitised Channel 83",
+      "avatarUrl": "https://fake.url/avatar83.jpg",
+      "subscriberText": "Sanitised Subscribers 83",
+      "descriptionSnippet": "Sanitised Snippet 83",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_084",
+      "name": "Sanitised Channel 84",
+      "avatarUrl": "https://fake.url/avatar84.jpg",
+      "subscriberText": "Sanitised Subscribers 84",
+      "descriptionSnippet": "Sanitised Snippet 84",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_085",
+      "name": "Sanitised Channel 85",
+      "avatarUrl": "https://fake.url/avatar85.jpg",
+      "subscriberText": "Sanitised Subscribers 85",
+      "descriptionSnippet": "Sanitised Snippet 85",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_086",
+      "name": "Sanitised Channel 86",
+      "avatarUrl": "https://fake.url/avatar86.jpg",
+      "subscriberText": "Sanitised Subscribers 86",
+      "descriptionSnippet": "Sanitised Snippet 86",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_087",
+      "name": "Sanitised Channel 87",
+      "avatarUrl": "https://fake.url/avatar87.jpg",
+      "subscriberText": "Sanitised Subscribers 87",
+      "descriptionSnippet": "Sanitised Snippet 87",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_088",
+      "name": "Sanitised Channel 88",
+      "avatarUrl": "https://fake.url/avatar88.jpg",
+      "subscriberText": "Sanitised Subscribers 88",
+      "descriptionSnippet": "Sanitised Snippet 88",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_089",
+      "name": "Sanitised Channel 89",
+      "avatarUrl": "https://fake.url/avatar89.jpg",
+      "subscriberText": "Sanitised Subscribers 89",
+      "descriptionSnippet": "Sanitised Snippet 89",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_090",
+      "name": "Sanitised Channel 90",
+      "avatarUrl": "https://fake.url/avatar90.jpg",
+      "subscriberText": "Sanitised Subscribers 90",
+      "descriptionSnippet": "Sanitised Snippet 90",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_091",
+      "name": "Sanitised Channel 91",
+      "avatarUrl": "https://fake.url/avatar91.jpg",
+      "subscriberText": "Sanitised Subscribers 91",
+      "descriptionSnippet": "Sanitised Snippet 91",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_092",
+      "name": "Sanitised Channel 92",
+      "avatarUrl": "https://fake.url/avatar92.jpg",
+      "subscriberText": "Sanitised Subscribers 92",
+      "descriptionSnippet": "Sanitised Snippet 92",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_093",
+      "name": "Sanitised Channel 93",
+      "avatarUrl": "https://fake.url/avatar93.jpg",
+      "subscriberText": "Sanitised Subscribers 93",
+      "descriptionSnippet": "Sanitised Snippet 93",
+      "isVerified": true,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_094",
+      "name": "Sanitised Channel 94",
+      "avatarUrl": "https://fake.url/avatar94.jpg",
+      "subscriberText": "Sanitised Subscribers 94",
+      "descriptionSnippet": "Sanitised Snippet 94",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_095",
+      "name": "Sanitised Channel 95",
+      "avatarUrl": "https://fake.url/avatar95.jpg",
+      "subscriberText": "Sanitised Subscribers 95",
+      "descriptionSnippet": "Sanitised Snippet 95",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_096",
+      "name": "Sanitised Channel 96",
+      "avatarUrl": "https://fake.url/avatar96.jpg",
+      "subscriberText": "Sanitised Subscribers 96",
+      "descriptionSnippet": "Sanitised Snippet 96",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_097",
+      "name": "Sanitised Channel 97",
+      "avatarUrl": "https://fake.url/avatar97.jpg",
+      "subscriberText": "Sanitised Subscribers 97",
+      "descriptionSnippet": "Sanitised Snippet 97",
+      "isVerified": false,
+      "isArtistChannel": false
+    },
+    {
+      "kind": "channel",
+      "id": "chan_098",
+      "name": "Sanitised Channel 98",
+      "avatarUrl": "https://fake.url/avatar98.jpg",
+      "subscriberText": "Sanitised Subscribers 98",
+      "descriptionSnippet": "Sanitised Snippet 98",
+      "isVerified": false,
+      "isArtistChannel": true
+    },
+    {
+      "kind": "channel",
+      "id": "chan_099",
+      "name": "Sanitised Channel 99",
+      "avatarUrl": "https://fake.url/avatar99.jpg",
+      "subscriberText": "Sanitised Subscribers 99",
+      "descriptionSnippet": "Sanitised Snippet 99",
+      "isVerified": true,
+      "isArtistChannel": false
+    }
+  ],
+  "continuation": "CONTINUATION_TOKEN_1",
+  "artistPanel": null
+}

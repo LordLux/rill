@@ -571,7 +571,11 @@ class PlaybackController extends Notifier<PlaybackState> {
     );
 
     try {
-      await engine.open(variant, play: wasPlaying);
+      // `retainSubtitle` because the reopen drops mpv's external subtitle track
+      // (F19 reopens the media; §2.9). Reattaching inside `engine.open` rather
+      // than here puts it after the audio attach, on the same freshly-loaded
+      // file, instead of racing the load from out here.
+      await engine.open(variant, play: wasPlaying, retainSubtitle: true);
       if (generation != _generation || _disposed) return;
 
       // **Subscribed before the seek is issued**: `positionStream` is a

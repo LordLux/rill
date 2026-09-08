@@ -1,13 +1,15 @@
 /// The player's keyboard shortcuts, and the guard that keeps them out of text.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../captions_controller.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
-import '../captions_controller.dart';
 import 'settings_menu.dart';
 import 'view_mode.dart';
 
@@ -21,15 +23,13 @@ enum PlayerAction {
   fullscreen,
   theatre,
   escape,
-  seekToStart,
-  seekToEnd,
   seekToDecile,
   frameBackward,
   frameForward,
   previous,
   next,
   miniPlayer,
-  toggleCaptions,
+  captions,
 }
 
 /// One resolved key press. [seconds] carries ∓5 or ∓10; [decile] carries 0–9.
@@ -109,11 +109,14 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   if (key == LogicalKeyboardKey.keyF) return const PlayerShortcut(PlayerAction.fullscreen);
   if (key == LogicalKeyboardKey.keyT) return const PlayerShortcut(PlayerAction.theatre);
   if (key == LogicalKeyboardKey.keyI) return const PlayerShortcut(PlayerAction.miniPlayer);
-  if (key == LogicalKeyboardKey.keyC) return const PlayerShortcut(PlayerAction.toggleCaptions);
+  // `C`, the same key youtube.com uses. Subject to [textEntryHasFocus] like
+  // every other letter here — typing "c" in the search box must not turn on
+  // subtitles behind it.
+  if (key == LogicalKeyboardKey.keyC) return const PlayerShortcut(PlayerAction.captions);
   if (key == LogicalKeyboardKey.escape) return const PlayerShortcut(PlayerAction.escape);
 
-  if (key == LogicalKeyboardKey.home) return const PlayerShortcut(PlayerAction.seekToStart);
-  if (key == LogicalKeyboardKey.end) return const PlayerShortcut(PlayerAction.seekToEnd);
+  // TODO add end and home for seeking to the start and end of the video
+
   // `,` and `.` step one frame; with Shift they step one second.
   //
   // **Both spellings of each key, and that is not belt-and-braces.** Flutter
@@ -243,10 +246,6 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         // The one shortcut that can decline. With neither mode on, `Esc` is
         // somebody else's key.
         return view.escape();
-      case PlayerAction.seekToStart:
-        playback.seekToFraction(0);
-      case PlayerAction.seekToEnd:
-        playback.seekToFraction(1);
       case PlayerAction.seekToDecile:
         playback.seekToFraction((shortcut.decile ?? 0) / 10);
       case PlayerAction.frameBackward:
@@ -259,8 +258,13 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         playback.next();
       case PlayerAction.miniPlayer:
         toMiniPlayerIn(ProviderScope.containerOf(context, listen: false));
-      case PlayerAction.toggleCaptions:
-        ref.read(captionsProvider.notifier).toggle();
+      case PlayerAction.captions:
+        // Declines when the video has no tracks, rather than swallowing the key
+        // — the same shape as `escape`. `toggle()` is already a no-op on an
+        // empty list; returning false here also leaves `c` to the rest of the
+        // app on a video that cannot have captions.
+        if (!ref.read(captionsProvider).hasTracks) return false;
+        unawaited(ref.read(captionsProvider.notifier).toggle());
     }
     return true;
   }

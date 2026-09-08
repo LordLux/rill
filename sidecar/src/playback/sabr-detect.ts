@@ -5,7 +5,7 @@
  * has gone SABR-only (F3). That is a dated observation about YouTube's policy,
  * not a property of the protocol — the day `MWEB` follows `WEB`, tier 2 of the
  * resolution ladder stops working and the SABR → DASH bridge stops being
- * deferrable. Tier 1 resolves as `ANDROID_VR` and is a separate bet with a
+ * deferrable. Tier 1 resolves as `VISIONOS` and is a separate bet with a
  * separate expiry date; this one is about `MWEB`.
  *
  * This function is how we find that out from a failing test rather than from a

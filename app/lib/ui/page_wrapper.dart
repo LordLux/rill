@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'pages/all_subscriptions.dart' show allSubscriptionsRouteName;
+import 'pages/subscriptions.dart';
+import 'player_shell.dart' show currentRouteProvider, rootNavigatorKey;
 import 'widgets/topbar.dart';
 
 const String drawerPrefsKey = 'left_drawer_open';
@@ -46,9 +49,31 @@ class PageWrapper extends ConsumerStatefulWidget {
 class _PageWrapperState extends ConsumerState<PageWrapper> {
   void _toggleDrawer() => ref.read(drawerStateProvider.notifier).toggle();
 
+  void _openSubscriptions() {
+    if (ref.read(currentRouteProvider) == subscriptionsRouteName) return;
+    rootNavigatorKey.currentState?.push(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: subscriptionsRouteName),
+        builder: (_) => const SubscriptionsPage(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDrawerOpen = ref.watch(drawerStateProvider);
+    final currentRoute = ref.watch(currentRouteProvider);
+    // "All subscriptions" is reached from the Subscriptions page (Task 21
+    // §4) and is still part of that section, not a route of its own the
+    // drawer knows about — so it keeps Subscriptions highlighted rather
+    // than falling through to `!isOnSubscriptions` and lighting up Home,
+    // which is wrong for *any* non-subscriptions, non-home page (watch,
+    // search — this just happened to be the one someone noticed first).
+    final isOnSubscriptions = currentRoute == subscriptionsRouteName || currentRoute == allSubscriptionsRouteName;
+    // The root route never gets a `RouteSettings.name` (see `CurrentRoute.build`
+    // in `player_shell.dart`), so `null` *is* "on home" — not "isn't on
+    // Subscriptions".
+    final isOnHome = currentRoute == null;
 
     return Scaffold(
       appBar: TopBar(
@@ -75,8 +100,10 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
                     icon: Icons.home,
                     label: 'Home',
                     isOpen: isDrawerOpen,
-                    isSelected: true, // Example of selected state
-                    onTap: () {},
+                    isSelected: isOnHome,
+                    onTap: () {
+                      rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+                    },
                   ),
                   // No Shorts entry. The parser strips Shorts by design — it is
                   // the product's first requirement — so the item could never
@@ -87,7 +114,8 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
                     icon: Icons.subscriptions_outlined,
                     label: 'Subscriptions',
                     isOpen: isDrawerOpen,
-                    onTap: () {},
+                    isSelected: isOnSubscriptions,
+                    onTap: _openSubscriptions,
                   ),
                   if (isDrawerOpen) ...[
                     const Divider(height: 32),
@@ -170,7 +198,7 @@ class _DrawerItem extends StatelessWidget {
             height: isOpen ? _openHeight : _closedHeight,
             child: Row(
               children: [
-                // 1. Anchored Icon & Vertical Label Container (Fixed Width)
+                // Anchored Icon & Vertical Label Container (Fixed Width)
                 SizedBox(
                   width: _width, // Fixed width for icon and vertical label
                   child: Column(
@@ -215,7 +243,7 @@ class _DrawerItem extends StatelessWidget {
                   ),
                 ),
 
-                // 2. Horizontal Label (Visible only when OPEN)
+                // Horizontal Label (Visible only when OPEN)
                 Expanded(
                   child: AnimatedOpacity(
                     duration: _animDuration,

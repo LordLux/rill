@@ -19,7 +19,20 @@ sealed class FeedItem with _$FeedItem {
     required bool isLive,
     String? viewCountText,
     String? publishedText,
+    String? descriptionSnippet,
     @Default([]) List<String> badges,
+    /// A Short, classified rather than stripped (Task 21 §1) — the ordinary
+    /// videoRenderer/lockupViewModel shape carrying a SHORTS-styled duration
+    /// overlay. The dedicated Shorts shelf is a different renderer entirely
+    /// and never reaches this DTO.
+    @Default(false) bool isShort,
+    /// The ♪ on YouTube's own duration badge, per video — distinct from
+    /// [isArtistChannel], which is per channel and can disagree with this.
+    @Default(false) bool isMusic,
+    /// The uploading channel's verified checkmark.
+    @Default(false) bool isVerified,
+    /// The uploading channel's "Official Artist Channel" badge.
+    @Default(false) bool isArtistChannel,
     /// When a premiere starts, unix ms — null for everything already published.
     ///
     /// Carried on the tile so a card can offer a reminder without a `/player`
@@ -56,6 +69,9 @@ sealed class FeedItem with _$FeedItem {
     required String name,
     required String avatarUrl,
     String? subscriberText,
+    String? descriptionSnippet,
+    @Default(false) bool isVerified,
+    @Default(false) bool isArtistChannel,
   }) = ChannelItem;
 
   @FreezedUnionValue('unknown')

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../data/playback/engine.dart';
 import '../data/rpc/client.dart';
 import '../theme/accent.dart';
 import '../theme/app_theme.dart';
@@ -195,7 +196,8 @@ class HarnessPage extends StatefulWidget {
 
 class _HarnessPageState extends State<HarnessPage> {
   late final Player _player = Player(
-    configuration: PlayerConfiguration(logLevel: widget.config.logLevel),
+    // Matches the real engine, so the harness measures what ships.
+    configuration: PlayerConfiguration(libass: kLibassEnabled, logLevel: widget.config.logLevel),
   );
 
   late final VideoController _video = VideoController(
@@ -442,7 +444,7 @@ class _HarnessPageState extends State<HarnessPage> {
                       style: TextStyle(color: theme.colorScheme.error, fontSize: 24),
                     ),
                   )
-                : Video(controller: _video),
+                : Video(controller: _video, subtitleViewConfiguration: kNoFlutterSubtitles),
           ),
           Padding(
             padding: const EdgeInsets.all(12),

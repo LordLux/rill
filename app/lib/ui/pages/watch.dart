@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 
@@ -20,16 +19,21 @@ import '../../domain/video_detail.dart';
 import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
+import '../player_shell.dart' show currentRouteProvider, watchRouteName;
 import '../playback_controller.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
+import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
+import '../widgets/subscribe_button.dart';
+import 'watch_layout.dart';
+import '../../theme/screen_values.dart';
 
 /// Where the two sizing rules meet — architecture §2.8
-const double _referenceAspect = 16 / 9;
+const double _referenceAspect = ScreenValues.normalAspectRatio;
 
 const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
@@ -39,6 +43,16 @@ const Key premiereNotifyKey = ValueKey('premiere-notify');
 /// An undecoded pair is the absence of a value, not 16:9, so the last real ratio
 /// stands until the next one arrives — architecture §2.8. [_referenceAspect] is
 /// only the answer before anything has decoded.
+/// Public alias, for the one mount point outside this file that needs it.
+///
+/// Fullscreen lives in `player_shell.dart` and draws the same texture (§2.8), so
+/// its caption handle needs the same ratio the watch page letterboxes against.
+/// Exported rather than duplicated, because two providers computing one ratio
+/// would eventually disagree about it during a switch.
+final fullscreenAspectRatioProvider = Provider<double>(
+  (ref) => ref.watch(_aspectRatioProvider).value ?? _referenceAspect,
+);
+
 final _aspectRatioProvider = StreamProvider.autoDispose<double>((ref) async* {
   final engine = ref.watch(playbackEngineProvider);
 
@@ -133,7 +147,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
         builder: (context, constraints) {
           final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
           final detail = info.value;
-          final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (16 / 9);
+          final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
           final queueHasItems = ref.watch(queueProvider.select((q) => q.items.length > 1));
 
           return TweenAnimationBuilder<double>(
@@ -141,154 +155,61 @@ class _WatchPageState extends ConsumerState<WatchPage> {
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutCubic,
             builder: (context, aspectRatio, _) {
-              double railWidth = 0;
-              double mainContainerWidth = constraints.maxWidth;
-              final isDesktop = constraints.maxWidth >= 889;
-
-              final double maxTheaterWidth = 1280.0 + 453.0 + 24.0 * 3;
-              if (isDesktop) {
-                final maxAllowedWidth = theatre ? maxTheaterWidth : 1950.0;
-                final effectiveWidth = math.min(constraints.maxWidth, maxAllowedWidth);
-                if (effectiveWidth >= 1042.0) {
-                  railWidth = 453.0;
-                } else {
-                  railWidth = math.max(300.0, effectiveWidth - 589.0);
-                }
-                mainContainerWidth = effectiveWidth - railWidth;
-              }
-
               final viewportHeight = MediaQuery.of(context).size.height;
-              final maxPlayerHeight = math.max(480.0, viewportHeight - 169.0);
 
-              final isTwoColumn = isDesktop;
-              final normalPlayerWidth = mainContainerWidth - 32;
+              final geometry = computeWatchGeometry(
+                availableWidth: constraints.maxWidth,
+                viewportHeight: viewportHeight,
+                aspectRatio: aspectRatio,
+                theatre: theatre,
+              );
 
-              // Whether the player is constrained by height rather than width.
-              //The two rules meet at 16:9, so the reference is that.
-              final heightBound = aspectRatio < _referenceAspect;
+              final embeddedQueue = queueHasItems ? EmbeddedQueuePanel(maxHeight: geometry.playerHeight) : const SizedBox.shrink();
 
-              final double playerWidth;
-              final double playerHeight;
-              if (heightBound) {
-                final tallest = math.min(maxPlayerHeight, math.max(480.0, viewportHeight - 169.0));
-                final widest = tallest * aspectRatio;
-                // The clamp matters just under 16:9, where the full available
-                // height would ask for more width than the column has. Without
-                // it the fix would trade an overflow at the bottom for one at
-                // the right.
-                if (widest <= normalPlayerWidth) {
-                  playerHeight = tallest;
-                  playerWidth = widest;
-                } else {
-                  playerWidth = normalPlayerWidth;
-                  playerHeight = normalPlayerWidth / aspectRatio;
-                }
-              } else {
-                playerWidth = normalPlayerWidth;
-                playerHeight = normalPlayerWidth / aspectRatio;
-              }
-
-              // Calculate player width and height for theatre mode (constrained within constraints.maxWidth x maxPlayerHeight)
-              double theatreWidth = constraints.maxWidth;
-              double theatreHeight = theatreWidth / aspectRatio;
-              if (theatreHeight > maxPlayerHeight) {
-                theatreHeight = maxPlayerHeight;
-                theatreWidth = theatreHeight * aspectRatio;
-              }
-
-              final embeddedQueue = queueHasItems ? EmbeddedQueuePanel(maxHeight: playerHeight) : const SizedBox.shrink();
-
-              final playerWidget = Center(
-                child: SizedBox(
-                  height: playerHeight,
-                  width: playerWidth,
-                  child: _PlayerSurface(
-                    playback: playback,
-                    actualAspectRatio: aspectRatio,
+              return WatchLayout(
+                geometry: geometry,
+                playerSlot: _PlayerSurface(
+                  playback: playback,
+                  actualAspectRatio: aspectRatio,
+                  rounded: !theatre,
+                ),
+                theatreBackground: theatre ? Theme.of(context).tokens.scrim : null,
+                metadataSlot: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _Meta(item: item, info: info),
+                      const SizedBox(height: 10),
+                      if (detail != null)
+                        _Description(
+                          detail: detail,
+                          expanded: _descriptionExpanded,
+                          onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+                        ),
+                      if (!geometry.isTwoColumn) ...[
+                        const SizedBox(height: 24),
+                        embeddedQueue,
+                        ..._relatedSection(detail, item.id, asGrid: true),
+                      ],
+                    ],
                   ),
                 ),
-              );
-
-              final metadataColumn = Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (!theatre)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 2, 0, 0),
-                      child: playerWidget,
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Meta(item: item, info: info),
-                        const SizedBox(height: 10),
-                        if (detail != null)
-                          _Description(
-                            detail: detail,
-                            expanded: _descriptionExpanded,
-                            onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
-                          ),
-                        if (!isTwoColumn) ...[
-                          const SizedBox(height: 24),
-                          embeddedQueue,
-                          ..._relatedSection(detail, item.id, asGrid: true),
-                        ],
-                      ],
-                    ),
+                railSlot: Padding(
+                  padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      embeddedQueue,
+                      ..._relatedSection(detail, item.id),
+                    ],
                   ),
-                ],
-              );
-
-              final mainContent = isTwoColumn
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          width: mainContainerWidth,
-                          child: metadataColumn,
-                        ),
-                        SizedBox(
-                          key: const ValueKey('related-rail'),
-                          width: railWidth,
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                embeddedQueue,
-                                ..._relatedSection(detail, item.id),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : metadataColumn;
-
-              return SilkyListView(
-                padding: EdgeInsets.zero,
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  if (theatre)
-                    Container(
-                      color: Theme.of(context).tokens.scrim,
-                      alignment: Alignment.center,
-                      height: theatreHeight,
-                      child: SizedBox(
-                        height: theatreHeight,
-                        width: theatreWidth,
-                        child: _PlayerSurface(
-                          playback: playback,
-                          rounded: false,
-                          actualAspectRatio: aspectRatio,
-                        ),
-                      ),
-                    ),
-                  mainContent,
-                ],
+                ),
+                scrollView: (children) => SilkyListView(
+                  padding: EdgeInsets.zero,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: children,
+                ),
               );
             },
           );
@@ -337,7 +258,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                   for (final related in items)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: _relatedTile(related),
+                      child: _relatedTile(related, asGrid: asGrid),
                     ),
                 ],
               );
@@ -350,7 +271,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                 for (final related in items)
                   SizedBox(
                     width: ((constraints.maxWidth - 16) / 2).floorToDouble(),
-                    child: _relatedTile(related),
+                    child: _relatedTile(related, asGrid: asGrid),
                   ),
               ],
             );
@@ -365,18 +286,25 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       for (final related in items)
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _relatedTile(related),
+          child: _relatedTile(related, asGrid: asGrid),
         ),
       showMore,
     ];
   }
 
-  Widget _relatedTile(FeedItem related) {
+  Widget _relatedTile(FeedItem related, {bool asGrid = false}) {
     final spec = specFor(related);
     if (spec == null) return const SizedBox.shrink();
+    if (!asGrid) {
+      return MediaTile.wide(
+        spec: spec,
+        onTap: () => openFromTile(ref, related),
+        onAddToQueue: () => queueFromTile(ref, related),
+        onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
+      );
+    }
     return MediaTile(
       spec: spec,
-      // No route push: this replaces the video on the page it is already on.
       onTap: () => openFromTile(ref, related),
       onAddToQueue: () => queueFromTile(ref, related),
       onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
@@ -444,20 +372,26 @@ class _PlayerSurface extends ConsumerWidget {
     final scheme = theme.colorScheme;
     final engine = ref.read(playbackEngineProvider);
     final fullscreen = ref.watch(playerViewProvider.select((view) => view.fullscreen));
-    final ratio = actualAspectRatio ?? ref.watch(_aspectRatioProvider).value ?? (16 / 9);
+    final ratio = actualAspectRatio ?? ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
+    final isTopWatchPage = (ModalRoute.of(context)?.isCurrent == true) && (ref.watch(currentRouteProvider) == watchRouteName);
 
     final content = ColoredBox(
       color: theme.tokens.scrim,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!fullscreen) engine.videoSurface(),
+          // `currentRouteProvider`, not *just* `ModalRoute.of(context)?.isCurrent` —
+          // see the comment on that provider in `player_shell.dart`. The two
+          // used to disagree for exactly one frame on the transition *into*
+          // this page. We AND them together so only the top-most WatchPage
+          // claims the surface, but it still waits for the provider to catch up.
+          if (!fullscreen) isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
 
           if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           // A premiere is not a failure, so it does not get the failure screen.
           if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
 
-          if (playback.error == null && !playback.isLoading && !fullscreen) PlayerControls(engine: engine, actualAspectRatio: ratio),
+          if (playback.error == null && !playback.isLoading && !fullscreen && isTopWatchPage) PlayerControls(engine: engine, actualAspectRatio: ratio),
         ],
       ),
     );
@@ -681,7 +615,13 @@ class _Meta extends ConsumerWidget {
                                 color: scheme.onSurface,
                               ),
                             ),
-                            // TODO verified/music artist badge
+                            ChannelBadge(
+                              channelId: detail?.channelId ?? item.channelId,
+                              isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
+                              isVerified: detail?.isVerified ?? item.isVerified,
+                              size: 14,
+                              paddingLeft: 4,
+                            ),
                           ],
                         ),
                       ),
@@ -693,23 +633,11 @@ class _Meta extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(width: 16),
-                  FilledButton.tonal(
-                    onPressed: () {},
-                    style: FilledButton.styleFrom(
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      foregroundColor: scheme.onSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                      minimumSize: const Size(0, 45),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.notifications_active_outlined, size: 18),
-                        SizedBox(width: 6),
-                        Text('Subscribed'),
-                        SizedBox(width: 6),
-                        Icon(Icons.keyboard_arrow_down, size: 18),
-                      ],
-                    ),
+                  SubscribeButton(
+                    key: ValueKey(detail?.channelId ?? item.channelId),
+                    channelId: detail?.channelId ?? item.channelId,
+                    initiallySubscribed: detail?.isSubscribed ?? false,
+                    minHeight: 45,
                   ),
                 ],
               ),
@@ -842,31 +770,9 @@ class _ActionsState extends ConsumerState<_Actions> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        // Views
-        if (views.isNotEmpty) ...[
-          Icon(Icons.visibility_outlined, size: 18, color: scheme.onSurface),
-          const SizedBox(width: 6),
-          SelectionArea(
-            child: Text(
-              views,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-            ),
-          ),
-          const SizedBox(width: 16),
-        ],
-
-        // Date
-        if (date.isNotEmpty) ...[
-          Icon(Icons.calendar_today_outlined, size: 18, color: scheme.onSurface),
-          const SizedBox(width: 6),
-          SelectionArea(
-            child: Text(
-              date,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-            ),
-          ),
-          const SizedBox(width: 16),
-        ],
+        // The read-outs, one `Wrap` child each — see [_MetaStat].
+        if (views.isNotEmpty) _MetaStat(icon: Icons.visibility_outlined, text: views),
+        if (date.isNotEmpty) _MetaStat(icon: Icons.calendar_today_outlined, text: date),
 
         // Like & Dislike
         Container(
@@ -1064,6 +970,54 @@ const Duration _chipMorph = Duration(milliseconds: 140);
 /// How long the Watch Later pill stays loud before settling.
 const Duration _watchLaterSettleDelay = Duration(seconds: 2);
 
+/// One read-out under the video: a glyph and the number it labels.
+///
+/// **One `Wrap` child, not four.** Spread as icon, gap, text, gap — which is
+/// what `...[ ]` into the parent's `children` produces — the row's glyph and its
+/// number are separate children, and `Wrap` starts a new run wherever the next
+/// child will not fit. It has no notion of two children that belong together, so
+/// there is a band of widths at which the eye lands at the end of one line and
+/// "1.2M views" opens the next, labelling nothing. The like/dislike group never
+/// had the problem because it was always a single child.
+///
+/// **The trailing gap is `Padding` inside this widget rather than a `SizedBox`
+/// beside it**, for the same reason. A spacer child is a child: `Wrap.spacing`
+/// is inserted on *both* sides of it, so a `SizedBox(width: 16)` rendered as 32,
+/// and at a run boundary it strands as an empty offset at the end of a line.
+/// Padding carried inside the pair cannot be separated from it, and the gap is
+/// stated once.
+class _MetaStat extends StatelessWidget {
+  const _MetaStat({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      // Plus the `Wrap`'s own 8, so the read-outs sit further from the pills
+      // than the pills sit from each other — which is the grouping the row is
+      // trying to show.
+      padding: const EdgeInsets.only(right: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: scheme.onSurface),
+          const SizedBox(width: 6),
+          SelectionArea(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// One pill under the video: an icon, and its label.
 ///
 /// The label is mounted at width zero behind an `Align(widthFactor:)` rather
@@ -1241,7 +1195,7 @@ class _ShareDialogState extends State<_ShareDialog> {
   // ignore: rill_lints/no_color_literals
   final redditColor = const Color(0xFFFF4500);
   // ignore: rill_lints/no_color_literals
-  final messagesColor = Colors.white;
+  final messagesColor = const Color(0xFFFFFFFF);
   // ignore: rill_lints/no_color_literals
   final telegramColor = const Color(0xFF0088CC);
 
@@ -1541,7 +1495,8 @@ class _ShareTargetState extends State<_ShareTarget> {
     final scheme = Theme.of(context).colorScheme;
     final isHoverState = _isHovered && widget.hoverColor != null;
     final bg = isHoverState ? widget.hoverColor! : scheme.surfaceContainerHighest;
-    final iconColor = isHoverState ? Colors.white : scheme.onSurface;
+    // ignore: rill_lints/no_color_literals
+    final iconColor = isHoverState ? const Color(0xFFFFFFFF) : scheme.onSurface;
 
     return SizedBox(
       width: 60,

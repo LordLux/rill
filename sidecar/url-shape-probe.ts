@@ -1,9 +1,9 @@
 /**
- * Does a freshly resolved `ANDROID_VR` URL accept ffmpeg's request shape?
+ * Does a freshly resolved `VISIONOS` URL accept ffmpeg's request shape?
  *
  * F10 recorded that `c=MWEB` URLs refuse open-ended `Range: bytes=0-` and that
- * `ANDROID_VR` URLs do not — F11 measured 28/28 `206` and called the difference
- * settled. The launch probe found an `ANDROID_VR` URL that **persistently**
+ * `VISIONOS` URLs do not — F11 measured 28/28 `206` and called the difference
+ * settled. The launch probe found an `VISIONOS` URL that **persistently**
  * refuses the open-ended form (5/5 `403` over 40 s) while answering a bounded
  * one with `206`, which is F10's signature on the client F10 said was clear.
  *

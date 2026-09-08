@@ -22,6 +22,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/captions_controller.dart';
 import 'package:rill/ui/pages/watch.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/controls.dart';
@@ -501,6 +502,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(textEntryHasFocus(), isTrue, reason: 'the field really has focus');
 
+    // `captions.list` is a real round trip to the fake sidecar, and
+    // `pumpAndSettle` does not wait for one. Without this the caption
+    // assertions below would pass because the list had not arrived yet —
+    // vacuously, which is the failure mode this whole test is about.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await tester.pumpAndSettle();
+
     engine.volumes.clear();
     engine.seeks.clear();
     final playingBefore = engine.playing;
@@ -515,6 +523,7 @@ void main() {
       LogicalKeyboardKey.space,
       LogicalKeyboardKey.digit5,
       LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.keyC,
     ]) {
       await tester.sendKeyEvent(key);
       await tester.pumpAndSettle();
@@ -525,6 +534,14 @@ void main() {
     expect(engine.volumes, isEmpty, reason: 'typing "m"');
     expect(engine.seeks, isEmpty, reason: 'typing "j", "l", "5" and pressing →');
     expect(engine.playing, playingBefore, reason: 'typing "k" and pressing space');
+    // **Not vacuous**: this sidecar serves two caption tracks for this video, so
+    // the `C` handler's own "no tracks, decline" branch is not what is stopping
+    // it — the focus guard is. Asserted alongside, because a caption toggle that
+    // fired while the user typed "coding" into the search box would be the same
+    // bug wearing a new key.
+    expect(container.read(captionsProvider).hasTracks, isTrue,
+        reason: 'the C key has something to toggle, so the guard is what stops it');
+    expect(container.read(captionsProvider).isOn, isFalse, reason: 'typing "c"');
 
     disposeContainer();
   });
@@ -837,10 +854,61 @@ void main() {
     disposeContainer();
   });
 
-  testWidgets('the captions button is present and disabled', (tester) async {
-    await pumpWatching(tester);
-    expect(tester.widget<IconButton>(find.byKey(playerCaptionsKey)).onPressed, isNull,
-        reason: 'captions are their own task — a live control that did nothing would lie');
+  testWidgets('the captions button appears once the track list has, and opens its page',
+      (tester) async {
+    // Not `pumpWatching` — it ends with `settleReal`, a real 400ms wait that
+    // is plenty of time for the fake sidecar's `captions.list` round trip to
+    // land, so by the time it returns the "before the list arrives" moment
+    // this test wants to check has already passed. Opening by hand and
+    // stopping at a plain `pump()` (no `runAsync`) keeps the check honest: a
+    // real subprocess response cannot land inside the fake-async test zone
+    // without `runAsync` stepping outside it, so the button's absence here is
+    // guaranteed by construction, not by outrunning a race.
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const TestApp()),
+    );
+    await tester.pumpAndSettle();
+    container.read(queueProvider.notifier).play(video('aaa'));
+    showWatchPageIn(container);
+    await tester.pump();
+
+    // Absent before the list arrives — not disabled. An empty list is settled
+    // once `captions.list` answers (`protocol.md` §3.8), so the button is drawn
+    // only when there is something behind it.
+    expect(find.byKey(playerCaptionsKey), findsNothing,
+        reason: 'nothing to show until the list is back');
+
+    await settleReal(tester);
+    expect(find.byKey(playerCaptionsKey), findsOneWidget);
+
+    await tester.tap(find.byKey(playerCaptionsKey));
+    await tester.pumpAndSettle();
+    expect(container.read(playerMenuProvider).page, SettingsPage.captions);
+    expect(find.byKey(playerCaptionsOffKey), findsOneWidget);
+
+    // The gear stays unlit while the caption panel is up: they are two doors
+    // into one panel, and both lighting at once reads as two menus.
+    expect(
+      tester.widget<IconButton>(find.descendant(
+        of: find.byKey(playerSettingsButtonKey),
+        matching: find.byType(IconButton),
+      )).onPressed,
+      isNotNull,
+    );
+    disposeContainer();
+  });
+
+  testWidgets('a video with no caption tracks draws no CC button at all', (tester) async {
+    await pumpWatching(tester, queue: const ['nocaps1']);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await tester.pumpAndSettle();
+
+    expect(container.read(captionsProvider).isLoadingTracks, isFalse,
+        reason: 'the list has answered, so this is a settled absence');
+    expect(find.byKey(playerCaptionsKey), findsNothing);
     disposeContainer();
   });
 

@@ -1,4 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../pages/search_results.dart';
+import '../search_suggest_controller.dart';
 
 class TopBar extends StatelessWidget implements PreferredSizeWidget {
   const TopBar({
@@ -26,14 +33,14 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
           builder: (context, constraints) {
             final screenWidth = constraints.maxWidth;
             // Define the breakpoint for when the search bar collapses
-            final bool showFullSearch = screenWidth > 700;
+            final bool showFullSearch = screenWidth > 634;
 
             return SizedBox(
               height: preferredSize.height,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  // 1. LEFT SECTION (Menu & Title)
+                  // LEFT SECTION (Menu & Title)
                   Positioned(
                     left: 0,
                     child: Row(
@@ -52,17 +59,23 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                     ),
                   ),
 
-                  // 2. CENTER SECTION (Search Bar - ABSOLUTE CENTER)
+                  // CENTER SECTION: Search Bar
                   // The horizontal padding guarantees it shrinks on medium screens
                   // without overlapping the left/right sections.
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 280.0),
-                    child: showFullSearch
-                        ? const _SearchField()
-                        : _buildCollapsedSearchButton(scheme),
-                  ),
+                  showFullSearch
+                      ? Padding(
+                          padding: EdgeInsets.only(left: 280.0, right: 200.0),
+                          child: const _SearchField(),
+                        )
+                      : Align(
+                          alignment: Alignment.centerRight,
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 120.0),
+                            child: _buildCollapsedSearchButton(scheme),
+                          ),
+                        ),
 
-                  // 3. RIGHT SECTION (Actions)
+                  // RIGHT SECTION (Actions)
                   Positioned(
                     right: 16,
                     child: Row(
@@ -152,43 +165,140 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
+  /// One source of truth for `player_shell.dart`'s caption clip, which has no
+  /// other way to know how tall this bar is without instantiating one.
+  static const double preferredHeight = 64.0;
+
   @override
-  Size get preferredSize => const Size.fromHeight(64.0);
+  Size get preferredSize => const Size.fromHeight(preferredHeight);
 }
 
-/// The search field, stateful only so it can own a [FocusNode].
+/// The search field: a controller, a debounced suggestions dropdown, and Enter
+/// to search (Task 20 §4–5). Escape and blur close the dropdown; a suggestion
+/// tap or Enter navigates to results with whatever text is in the box at that
+/// moment.
 ///
 /// The field draws its own container rather than using an `InputBorder`, so the
 /// focus ring has to be drawn here too — and a focus ring is one of the places
 /// the accent belongs (§3.3). Nothing else about the field changes on focus.
-class _SearchField extends StatefulWidget {
+class _SearchField extends ConsumerStatefulWidget {
   const _SearchField();
 
   @override
-  State<_SearchField> createState() => _SearchFieldState();
+  ConsumerState<_SearchField> createState() => _SearchFieldState();
 }
 
-class _SearchFieldState extends State<_SearchField> {
+class _SearchFieldState extends ConsumerState<_SearchField> {
   final FocusNode _focus = FocusNode();
+  final TextEditingController _controller = TextEditingController();
+  final LayerLink _link = LayerLink();
+  OverlayEntry? _overlay;
 
   @override
   void initState() {
     super.initState();
     _focus.addListener(_onFocusChanged);
+    final current = ref.read(currentSearchQueryProvider);
+    if (current != null) _controller.text = current;
   }
 
   /// `mounted` because `FocusNode.dispose()` unfocuses, and unfocusing notifies
   /// listeners — after the element is defunct. Without the guard that path calls
   /// `setState` on a disposed State.
   void _onFocusChanged() {
-    if (mounted) setState(() {});
+    if (!_focus.hasFocus) ref.read(searchSuggestProvider.notifier).close();
+    if (mounted) setState(_syncOverlay);
   }
 
   @override
   void dispose() {
+    _removeOverlay();
     _focus.removeListener(_onFocusChanged);
     _focus.dispose();
+    _controller.dispose();
     super.dispose();
+  }
+
+  void _submit(String text) {
+    ref.read(searchSuggestProvider.notifier).close();
+    _focus.unfocus();
+    openSearch(ref, text);
+  }
+
+  /// Enter, with a suggestion arrow-highlighted: search *that* suggestion,
+  /// not whatever is still sitting in the text field — the highlight is a
+  /// choice the user just made, and submitting the box's stale text past it
+  /// would silently discard it. No highlight falls back to the box's own
+  /// text, which is `TextField.onSubmitted`'s ordinary behaviour.
+  void _submitHighlightedOrText(String text) {
+    final suggestState = ref.read(searchSuggestProvider);
+    final index = suggestState.highlightedIndex;
+    final chosen = (index != null && index < suggestState.suggestions.length) ? suggestState.suggestions[index] : text;
+    _submit(chosen);
+  }
+
+  void _syncOverlay() {
+    final state = ref.read(searchSuggestProvider);
+    final shouldShow = _focus.hasFocus && state.isOpen && state.suggestions.isNotEmpty;
+    if (shouldShow && _overlay == null) {
+      _overlay = _buildOverlay();
+      Overlay.of(context).insert(_overlay!);
+    } else if (!shouldShow && _overlay != null) {
+      _removeOverlay();
+    } else {
+      _overlay?.markNeedsBuild();
+    }
+  }
+
+  void _removeOverlay() {
+    _overlay?.remove();
+    _overlay = null;
+  }
+
+  OverlayEntry _buildOverlay() {
+    return OverlayEntry(
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        final suggestions = ref.watch(searchSuggestProvider.select((s) => s.suggestions));
+        final highlightedIndex = ref.watch(searchSuggestProvider.select((s) => s.highlightedIndex));
+        return Positioned(
+          width: 600,
+          child: CompositedTransformFollower(
+            link: _link,
+            showWhenUnlinked: false,
+            offset: const Offset(0, 44),
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(12),
+              color: scheme.surfaceContainerLowest,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: suggestions.length,
+                  itemBuilder: (context, index) {
+                    final suggestion = suggestions[index];
+                    final isHighlighted = index == highlightedIndex;
+                    return ListTile(
+                      dense: true,
+                      selected: isHighlighted,
+                      selectedTileColor: scheme.surfaceContainerHigh,
+                      leading: const Icon(Icons.search, size: 18),
+                      title: Text(suggestion),
+                      onTap: () {
+                        _controller.text = suggestion;
+                        _submit(suggestion);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -196,63 +306,135 @@ class _SearchFieldState extends State<_SearchField> {
     final scheme = Theme.of(context).colorScheme;
     final focused = _focus.hasFocus;
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 600),
-      child: Container(
-        height: 40,
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(40),
-          border: Border.all(
-            color: focused ? scheme.primary : scheme.outlineVariant,
-            width: focused ? 2 : 1,
+    // A navigation-driven query (opening results from a tile's related search,
+    // or landing back on this route) updates the box — but only while the user
+    // is not actively typing in it, so a debounced suggestion fetch elsewhere
+    // never overwrites what they are mid-way through.
+    ref.listen(currentSearchQueryProvider, (previous, next) {
+      if (next == null || _focus.hasFocus) return;
+      _controller.text = next;
+    });
+
+    ref.listen(searchSuggestProvider, (previous, next) {
+      if (previous?.suggestions != next.suggestions || previous?.isOpen != next.isOpen || previous?.highlightedIndex != next.highlightedIndex) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _syncOverlay();
+        });
+      }
+    });
+
+    return CompositedTransformTarget(
+      link: _link,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(40),
+            border: Border.all(
+              color: focused ? scheme.primary : scheme.outlineVariant,
+              width: focused ? 2 : 1,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            // Search Input Field
-            Expanded(
-              child: Padding(
-                // The focused border is a pixel thicker; absorbing that here
-                // keeps the text from shifting when the field takes focus.
-                padding: EdgeInsets.only(left: focused ? 15.0 : 16.0, right: 8.0),
-                child: TextField(
-                  focusNode: _focus,
-                  style: TextStyle(color: scheme.onSurface, fontSize: 16),
-                  decoration: InputDecoration(
-                    hintText: 'Search',
-                    hintStyle: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w400,
+          child: Row(
+            children: [
+              // Search Input Field
+              Expanded(
+                child: Padding(
+                  // The focused border is a pixel thicker; absorbing that here
+                  // keeps the text from shifting when the field takes focus.
+                  padding: EdgeInsets.only(left: focused ? 15.0 : 16.0, right: 8.0),
+                  child: Shortcuts(
+                    shortcuts: {
+                      LogicalKeySet(LogicalKeyboardKey.escape): const _CloseSearchIntent(),
+                      // A single-line `TextField` has no vertical text of its
+                      // own to move a cursor through, so `EditableText` does
+                      // not claim these — they reach here unhandled, which is
+                      // exactly what let the dropdown steal them for its own
+                      // navigation instead.
+                      LogicalKeySet(LogicalKeyboardKey.arrowDown): const _MoveHighlightIntent(1),
+                      LogicalKeySet(LogicalKeyboardKey.arrowUp): const _MoveHighlightIntent(-1),
+                    },
+                    child: Actions(
+                      actions: {
+                        _CloseSearchIntent: CallbackAction<_CloseSearchIntent>(
+                          onInvoke: (_) {
+                            ref.read(searchSuggestProvider.notifier).close();
+                            _focus.unfocus();
+                            return null;
+                          },
+                        ),
+                        _MoveHighlightIntent: CallbackAction<_MoveHighlightIntent>(
+                          onInvoke: (intent) {
+                            ref.read(searchSuggestProvider.notifier).moveHighlight(intent.delta);
+                            return null;
+                          },
+                        ),
+                      },
+                      child: TextField(
+                        controller: _controller,
+                        focusNode: _focus,
+                        style: TextStyle(color: scheme.onSurface, fontSize: 16),
+                        decoration: InputDecoration(
+                          hintText: 'Search',
+                          hintStyle: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w400,
+                          ),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onChanged: (text) => ref.read(searchSuggestProvider.notifier).onTextChanged(text),
+                        onSubmitted: _submitHighlightedOrText,
+                      ),
                     ),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   ),
                 ),
               ),
-            ),
-            // Search Button
-            Container(
-              width: 64,
-              decoration: BoxDecoration(
+              // Search Button
+              Material(
                 color: scheme.surfaceContainerHigh,
                 borderRadius: const BorderRadius.only(
                   topRight: Radius.circular(40),
                   bottomRight: Radius.circular(40),
                 ),
-                border: Border(
-                  left: BorderSide(color: scheme.outlineVariant, width: 1),
+                child: InkWell(
+                  onTap: () => _submit(_controller.text),
+                  borderRadius: const BorderRadius.only(
+                    topRight: Radius.circular(40),
+                    bottomRight: Radius.circular(40),
+                  ),
+                  mouseCursor: SystemMouseCursors.click,
+                  child: Container(
+                    width: 64,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: scheme.outlineVariant, width: 1),
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.search, color: scheme.onSurface, size: 24),
+                    ),
+                  ),
                 ),
               ),
-              child: Center(
-                child: Icon(Icons.search, color: scheme.onSurface, size: 24),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+class _CloseSearchIntent extends Intent {
+  const _CloseSearchIntent();
+}
+
+/// Arrow-down (`1`) or arrow-up (`-1`) through the suggestions dropdown.
+class _MoveHighlightIntent extends Intent {
+  const _MoveHighlightIntent(this.delta);
+  final int delta;
 }

@@ -96,7 +96,12 @@ interface VideoItem {
   isLive: boolean;
   viewCountText: string | null;     // display string, not parsed
   publishedText: string | null;
+  descriptionSnippet: string | null;
   badges: string[];                 // "4K", "New", "Members only"
+  isShort: boolean;                 // Task 21 — classified, not stripped
+  isMusic: boolean;                 // the ♪ on the duration badge, per video
+  isVerified: boolean;              // the uploading channel's checkmark
+  isArtistChannel: boolean;         // the uploading channel's artist badge
   premiereAtMs: number | null;      // unix ms; null unless it is a premiere
   canWatchLater: boolean;
   canAddToQueue: boolean;
@@ -115,7 +120,9 @@ interface PlaylistItem { kind: 'playlist'; id: string; title: string;
   thumbnailUrl: string; videoCount: number | null; channelName: string | null; }
 
 interface ChannelItem { kind: 'channel'; id: string; name: string;
-  avatarUrl: string; subscriberText: string | null; }
+  avatarUrl: string; subscriberText: string | null;
+  descriptionSnippet: string | null;
+  isVerified: boolean; isArtistChannel: boolean; }
 
 interface Chip {
   label: string;
@@ -150,7 +157,24 @@ view-based surface.
 | Hover actions | — | `ThumbnailHoverOverlayToggleActionsView` |
 | Continuation | `continuationItemRenderer` | `ContinuationItem` |
 
-Shorts are stripped, never rendered.
+**Shorts are split, not simply stripped** (revised by Task 21 §1; this line
+used to read "stripped, never rendered" and both halves of that are now
+false). A Shorts *shelf* — `shortsLockupViewModel`, `reelItemRenderer`,
+`reelShelfRenderer`, `richShelfShorts` — is still stripped whole by the
+vocabulary. A Short arriving as an **ordinary video renderer carrying a
+`SHORTS`-styled duration overlay**, which is how search returns them, is
+classified instead: `VideoItem.isShort`, with `"SHORTS"` deliberately kept
+out of `badges[]` so the fact ships once. The client decides what to do with
+the flag, and `feed_view.dart` does render them, in a shelf of their own.
+
+**A fact with a DTO field of its own does not also travel as a label.** That is
+the general rule `isShort` is one case of, and `isLive` is the other. `LIVE`
+used to be pushed into `BadgeScan.labels` and then filtered back out by each
+mapper separately — redundant, and with a hole in it exactly the size of the
+next mapper someone writes. `scanBadges` now never emits either, so there is
+one route for each fact and no filter to forget. `parser.test.ts` asserts it
+across the whole corpus rather than per mapper, so the rule also covers mappers
+that do not exist yet.
 
 ---
 
@@ -205,6 +229,16 @@ from the new build inside the bundled `.exe` — before trusting any device
 measurement. Otherwise the run measures the previous sidecar and says so
 nowhere.
 
+**It bit again on 2026-08-19, and it does not look like a stale binary.** It
+looks like a half-finished feature: captions rendered position and outline but no
+colour or font, because the bundled sidecar predated the change that reads
+per-segment pens, while `sidecar/dist/` had it. Two things now make it cheaper to
+spot. The client logs `rill: sidecar <path> (built <mtime>)` at startup — compare
+that timestamp against `sidecar/dist/sidecar.exe`. And `grep -a` for a symbol
+only the new code has (`layerAlpha`, `includeStyled`) inside **both** binaries;
+if the bundled one is busy, the app is running and holding it, which is itself
+the answer.
+
 ---
 
 ## Notes that will bite otherwise
@@ -231,10 +265,12 @@ nowhere.
   to nothing, as the scrubber's input: at ~6 s between frames they are good for
   showing one frame at a pointer position and nothing else.
 - **Browse and resolve are different clients.** Browse and report as `WEB` with
-  cookies; resolve streams anonymously, asking as `ANDROID_VR` (ladder tier 1)
-  and falling back to `MWEB` (tier 2). Do not attempt to bridge CPNs between
+  cookies; resolve streams anonymously, asking as `VISIONOS` (ladder tier 1)
+  and falling back to `MWEB` (tier 2). **Tier 1 was `ANDROID_VR` until
+  2026-08-18** — it now requires a PO token and is no longer viable
+  (`architecture.md` F11), so any note here still naming it is stale. Do not attempt to bridge CPNs between
   them — issue two independent calls.
-- **The resolution session needs a server-issued visitor id.** `ANDROID_VR`
+- **The resolution session needs a server-issued visitor id.** `VISIONOS`
   refuses a locally fabricated one on ~93% of attempts, with
   `LOGIN_REQUIRED — "Sign in to confirm you're not a bot"`, which reads like an
   age gate and is not. `createSession` fetches a real one by default. Tier 1
@@ -258,6 +294,85 @@ nowhere.
 - **`playback.report` is load-bearing.** If watch events stop landing, the
   recommender stops training and the homepage drifts from the real one, which
   defeats the point of the app. Report every 10–30 s plus on state changes.
+- **`build_runner` works. Never re-add `animated_vector_gen`.** That package is
+  the whole reason codegen appeared to be broken, and the error names nothing
+  that points at it: `dart compile kernel` crashes inside the FFI use-site
+  transformer with `type 'InvalidType' is not a subtype of type 'FunctionType'`
+  and a `_verifyAndReplaceNativeCallable` stack, which reads like an FFI bug in
+  media_kit or in this app's own code. It is neither, and it blocks **every**
+  generator rather than one. build_runner compiles a build script importing every
+  builder in the graph, using the plain Dart VM; `animated_vector_gen` →
+  `animated_vector_annotations` → `flutter`, and that package re-exports
+  `dart:ui`, so the build script drags the Flutter framework into a compiler that
+  has no `dart:ui` and every use site in it resolves to `InvalidType`. Bisected
+  2026-08-18: freezed, json_serializable, source_gen and build_runner's own
+  entrypoint each compile clean alone; that one alone fails. `--force-jit` does
+  **not** help — it still runs `dart compile kernel`. The pin is removed with a
+  comment in `app/pubspec.yaml`; it generated nothing (no `@ShapeshifterAsset`
+  exists), so nothing was lost.
+- **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
+  draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
+  `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:
+  `sub-add` costs 12–36 ms and **does not rebuild the video texture**, so a
+  caption toggle is free where a quality switch costs 0.55–12 s (F19). A quality
+  switch *does* drop the track, and `MediaKitEngine.open(retainSubtitle: true)`
+  is what puts it back — with a control proving a reopen without the flag loses
+  it.
+- **`fmt=ytt` answers HTTP 404, and a `WEB` caption URL answers 200 with no
+  body.** Two things that look like bugs and are not. YTT is not a fetchable
+  format: its styling model *is* the `pens` / `wsWinStyles` / `wpWinPositions`
+  arrays already in every `json3` document. And a `WEB` `/player` signs its
+  `timedtext` URLs with `exp=xpe`, which makes every one of them return an empty
+  body — so the empty-list fallback asks **`MWEB`**, whose URLs work. A `WEB`
+  fallback would fill a language picker in which nothing renders.
+- **media_kit does not use libass unless you tell it to, and mounts a second
+  caption renderer if you don't stop it.** `PlayerConfiguration.libass` defaults
+  to `false` → `sub-ass=no` *and* `sub-visibility=no`, so mpv strips every tag
+  and draws nothing; `Video` then paints mpv's plain `sub-text` with a Flutter
+  `TextStyle`. Both settings live in `engine.dart` (`kLibassEnabled`,
+  `kNoFlutterSubtitles`) and each alone is wrong — one draws captions twice, the
+  other draws none. **This is invisible on a plain track**, which is why it
+  survived two tasks: it only shows when a track carries styling.
+- **A styled caption is more than one event, and merging them is the whole of
+  Task 18.** YouTube composites it: an invisible-glyph pen contributing a drop
+  shadow over a visible pen contributing the outline — 240 of `L-BgxLtMxh0`'s 257
+  cue groups. Emitted verbatim that is two lines stacked, which is what the bug
+  looked like. `CueStyle.edgeStyles` is a *set* for this reason. Where two
+  *visible* pens conflict, both are emitted instead, which is safe because
+  **`\pos` suppresses libass's collision avoidance** (measured). §2.9 has the
+  rest, including two ASS tags that look like they work and do not: an inline
+  `\c` takes six digits and no alpha, and a caption background is
+  `BorderStyle: 3` filled from `\3c`.
+- **`bun run check` is the gate, and rendering is checkable offline.** libmpv
+  is a DLL and Bun has FFI, so an ASS document can be rendered to frames through
+  **the artefact the app actually loads** rather than reasoned about — which is
+  how the `\pos` collision question, the `\an` anchor mapping and the missing-font
+  fallback were settled. That build's FFmpeg has no PNG encoder and no `color`
+  lavfi source: feed it raw frames (`demuxer=rawvideo`) and take `jpg` out.
+- **Do not use a bash heredoc for anything containing backslashes.** The Bash
+  tool eats one level, so `\an1` reaches the file as a BEL byte and libass
+  silently ignores the override — a probe that then "measures" the default style
+  and looks like a real result. Write such files with the Write tool.
+- **The docs restate the contract in five places, and one test checks they
+  agree.** `CLAUDE.md`, `architecture.md`, `protocol.md`, `parser.test.ts`'s
+  `SHAPES` and `corpus.test.ts`'s auditor each hold part of it independently.
+  Twice a change landed in the code and one doc while the rest went stale in
+  silence — `ChannelItem.descriptionSnippet`, and `ANDROID_VR` surviving as
+  "ladder tier 1" in thirteen places after `VISIONOS` replaced it (F11). Since
+  CLAUDE.md is loaded into every session, that one taught the wrong client for
+  months. `sidecar/test/contract-docs.test.ts` compares the DTO block here
+  against `types.ts` field by field, and fails on any doc sentence naming an
+  InnerTube client that appears nowhere in `sidecar/src`. **A sentence carrying
+  an `F<n>` reference or an ISO date is exempt** — that is how this repo writes
+  history, and history about a retired client has to survive. The cost is real
+  and worth knowing: adding a dated note to a sentence also stops it being
+  checked.
+- **`bun run export-contract-corpus` runs the auditor itself, and exits 1 if it
+  is red.** Not a courtesy — the export is what breaks `corpus.test.ts`, by
+  writing a field with no sanitiser, and it breaks it *in a different file from
+  the one being edited*. Run after the last `bun run check` of a session, it
+  reports success while leaving the suite red and possibly real capture data in
+  `corpus/`. Measured 2026-09-04, which is how this note exists.
 
 ## Current state
 

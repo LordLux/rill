@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'tokens.dart';
 
@@ -13,7 +14,11 @@ ThemeData buildRillTheme(Color accent) {
     seedColor: accent,
     brightness: Brightness.dark,
   );
-  final base = ThemeData(colorScheme: scheme, useMaterial3: true);
+  final base = ThemeData(
+    colorScheme: scheme,
+    useMaterial3: true,
+    fontFamily: GoogleFonts.roboto().fontFamily,
+  );
   final tokens = RillTokens.from(scheme);
 
   // No font-size delta here, deliberately.
@@ -29,6 +34,11 @@ ThemeData buildRillTheme(Color accent) {
   // delta over one that has no sizes in it.
   return base.copyWith(
     extensions: [tokens],
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {
+        for (final platform in TargetPlatform.values) platform: const _NoTransitionsBuilder(),
+      },
+    ),
     chipTheme: base.chipTheme.copyWith(
       // The selected filter chip is one of the few places the accent belongs.
       backgroundColor: scheme.surfaceContainerHighest,
@@ -38,4 +48,19 @@ ThemeData buildRillTheme(Color accent) {
       secondaryLabelStyle: TextStyle(color: scheme.onPrimaryContainer),
     ),
   );
+}
+
+class _NoTransitionsBuilder extends PageTransitionsBuilder {
+  const _NoTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T>? route,
+    BuildContext? context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget? child,
+  ) {
+    return child!;
+  }
 }

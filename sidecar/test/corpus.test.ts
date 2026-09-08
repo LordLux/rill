@@ -82,9 +82,23 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   channelName: /^Sanitised Channel \d+$/,
   name: /^Sanitised Channel \d+$/,
   subtitle: /^Sanitised Subtitle \d+$/,
+  // Free text from an arbitrary uploader, same reasoning as `title`.
+  descriptionSnippet: /^Sanitised Snippet \d+$/,
   thumbnailUrl: /^https:\/\/fake\.url\/img\d+\.jpg$/,
   avatarUrl: /^https:\/\/fake\.url\/avatar\d+\.jpg$/,
   channelAvatarUrl: /^https:\/\/fake\.url\/avatar\d+\.jpg$/,
+  // ArtistPanel (Task 21 §3) — its own `channelId`/`mixPlaylistId` reuse
+  // `chan_`/`mix_` id shapes; `handle` and `videoCountText` are new.
+  handle: /^@sanitised_handle_\d+$/,
+  // Task 23. The panel's `backgroundColor`/`baseBackgroundColor` are not here
+  // and do not need to be: they are numbers, which this auditor does not walk,
+  // and they are YouTube's own palette for a public channel — they identify
+  // nobody, and replacing them would cost the corpus the only field a colour
+  // regression could ever be caught by. The exporter says the same at the
+  // point it lets them through.
+  backdropUrl: /^https:\/\/fake\.url\/backdrop\d+\.jpg$/,
+  videoCountText: /^Sanitised Videos \d+$/,
+  mixPlaylistId: /^mix_\d{3,}$/,
 
   // "All" survives verbatim: the app keys its unfiltered state off that label,
   // and an empty token is the contract's "no filter" rather than session data.
@@ -95,6 +109,19 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // Channel subscriber counts are public, but no channel tile has reached the
   // corpus yet; require a synthetic value rather than guessing a policy.
   subscriberText: /^Sanitised Subscribers \d+$/,
+
+  // VideoDetail. A description is free text from an arbitrary uploader and a
+  // like count is public, but both are replaced rather than kept: the corpus is
+  // a shape reference, and neither adds a shape a synthetic value would not.
+  description: /^Sanitised Description \d+$/,
+  likeText: /^Sanitised Likes \d+$/,
+  relatedContinuation: /^CONTINUATION_TOKEN_\d+$/,
+
+  // Caption tracks. `languageCode` is a BCP-47-ish tag from a closed-ish
+  // vocabulary and identifies nobody, so it survives verbatim — but it is
+  // pinned to a tag shape rather than exempted, because "en" passing and an
+  // arbitrary string passing are different properties.
+  languageCode: /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$/,
 };
 
 /** Shapes that must never occur in the corpus, whatever field they sit in. */
@@ -301,7 +328,12 @@ describe('corpus sanitisation', () => {
     });
 
     test('an unsanitised new field is caught even though nothing matches it', () => {
-      const docs = poisoned({ id: 'vid_001', title: 'Sanitised Title 1', descriptionSnippet: 'anything at all' });
+      // `descriptionSnippet` used to be this test's example — it was itself an
+      // unsanitised field until Task 21's re-export caught it for real (see
+      // `export-contract-corpus.ts`). Now that it has a shape, this needs a
+      // field name that will never be a real one, so the control keeps testing
+      // "a brand-new field is caught" rather than quietly re-testing the fixed bug.
+      const docs = poisoned({ id: 'vid_001', title: 'Sanitised Title 1', someUnsanitisedField: 'anything at all' });
       expect(auditShapes(docs).join()).toContain('no sanitised shape');
     });
 
