@@ -20,6 +20,7 @@ import 'libass/ass_padding.dart';
 import 'libass/caption_layout.dart';
 import 'libass/ass_reposition.dart';
 import 'libass/dll_search.dart';
+import 'view_mode.dart';
 
 /// Millisecond-precision timestamp for the `debugPrint` trail below — plain
 /// log lines have no ordering signal of their own once two async chains
@@ -777,7 +778,8 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final track = captions.tracks.where((t) => t.id == captions.selectedId).firstOrNull;
         final isPositional = track?.positional == true;
         final isDraggable = !isPositional;
-        
+        final isFullscreen = ref.watch(playerViewProvider.select((s) => s.fullscreen));
+
         final defaultBg = isPositional ? const Color(0x00000000) : captionDefaultBackground;
         final backgroundColor = _resolveOverlayColor(
           captions.style.background,
@@ -816,6 +818,11 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
                         windowColor: windowColor,
                         groupBox: _groupBoxes[g],
                         showBounds: _showBounds,
+                        // The manual vertical correction below is tuned against an
+                        // unpositioned (non-styled) cue's own box — a positional
+                        // (styled) track keeps its authored placement untouched.
+                        isPositional: isPositional,
+                        isFullscreen: isFullscreen,
                         onPanUpdate: isDraggable ? _onPanUpdate : null,
                         onPanEnd: isDraggable ? (_) => _commitDrag() : null,
                       ),
@@ -855,6 +862,8 @@ class _CaptionGroup extends StatelessWidget {
   final Color windowColor;
   final Box groupBox;
   final bool showBounds;
+  final bool isPositional;
+  final bool isFullscreen;
   final void Function(DragUpdateDetails)? onPanUpdate;
   final void Function(DragEndDetails)? onPanEnd;
 
@@ -869,6 +878,8 @@ class _CaptionGroup extends StatelessWidget {
     required this.windowColor,
     required this.groupBox,
     required this.showBounds,
+    required this.isPositional,
+    required this.isFullscreen,
     required this.onPanUpdate,
     required this.onPanEnd,
   });
@@ -932,6 +943,8 @@ class _CaptionGroup extends StatelessWidget {
                         sy: sy,
                         backgroundColor: backgroundColor,
                         windowColor: windowColor,
+                        isPositional: isPositional,
+                        isFullscreen: isFullscreen,
                       ),
                     ),
                   ),
@@ -969,10 +982,23 @@ class _CaptionGroup extends StatelessWidget {
 /// **`_verticalNudge` is a reported-not-measured correction.** Both boxes are
 /// built from the exact same glyph boxes `RawImage` paints from — there is no
 /// code path that can put them out of step with the text — so the fix for
-/// "the background sits slightly low" cannot be a positioning bug in this
-/// class as written; it is a small uniform shift applied on top. If it turns
-/// out wrong or over/under-corrected, this constant is the one place to
-/// change — it is not derived from anything and does not need to be.
+/// "the background sits slightly low/high" cannot be a positioning bug in
+/// this class as written; it is a small uniform shift applied on top. If it
+/// turns out wrong or over/under-corrected, these constants are the one place
+/// to change — they are not derived from anything and do not need to be.
+///
+/// **It is reported differently at different window sizes.** A caption whose
+/// box looked right windowed sat with the text noticeably high in its box
+/// once fullscreen — reported 2026-09-08, with a windowed and a fullscreen
+/// screenshot of the same cue. Nothing here scales the fixed-pixel nudge (or
+/// the line padding above it) with the player's own size, so a correction
+/// tuned by eye at one size is only ever exactly right at that size. Rather
+/// than re-deriving where the mismatch actually comes from, this keeps the
+/// same "reported, not measured" shift and gives it a second, larger value
+/// for fullscreen specifically — [_fullscreenVerticalNudge] is the one place
+/// to retune if that guess is itself off. Left untouched for a positional
+/// (styled) track: the nudge is calibrated against a plain cue's own box, and
+/// a styled track's placement is authored, not this class's to move.
 class _BackgroundPainter extends CustomPainter {
   final List<Rect> lines;
   final Box windowBox;
@@ -980,6 +1006,8 @@ class _BackgroundPainter extends CustomPainter {
   final double sy;
   final Color backgroundColor;
   final Color windowColor;
+  final bool isPositional;
+  final bool isFullscreen;
 
   _BackgroundPainter({
     required this.lines,
@@ -988,16 +1016,43 @@ class _BackgroundPainter extends CustomPainter {
     required this.sy,
     required this.backgroundColor,
     required this.windowColor,
+    required this.isPositional,
+    required this.isFullscreen,
   });
 
   /// A manual visual correction, not a measured one — see the class doc.
-  static const double _verticalNudge = -3.0;
+  static const double _baseVerticalNudge = -3.0;
+
+  /// How much further to push the box up in fullscreen, on top of
+  /// [_baseVerticalNudge]. The one number to retune if fullscreen is still
+  /// off — everything else here is derived from it.
+  static const double _fullscreenExtraNudge = -8.0;
+
+  /// Windowed gets a quarter of the fullscreen correction, per the same
+  /// report: the windowed box already read as correct, but not perfectly so.
+  static const double _windowedExtraNudge = _fullscreenExtraNudge / 4;
+
+  /// All subtitles look slightly too offset to the left. This is to center it visually
+  static const double _alwaysHorizontalNudge = -2.0;
+
+  double get _verticalNudge {
+    // The base correction applied to every track, as before. The new
+    // fullscreen-aware extra is additional and, per the report that
+    // prompted it ("non-styled" captions specifically), does not touch a
+    // positional (styled) track's authored placement.
+    final extra = isPositional ? 0.0 : (isFullscreen ? _fullscreenExtraNudge : _windowedExtraNudge);
+    return _baseVerticalNudge + extra;
+  }
+  
+  double get _horizontalNudge {
+    return isPositional ? 0.0 : _alwaysHorizontalNudge;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
     if (backgroundColor.a == 0 && windowColor.a == 0) return;
 
-    canvas.translate(0, _verticalNudge);
+    canvas.translate(_horizontalNudge, _verticalNudge);
     final paint = Paint()..style = PaintingStyle.fill;
     final path = Path();
 
