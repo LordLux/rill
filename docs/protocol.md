@@ -945,6 +945,7 @@ them has a `retry` value:
 | `BAD_REQUEST` | `no` | This is a client bug. Surface it — never retry, never swallow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
 | `VIDEO_UPCOMING` | `no` | The premiere slate: thumbnail, scheduled time, reminder. **Not** an error state |
+| `VIDEO_MEMBERS_ONLY` | `no` | The members slate: thumbnail, the channel, a Join affordance. **Not** an error state |
 | `RATE_LIMITED` | `auto` | App backs off and retries silently |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
 
@@ -972,6 +973,38 @@ scheduled time and a reminder. It arrives with YouTube's own prose as its messag
 ("Premieres in 9 days"), which is enough to render the slate before `video.info`
 answers; the machine-readable time is `VideoDetail.premiereAtMs` (§3.3), on a
 call the watch page already makes.
+
+**`VIDEO_MEMBERS_ONLY` is `VIDEO_UPCOMING`'s shape, for a different clock —
+added 2026-09-09.** A members-only video exists and works; it is behind the
+channel's paid tier, and no rung of the ladder can buy a membership. So it ends
+the ladder rather than declining down it, and it is `no` because retrying is
+arithmetic-proof in the same way a premiere's is. It is deliberately **not**
+`AUTH_REQUIRED`: signing in does not help, and the user is usually signed in
+already.
+
+**Two signals, and only one of them is structural.** The flag on the DTOs —
+`VideoItem.isMembersOnly` and `VideoDetail.isMembersOnly` — comes from
+`BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) on a
+`metadataBadgeRenderer`, which YouTube does not localise. **The error code does
+not have that luxury.** Measured 2026-09-09 on `rAWLNJoE5_Y`, the whole of
+`playabilityStatus` on the resolve clients is `{status, reason,
+playableInEmbed}`: VISIONOS carries no `errorScreen` at all, MWEB's is a generic
+`playerErrorMessageRenderer`, and only the authenticated `WEB` response — which
+the resolve path never makes — has the specific
+`playerLegacyDesktopYpcOfferRenderer`. So `playback.open` classifies from the
+`reason` prose.
+
+That is tolerable only because of where it sits: it refines a response that has
+**already failed**, so a locale the pattern misses falls back to
+`STREAM_UNAVAILABLE` — today's behaviour — and it can never make a working video
+fail. The watch page draws its slate from the structural flag on `video.info`,
+not from the error, for exactly this reason.
+
+**The slate does not claim the user is not a member**, and that is a correctness
+point rather than a wording one. Stream resolution is anonymous (§2.3), so a
+members-only video refuses even for a paying member; YouTube's own "Join this
+channel" prose describes the anonymous session that asked, not the person
+reading it.
 
 `STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
 very good bet and not a promise (§3.5, F9): every rung can decline for a video

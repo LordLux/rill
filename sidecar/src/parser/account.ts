@@ -14,7 +14,7 @@
  * accounts from each other, which is the entire point of showing it.
  */
 
-import { deepFind, isObject, type JsonObject } from './tree.ts';
+import { deepFind, type JsonObject } from './tree.ts';
 import { bestImageUrl, text } from './text.ts';
 
 export interface AccountInfo {
@@ -61,7 +61,16 @@ export function parseAccountMenu(raw: unknown): AccountInfo {
     // Scoped to `accountPhoto` rather than the item: `bestImageUrl` walks for
     // any `thumbnails` below whatever it is handed, and an account item can
     // carry a channel banner or a badge icon alongside the avatar.
-    avatarUrl: isObject(item['accountPhoto']) ? bestImageUrl(item['accountPhoto']) : null,
+    //
+    // Passed straight through rather than behind an `isObject` gate. The gate
+    // was redundant — `bestImageUrl` walks whatever it is given and answers
+    // null for anything with no image in it — and it was the same shape as the
+    // `get`-across-an-array bug found on 2026-09-09: a type check in front of a
+    // call that already handles the type, which turns "unusual shape" into a
+    // silent null instead of an answer. If YouTube ever ships this field as a
+    // list, this now reads it; before, it would have returned null and said
+    // nothing.
+    avatarUrl: bestImageUrl(item['accountPhoto']),
   };
 }
 

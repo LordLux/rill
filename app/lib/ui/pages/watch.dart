@@ -25,6 +25,7 @@ import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
+import '../widgets/tile_badges.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
@@ -37,6 +38,8 @@ const double _referenceAspect = ScreenValues.normalAspectRatio;
 
 const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
+const Key membersOnlySlateKey = ValueKey('members-only-slate');
+const Key membersOnlyJoinKey = ValueKey('members-only-join');
 
 /// The aspect ratio of the frames actually being decoded, **held across a switch**.
 ///
@@ -389,7 +392,15 @@ class _PlayerSurface extends ConsumerWidget {
 
           if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           // A premiere is not a failure, so it does not get the failure screen.
-          if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
+          // Neither of the first two is a failure, so neither gets the failure
+          // screen — a members-only video is working exactly as its channel
+          // intends, the same way a premiere is.
+          if (playback.isUpcoming)
+            _PremiereSlate(playback: playback)
+          else if (playback.isMembersOnly)
+            _MembersOnlySlate(playback: playback)
+          else if (playback.error != null)
+            _Unavailable(playback: playback),
 
           if (playback.error == null && !playback.isLoading && !fullscreen && isTopWatchPage) PlayerControls(engine: engine, actualAspectRatio: ratio),
         ],
@@ -478,6 +489,108 @@ class _PremiereSlate extends ConsumerWidget {
                   onPressed: null,
                   icon: const Icon(Icons.notifications_none, size: 18),
                   label: const Text('Notify me'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A members-only video: thumbnail, what it is, and where to join — never a
+/// *Try again*, because retrying cannot buy a membership.
+///
+/// The same shape as [_PremiereSlate] deliberately. Both are videos that are
+/// working exactly as intended and simply cannot be played *here, now*, and the
+/// failure screen is the wrong answer to both.
+///
+/// **The wording avoids claiming the user is not a member**, because the app
+/// cannot tell. Stream resolution is anonymous by design (`architecture.md`
+/// §2.3), so a members-only video refuses even for someone who *is* a member —
+/// what YouTube's own message says ("Join this channel…") is about the
+/// anonymous session that asked, not about the person reading it. Saying "you
+/// need to join" would be a guess, and wrong for exactly the paying members it
+/// would insult.
+class _MembersOnlySlate extends ConsumerWidget {
+  const _MembersOnlySlate({required this.playback});
+
+  final PlaybackState playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = Theme.of(context).tokens;
+    final item = playback.item;
+    final thumbnailUrl = item?.thumbnailUrl;
+    final channel = item?.maybeMap(
+      video: (v) => v.channelName,
+      orElse: () => null,
+    );
+
+    return Stack(
+      key: membersOnlySlateKey,
+      fit: StackFit.expand,
+      children: [
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+          Image.network(thumbnailUrl, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                tokens.scrim.withValues(alpha: 0.75),
+                tokens.scrim.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomLeft,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.star_rounded, size: 14, color: membersGreenOnScrim),
+                    const SizedBox(width: 5),
+                    Text(
+                      'MEMBERS ONLY',
+                      style: TextStyle(
+                        color: membersGreenOnScrim,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  channel == null
+                      ? 'This video is for channel members.'
+                      : 'This video is for members of $channel.',
+                  style: TextStyle(
+                    color: tokens.onScrim,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Disabled, exactly like the premiere reminder: joining a
+                // channel is a purchase flow this app does not implement, and a
+                // button that looks like it worked and did nothing is worse
+                // than one that plainly cannot be pressed.
+                FilledButton.icon(
+                  key: membersOnlyJoinKey,
+                  onPressed: null,
+                  icon: const Icon(Icons.star_outline_rounded, size: 18),
+                  label: const Text('Join this channel'),
                 ),
               ],
             ),

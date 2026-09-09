@@ -38,7 +38,7 @@ class FeedPage extends StatelessWidget {
           },
         ),
       ],
-      body: FeedView(provider: feedProvider),
+      body: FeedView(provider: feedProvider, groupMembersOnly: true),
     );
   }
 }
