@@ -34,14 +34,16 @@
  */
 
 import { ytDlpBinary } from '../capabilities.ts';
-import { RpcError, hasCode } from '../errors.ts';
+import { RpcError, hasCode, type EnvelopeErrorCode } from '../errors.ts';
 import { logger } from '../log.ts';
 import { getPlayer, type Player } from '../innertube/player.ts';
 import { getPlayerResponse } from '../innertube/player-response.ts';
 import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
-import type { EnvelopeErrorCode } from '../errors.ts';
+import { isSabrOnly } from './sabr-detect.ts';
+import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
+import { openPlaybackSession } from './sessions.ts';
 
 /**
  * Refusals that end the ladder instead of declining down it.
@@ -62,9 +64,6 @@ const LADDER_TERMINAL_CODES: readonly EnvelopeErrorCode[] = [
   'VIDEO_UPCOMING',
   'VIDEO_MEMBERS_ONLY',
 ];
-import { isSabrOnly } from './sabr-detect.ts';
-import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
-import { openPlaybackSession } from './sessions.ts';
 
 const log = logger('playback');
 
