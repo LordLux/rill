@@ -44,6 +44,23 @@ const PREMIERE_AT_MS = 1787670000_000;
  */
 const BROKEN_ID = 'broken1';
 
+/**
+ * Members-only, in the two shapes the app has to survive.
+ *
+ * `members1` is the ordinary one: the sidecar recognised the refusal and
+ * answered `VIDEO_MEMBERS_ONLY`.
+ *
+ * `memberslocale1` is the case the structural fallback exists for — the
+ * sidecar classifies from YouTube's localised prose, so on a locale its
+ * pattern misses it answers a plain `STREAM_UNAVAILABLE` instead. The watch
+ * page must still show the members slate, because `video.info` says so from a
+ * badge style YouTube does not translate.
+ */
+const MEMBERS_ID = 'members1';
+const MEMBERS_LOCALE_ID = 'memberslocale1';
+/** Members-only, and nothing anywhere knows the channel's name. */
+const MEMBERS_NO_CHANNEL_ID = 'membersnochan1';
+
 /** No caption tracks at all — the CC control must not be drawn. */
 const NO_CAPTIONS_ID = 'nocaps1';
 /** `captions.list` fails. A caption failure must not touch playback. */
@@ -198,6 +215,31 @@ rl.on('line', (line) => {
         }) + '\n');
         return;
       }
+      if (req.params?.videoId === MEMBERS_ID || req.params?.videoId === MEMBERS_NO_CHANNEL_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: {
+            code: 'VIDEO_MEMBERS_ONLY',
+            message: 'Join this channel to get access to members-only content like this video.',
+            retry: 'no',
+          },
+        }) + '\n');
+        return;
+      }
+      if (req.params?.videoId === MEMBERS_LOCALE_ID) {
+        // The locale the sidecar's prose pattern misses: it could not classify
+        // the refusal, so the ladder exhausted and this is an ordinary failure
+        // as far as the error code goes. `video.info` still knows.
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: {
+            code: 'STREAM_UNAVAILABLE',
+            message: 'every resolution tier declined',
+            retry: 'user',
+          },
+        }) + '\n');
+        return;
+      }
       if (mode === 'open-fails-once' && !isPreload && realOpens++ === 0) {
         process.stdout.write(JSON.stringify({
           id: req.id,
@@ -260,7 +302,7 @@ rl.on('line', (line) => {
           id: videoId,
           title: `Detail for ${videoId}`,
           description: 'A description long enough to collapse.',
-          channelName: 'Fake Channel',
+          channelName: videoId === MEMBERS_NO_CHANNEL_ID ? '' : 'Fake Channel',
           channelId: 'chan_001',
           channelAvatarUrl: null,
           subscriberText: '1.2M subscribers',
@@ -271,6 +313,10 @@ rl.on('line', (line) => {
           likeText: '1.1M',
           isSubscribed: false,
           badges: [],
+          // Structural, from `BADGE_STYLE_TYPE_MEMBERS_ONLY` — true for both
+          // members ids, including the one whose *error* the sidecar could not
+          // classify.
+          isMembersOnly: videoId === MEMBERS_ID || videoId === MEMBERS_LOCALE_ID,
           premiereAtMs: videoId === PREMIERE_ID ? PREMIERE_AT_MS : null,
           related: [],
           relatedContinuation: null,

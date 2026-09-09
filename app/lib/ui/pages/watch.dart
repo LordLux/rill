@@ -391,13 +391,12 @@ class _PlayerSurface extends ConsumerWidget {
           if (!fullscreen) isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
 
           if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
-          // A premiere is not a failure, so it does not get the failure screen.
           // Neither of the first two is a failure, so neither gets the failure
           // screen — a members-only video is working exactly as its channel
           // intends, the same way a premiere is.
           if (playback.isUpcoming)
             _PremiereSlate(playback: playback)
-          else if (playback.isMembersOnly)
+          else if (_isMembersOnlyFailure(ref, playback))
             _MembersOnlySlate(playback: playback)
           else if (playback.error != null)
             _Unavailable(playback: playback),
@@ -499,6 +498,31 @@ class _PremiereSlate extends ConsumerWidget {
   }
 }
 
+/// Whether a failed open is a members-only one — from either signal.
+///
+/// **Two signals, and only one of them is structural.** `VIDEO_MEMBERS_ONLY` is
+/// classified in the sidecar from YouTube's refusal *prose*, because the resolve
+/// clients carry nothing else (`protocol.md` §4). That prose is localised, so on
+/// a locale the pattern misses the sidecar answers `STREAM_UNAVAILABLE` and the
+/// user would get "This video would not open" with a *Try again* that cannot
+/// work — on a video the feed had already drawn a green members pill on.
+///
+/// `VideoDetail.isMembersOnly` is the structural half: it comes from
+/// `BADGE_STYLE_TYPE_MEMBERS_ONLY` on the watch page, which YouTube does not
+/// translate, and it rides on a `video.info` call this page already makes. So
+/// either signal is enough.
+///
+/// **Gated on there being a failure at all.** The flag says what the video *is*,
+/// not that it could not be played; without this, a members video that one day
+/// resolves for an actual member would draw the slate over a playing stream.
+bool _isMembersOnlyFailure(WidgetRef ref, PlaybackState playback) {
+  if (playback.error == null) return false;
+  if (playback.isMembersOnly) return true;
+  final item = playback.item;
+  if (item == null) return false;
+  return ref.watch(videoInfoProvider(item.id)).value?.isMembersOnly ?? false;
+}
+
 /// A members-only video: thumbnail, what it is, and where to join — never a
 /// *Try again*, because retrying cannot buy a membership.
 ///
@@ -523,10 +547,23 @@ class _MembersOnlySlate extends ConsumerWidget {
     final tokens = Theme.of(context).tokens;
     final item = playback.item;
     final thumbnailUrl = item?.thumbnailUrl;
-    final channel = item?.maybeMap(
-      video: (v) => v.channelName,
-      orElse: () => null,
-    );
+    // **Blank is absent, and the detail wins over the tile.**
+    //
+    // Rendered "This video is for members of ." on first run — a stray full
+    // stop after nothing. `VideoItem.channelName` is a non-nullable `String`,
+    // so a tile that never carried one holds `''`, and a `== null` check sails
+    // straight past it. The launch-probe placeholder is one such tile; so is
+    // any surface that builds an item before the name is known.
+    //
+    // `video.info` is preferred rather than used only as a fallback: this page
+    // has already fetched it — the byline under the player is drawn from it —
+    // and it is the authoritative name where the tile's is whatever the feed
+    // happened to carry.
+    final detail = item == null ? null : ref.watch(videoInfoProvider(item.id)).value;
+    final channel = [
+      detail?.channelName,
+      item?.maybeMap(video: (v) => v.channelName, orElse: () => null),
+    ].map((name) => name?.trim() ?? '').firstWhere((name) => name.isNotEmpty, orElse: () => '');
 
     return Stack(
       key: membersOnlySlateKey,
@@ -572,7 +609,7 @@ class _MembersOnlySlate extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  channel == null
+                  channel.isEmpty
                       ? 'This video is for channel members.'
                       : 'This video is for members of $channel.',
                   style: TextStyle(
