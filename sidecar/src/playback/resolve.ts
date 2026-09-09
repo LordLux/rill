@@ -41,6 +41,27 @@ import { getPlayerResponse } from '../innertube/player-response.ts';
 import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
+import type { EnvelopeErrorCode } from '../errors.ts';
+
+/**
+ * Refusals that end the ladder instead of declining down it.
+ *
+ * Each names a video that is **fine** and simply cannot be resolved by any
+ * tier: a premiere has not started, and members-only content is behind a
+ * purchase. Trying the remaining rungs costs four more `/player` calls and
+ * arrives at `STREAM_UNAVAILABLE`, which is `retry: "user"` — so the UI offers
+ * a *Try again* that provably cannot work, on a video nothing is wrong with.
+ *
+ * **A list rather than a check per code, because the check is easy to forget.**
+ * `VIDEO_MEMBERS_ONLY` was thrown by `assertPlayable`, documented here and in
+ * `protocol.md` as ending the ladder, and then quietly collected as an ordinary
+ * decline for a day — the rethrow named `VIDEO_UPCOMING` alone. Adding a
+ * terminal code now means adding it here, in one place, next to this note.
+ */
+const LADDER_TERMINAL_CODES: readonly EnvelopeErrorCode[] = [
+  'VIDEO_UPCOMING',
+  'VIDEO_MEMBERS_ONLY',
+];
 import { isSabrOnly } from './sabr-detect.ts';
 import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
 import { openPlaybackSession } from './sessions.ts';
@@ -754,14 +775,14 @@ export async function descendLadder(
       // `STREAM_REQUIRES_SABR` is the designed decline and stays at debug; the
       // rest are worth seeing, because a tier failing for an unexpected reason
       // still looks like success from the outside once a lower tier serves it.
-      // **A premiere ends the ladder rather than declining down it.** No lower
-      // tier can resolve a video that has not started — tier 5's progressive
-      // floor least of all — so continuing spends four more `/player` calls to
-      // arrive at "every tier declined", which is both slower and the wrong
-      // answer: the UI would offer *Try again* on something that cannot succeed
-      // until a date. Rethrown as-is so the scheduled time and YouTube's own
-      // wording survive to Flutter.
-      if (hasCode(error, 'VIDEO_UPCOMING')) {
+      // **Some refusals end the ladder rather than declining down it** — see
+      // [LADDER_TERMINAL_CODES]. No lower tier can resolve a video that has not
+      // started, or buy a membership; tier 5's progressive floor least of all.
+      // Continuing spends four more `/player` calls to arrive at "every tier
+      // declined", which is both slower and the wrong answer: the UI would
+      // offer *Try again* on something that cannot succeed. Rethrown as-is so
+      // the scheduled time, or YouTube's own wording, survives to Flutter.
+      if (LADDER_TERMINAL_CODES.some((code) => hasCode(error, code))) {
         log.info(`${videoId}: not resolving — ${error instanceof Error ? error.message : error}`);
         throw error;
       }
@@ -778,6 +799,14 @@ export async function descendLadder(
 
   // Never `STREAM_REQUIRES_SABR`: that code is internal to this loop and must
   // not reach Flutter.
+  //
+  // Anything reaching here genuinely exhausted the ladder. A code that should
+  // have stopped it belongs in [LADDER_TERMINAL_CODES], not here — arriving at
+  // `STREAM_UNAVAILABLE` turns a specific, actionable refusal into "would not
+  // open" with a *Try again* that cannot work, which is exactly what
+  // `VIDEO_MEMBERS_ONLY` did until 2026-09-09: it was thrown, documented as
+  // ending the ladder, and then collected as an ordinary decline because this
+  // check named one code instead of a list.
   throw new RpcError(
     'STREAM_UNAVAILABLE',
     `${videoId}: every resolution tier declined —\n  ${declined.join('\n  ')}`,

@@ -10,6 +10,9 @@
 import { describe, expect, test } from 'bun:test';
 import { scanBadges } from '../src/parser/text.ts';
 import { parsePlayer } from '../src/parser/player.ts';
+import { openPlayback } from '../src/playback/resolve.ts';
+import { isRpcError } from '../src/errors.ts';
+import type { Session } from '../src/innertube/session.ts';
 
 /** Verbatim from the watch page for `rAWLNJoE5_Y`. */
 const CLASSIC_BADGE = {
@@ -178,6 +181,58 @@ describe('parsePlayer', () => {
       videoDetails: { videoId: 'x' },
     });
     expect(result.isMembersOnly).toBe(false);
+  });
+
+  test('a members-only refusal ends the ladder — it is not a decline', async () => {
+    // **The bug that reached a user.** `assertPlayable` threw
+    // `VIDEO_MEMBERS_ONLY`, `protocol.md` said it ended the ladder, and the
+    // ladder's rethrow named `VIDEO_UPCOMING` alone — so it was collected as an
+    // ordinary decline, every remaining tier was tried, and the watch page got
+    // `STREAM_UNAVAILABLE` ("This video would not open") with a *Try again*
+    // button on a video nothing is wrong with.
+    //
+    // Asserted through `openPlayback` rather than `assertPlayable`, because the
+    // throw was never the broken half — what was broken is what the loop around
+    // it did with the throw.
+    const refusal = {
+      playabilityStatus: {
+        status: 'UNPLAYABLE',
+        reason:
+          'Join this channel from your computer or mobile app to get access to ' +
+          'members-only content like this video.',
+      },
+      videoDetails: { videoId: '0BVmuG4Kjhk' },
+    };
+
+    let calls = 0;
+    const session = {
+      innertube: { session: { player: { signature_timestamp: 20702 } } },
+      hasCookie: false,
+      visitorId: 'x'.repeat(560),
+      async execute() {
+        calls += 1;
+        return refusal;
+      },
+    } as unknown as Session;
+
+    let thrown: unknown;
+    try {
+      await openPlayback({ session }, { videoId: '0BVmuG4Kjhk' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(isRpcError(thrown)).toBe(true);
+    const rpcError = thrown as { code: string; retry: string | null; message: string };
+    expect(rpcError.code).toBe('VIDEO_MEMBERS_ONLY');
+    // `no`, not `user` — the whole point. A retry cannot buy a membership.
+    expect(rpcError.retry).toBe('no');
+    expect(rpcError.message).not.toContain('every resolution tier declined');
+
+    // Tier 1 mints a fresh visitor id and retries once on any non-OK response
+    // (F5), so two `/player` calls is expected. What must not happen is the
+    // ladder walking on to MWEB, yt-dlp and the progressive floor.
+    expect(calls).toBeLessThanOrEqual(2);
   });
 
   test('a healthy response is not members-only', () => {
