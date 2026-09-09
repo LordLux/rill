@@ -212,7 +212,20 @@ cd sidecar && bun run test:network  # live decipher tests — real requests, ~24
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
 cd sidecar && bun run build     # compile to dist/sidecar.exe — see below
 cd app && flutter run -d windows
+cd app && dart run tool/test_suite_guard.dart   # flutter test + the guard below
 ```
+
+**Run the app's tests through `tool/test_suite_guard.dart`, not `flutter test`
+alone.** A test file that does not compile fails to *load*, and `flutter test`
+scores that as a single `-1` — identical to one failed expectation, while every
+test in the file silently stops running. That is not hypothetical: nineteen
+tests stopped running on 2026-08-18 when `bf2e288` renamed
+`PlayerAction.toggleCaptions`, and it went unnoticed for three weeks because the
+suite already carried two known failures and `+403 -2` read as normal. The guard
+fails on any file in `test/` that produced no tests, which is never intentional
+and needs no maintenance. **The sidecar needs no equivalent** — measured
+2026-09-10, `bun test` reports an unloadable file as a separate `1 error` and
+exits 1, so the ambiguity is specific to `flutter test`'s reporter.
 
 The app prefers `sidecar/dist/sidecar.exe` and falls back to `bun run
 src/main.ts` when it is absent, so an unbuilt checkout still runs. The fallback
@@ -327,8 +340,6 @@ the answer.
   non-empty adaptive ladder — not just on `LOGIN_REQUIRED`, because no one has
   ever seen a server-issued id expire and so nobody knows what shape that
   failure takes. A SABR-only response is not an identity refusal.
-- **`build_runner` crashes on compilation with `media_kit` (dart:ffi):** 
-  Running `dart run build_runner build` or `flutter pub run build_runner build` crashes with `type 'InvalidType' is not a subtype of type 'FunctionType' in type cast` inside `_FfiUseSiteTransformer._verifyAndReplaceNativeCallable`. This is a known Dart SDK bug where the kernel compiler crashes when encountering FFI use sites. Because `build_runner` bootstraps and compiles its entrypoint (`build.dart`), this crash **blocks ALL `build_runner` codegen in this project** — not just `freezed`, but `json_serializable`, `riverpod_generator`, and any other builder. Running `build_runner` in JIT mode (e.g. `dart run .dart_tool/build/entrypoint/build.dart build`) also crashes with the same kernel generation error. There is no known one-line escape hatch or flag. The permanent policy is to use hand-written DTOs instead of generated ones to avoid needing to run `build_runner` entirely.
 - **When `app/pubspec.yaml` is first created**, pin
   `media_kit_libs_windows_video: 1.0.11` exactly (not caret). A bump lands
   modern FFmpeg and reintroduces the F13 seek freeze. See §2.4.
@@ -359,6 +370,28 @@ the answer.
   **not** help — it still runs `dart compile kernel`. The pin is removed with a
   comment in `app/pubspec.yaml`; it generated nothing (no `@ShapeshifterAsset`
   exists), so nothing was lost.
+
+  **This note used to have a companion above it blaming `media_kit`'s
+  `dart:ffi` and declaring hand-written DTOs the "permanent policy". That
+  diagnosis was wrong and the two sat contradicting each other in the file
+  loaded into every session — deleted 2026-09-10.** The symptom it described
+  was real and is the one above; the cause it named was not. Codegen works.
+
+  **There were two causes, not one, and `16b70c7` introduced both.** That
+  commit ("added initial Watch Later animated icon assets") added
+  `animated_vector_gen` *and* added `analyzer` / `dart_style` to
+  `dependency_overrides` to make the tree resolve. `bf2e288` removed the
+  generator and codegen started running — which is why this note reads
+  "build_runner works" — but the overrides survived, and they break a
+  *different phase*: the build script compiles fine, then `freezed` fails at
+  builder runtime against an analyzer API it was not written for. An override
+  bypasses constraint checking entirely, so pub resolved analyzer 13.0.0 while
+  freezed needs 12.x and `dart_style` needed 13.1+, and nothing warned. Found
+  and removed 2026-09-09; `app/pubspec.yaml` carries a comment saying which two
+  are deliberately *not* overridden and why. So: **both diagnoses were real and
+  sequential, and this note's "removing it fixes all codegen" was too broad** —
+  it fixed the bootstrap, not the builders. If codegen breaks again, check
+  which phase fails before assuming either cause.
 - **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
   draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
   `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:

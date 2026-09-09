@@ -51,21 +51,19 @@ async function videoDeps(): Promise<{ browse: Session; resolve: Session }> {
   return { browse, resolve };
 }
 
-/**
- * Throw away the resolve session and mint a replacement.
+/*
+ * `remintResolveSession()` used to live here — its only caller was F20's
+ * poisoned-bucket retry, which is retired (`architecture.md` F20, and the note
+ * at `playback.open` below). Removed with it rather than left dead, because a
+ * dead exported helper is what the revival reached for last time.
  *
- * **Resolve only, and that is the whole safety property.** `browseSessionPromise`
- * is untouched: it is the `WEB` session carrying the user's cookies, and
- * dropping it would sign them out on a quarter of launches to fix a stream URL —
- * a worse failure, and a silent one, because a degraded session answers HTTP 200
- * with an empty feed (F7). Asserted in `bucket.test.ts`.
- *
- * Used only by the poisoned-bucket retry (`playback/bucket.ts`, F20).
+ * Its safety property is the part worth keeping, and it applies to anything
+ * that ever re-mints a session here: **replace the resolve session only.**
+ * `browseSessionPromise` is the `WEB` session carrying the user's cookies, and
+ * dropping it to fix a stream URL signs them out — silently, because a degraded
+ * session answers HTTP 200 with an empty feed (F7). That is a worse failure
+ * than the one being fixed.
  */
-function remintResolveSession(): Promise<Session> {
-  resolveSessionPromise = null;
-  return getResolveSession();
-}
 
 function getResolveSession(): Promise<Session> {
   if (!resolveSessionPromise) {
@@ -422,17 +420,26 @@ async function handleRequest(request: RpcRequest) {
       // in the whole resolution module graph, and doing that first made a
       // rejected request pay for a ladder it was never going to use.
       //
-      // **`openPlaybackPastBucket`, not `openPlayback`.** Found while clearing
-      // the typecheck for Task 22 and unrelated to it: this called the bare
-      // ladder and passed `remintResolveSession` alongside it, which
-      // `PlaybackDeps` does not declare — so F20's poisoned-bucket retry was
-      // wired up at both ends and never actually reachable. The excess property
-      // was the compiler saying exactly that.
+      // **`openPlayback`, not `openPlaybackPastBucket` — F20's re-mint is
+      // retired, and this line is where it gets revived by accident.** Read
+      // `architecture.md` F20 before touching it. Short version: the re-mint
+      // worked in August only because it randomly drew *unflagged* buckets;
+      // the PO-token rollout it was escaping is now at 100%, so there is
+      // nothing left to draw and `MAX_REMINTS` is 0. `bucket.test.ts` asserts
+      // this call site stays on the bare ladder.
+      //
+      // It has already been revived once. `663edb1` (a captions refactor)
+      // unwired it by accident but left `remintResolveSession` in the argument
+      // object; `c53fb54` retired the mechanism the next day and left the call
+      // site alone, correctly. Task 22 then read that leftover argument — an
+      // excess property `PlaybackDeps` does not declare, and a real typecheck
+      // error — as evidence the wiring was *broken* and restored the wrapper.
+      // Dropping the argument, not restoring the wrapper, was the fix.
       const videoId = requireString(params, 'videoId', 'playback.open');
-      const { openPlaybackPastBucket } = await import('../playback/bucket.ts');
+      const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
-      const result = await openPlaybackPastBucket(
-        { session, remintResolveSession },
+      const result = await openPlayback(
+        { session },
         { videoId, preload: params?.preload === true },
       );
       emitResponse(id, result);
