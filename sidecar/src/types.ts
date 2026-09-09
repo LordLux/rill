@@ -652,3 +652,22 @@ export interface AuthVerification {
   state: AuthState;
   tileCount: number;
 }
+
+/**
+ * `auth.status` — protocol.md §3.1, widened by Task 22 §7.
+ *
+ * §3.1 specified `{state, accountName?}`. The top bar needs a picture as well
+ * as a name, and a handle is what tells two accounts with the same display name
+ * apart, so all three ship. They are **values or `null`**, never omitted — the
+ * DTO rule in `CLAUDE.md`, applied here because the alternative is a client
+ * that cannot distinguish "no name" from "an older sidecar".
+ *
+ * `state` is measured, never inferred from cookie presence (hard invariant 5).
+ * The account fields are `null` for any state but `authenticated`.
+ */
+export interface AuthStatus {
+  state: AuthState;
+  accountName: string | null;
+  accountHandle: string | null;
+  accountAvatarUrl: string | null;
+}

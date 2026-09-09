@@ -1012,10 +1012,10 @@ class _MediaTileState extends State<MediaTile> {
         final bool isShort = widget.spec.isShort || widget.layout == MediaTileLayout.shorts;
         final EdgeInsets hoverExpansion = isHovering
             ? isShort
-                  ? EdgeInsets.all(-10.0).copyWith(top: -9.0)
+                  ? EdgeInsets.all(-10.0).copyWith(top: -9.0) // Shorts
                   : widget.layout == MediaTileLayout.standard
-                      ? EdgeInsets.symmetric(horizontal: -10.0).copyWith(top: -10.0, bottom: -4.0)
-                      : EdgeInsets.all(-4.0)
+                      ? EdgeInsets.symmetric(horizontal: -10.0).copyWith(top: -9.0, bottom: -4.0) // Standard
+                      : EdgeInsets.all(-4.0) // Wide
             : EdgeInsets.zero;
 
         return MouseRegion(

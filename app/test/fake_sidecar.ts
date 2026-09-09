@@ -54,6 +54,20 @@ const captionGets: unknown[] = [];
 const searchCalls: unknown[] = [];
 const suggestCalls: unknown[] = [];
 
+/**
+ * The auth state this fake is in — Task 22.
+ *
+ * Starts `authenticated` so every pre-existing test sees exactly the behaviour
+ * it saw before this existed; `auth.setCookie` and `auth.signOut` move it, and
+ * `auth.verify`/`auth.status` report it. That is the whole state machine, and
+ * it is here rather than per test because the property under test is a
+ * *sequence* — sign in, restart, sign out — which needs one process that
+ * remembers.
+ */
+let authState: 'authenticated' | 'degraded' | 'anonymous' = 'authenticated';
+const authCookies: string[] = [];
+let signOuts = 0;
+
 const opens: Array<{ videoId?: string; preload: boolean }> = [];
 const reports: unknown[] = [];
 const closes: unknown[] = [];
@@ -113,11 +127,53 @@ rl.on('line', (line) => {
         id: req.id,
         result: mode === 'empty-home'
           ? { state: 'anonymous', tileCount: 0 }
-          : { state: 'authenticated', tileCount: 10 },
+          : authState === 'authenticated'
+            ? { state: 'authenticated', tileCount: 10 }
+            : { state: authState, tileCount: 0 },
       }) + '\n');
       // Deliberately not registered in `pending`: the client issues auth.verify
       // with a plain call and never cancels it, which is exactly the point.
       if (mode === 'empty-home') setTimeout(replyAuth, 400); else replyAuth();
+    } else if (req.method === 'auth.setCookie') {
+      // Task 22. The cookie *value* decides the answer, so a test can reach all
+      // three states without a network: one that contains `degraded` is a stale
+      // session, one with no `SAPISID` is refused, anything else works.
+      //
+      // The value is recorded so a test can assert the app persisted and
+      // restored the same header. It is a fake in a test file and never a real
+      // session — nothing here is a pattern for the app.
+      const cookie = String(req.params?.cookie ?? '');
+      authCookies.push(cookie);
+      authState = cookie.includes('degraded')
+        ? 'degraded'
+        : cookie.includes('SAPISID=') ? 'authenticated' : 'anonymous';
+      process.stdout.write(JSON.stringify({ id: req.id, result: { state: authState } }) + '\n');
+    } else if (req.method === 'auth.signOut') {
+      authState = 'anonymous';
+      signOuts += 1;
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'auth.status') {
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: authState === 'authenticated'
+          ? {
+              state: 'authenticated',
+              accountName: 'Ada Lovelace',
+              accountHandle: '@ada',
+              accountAvatarUrl: 'https://yt3.ggpht.com/ada',
+            }
+          : {
+              state: authState,
+              accountName: null,
+              accountHandle: null,
+              accountAvatarUrl: null,
+            },
+      }) + '\n');
+    } else if (req.method === 'test.authLog') {
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: { state: authState, cookies: authCookies, signOuts },
+      }) + '\n');
     } else if (req.method === 'playback.open') {
       // 'open-fails-once': the first real open answers STREAM_UNAVAILABLE with
       // retry:"user" — the §4 shape the watch page has to offer a retry out of.
@@ -335,6 +391,15 @@ rl.on('line', (line) => {
       captionGets.length = 0;
       searchCalls.length = 0;
       suggestCalls.length = 0;
+      authCookies.length = 0;
+      signOuts = 0;
+      // `test.reset {authState}` puts the session where a test needs to start
+      // without going through `auth.signOut` — which would land in `signOuts`
+      // and be counted against the test that follows. Default restores the
+      // file's own starting state, so every pre-existing caller is unchanged.
+      authState = typeof req.params?.authState === 'string'
+        ? req.params.authState as typeof authState
+        : (mode === 'empty-home' ? 'anonymous' : 'authenticated');
       process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
     } else if (req.method === 'test.playbackLog') {
       // The test's window into what the client actually sent. Reports are
@@ -550,6 +615,24 @@ rl.on('line', (line) => {
         if (!keepalive) pending.set(req.id, timer);
       }
     } else if (req.method === 'feed.subscriptions') {
+      // **A signed-out subscriptions feed is an upstream refusal, not an empty
+      // page.** Measured live 2026-09-08 against the real sidecar: after
+      // `auth.signOut`, `feed.subscriptions` answers
+      // `UPSTREAM_ERROR — "You must be signed in to perform this operation."`.
+      // Modelled here so `anonymous_browsing_test.dart` is asserting a real
+      // difference between the browse family and the resolve family, rather
+      // than a fake that answers the same thing either way.
+      if (authState === 'anonymous') {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: {
+            code: 'UPSTREAM_ERROR',
+            message: 'You must be signed in to perform this operation.',
+            retry: 'auto',
+          },
+        }) + '\n');
+        return;
+      }
       // Same anonymous/authenticated split as `feed.home`'s 'empty-home' mode
       // drives for `auth.verify`, minus the chip bar `feed.subscriptions` never
       // had.

@@ -247,6 +247,25 @@ the answer.
   touches the account. Export from an incognito window parked on
   `youtube.com/robots.txt`, then close it without logging out. Keep main-profile
   YouTube tabs closed while testing.
+- **No cookie value goes to stderr or into an error envelope, and two
+  chokepoints enforce that rather than a rule per call site.** `logger()` and
+  the RPC error envelope both pass their text through `redact.ts`, which strikes
+  the values the process was handed *and* anything shaped like a Google auth
+  cookie. The sidecar's own code interpolates a cookie nowhere; what this
+  catches is a third party doing it — youtubei.js quoting a failed request, a
+  `fetch` rejection carrying headers — which is unreachable by reading this repo
+  and silent when it happens. `redact.test.ts` proves the redaction;
+  `rpc.test.ts`'s end-to-end check is a regression guard and, mutation-checked
+  2026-09-08, currently passes for the second reason too.
+- **The browse session's cookie changes at runtime now, and the base-browse
+  cache belongs to it.** `innertube/auth.ts` owns the cookie, the session, the
+  30-second `feed.home`/`auth.verify` cache and the cached account, and drops
+  all four together. Keeping the cache beside the session instead of on it means
+  a sign-in is verified against the *anonymous* response it just superseded —
+  `degraded` reported for a login that worked, silent and indistinguishable from
+  a genuinely stale cookie. `YT_COOKIE` seeds the first session and any
+  `auth.setCookie`/`auth.signOut` overrides it for the life of the process; a
+  sign-out cannot unset an environment variable, and says so on stderr.
 - **Fixtures must be captured with `parse: false`.** Parsed objects are lossy
   and make a useless corpus.
 - **Never mix fixtures across capture runs.** Clear the directory first. A stale

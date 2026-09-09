@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
@@ -9,7 +7,11 @@ import '../open_video.dart';
 import '../../data/rpc/client.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
+import '../auth_controller.dart';
+import 'account_button.dart';
 import 'channel_badge.dart';
+import 'feed_grid_metrics.dart';
+import 'feed_skeleton.dart';
 import 'media_tile.dart';
 import 'subscribe_button.dart';
 
@@ -175,50 +177,39 @@ class _FeedViewState extends ConsumerState<FeedView> {
       );
     }
 
-    if (state.isAuthDegraded && state.items.isEmpty)
-      return const Center(
-        child: Text('Authentication Degraded. Please sign in again.'),
-      );
-
-    if (state.isAnonymous && state.items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.account_circle_outlined,
-              size: 64,
-              color: scheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              widget.anonymousTitle ?? 'You are browsing anonymously.',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              widget.anonymousMessage ?? 'Log in to see your personalized home feed.',
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Login flow not implemented yet'),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.login),
-              label: const Text('Log In'),
-            ),
-          ],
-        ),
+    // **Two signed-out states, two messages** — Task 22 §3. `degraded` means a
+    // session the server stopped honouring; `anonymous` means there never was
+    // one. Collapsing them into "please sign in" is what makes F7 invisible:
+    // the user sees the same empty page either way and has no reason to think
+    // anything expired. Both offer the same button, because the same action
+    // fixes both — the difference is what the reader is told happened.
+    if (state.isAuthDegraded && state.items.isEmpty) {
+      return _SignedOutState(
+        icon: Icons.gpp_maybe_outlined,
+        iconColor: scheme.error,
+        title: 'Your session expired.',
+        message: 'YouTube stopped honouring this login. Sign in again to get your feed back.',
+        buttonLabel: 'Sign in again',
       );
     }
 
+    if (state.isAnonymous && state.items.isEmpty) {
+      return _SignedOutState(
+        icon: Icons.account_circle_outlined,
+        iconColor: scheme.onSurfaceVariant,
+        title: widget.anonymousTitle ?? 'You are browsing anonymously.',
+        message: widget.anonymousMessage ?? 'Log in to see your personalized home feed.',
+        buttonLabel: 'Log In',
+      );
+    }
+
+    // A skeleton, not a spinner. This is the first paint after a sign-in — the
+    // login window has just closed and the user has no other signal that it
+    // worked — and a grid-shaped placeholder answers "did that do anything?"
+    // where a centred spinner does not. It shares its geometry with the real
+    // grid below, so nothing reflows when the items arrive.
     if (items.isEmpty && state.isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return FeedSkeleton(isWideLayout: widget.isWideLayout);
     }
 
     // A load that finished, found nothing, and is none of the above — a real
@@ -258,15 +249,14 @@ class _FeedViewState extends ConsumerState<FeedView> {
       },
       child: LayoutBuilder(
         builder: (context, constraints) {
-          const double maxExtent = 430.0;
-          // The grid (home, subscriptions, all-subscriptions) gets real breathing
-          // room between rows; a wide, single-column surface (search results, and
-          // any future one) sits closer to a list and stays tight instead.
-          final double spacing = widget.isWideLayout ? 2.0 : 16.0;
-          const double hSpacing = 16.0;
-
-          int crossAxisCount = widget.isWideLayout ? 1 : ((constraints.maxWidth + hSpacing) / (maxExtent + hSpacing)).ceil();
-          crossAxisCount = math.max(1, crossAxisCount);
+          // Geometry lives in `FeedGridMetrics`, shared with `FeedSkeleton`.
+          // The numbers themselves are unchanged; what changed is that there is
+          // now exactly one copy of them, so the placeholder grid cannot drift
+          // from this one and make tiles jump when real content lands.
+          final double spacing = FeedGridMetrics.verticalSpacing(widget.isWideLayout);
+          const double hSpacing = FeedGridMetrics.horizontalSpacing;
+          final int crossAxisCount =
+              FeedGridMetrics.columnCount(constraints.maxWidth, widget.isWideLayout);
 
           final bool hasFooter = items.isNotEmpty && (state.isLoading || state.error != null);
 
@@ -424,9 +414,9 @@ class _FeedViewState extends ConsumerState<FeedView> {
                 controller: _scroll,
                 padding: const EdgeInsets.only(
                   bottom: 16.0,
-                  top: 8.0,
-                  left: 8.0,
-                  right: 8.0,
+                  top: 10.0,
+                  left: 10.0,
+                  right: 10.0,
                 ),
                 itemCount: rows.length,
                 itemBuilder: (context, index) {
@@ -801,6 +791,67 @@ class ChannelTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The empty state for a surface nobody is signed in to — Task 22 §3.
+///
+/// One widget, two callers, because `degraded` and `anonymous` differ only in
+/// what they say. Sharing the *layout* while keeping the *words* apart is the
+/// point: the moment these two are one message with one icon, the distinction
+/// the task is about stops reaching anybody.
+class _SignedOutState extends ConsumerWidget {
+  const _SignedOutState({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.message,
+    required this.buttonLabel,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String message;
+  final String buttonLabel;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final busy = ref.watch(authProvider.select((s) => s.isBusy));
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 64, color: iconColor),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              // Disabled while a sign-in is in flight rather than hidden: a
+              // button that vanishes mid-click reads as the click having done
+              // something else.
+              onPressed: busy ? null : () => openLoginFlow(context, ref),
+              icon: const Icon(Icons.login),
+              label: Text(buttonLabel),
+            ),
+          ],
+        ),
       ),
     );
   }
