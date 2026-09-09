@@ -51,3 +51,4 @@ sidecar/auth.json
 # session data (channel lists, feeds), which must never reach the repo.
 scratch/
 sidecar/scratch/
+*.lnk

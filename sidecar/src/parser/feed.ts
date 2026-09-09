@@ -28,7 +28,8 @@ import { isRendererKey, normaliseRendererName, roleOf } from './vocabulary.ts';
 
 const log = logger('parser');
 
-interface Collector {
+/** Exported for tests only, alongside `traverse` — see its doc comment. */
+export interface Collector {
   items: FeedItem[];
   chips: Chip[];
   continuation: string | null;
@@ -176,8 +177,14 @@ function handleRenderer(
  * Depth-first traversal. Hand-rolled rather than reusing `walk` from tree.ts
  * because the pruning decision here depends on the *key* a value arrived under,
  * which a value-only visitor cannot see.
+ *
+ * Exported for tests only — specifically `tree.test.ts`'s check that this
+ * function's own `value === null || typeof value !== 'object'` /
+ * `Array.isArray` split still agrees with `isObject` (tree.ts) and the inline
+ * branch inside `walk` (tree.ts). Everything in production reaches this
+ * through `parseFeed`.
  */
-function traverse(collector: Collector, value: Json, context: string, depth: number): void {
+export function traverse(collector: Collector, value: Json, context: string, depth: number): void {
   if (depth > 60 || value === null || typeof value !== 'object') return;
 
   if (Array.isArray(value)) {
