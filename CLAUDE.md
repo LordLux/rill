@@ -97,9 +97,10 @@ interface VideoItem {
   viewCountText: string | null;     // display string, not parsed
   publishedText: string | null;
   descriptionSnippet: string | null;
-  badges: string[];                 // "4K", "New", "Members only"
+  badges: string[];                 // "4K", "New" — never a fact with a field
   isShort: boolean;                 // Task 21 — classified, not stripped
   isMusic: boolean;                 // the ♪ on the duration badge, per video
+  isMembersOnly: boolean;           // BADGE_STYLE_TYPE_MEMBERS_ONLY, not the label
   isVerified: boolean;              // the uploading channel's checkmark
   isArtistChannel: boolean;         // the uploading channel's artist badge
   premiereAtMs: number | null;      // unix ms; null unless it is a premiere
@@ -166,6 +167,15 @@ vocabulary. A Short arriving as an **ordinary video renderer carrying a
 classified instead: `VideoItem.isShort`, with `"SHORTS"` deliberately kept
 out of `badges[]` so the fact ships once. The client decides what to do with
 the flag, and `feed_view.dart` does render them, in a shelf of their own.
+
+**Members-only is a flag, not a badge string — added 2026-09-09.** Same rule as
+the two below, and the same reason the verified badge is read by `style`:
+`BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) is stable,
+while the `"Members only"` label is localised. It ships as
+`VideoItem.isMembersOnly` / `VideoDetail.isMembersOnly` and is kept out of
+`badges[]`. **A tile carrying it says nothing about whether this account can
+watch** — YouTube puts members-only videos in a subscriber's feed either way,
+and the resolve path is anonymous besides.
 
 **A fact with a DTO field of its own does not also travel as a label.** That is
 the general rule `isShort` is one case of, and `isLive` is the other. `LIVE`
@@ -273,6 +283,26 @@ the answer.
 - **Fixtures are one moment.** The home feed's renderer mix shifted measurably
   within 8½ hours. Never assert that a given surface contains a given
   generation; search the corpus for wherever it lives.
+- **"Is this an object?" exists three times in the parser, and the three do not
+  share a line of code.** `isObject` in `tree.ts`, the inline `Array.isArray`
+  branch inside `walk`, and a hand-rolled `traverse()` in `parser/feed.ts`. They
+  agree today. Nothing makes them agree, and they are the kind of thing that is
+  changed one at a time — so if you touch one, read the other two before
+  deciding it was safe.
+  **`get()` is where that already cost something.** Every hop was guarded by
+  `isObject`, which excludes arrays *by design* (its `value is JsonObject`
+  predicate would otherwise be a lie, and ~30 call sites gate on "is this a
+  renderer payload"). So `get` could not walk *through* a list: the moment a
+  path stepped onto one, every remaining segment answered `null`.
+  `parsePlayer`'s `playabilityStatus.messages[0]` fallback for a refusal reason
+  was therefore dead from the initial commit — written, documented, believed in,
+  and never once firing, with nothing thrown and nothing logged. Fixed
+  2026-09-09 in `get` rather than in `isObject`, because only `get` walks a
+  *path*; a numeric segment now indexes an array, and a non-numeric one against
+  an array is still `null` so that `get(x, 'runs', 'length')` cannot answer with
+  a property of the container. `src/` was swept at the same time and had no
+  other such caller, so this is a trap rather than a fleet of live bugs — but it
+  is a trap that reads as correct code.
 - **Hover previews are the real video, muted, in the tile** (revised 2026-08-11;
   this note used to say sprite sheets, and `architecture.md` §2.6 records why it
   changed). **Never instantiate a player per tile** — that part is unchanged and

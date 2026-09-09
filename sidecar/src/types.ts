@@ -50,6 +50,20 @@ export interface VideoItem {
    * a non-music video).
    */
   isMusic: boolean;
+  /**
+   * Members-only content — the channel's paid tier, not a public video.
+   *
+   * From `BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon), so
+   * it is read from a token YouTube does not localise. It is deliberately kept
+   * out of `badges[]`: one fact, one route, the rule {@link isShort} and
+   * {@link isLive} already follow.
+   *
+   * **It says nothing about whether *this* account can watch it.** YouTube puts
+   * members-only videos in a subscriber's feed whether or not they are a
+   * member, and the resolve path is anonymous besides — so a tile carrying this
+   * is a tile whose playback may well answer `VIDEO_MEMBERS_ONLY`.
+   */
+  isMembersOnly: boolean;
   /** The uploading channel's verified checkmark. Never true alongside {@link isArtistChannel} — YouTube ships one badge per channel. */
   isVerified: boolean;
   /** The uploading channel's "Official Artist Channel" badge. */
@@ -237,6 +251,16 @@ export interface VideoDetail {
   /** Whether the channel holds an Official Artist Channel badge. Same badge as {@link VideoItem.isArtistChannel}. */
   isArtistChannel: boolean;
   badges: string[];
+  /**
+   * Members-only content. Same badge and same rule as
+   * {@link VideoItem.isMembersOnly}, read off the watch page.
+   *
+   * This is what the watch page's members slate is drawn from, rather than the
+   * `playback.open` failure: it is structural (`BADGE_STYLE_TYPE_MEMBERS_ONLY`)
+   * where the failure's `reason` is localised prose, and it arrives on a call
+   * the page already makes.
+   */
+  isMembersOnly: boolean;
   /**
    * When a premiere starts, unix ms — null for anything already published.
    *
@@ -509,6 +533,14 @@ export interface PlayerResult {
   isLive: boolean;
   /** A premiere or scheduled stream that has not started. Never playable yet. */
   isUpcoming: boolean;
+  /**
+   * The refusal was "join this channel". Ends the ladder, like {@link isUpcoming}.
+   *
+   * Classified from `playabilityStatus.reason`, which is localised — the only
+   * signal this response carries. See the note in `parser/player.ts`; the
+   * structural answer is {@link VideoDetail.isMembersOnly}.
+   */
+  isMembersOnly: boolean;
   /** When it starts, unix ms. Null even when [isUpcoming] — see the parser. */
   scheduledStartMs: number | null;
   /**

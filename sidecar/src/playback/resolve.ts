@@ -238,6 +238,17 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
     throw new RpcError('VIDEO_UPCOMING', reason);
   }
 
+  // Members-only, and it ends the ladder for the same reason a premiere does:
+  // no lower rung can buy a membership, so declining through all four spends
+  // three more `/player` calls to arrive at a worse-worded version of this.
+  //
+  // It also matters that this is not `STREAM_UNAVAILABLE`: that code is `user`,
+  // so the watch page would offer a *Try again* that can only ever fail, on a
+  // video that is working exactly as the channel intends.
+  if (response.isMembersOnly) {
+    throw new RpcError('VIDEO_MEMBERS_ONLY', reason);
+  }
+
   if (status === 'UNPLAYABLE' && /page needs to be reloaded/i.test(reason)) {
     // Hard invariant 7. If this ever fires, the `/player` payload lost its
     // signatureTimestamp or it no longer matches the deciphering player.

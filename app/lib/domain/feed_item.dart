@@ -29,6 +29,16 @@ sealed class FeedItem with _$FeedItem {
     /// The ♪ on YouTube's own duration badge, per video — distinct from
     /// [isArtistChannel], which is per channel and can disagree with this.
     @Default(false) bool isMusic,
+    /// Members-only content — the channel's paid tier.
+    ///
+    /// From `BADGE_STYLE_TYPE_MEMBERS_ONLY`, so it is read off a token YouTube
+    /// does not localise, and it never appears in [badges] as well.
+    ///
+    /// **It does not mean this account cannot watch it.** YouTube puts
+    /// members-only videos in a subscriber's feed either way, and the sidecar's
+    /// resolve path is anonymous besides — so a tile with this set is one whose
+    /// playback may answer `VIDEO_MEMBERS_ONLY`.
+    @Default(false) bool isMembersOnly,
     /// The uploading channel's verified checkmark.
     @Default(false) bool isVerified,
     /// The uploading channel's "Official Artist Channel" badge.

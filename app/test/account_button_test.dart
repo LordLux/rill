@@ -58,7 +58,7 @@ void main() {
     // makes F7 invisible — the user's own feed goes empty and nothing on screen
     // suggests anything expired.
     await pumpWith(tester, const AuthState(status: AuthStatus.degraded));
-    expect(find.byTooltip('Your session expired — sign in again'), findsOneWidget);
+    expect(find.byTooltip('Your session expired. Please sign in again'), findsOneWidget);
     expect(find.byTooltip('Log in'), findsNothing);
   });
 

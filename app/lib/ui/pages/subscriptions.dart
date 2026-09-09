@@ -52,6 +52,7 @@ class SubscriptionsPage extends StatelessWidget {
           Expanded(
             child: FeedView(
               provider: subscriptionsProvider,
+              groupMembersOnly: true,
               anonymousTitle: 'No subscriptions to show.',
               anonymousMessage: 'Log in to see videos from channels you subscribe to.',
               emptyMessage: 'Nothing new from your subscriptions.',

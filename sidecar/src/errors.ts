@@ -28,6 +28,19 @@ export type EnvelopeErrorCode =
    * for the next nine days.
    */
   | 'VIDEO_UPCOMING'
+  /**
+   * The video exists and is fine; it is behind the channel's membership.
+   *
+   * The same shape as `VIDEO_UPCOMING` and for the same reason: no rung of the
+   * ladder can resolve it, so declining down all four spends four `/player`
+   * calls to reach a worse-worded version of the answer tier 1 already gave.
+   * `no` because retrying cannot buy a membership.
+   *
+   * Kept separate from `AUTH_REQUIRED`, which means "sign in" — signing in does
+   * not help here, and on a members-only video the user is *already* signed in
+   * more often than not.
+   */
+  | 'VIDEO_MEMBERS_ONLY'
   | 'RATE_LIMITED'
   | 'UPSTREAM_ERROR';
 
@@ -93,6 +106,7 @@ const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.fre
   // policy: retrying before the scheduled time cannot succeed, and the UI has
   // something better than a retry button to offer — the date and a reminder.
   VIDEO_UPCOMING: 'no',
+  VIDEO_MEMBERS_ONLY: 'no',
   RATE_LIMITED: 'auto',
   UPSTREAM_ERROR: 'auto',
 });
