@@ -19,6 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/domain/video_detail.dart';
 import 'package:rill/ui/pages/watch.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/view_mode.dart';
@@ -76,6 +77,57 @@ Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
 }
 
 void main() {
+  // The two-signal rule as pure logic. It became a pure function so that this
+  // group could exist — with a `WidgetRef` in the signature the only way to
+  // reach these four combinations was to pump a widget per case.
+  group('isMembersOnlyFailure', () {
+    PlaybackState failed({bool membersCode = false}) => PlaybackState(
+          error: 'something',
+          errorCode: membersCode ? 'VIDEO_MEMBERS_ONLY' : 'STREAM_UNAVAILABLE',
+        );
+
+    VideoDetail detail({required bool membersOnly}) => VideoDetail(
+          id: 'x',
+          title: 't',
+          channelName: 'c',
+          isLive: false,
+          isSubscribed: false,
+          isMembersOnly: membersOnly,
+        );
+
+    test('the error code alone is enough', () {
+      expect(isMembersOnlyFailure(failed(membersCode: true), null), isTrue);
+    });
+
+    test('the structural flag alone is enough', () {
+      // The locale case: the sidecar could not classify the prose, `video.info`
+      // read the badge style anyway.
+      expect(isMembersOnlyFailure(failed(), detail(membersOnly: true)), isTrue);
+    });
+
+    test('an ordinary failure on an ordinary video is neither', () {
+      expect(isMembersOnlyFailure(failed(), detail(membersOnly: false)), isFalse);
+      expect(isMembersOnlyFailure(failed(), null), isFalse);
+    });
+
+    test('no failure is never members-only, however the flags read', () {
+      // The gate that stops a slate landing over a playing stream if a
+      // membership ever resolves for a real member.
+      expect(
+        isMembersOnlyFailure(const PlaybackState(), detail(membersOnly: true)),
+        isFalse,
+      );
+      expect(
+        isMembersOnlyFailure(
+          const PlaybackState(errorCode: 'VIDEO_MEMBERS_ONLY'),
+          detail(membersOnly: true),
+        ),
+        isFalse,
+        reason: 'an error *code* with no error is not a failure',
+      );
+    });
+  });
+
   setUpAll(() async {
     await RpcClient.instance.killForTestAndWait();
     RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];

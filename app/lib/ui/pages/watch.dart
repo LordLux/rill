@@ -377,6 +377,11 @@ class _PlayerSurface extends ConsumerWidget {
     final fullscreen = ref.watch(playerViewProvider.select((view) => view.fullscreen));
     final ratio = actualAspectRatio ?? ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
     final isTopWatchPage = (ModalRoute.of(context)?.isCurrent == true) && (ref.watch(currentRouteProvider) == watchRouteName);
+    // Watched here rather than inside the helper below, so this widget's
+    // subscriptions are all readable from one place. Carries the *structural*
+    // members-only flag — see [isMembersOnlyFailure].
+    final item = playback.item;
+    final detail = item == null ? null : ref.watch(videoInfoProvider(item.id)).value;
 
     final content = ColoredBox(
       color: theme.tokens.scrim,
@@ -396,7 +401,7 @@ class _PlayerSurface extends ConsumerWidget {
           // intends, the same way a premiere is.
           if (playback.isUpcoming)
             _PremiereSlate(playback: playback)
-          else if (_isMembersOnlyFailure(ref, playback))
+          else if (isMembersOnlyFailure(playback, detail))
             _MembersOnlySlate(playback: playback)
           else if (playback.error != null)
             _Unavailable(playback: playback),
@@ -515,12 +520,14 @@ class _PremiereSlate extends ConsumerWidget {
 /// **Gated on there being a failure at all.** The flag says what the video *is*,
 /// not that it could not be played; without this, a members video that one day
 /// resolves for an actual member would draw the slate over a playing stream.
-bool _isMembersOnlyFailure(WidgetRef ref, PlaybackState playback) {
+/// Pure, and takes [detail] rather than a `WidgetRef`, so that the `ref.watch`
+/// it needs happens in `build` where the widget's other subscriptions are
+/// visible — a `ref.watch` buried in a free function is sound but leaves the
+/// caller's subscription list unreadable from the caller.
+@visibleForTesting
+bool isMembersOnlyFailure(PlaybackState playback, VideoDetail? detail) {
   if (playback.error == null) return false;
-  if (playback.isMembersOnly) return true;
-  final item = playback.item;
-  if (item == null) return false;
-  return ref.watch(videoInfoProvider(item.id)).value?.isMembersOnly ?? false;
+  return playback.isMembersOnly || (detail?.isMembersOnly ?? false);
 }
 
 /// A members-only video: thumbnail, what it is, and where to join — never a
