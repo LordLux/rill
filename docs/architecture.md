@@ -290,6 +290,102 @@ with an empty feed and no error. The sidecar must therefore:
 Login is a one-time WebView2 flow owned by the app. Because nothing else touches
 that session, browser-side cookie rotation cannot invalidate it.
 
+#### The WebView2 binding, decided by what it can read — built 2026-09-08
+
+Task 22's stop condition was whether a Flutter Windows WebView2 package can hand
+back cookies at all. It is a real fork in the road and the answer decides the
+package:
+
+- **`webview_windows` cannot.** Its method channel has some twenty methods and
+  none of them reads a cookie; `clearCookies()` is the only cookie operation it
+  exposes. `executeScript('document.cookie')` is not a way around that — every
+  Google session cookie is `HttpOnly` and invisible to page script, which is the
+  point of `HttpOnly`.
+- **`flutter_inappwebview_windows` can.** It goes through the DevTools protocol:
+  `Network.getCookies` for the read, `Network.clearBrowserCookies` for the
+  clear, both against WebView2's default environment. CDP returns `HttpOnly`
+  cookies, which is what makes the whole task possible.
+
+So the dependency is `flutter_inappwebview` (6.1.5, endorsing
+`flutter_inappwebview_windows` 0.6.0). It is used on one screen and renders no
+app UI.
+
+#### Completion is a cookie set, never a URL — 2026-09-08
+
+The flow polls the jar every two seconds and on every `onLoadStop`, and treats
+the presence of **`SAPISID` and `SID` together** as "worth trying". Not a URL
+match: Google's redirect chain differs by sign-in method (password, 2FA,
+passkey, account picker) and interstitials land on pages that look final and are
+not.
+
+`SAPISID` specifically, and not one marker among several — youtubei.js builds
+the `Authorization: SAPISIDHASH …` header by hashing that literally-named
+cookie. A jar carrying only the `__Secure-` variants produces a request with no
+`Authorization` at all: HTTP 200, an anonymous feed, no error. F7's shape,
+reached by a different road.
+
+And the cookie set is only a **precondition**. Hard invariant 5 applies here as
+everywhere: the flow hands the header to `auth.setCookie`, which fetches home
+and counts tiles, and only a tile count above zero closes the window. A cookie
+set by a half-finished flow leaves the user exactly where they were.
+
+#### The login WebView must not load YouTube — crash, 2026-09-09
+
+The first real sign-in crashed the app the instant it succeeded, and the crash
+is worth recording because nothing about it points at its own cause.
+
+`continue` used to be `https://www.youtube.com/`, so a successful login handed
+the WebView the entire YouTube SPA to render — at precisely the moment
+`login_page.dart` tears the WebView down. Windows Error Reporting caught it:
+`0xc0000005` in `flutter_inappwebview_windows_plugin.dll` at RVA `0x7aff5`.
+Disassembling the shipped DLL at that offset gives
+`mov rsi,[r8]` / `cmp byte ptr [rsi+40h],0Bh` — a `std::get<flutter::EncodableMap>`
+on an `EncodableValue` (index 11 is `EncodableMap`; the index byte sits at
+`+0x40` because MSVC's `std::any`, inside `CustomEncodableValue`, makes the
+variant that wide). The only unguarded call of that shape in the plugin is
+`WebViewChannelDelegate::PermissionRequestCallback::decodeResult`.
+
+So: the page asked for a permission, the plugin sent `onPermissionRequest` to
+Dart and kept a callback, and Dart's reply came back after the native webview
+had been freed. A use-after-free in the plugin's lifetime handling, reachable by
+any caller that closes a webview while a page is still asking for things.
+
+Three changes, in order of how much they matter:
+
+1. **`continue` lands on `youtube.com/robots.txt`.** A few bytes of text that
+   ask for no permissions, run no script and play nothing. The cookies are set
+   by the `SetSID` bounce before that target is reached, so detection is
+   unchanged. This removes the trigger rather than racing it.
+2. **Every permission request is denied synchronously.** There is then never a
+   pending reply to outlive the page — and a login WebView with no permission UI
+   has no honest answer but no anyway.
+3. **The WebView is stopped and parked on `about:blank` before the route pops.**
+   This narrows the window rather than closing it; the defect is the plugin's,
+   and a caller can only stop feeding it.
+
+Worth knowing for the next Windows plugin that owns a native view: a crash like
+this leaves no application log at all, because stderr goes nowhere when the app
+is launched from a shortcut. The evidence was entirely in WER
+(`Application Error` event 1000, plus a minidump under `%LOCALAPPDATA%\CrashDumps`).
+**That minidump contains the session cookie in process memory** — it is a
+credential artefact under §5's rule, and should be deleted rather than kept or
+attached to a bug report.
+
+#### Where the cookie lives, and what that actually is — 2026-09-08
+
+`flutter_secure_storage`, as Task 22 §5 requires. What that maps to on Windows
+is worth writing down, because it is not what the task assumed: as of
+`flutter_secure_storage_windows` 3.1.2 it is **not DPAPI**. The plugin generates
+a 16-byte AES key, stores that in Windows Credential Manager (`CredWriteW`,
+`CRED_TYPE_GENERIC`), and writes values AES-GCM-encrypted to a file in the app's
+data directory. So the credential store holds the key and the app directory
+holds the ciphertext.
+
+That also happens to be why it works at all here: Credential Manager's blob
+limit is 2560 bytes and a real YouTube cookie header is routinely larger. A
+version of this plugin that wrote the value straight to `CredWrite` would fail
+on a real session.
+
 ### 2.6 Hover previews
 
 **Revised 2026-08-11.** Hovering a tile plays the real video, muted, in the

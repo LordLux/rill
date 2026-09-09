@@ -7,6 +7,7 @@ import '../domain/artist_panel.dart';
 import '../domain/feed_item.dart';
 import '../domain/search_filters.dart';
 import '../data/rpc/client.dart';
+import 'auth_controller.dart';
 
 /// Which RPC family a surface needs beyond `{method, hasChips}`.
 ///
@@ -315,6 +316,17 @@ class FeedController extends Notifier<FeedState> {
       _retryTimer?.cancel();
       _retryTimer = null;
     });
+
+    // Reload when the signed-in account changes — Task 22 §6.8, "refresh
+    // whatever surface the user was on". `build` re-runs on a bump and the
+    // `autoLoadOnBuild` line below does the rest, so a surface gets this for
+    // free rather than each one subscribing.
+    //
+    // A counter, not [authProvider] itself: the account name arrives one round
+    // trip after the state does, and watching the whole state would reload
+    // every open feed a second time for a change no feed renders.
+    ref.watch(authRefreshProvider);
+
     if (config.autoLoadOnBuild) Future.microtask(load);
     // `FeedState.isLoading` defaults to true because home and subscriptions
     // both start fetching the instant they build. A surface that waits for an
@@ -460,6 +472,12 @@ class FeedController extends Notifier<FeedState> {
         final authResponse = await RpcClient.instance.call('auth.verify', {});
         if (generation != _generation) return;
         final stateStr = authResponse['state'] as String?;
+        // This is the one moment F7 is detectable, and the top bar has no other
+        // way to learn about it — an account whose session just died would
+        // otherwise keep its avatar and name next to an empty feed. Handing the
+        // answer over costs nothing; asking again from the top bar would cost a
+        // second `/browse`.
+        ref.read(authProvider.notifier).adoptVerifiedState(stateStr);
         if (stateStr == 'degraded') {
           state = state.copyWith(isAuthDegraded: true, isLoading: false);
           return;

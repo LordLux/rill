@@ -121,13 +121,24 @@ void main() {
           const PlayerMenuState(open: true, page: SettingsPage.root),
           reason: 'back leaves the menu open — it is not a close');
 
-      menu.go(SettingsPage.captions);
-      expect(menu.back(), isTrue);
-      expect(container.read(playerMenuProvider),
-          const PlayerMenuState(open: true, page: SettingsPage.root),
-          reason: 'back out of captions returns to root');
-
       expect(menu.back(), isFalse, reason: 'nothing above the root');
+
+      // **Captions is a top level, not a subpage — and this assertion used to
+      // say the opposite.** It was written when captions hung off the root
+      // menu; Task 19 gave it its own CC button, which makes it a peer of
+      // quality, and `back()`'s doc says so ("only `moreOptions` is under
+      // anything"). The assertion was not updated, so it has been failing ever
+      // since — the one red test in the suite, for a design decision that had
+      // already been made and documented.
+      //
+      // The caption *sub*-pages do go back, but not through here: each one
+      // names its own parent with `go(...)` (`forceStyle` → `captionStyle` →
+      // `captions`, `settings_menu.dart`), and the widget test "back returns to
+      // the track list, not to the root" is what covers that.
+      menu.go(SettingsPage.captions);
+      expect(menu.back(), isFalse, reason: 'captions is its own top level');
+      expect(container.read(playerMenuProvider).page, SettingsPage.captions,
+          reason: 'a back that had nowhere to go must not move the page either');
 
       // Quality is a top level of its own, reached from its own button.
       menu.go(SettingsPage.quality);
