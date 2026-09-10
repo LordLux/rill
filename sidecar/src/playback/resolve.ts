@@ -202,6 +202,7 @@ function assemble(parts: SourceParts): PlaybackSource {
   return {
     sessionId: newSessionId(),
     durationMs: parts.durationMs ?? (durationSeconds === null ? null : durationSeconds * 1000),
+    startTimestamp: parts.response?.startTimestamp ?? null,
     storyboardTemplate: parts.response ? storyboardTemplate(parts.response) : null,
     // A uniform rule rather than a bottom-rung special case: tier 5 is 360p so
     // it is always degraded, and a tier-1 resolution that could only find 360p is
@@ -289,6 +290,28 @@ export async function tierPlainAdaptive(
       'STREAM_REQUIRES_SABR',
       `${videoId}: ${client} adaptive formats are SABR-only`,
     );
+  }
+
+  if (response.hlsManifestUrl || response.dashManifestUrl) {
+    const isHls = !!response.hlsManifestUrl;
+    const url = (response.hlsManifestUrl ?? response.dashManifestUrl) as string;
+    
+    // We can infer a max resolution from the available formats to satisfy the type.
+    const maxVideo = rankVideo(response.formats)[0];
+    
+    return assemble({
+      variants: [{
+        videoUrl: url as SignedUrl,
+        audioUrl: null,
+        itag: maxVideo?.itag ?? null,
+        height: maxVideo?.height ?? 1080,
+        fps: maxVideo?.fps ?? 30,
+        videoCodec: maxVideo?.codecs ?? 'unknown',
+        audioCodec: 'unknown',
+      }],
+      response,
+      transport: isHls ? 'hls' : 'dash',
+    });
   }
 
   const rankedVideos = rankVideo(response.formats);
@@ -826,6 +849,17 @@ export async function openPlayback(
   // still cached.
   if (!preload) {
     openPlaybackSession(source.sessionId, videoId);
+  }
+
+  if (source.durationMs === null && source.startTimestamp === null) {
+    try {
+      const mweb = await getPlayerResponse(deps.session, videoId, 'MWEB');
+      if (mweb.startTimestamp) {
+        source.startTimestamp = mweb.startTimestamp;
+      }
+    } catch (error) {
+      log.warn(`${videoId}: MWEB fallback for startTimestamp failed`);
+    }
   }
 
   return source;

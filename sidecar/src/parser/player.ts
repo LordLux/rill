@@ -182,6 +182,8 @@ export function parsePlayer(raw: Json): PlayerResult {
   return {
     videoId: str(get(details, 'videoId')),
     formats,
+    hlsManifestUrl: str(get(streaming, 'hlsManifestUrl')) ?? str(get(streaming, 'hls_manifest_url')),
+    dashManifestUrl: str(get(streaming, 'dashManifestUrl')) ?? str(get(streaming, 'dash_manifest_url')),
     storyboards: extractStoryboards(body),
     cpn: extractCpn(body),
     playabilityStatus: str(get(body, 'playabilityStatus', 'status')),
@@ -190,6 +192,7 @@ export function parsePlayer(raw: Json): PlayerResult {
       str(get(body, 'playabilityStatus', 'messages', '0')),
     durationSeconds: isLive ? null : lengthSeconds,
     isLive,
+    startTimestamp: str(get(body, 'microformat', 'playerMicroformatRenderer', 'liveBroadcastDetails', 'startTimestamp')),
     isUpcoming,
     scheduledStartMs: isUpcoming ? premiereStartMs(body) : null,
     // Deliberately about the *adaptive* ladder, not about every format — a

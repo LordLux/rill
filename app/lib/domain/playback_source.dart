@@ -40,6 +40,7 @@ abstract class PlaybackSource with _$PlaybackSource {
   const factory PlaybackSource({
     required String sessionId,
     int? durationMs,
+    String? startTimestamp,
     String? storyboardTemplate,
     @Default(false) bool qualityDegraded,
     @Default('plain') String transport,

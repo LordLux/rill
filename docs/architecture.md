@@ -134,6 +134,8 @@ the finding rests on: **F15** measured the same four seeks through media_kit's
 Dart binding and ANGLE render path, 4/4 across five runs plus a debug run, on the
 same DLL. What the ANGLE path *does* change is the decoder, not the seek: see
 **F16**. Still one video (`aqz-KE-bpKQ`), one machine, one GPU.
+| F21 | **The `ANDROID` client response fundamentally breaks the sidecar parser.** | Measured 2026-09-10. While spoofing `ANDROID` returns the same conceptual data, its API responses heavily use protobuf arrays or mobile-specific JSON renderers (like `compactVideoRenderer`, native carousels, or Android ad blocks). The sidecar is explicitly built around `MWEB`/Desktop JSON vocabulary (`src/parser/vocabulary.ts`); encountering these undocumented renderers causes the parser to safely skip them, resulting in empty/broken feeds. Thus, `MWEB` remains strictly superior for stable metadata scraping. |
+| F22 | **YouTube issues `"STATION"` badges for 24/7 radio streams to Android, but `"LIVE"` to web clients.** | Measured 2026-09-10 on DECO*27's channel. The official Android app (`ANDROID` client) receives a `thumbnailBadgeViewModel` with the text label `"STATION"` for 24/7 music radios. The `MWEB` client receives `"LIVE"`. Because the sidecar parses `isLive` based on matching the regex `/^(live|live now|in diretta)$/i` or internal styles, processing the Android payload would actually cause a regression by failing to flag the video as live, degrading the app's red live duration indicator into a standard text pill. |
 
 ---
 
