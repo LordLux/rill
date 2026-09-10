@@ -135,7 +135,12 @@ class FakeEngine implements PlaybackEngine {
   Stream<String?> get subtitleTextStream => subtitleText.stream;
 
   @override
-  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {
+  Future<void> open(
+    PlaybackVariant variant, {
+    bool play = true,
+    bool retainSubtitle = false,
+    bool isLive = false,
+  }) async {
     opened.add(variant);
     // Exactly `MediaKitEngine`'s behaviour: the reopen drops mpv's external
     // subtitle track, and only `retainSubtitle` puts it back. Modelled here

@@ -21,6 +21,7 @@ import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
+import '../../domain/playback_source.dart';
 import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
 import '../captions_controller.dart';
@@ -501,6 +502,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
           engine: widget.engine,
           dragging: _dragging,
           hold: playback.hold,
+          source: playback.source,
           onDrag: (value) {
             setState(() => _dragging = value);
             _wake();
@@ -583,6 +585,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         engine: widget.engine,
                         dragging: _dragging,
                         hold: playback.hold,
+                        source: playback.source,
                       ),
                     ),
                   ),
@@ -747,6 +750,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             engine: widget.engine,
             dragging: _dragging,
             hold: playback.hold,
+            source: playback.source,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -755,6 +759,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               engine: widget.engine,
               dragging: _dragging,
               hold: playback.hold,
+              source: playback.source,
               onDrag: (value) {
                 setState(() => _dragging = value);
                 _wake();
@@ -989,12 +994,14 @@ class _Scrubber extends StatelessWidget {
     required this.engine,
     required this.dragging,
     required this.hold,
+    required this.source,
     required this.onDrag,
     required this.onDragEnd,
   });
 
   final PlaybackEngine engine;
   final double? dragging;
+  final PlaybackSource? source;
 
   /// Where the video is while the engine cannot say — see [PlaybackHold].
   /// Outranks the stream, and is outranked by the thumb: three sources, one
@@ -1019,18 +1026,61 @@ class _Scrubber extends StatelessWidget {
           stream: engine.bufferStream,
           initialData: engine.buffer,
           builder: (context, bufferSnapshot) {
-            final duration = hold?.duration ?? engine.duration;
-            final max = math.max(duration.inMilliseconds.toDouble(), 1.0);
-            final position = (hold?.position ?? positionSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
-            final value = (dragging ?? position).clamp(0.0, max);
-            final buffered = (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+            double durationMs = (hold?.duration ?? engine.duration).inMilliseconds.toDouble();
+            double max = math.max(durationMs, 1.0);
+            double positionMs = (hold?.position ?? positionSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+            double bufferedMs = (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+            
+            double value = (dragging ?? positionMs).clamp(0.0, max);
+            double? unplayableEndFraction;
+
+            if (source?.durationMs == null && source?.startTimestamp != null) {
+              final start = DateTime.parse(source!.startTimestamp!).toLocal();
+              final now = DateTime.now();
+              final liveEdgeMs = math.max(now.difference(start).inMilliseconds.toDouble(), 1.0);
+              
+              final playheadOffsetMs = durationMs - positionMs;
+              final absoluteValueMs = liveEdgeMs - playheadOffsetMs;
+
+              max = liveEdgeMs;
+              value = (dragging ?? absoluteValueMs).clamp(0.0, max);
+              
+              final bufferOffsetMs = durationMs - bufferedMs;
+              bufferedMs = (liveEdgeMs - bufferOffsetMs).clamp(0.0, max);
+              
+              final unplayableEndMs = liveEdgeMs - durationMs;
+              unplayableEndFraction = (unplayableEndMs / max).clamp(0.0, 1.0);
+            }
+
+            void handleDrag(double absoluteValue) {
+              if (unplayableEndFraction != null) {
+                final unplayableEndMs = max * unplayableEndFraction!;
+                final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
+                // Convert back to relative
+                final relativeValue = clampedAbsolute - unplayableEndMs;
+                onDrag(relativeValue);
+              } else {
+                onDrag(absoluteValue);
+              }
+            }
+
+            void handleDragEnd(double absoluteValue) {
+              if (unplayableEndFraction != null) {
+                final unplayableEndMs = max * unplayableEndFraction!;
+                final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
+                final relativeValue = clampedAbsolute - unplayableEndMs;
+                onDragEnd(relativeValue);
+              } else {
+                onDragEnd(absoluteValue);
+              }
+            }
 
             final pad = SliderTheme.of(context).padding ?? const EdgeInsets.symmetric(horizontal: 12.0);
 
             return SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 4,
-                trackShape: const _RillSliderTrackShape(),
+                trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                 padding: pad / 1.5,
@@ -1038,12 +1088,9 @@ class _Scrubber extends StatelessWidget {
               child: Slider(
                 value: value,
                 max: max,
-                // The buffered range. Clamped above `value` because a secondary
-                // track behind the thumb is an assertion error, and mpv reports
-                // a buffer of zero for a moment after every seek.
-                secondaryTrackValue: buffered.clamp(value, max),
-                onChanged: onDrag,
-                onChangeEnd: onDragEnd,
+                secondaryTrackValue: bufferedMs.clamp(value, max),
+                onChanged: handleDrag,
+                onChangeEnd: handleDragEnd,
               ),
             );
           },
@@ -1054,7 +1101,7 @@ class _Scrubber extends StatelessWidget {
 }
 
 class _Clock extends StatelessWidget {
-  const _Clock({required this.engine, required this.dragging, required this.hold});
+  const _Clock({required this.engine, required this.dragging, required this.hold, this.source});
 
   final PlaybackEngine engine;
   final double? dragging;
@@ -1062,6 +1109,7 @@ class _Clock extends StatelessWidget {
   /// See [_Scrubber.hold]. Same sources, same order — a clock reading
   /// `0:00 / 0:00` beside a scrubber holding 3:12 would be its own kind of wrong.
   final PlaybackHold? hold;
+  final PlaybackSource? source;
 
   @override
   Widget build(BuildContext context) {
@@ -1074,6 +1122,41 @@ class _Clock extends StatelessWidget {
         // otherwise the number under the finger is the position the user is
         // leaving, which is the one piece of information they do not need.
         final position = dragging == null ? (hold?.position ?? snapshot.data ?? Duration.zero) : Duration(milliseconds: dragging!.round());
+        
+        if (source?.durationMs == null && source != null) {
+          Widget timeWidget;
+          if (source!.startTimestamp != null) {
+            final start = DateTime.parse(source!.startTimestamp!).toLocal();
+            final now = DateTime.now();
+            final liveEdgeUptime = now.difference(start);
+            final playheadOffset = duration - position;
+            final absoluteUptime = liveEdgeUptime - playheadOffset;
+            timeWidget = Text(
+              formatClock(absoluteUptime.isNegative ? Duration.zero : absoluteUptime),
+              style: const TextStyle(fontSize: 12),
+            );
+          } else {
+            timeWidget = Text(
+              formatClock(position),
+              style: const TextStyle(fontSize: 12),
+            );
+          }
+
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              timeWidget,
+              const SizedBox(width: 6),
+              const Icon(Icons.circle, size: 6, color: Colors.red),
+              const SizedBox(width: 4),
+              const Text(
+                'LIVE',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ],
+          );
+        }
+
         return Text(
           '${formatClock(position)} / ${formatClock(duration)}',
           // One line, clipped. Inside the `Expanded` above, a narrow bar hands
@@ -1360,7 +1443,8 @@ String formatClock(Duration d) {
 }
 
 class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
-  const _RillSliderTrackShape();
+  final double? unplayableEndFraction;
+  const _RillSliderTrackShape({this.unplayableEndFraction});
 
   @override
   void paint(
@@ -1418,7 +1502,21 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
     // Draw active track
     final Rect leftTrackSegment = Rect.fromLTRB(trackRect.left, trackRect.top, thumbCenter.dx, trackRect.bottom);
     if (!leftTrackSegment.isEmpty) {
-      context.canvas.drawRect(leftTrackSegment, leftTrackPaint);
+      if (unplayableEndFraction != null && unplayableEndFraction! > 0) {
+        final unplayableEndX = trackRect.left + (trackRect.width * unplayableEndFraction!);
+        if (unplayableEndX < thumbCenter.dx) {
+          final Rect unplayableSegment = Rect.fromLTRB(trackRect.left, trackRect.top, unplayableEndX, trackRect.bottom);
+          final Rect playableSegment = Rect.fromLTRB(unplayableEndX, trackRect.top, thumbCenter.dx, trackRect.bottom);
+          final Paint unplayablePaint = Paint()..color = activePaint.color.withValues(alpha: 0.3);
+          context.canvas.drawRect(unplayableSegment, unplayablePaint);
+          context.canvas.drawRect(playableSegment, leftTrackPaint);
+        } else {
+          final Paint unplayablePaint = Paint()..color = activePaint.color.withValues(alpha: 0.3);
+          context.canvas.drawRect(leftTrackSegment, unplayablePaint);
+        }
+      } else {
+        context.canvas.drawRect(leftTrackSegment, leftTrackPaint);
+      }
     }
 
     // Draw secondary track (buffered)

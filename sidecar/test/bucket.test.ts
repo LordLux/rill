@@ -39,6 +39,7 @@ function sourceWith(fexp: string): PlaybackSource {
   return {
     sessionId: 's1',
     durationMs: 1000,
+    startTimestamp: null,
     storyboardTemplate: null,
     qualityDegraded: false,
     transport: 'plain',

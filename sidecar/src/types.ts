@@ -500,6 +500,8 @@ export interface StoryboardResult {
 export interface PlayerResult {
   videoId: string | null;
   formats: PlayerFormat[];
+  hlsManifestUrl: string | null;
+  dashManifestUrl: string | null;
   storyboards: Storyboard[];
   /** Client playback nonce, needed by `playback.report`. */
   cpn: string | null;
@@ -507,6 +509,7 @@ export interface PlayerResult {
   playabilityReason: string | null;
   durationSeconds: number | null;
   isLive: boolean;
+  startTimestamp: string | null;
   /** A premiere or scheduled stream that has not started. Never playable yet. */
   isUpcoming: boolean;
   /** When it starts, unix ms. Null even when [isUpcoming] — see the parser. */
@@ -557,7 +560,7 @@ export interface ItemListResult {
  * Telemetry only. Flutter must not be able to tell the tiers apart — a video
  * that arrived over `ytdlp` opens exactly like one that arrived over `plain`.
  */
-export type PlaybackTransport = 'plain' | 'sabr-dash' | 'ytdlp';
+export type PlaybackTransport = 'plain' | 'hls' | 'dash' | 'sabr-dash' | 'ytdlp';
 
 /**
  * One playable video + audio pair within a `PlaybackSource`.
@@ -607,6 +610,7 @@ export interface PlaybackSource {
   sessionId: string;
   /** null when live — a live stream has no final duration. */
   durationMs: number | null;
+  startTimestamp: string | null;
   /** Sprite-sheet template for hover previews (F8). */
   storyboardTemplate: string | null;
   /** Drives a badge in the UI, never a dead end. */

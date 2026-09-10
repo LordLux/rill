@@ -127,7 +127,7 @@ abstract class PlaybackEngine {
   /// A quality switch reopens the media (F19) and mpv drops external subtitle
   /// tracks with it. Opening a *different video* must not carry the previous
   /// one's captions, so this is opt-in and only `switchQuality` passes it.
-  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false});
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false, bool isLive = false});
   Future<void> play();
   Future<void> pause();
   Future<void> playOrPause();
@@ -417,7 +417,7 @@ class MediaKitEngine implements PlaybackEngine {
       });
 
   @override
-  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false}) async {
+  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false, bool isLive = false}) async {
     lastOpened = variant;
     // Read before the open, applied after it. A reopen drops mpv's external
     // subtitle tracks, and this is the only place that knows one was attached.
@@ -434,12 +434,6 @@ class MediaKitEngine implements PlaybackEngine {
     _height = null;
 
     await _player.open(Media(variant.videoUrl), play: play);
-
-    final audioUrl = variant.audioUrl;
-    if (audioUrl == null) {
-      if (retained != null) await setSubtitle(retained);
-      return;
-    }
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -463,6 +457,17 @@ class MediaKitEngine implements PlaybackEngine {
         }),
       ]).timeout(const Duration(seconds: 20));
     }
+
+    if (isLive && _player.state.duration > Duration.zero) {
+      await _player.seek(_player.state.duration);
+    }
+
+    final audioUrl = variant.audioUrl;
+    if (audioUrl == null) {
+      if (retained != null) await setSubtitle(retained);
+      return;
+    }
+
     await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
     // After the audio, not before: both go through `sub-add`/`audio-add` against
     // a freshly loaded file, and attaching a subtitle to a file whose duration is

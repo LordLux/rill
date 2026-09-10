@@ -239,6 +239,7 @@ function stubSource(transport: PlaybackSource['transport'], height: number): Pla
   return {
     sessionId: 'test',
     durationMs: 1000,
+    startTimestamp: null,
     storyboardTemplate: null,
     qualityDegraded: height < 720,
     transport,
