@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
@@ -9,7 +7,12 @@ import '../open_video.dart';
 import '../../data/rpc/client.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
+import '../auth_controller.dart';
+import '../members_only_preference.dart';
+import 'account_button.dart';
 import 'channel_badge.dart';
+import 'feed_grid_metrics.dart';
+import 'feed_skeleton.dart';
 import 'media_tile.dart';
 import 'subscribe_button.dart';
 
@@ -33,7 +36,15 @@ class FeedView extends ConsumerStatefulWidget {
     this.header,
     this.assumeChannelsSubscribed = false,
     this.scrollController,
+    this.groupMembersOnly = false,
   });
+
+  /// Collect members-only videos out of the grid into a shelf of their own.
+  ///
+  /// On for the grid surfaces (home, subscriptions), off for search — a search
+  /// result is an answer in a *rank order*, and lifting some of its rows into a
+  /// shelf at the top would reorder the answer rather than tidy it.
+  final bool groupMembersOnly;
 
   final NotifierProvider<FeedController, FeedState> provider;
   final Widget? header;
@@ -137,9 +148,40 @@ class _FeedViewState extends ConsumerState<FeedView> {
 
   Widget _buildBody(BuildContext context, FeedState state, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final items = widget.itemFilter == null ? state.items : state.items.where(widget.itemFilter!).toList();
+    final filtered =
+        widget.itemFilter == null ? state.items : state.items.where(widget.itemFilter!).toList();
 
-    if (state.error != null && items.isEmpty) {
+    // **Members-only content: hidden, hoisted, or left alone.**
+    //
+    // Hidden first — when the preference is off nothing members-only reaches
+    // any of the three paths below, including the shelf.
+    //
+    // Then hoisted, on the surfaces that group it: YouTube collects these into
+    // one shelf rather than scattering them through the grid, and they arrive
+    // scattered. Hoisting means they must also leave the grid — rendering both
+    // would show every members-only video twice, which is the same reason the
+    // sidecar lifts the artist panel's shelf out rather than letting the walker
+    // descend into it (`protocol.md` §3.3).
+    final showMembersOnly = ref.watch(membersOnlyVisibleProvider);
+    final visible =
+        showMembersOnly ? filtered : filtered.where((i) => !isMembersOnlyItem(i)).toList();
+
+    final membersOnly =
+        widget.groupMembersOnly ? visible.where(isMembersOnlyItem).toList() : const <FeedItem>[];
+    final items = widget.groupMembersOnly
+        ? visible.where((i) => !isMembersOnlyItem(i)).toList()
+        : visible;
+
+    // **The emptiness checks below count the shelf too.**
+    //
+    // Hoisting takes items *out* of `items`, so a page whose every video is
+    // members-only leaves the grid empty with a full shelf — and the checks
+    // that follow would call that "Nothing here yet" and render nothing, or
+    // flash a skeleton over content that had already arrived. A subscriptions
+    // feed of one heavily-membership channel is not a hypothetical.
+    final isEmpty = items.isEmpty && membersOnly.isEmpty;
+
+    if (state.error != null && isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),
@@ -175,50 +217,39 @@ class _FeedViewState extends ConsumerState<FeedView> {
       );
     }
 
-    if (state.isAuthDegraded && state.items.isEmpty)
-      return const Center(
-        child: Text('Authentication Degraded. Please sign in again.'),
-      );
-
-    if (state.isAnonymous && state.items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.account_circle_outlined,
-              size: 64,
-              color: scheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              widget.anonymousTitle ?? 'You are browsing anonymously.',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              widget.anonymousMessage ?? 'Log in to see your personalized home feed.',
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Login flow not implemented yet'),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.login),
-              label: const Text('Log In'),
-            ),
-          ],
-        ),
+    // **Two signed-out states, two messages** — Task 22 §3. `degraded` means a
+    // session the server stopped honouring; `anonymous` means there never was
+    // one. Collapsing them into "please sign in" is what makes F7 invisible:
+    // the user sees the same empty page either way and has no reason to think
+    // anything expired. Both offer the same button, because the same action
+    // fixes both — the difference is what the reader is told happened.
+    if (state.isAuthDegraded && state.items.isEmpty) {
+      return _SignedOutState(
+        icon: Icons.gpp_maybe_outlined,
+        iconColor: scheme.error,
+        title: 'Your session expired.',
+        message: 'YouTube stopped honouring this login. Sign in again to get your feed back.',
+        buttonLabel: 'Sign in again',
       );
     }
 
-    if (items.isEmpty && state.isLoading) {
-      return const Center(child: CircularProgressIndicator());
+    if (state.isAnonymous && state.items.isEmpty) {
+      return _SignedOutState(
+        icon: Icons.account_circle_outlined,
+        iconColor: scheme.onSurfaceVariant,
+        title: widget.anonymousTitle ?? 'You are browsing anonymously.',
+        message: widget.anonymousMessage ?? 'Log in to see your personalized home feed.',
+        buttonLabel: 'Log In',
+      );
+    }
+
+    // A skeleton, not a spinner. This is the first paint after a sign-in — the
+    // login window has just closed and the user has no other signal that it
+    // worked — and a grid-shaped placeholder answers "did that do anything?"
+    // where a centred spinner does not. It shares its geometry with the real
+    // grid below, so nothing reflows when the items arrive.
+    if (isEmpty && state.isLoading) {
+      return FeedSkeleton(isWideLayout: widget.isWideLayout);
     }
 
     // A load that finished, found nothing, and is none of the above — a real
@@ -229,7 +260,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
     // and now there's nothing" is not a property of one surface. Checked
     // against the filtered count: a page whose every item an [itemFilter]
     // excluded should not flash the raw grid it will never render.
-    if (items.isEmpty && !state.isLoading && state.error == null) {
+    if (isEmpty && !state.isLoading && state.error == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),
@@ -258,15 +289,14 @@ class _FeedViewState extends ConsumerState<FeedView> {
       },
       child: LayoutBuilder(
         builder: (context, constraints) {
-          const double maxExtent = 430.0;
-          // The grid (home, subscriptions, all-subscriptions) gets real breathing
-          // room between rows; a wide, single-column surface (search results, and
-          // any future one) sits closer to a list and stays tight instead.
-          final double spacing = widget.isWideLayout ? 2.0 : 16.0;
-          const double hSpacing = 16.0;
-
-          int crossAxisCount = widget.isWideLayout ? 1 : ((constraints.maxWidth + hSpacing) / (maxExtent + hSpacing)).ceil();
-          crossAxisCount = math.max(1, crossAxisCount);
+          // Geometry lives in `FeedGridMetrics`, shared with `FeedSkeleton`.
+          // The numbers themselves are unchanged; what changed is that there is
+          // now exactly one copy of them, so the placeholder grid cannot drift
+          // from this one and make tiles jump when real content lands.
+          final double spacing = FeedGridMetrics.verticalSpacing(widget.isWideLayout);
+          const double hSpacing = FeedGridMetrics.horizontalSpacing;
+          final int crossAxisCount =
+              FeedGridMetrics.columnCount(constraints.maxWidth, widget.isWideLayout);
 
           final bool hasFooter = items.isNotEmpty && (state.isLoading || state.error != null);
 
@@ -287,6 +317,41 @@ class _FeedViewState extends ConsumerState<FeedView> {
               );
             }
             rows.add(headerContent);
+          }
+
+          // The members shelf goes after roughly one row of grid content, which
+          // is where YouTube puts its own — high enough to be seen, not so high
+          // that it displaces the feed the user came for.
+          //
+          // **The threshold is an item count, not a row index**, and the
+          // distinction is worth the sentence: it is compared against
+          // `gridItemsEmitted`, which is incremented per *item*. One row's worth
+          // is `crossAxisCount` items, so on a full first row the two readings
+          // agree — but a short first row (the tail of a page, or a grid whose
+          // first row lost slots to a Shorts shelf) simply defers the shelf to
+          // the next row rather than landing early.
+          //
+          // It can never land *inside* a row: `maybeAddMembersShelf` appends to
+          // `rows`, and every call site sits immediately after a completed
+          // `rows.add(...)`.
+          final int membersShelfAfterItems = crossAxisCount;
+          var gridItemsEmitted = 0;
+          var membersShelfEmitted = false;
+
+          void maybeAddMembersShelf() {
+            if (membersShelfEmitted || membersOnly.isEmpty) return;
+            if (gridItemsEmitted < membersShelfAfterItems) return;
+            membersShelfEmitted = true;
+            Widget shelf = _buildMembersShelf(context, ref, membersOnly, scheme);
+            if (widget.isWideLayout) {
+              shelf = Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: ScreenValues.contentMaxWidth),
+                  child: shelf,
+                ),
+              );
+            }
+            rows.add(shelf);
           }
 
           int i = 0;
@@ -392,7 +457,17 @@ class _FeedViewState extends ConsumerState<FeedView> {
               }
 
               rows.add(rowContent);
+              gridItemsEmitted += rowItems.length;
+              maybeAddMembersShelf();
             }
+          }
+
+          // A feed shorter than one row — or one made entirely of members-only
+          // videos — still gets the shelf, at the end rather than never.
+          membersShelfEmitted = membersShelfEmitted || membersOnly.isEmpty;
+          if (!membersShelfEmitted) {
+            gridItemsEmitted = membersShelfAfterItems;
+            maybeAddMembersShelf();
           }
 
           if (hasFooter) {
@@ -424,9 +499,9 @@ class _FeedViewState extends ConsumerState<FeedView> {
                 controller: _scroll,
                 padding: const EdgeInsets.only(
                   bottom: 16.0,
-                  top: 8.0,
-                  left: 8.0,
-                  right: 8.0,
+                  top: 10.0,
+                  left: 10.0,
+                  right: 10.0,
                 ),
                 itemCount: rows.length,
                 itemBuilder: (context, index) {
@@ -441,6 +516,87 @@ class _FeedViewState extends ConsumerState<FeedView> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// The members-only shelf — YouTube's "Get more from memberships", ours.
+  ///
+  /// A horizontal strip of ordinary video tiles rather than a new tile shape:
+  /// these are full-size 16:9 videos, unlike Shorts, so the shelf above is the
+  /// wrong template for everything except its structure. What makes it a shelf
+  /// is that the videos were *collected* out of the grid, not that they look
+  /// different.
+  ///
+  /// The tiles keep their own green members pill. That is not redundant with
+  /// the shelf header — a tile dragged out of context by a screenshot, or a
+  /// shelf scrolled so its header is off screen, still has to say what it is.
+  Widget _buildMembersShelf(
+    BuildContext context,
+    WidgetRef ref,
+    List<FeedItem> members,
+    ColorScheme scheme,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0, top: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4.0, bottom: 8.0),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.star_rounded, size: 20, color: scheme.onSurface),
+                const SizedBox(width: 8),
+                Text(
+                  'From your memberships',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // One column narrower than the grid, so the shelf reads as a
+              // strip that continues past the edge rather than as a short row
+              // that happens to be indented.
+              final columns = FeedGridMetrics.columnCount(constraints.maxWidth, false) + 0.4;
+              final itemWidth = (constraints.maxWidth / columns).clamp(180.0, 340.0);
+              // 16:9 thumbnail plus the same caption block the grid tile uses.
+              final itemHeight = itemWidth / ScreenValues.normalAspectRatio + 104.0;
+
+              return SizedBox(
+                height: itemHeight,
+                child: SilkyListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: members.length,
+                  itemBuilder: (context, index) {
+                    final item = members[index];
+                    final spec = specFor(item);
+                    if (spec == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 16.0),
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: MediaTile(
+                          spec: spec,
+                          onTap: watchTargetFor(item) == null ? null : () => openFromTile(ref, item),
+                          onAddToQueue: () => queueFromTile(ref, item),
+                          onWatchLater: () => addToWatchLater(context, item),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -801,6 +957,67 @@ class ChannelTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The empty state for a surface nobody is signed in to — Task 22 §3.
+///
+/// One widget, two callers, because `degraded` and `anonymous` differ only in
+/// what they say. Sharing the *layout* while keeping the *words* apart is the
+/// point: the moment these two are one message with one icon, the distinction
+/// the task is about stops reaching anybody.
+class _SignedOutState extends ConsumerWidget {
+  const _SignedOutState({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.message,
+    required this.buttonLabel,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String message;
+  final String buttonLabel;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final busy = ref.watch(authProvider.select((s) => s.isBusy));
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 64, color: iconColor),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              // Disabled while a sign-in is in flight rather than hidden: a
+              // button that vanishes mid-click reads as the click having done
+              // something else.
+              onPressed: busy ? null : () => openLoginFlow(context, ref),
+              icon: const Icon(Icons.login),
+              label: Text(buttonLabel),
+            ),
+          ],
+        ),
       ),
     );
   }

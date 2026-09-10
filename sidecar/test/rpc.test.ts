@@ -372,6 +372,11 @@ describe('RPC Transport', () => {
       ],
       ['search.suggest with no q', 'search.suggest', {}],
       ['search.suggest with a blank q', 'search.suggest', { q: '  ' }],
+      // Task 22 §3.1. A sign-in with no credentials is a client bug, and the
+      // one thing it must not be is a quiet sign-out — see `auth.test.ts`.
+      ['auth.setCookie with no cookie', 'auth.setCookie', {}],
+      ['auth.setCookie with a blank cookie', 'auth.setCookie', { cookie: '   ' }],
+      ['auth.setCookie with a non-string cookie', 'auth.setCookie', { cookie: 42 }],
     ];
 
     let nextId = 100;
@@ -390,5 +395,98 @@ describe('RPC Transport', () => {
       expect(frame.error).toBeUndefined();
       expect(frame.result).toEqual({});
     }, 10000);
+
+    it('auth.setCookie\'s rejection names the field and never the value', async () => {
+      // Task 22 §5, on the one error path that is handed a real cookie. The
+      // value here is not a valid one, but a validator that echoed its input
+      // would echo a valid one identically — which is why this asserts on the
+      // message rather than on the code alone.
+      const frame = await answer(201, 'auth.setCookie', { cookie: 42 });
+      const error = errorOf(frame);
+      expect(error.code).toBe('BAD_REQUEST');
+      expect(error.message).toContain("'cookie'");
+      expect(error.message).not.toContain('42');
+    }, 10000);
+
+    it('auth.signOut succeeds with no session ever created', async () => {
+      // Signing out of nothing is not an error: the app calls this on a
+      // credential-store clear, and the sidecar may never have been asked for a
+      // session at all. It must also not create one on the way out.
+      const frame = await answer(202, 'auth.signOut', {});
+      expect(frame.error).toBeUndefined();
+      expect(frame.result).toEqual({});
+    }, 10000);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Task 22 §5 — nothing the process is given comes back out
+// ---------------------------------------------------------------------------
+
+describe('a cookie handed to a real sidecar never reaches stdout or stderr', () => {
+  /**
+   * The end-to-end half of `redact.test.ts`.
+   *
+   * That file proves the two chokepoints redact; this proves a real process,
+   * started the way the app starts it and driven the way the app drives it,
+   * emits the value nowhere — across the handshake, the session log line, and
+   * whatever `auth.setCookie` answers. It asserts **absence over everything
+   * captured**, which is the "grep your own output" instruction written as a
+   * test rather than as a habit.
+   *
+   * `SIDECAR_LOG_LEVEL=debug` on purpose: §5 names debug level first.
+   *
+   * **It passes today for a second reason, and that is worth knowing.**
+   * Mutation-checked 2026-09-08 by making `redact()` a no-op: this test still
+   * passed, because no code path in the sidecar currently puts a cookie into a
+   * log line or an error message at all. So it is not evidence that redaction
+   * works — `redact.test.ts` is — it is a regression guard for the day
+   * something starts emitting one. Which is the whole point: that day arrives
+   * silently, and this is what makes it arrive as a red test instead.
+   */
+  const MARKER = 'zzsentinelcookievaluezz';
+  const FAKE_COOKIE = `SAPISID=${MARKER}0001; SID=${MARKER}0002; LOGIN_INFO=${MARKER}0003`;
+
+  it('emits neither the header nor any value from it', async () => {
+    const child = spawn('bun', [resolve(__dirname, '../src/main.ts')], {
+      env: {
+        ...process.env,
+        SIDECAR_LOG_LEVEL: 'debug',
+        YT_COOKIE: FAKE_COOKIE,
+        // No network. The point is to reach the *failure* path, which is the
+        // one that quotes a request — and to reach it in a bounded time.
+        HTTP_PROXY: 'http://0.0.0.0:12345',
+        HTTPS_PROXY: 'http://0.0.0.0:12345',
+      },
+    });
+
+    let captured = '';
+    child.stdout!.on('data', (chunk: Buffer) => {
+      captured += chunk.toString();
+    });
+    child.stderr!.on('data', (chunk: Buffer) => {
+      captured += chunk.toString();
+    });
+
+    // Wait for the handshake, then ask for everything that touches the cookie.
+    await new Promise<void>((done) => {
+      const check = () => (captured.includes('event.ready') ? done() : setTimeout(check, 25));
+      check();
+    });
+    child.stdin!.write(JSON.stringify({ id: 1, method: 'auth.setCookie', params: { cookie: FAKE_COOKIE } }) + '\n');
+    child.stdin!.write(JSON.stringify({ id: 2, method: 'auth.verify' }) + '\n');
+    child.stdin!.write(JSON.stringify({ id: 3, method: 'auth.status' }) + '\n');
+
+    // Bounded rather than "until id 3 answers": with the network cut, a request
+    // may never answer at all, and a test that hangs waiting for it would stop
+    // testing the thing it is named after. Everything written in this window is
+    // what the console would have shown.
+    await new Promise((r) => setTimeout(r, 3000));
+    child.stdin!.end();
+    child.kill();
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured).not.toContain(FAKE_COOKIE);
+    expect(captured).not.toContain(MARKER);
+  }, 20000);
 });

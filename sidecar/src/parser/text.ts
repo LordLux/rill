@@ -153,7 +153,7 @@ export function isPublishedText(value: string): boolean {
  * and nothing would say so. The filter is gone; the flags are the only route.
  */
 export interface BadgeScan {
-  /** Non-duration, non-live, non-Shorts labels: "4K", "New", "Members only", "Upcoming". */
+  /** Non-duration, non-live, non-Shorts, non-members labels: "4K", "New", "Upcoming". */
   labels: string[];
   durationSeconds: number | null;
   /** Ships as `VideoItem.isLive`. Never as a `"LIVE"` entry in `badges[]`. */
@@ -167,6 +167,28 @@ export interface BadgeScan {
    * no equivalent icon field, so this stays false for them.
    */
   hasMusicNote: boolean;
+  /**
+   * Members-only content — ships as `VideoItem.isMembersOnly`, never as a
+   * `"Members only"` entry in `badges[]`.
+   *
+   * **Keyed on `style`, never on the label**, and that is the whole point:
+   * `label` is localised (this account browses `tz=Europe.Rome`) while
+   * `BADGE_STYLE_TYPE_MEMBERS_ONLY` is not — the same trap the verified badge
+   * documents in `protocol.md`. Measured live 2026-09-09 on the watch page for
+   * `rAWLNJoE5_Y`:
+   *
+   * ```json
+   * {"metadataBadgeRenderer": {
+   *    "icon": {"iconType": "SPONSORSHIP_STAR"},
+   *    "style": "BADGE_STYLE_TYPE_MEMBERS_ONLY",
+   *    "label": "Members only"}}
+   * ```
+   *
+   * The icon is read as a second route because a view-based tile carries an
+   * icon where it may carry no style — the same asymmetry `hasMusicNote`
+   * already deals with. Only the classic shape above is confirmed live.
+   */
+  isMembersOnly: boolean;
 }
 
 const LIVE_LABEL = /^(live|live now|in diretta)$/i;
@@ -179,6 +201,21 @@ function badgeHasMusicIcon(badge: JsonObject): boolean {
 }
 
 /**
+ * YouTube's own membership glyph, on a badge that may carry no `style`.
+ *
+ * Checked in both spellings a badge icon uses: `icon.iconType` (classic) and
+ * `icon.sources[].clientResource.imageName` (view-based).
+ */
+function badgeHasMembersIcon(badge: JsonObject): boolean {
+  if (str(get(badge, 'icon', 'iconType')) === MEMBERS_ICON) return true;
+  const sources = asArray(get(badge, 'icon', 'sources'));
+  return sources.some((source) => str(get(source, 'clientResource', 'imageName')) === MEMBERS_ICON);
+}
+
+const MEMBERS_STYLE = /MEMBERS_ONLY/i;
+const MEMBERS_ICON = 'SPONSORSHIP_STAR';
+
+/**
  * Sweep every badge-ish node in a tile and split it into duration, live/Shorts
  * flags, the music-note icon and display labels. Covers `thumbnailBadgeViewModel`
  * (view-based), `metadataBadgeRenderer` (classic) and
@@ -189,8 +226,27 @@ export function scanBadges(node: Json): BadgeScan {
   let durationSeconds: number | null = null;
   let isLive = false;
   let isShort = false;
+  let isMembersOnly = false;
 
-  const consider = (value: string | null, style: string | null): void => {
+  /**
+   * `membersIcon` is the badge's own `SPONSORSHIP_STAR`, decided by the caller.
+   *
+   * It is a *parameter* rather than something the sweep sets afterwards, and
+   * that is what keeps this locale-independent. Deciding it out here and
+   * striking the label later meant the label had already been pushed, so it had
+   * to be removed by matching `/members only|solo membri/` — which covered two
+   * languages and would have drawn a green pill *and* a grey "Réservé aux
+   * membres" pill for everyone else. Now neither shape ever pushes it, and no
+   * pattern over localised text exists to be incomplete.
+   */
+  const consider = (value: string | null, style: string | null, membersIcon = false): void => {
+    // **Members first, and before the empty-value guard.** A members badge can
+    // be an icon with no text at all on a view-based tile, and returning early
+    // on a null label would drop the one signal it carries.
+    if (membersIcon || (style !== null && MEMBERS_STYLE.test(style))) {
+      isMembersOnly = true;
+      return;
+    }
     if (!value) return;
     if (looksLikeDuration(value)) {
       durationSeconds ??= durationToSeconds(value);
@@ -212,13 +268,17 @@ export function scanBadges(node: Json): BadgeScan {
   walk(node, (candidate) => {
     const badge = candidate['thumbnailBadgeViewModel'];
     if (isObject(badge)) {
-      consider(text(badge['text']), str(badge['badgeStyle']));
+      consider(text(badge['text']), str(badge['badgeStyle']), badgeHasMembersIcon(badge));
       if (badgeHasMusicIcon(badge)) hasMusicNote = true;
     }
 
     const metadataBadge = candidate['metadataBadgeRenderer'];
     if (isObject(metadataBadge)) {
-      consider(text(metadataBadge['label']), str(metadataBadge['style']));
+      consider(
+        text(metadataBadge['label']),
+        str(metadataBadge['style']),
+        badgeHasMembersIcon(metadataBadge),
+      );
     }
 
     const timeStatus = candidate['thumbnailOverlayTimeStatusRenderer'];
@@ -229,7 +289,7 @@ export function scanBadges(node: Json): BadgeScan {
     return true;
   });
 
-  return { labels, durationSeconds, isLive, isShort, hasMusicNote };
+  return { labels, durationSeconds, isLive, isShort, hasMusicNote, isMembersOnly };
 }
 
 const VERIFIED_STYLE = 'BADGE_STYLE_TYPE_VERIFIED';
