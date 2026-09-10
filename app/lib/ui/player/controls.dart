@@ -1091,7 +1091,7 @@ class _Scrubber extends StatelessWidget {
 
             void handleDrag(double absoluteValue) {
               if (unplayableEndFraction != null) {
-                final unplayableEndMs = max * unplayableEndFraction!;
+                final unplayableEndMs = max * unplayableEndFraction;
                 final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
                 // Convert back to relative
                 final relativeValue = clampedAbsolute - unplayableEndMs;
@@ -1103,7 +1103,7 @@ class _Scrubber extends StatelessWidget {
 
             void handleDragEnd(double absoluteValue) {
               if (unplayableEndFraction != null) {
-                final unplayableEndMs = max * unplayableEndFraction!;
+                final unplayableEndMs = max * unplayableEndFraction;
                 final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
                 final relativeValue = clampedAbsolute - unplayableEndMs;
                 onDragEnd(relativeValue);
