@@ -115,6 +115,22 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   /// What the play state was before the click, for the undo below.
   bool _playingBeforeTap = false;
 
+  int _hoveredClickables = 0;
+
+  Widget _buildHoverable(Widget child) {
+    return MouseRegion(
+      onEnter: (_) {
+        _hoveredClickables++;
+        _restartHideTimer();
+      },
+      onExit: (_) {
+        _hoveredClickables--;
+        _restartHideTimer();
+      },
+      child: child,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -146,15 +162,14 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     ref.read(playerControlsVisibleProvider.notifier).set(value);
   }
 
-  /// The auto-hide rule, in one place.
+  /// Restarts the countdown that hides the bar.
   ///
-  /// Hides only while **playing**, only after [autoHideDelay], and never while
-  /// the settings menu is open — a menu that vanishes from under the pointer is
-  /// worse than one that overstays.
+  /// Hides only while **playing**, only after [autoHideDelay], never while
+  /// the settings menu is open, and never when hovering a clickable control.
   void _restartHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = null;
-    if (!_playing || ref.read(playerMenuProvider).open) {
+    if (!_playing || ref.read(playerMenuProvider).open || _hoveredClickables > 0) {
       _setVisible(true);
       return;
     }
@@ -378,57 +393,65 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              _VerticalVolume(
-                                key: playerVerticalVolumeKey,
-                                engine: widget.engine,
-                                onChanged: _wake,
+                              _buildHoverable(
+                                _VerticalVolume(
+                                  key: playerVerticalVolumeKey,
+                                  engine: widget.engine,
+                                  onChanged: _wake,
+                                ),
                               ),
                               const SizedBox(height: 2),
                               if (ref.watch(captionsProvider.select((c) => c.hasTracks))) ...[
                                 KeyedSubtree(
                                   key: captionsButtonAnchorKey,
-                                  child: _MenuButton(
-                                    key: playerCaptionsKey,
-                                    icon: ref.watch(captionsProvider.select((c) => c.isOn))
-                                        ? Icons.closed_caption
-                                        : Icons.closed_caption_outlined,
-                                    busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
-                                    open: ref.watch(
-                                      playerMenuProvider.select(
-                                        (menu) => menu.open && menu.page == SettingsPage.captions,
+                                  child: _buildHoverable(
+                                    _MenuButton(
+                                      key: playerCaptionsKey,
+                                      icon: ref.watch(captionsProvider.select((c) => c.isOn))
+                                          ? Icons.closed_caption
+                                          : Icons.closed_caption_outlined,
+                                      busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
+                                      open: ref.watch(
+                                        playerMenuProvider.select(
+                                          (menu) => menu.open && menu.page == SettingsPage.captions,
+                                        ),
                                       ),
+                                      onPressed: _toggleCaptions,
                                     ),
-                                    onPressed: _toggleCaptions,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                               ],
                               KeyedSubtree(
                                 key: qualityButtonAnchorKey,
-                                child: _MenuButton(
-                                  key: playerQualityButtonKey,
-                                  icon: Icons.hd_outlined,
-                                  busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
-                                  open: ref.watch(
-                                    playerMenuProvider.select(
-                                      (menu) => menu.open && menu.page == SettingsPage.quality,
+                                child: _buildHoverable(
+                                  _MenuButton(
+                                    key: playerQualityButtonKey,
+                                    icon: Icons.hd_outlined,
+                                    busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
+                                    open: ref.watch(
+                                      playerMenuProvider.select(
+                                        (menu) => menu.open && menu.page == SettingsPage.quality,
+                                      ),
                                     ),
+                                    onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty)) ? null : _toggleQuality,
                                   ),
-                                  onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty)) ? null : _toggleQuality,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               KeyedSubtree(
                                 key: settingsMenuAnchorKey,
-                                child: _MenuButton(
-                                  key: playerSettingsButtonKey,
-                                  icon: Icons.settings,
-                                  open: ref.watch(
-                                    playerMenuProvider.select(
-                                      (menu) => menu.open && _isGearPage(menu.page),
+                                child: _buildHoverable(
+                                  _MenuButton(
+                                    key: playerSettingsButtonKey,
+                                    icon: Icons.settings,
+                                    open: ref.watch(
+                                      playerMenuProvider.select(
+                                        (menu) => menu.open && _isGearPage(menu.page),
+                                      ),
                                     ),
+                                    onPressed: _toggleMenu,
                                   ),
-                                  onPressed: _toggleMenu,
                                 ),
                               ),
                             ],
@@ -497,23 +520,25 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _Scrubber(
-          key: playerScrubberKey,
-          engine: widget.engine,
-          dragging: _dragging,
-          hold: playback.hold,
-          source: playback.source,
-          onDrag: (value) {
-            setState(() => _dragging = value);
-            _wake();
-          },
-          onDragEnd: (value) {
-            setState(() => _dragging = null);
-            unawaited(
-              ref.read(playbackProvider.notifier).seek(Duration(milliseconds: value.round())),
-            );
-            _restartHideTimer();
-          },
+        _buildHoverable(
+          _Scrubber(
+            key: playerScrubberKey,
+            engine: widget.engine,
+            dragging: _dragging,
+            hold: playback.hold,
+            source: playback.source,
+            onDrag: (value) {
+              setState(() => _dragging = value);
+              _wake();
+            },
+            onDragEnd: (value) {
+              setState(() => _dragging = null);
+              unawaited(
+                ref.read(playbackProvider.notifier).seek(Duration(milliseconds: value.round())),
+              );
+              _restartHideTimer();
+            },
+          ),
         ),
         // The bar has to survive a narrow window: at 900 px with the drawer
         // open the player is ~630 px wide, and the full cluster set needs ~700.
@@ -532,46 +557,46 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                     initialData: widget.engine.playing,
                     builder: (context, snapshot) {
                       final playing = snapshot.data ?? false;
-                      return _ControlIcon(
-                        iconKey: playerPlayPauseKey,
-                        icon: playing ? Icons.pause : Icons.play_arrow,
-                        label: playing ? 'Pause' : 'Play',
-                        onPressed: () {
-                          _wake();
-                          unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                        },
+                      return _buildHoverable(
+                        _ControlIcon(
+                          iconKey: playerPlayPauseKey,
+                          icon: playing ? Icons.pause : Icons.play_arrow,
+                          label: playing ? 'Pause' : 'Play',
+                          onPressed: () {
+                            _wake();
+                            unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
+                          },
+                        ),
                       );
                     },
                   ),
-                  // **Absent, not disabled, when there is nowhere to go.** The
-                  // queue stops rather than wrapping, and on an ordinary video
-                  // there is no queue at all — two greyed-out arrows on every
-                  // single video are two controls that never do anything. So
-                  // they appear exactly when a playlist, mix or queue has given
-                  // them somewhere to go. `Shift + P` / `Shift + N` still fire
-                  // either way, which is what keeps the keyboard from being the
-                  // thing that disappeared.
                   if (queue.hasPrevious)
-                    _ControlIcon(
-                      iconKey: playerPreviousKey,
-                      icon: Icons.skip_previous,
-                      label: 'Previous video',
-                      onPressed: () {
-                        _wake();
-                        ref.read(playbackProvider.notifier).previous();
-                      },
+                    _buildHoverable(
+                      _ControlIcon(
+                        iconKey: playerPreviousKey,
+                        icon: Icons.skip_previous,
+                        label: 'Previous video',
+                        onPressed: () {
+                          _wake();
+                          ref.read(playbackProvider.notifier).previous();
+                        },
+                      ),
                     ),
                   if (queue.hasNext)
-                    _ControlIcon(
-                      iconKey: playerNextKey,
-                      icon: Icons.skip_next,
-                      label: 'Next video',
-                      onPressed: () {
-                        _wake();
-                        ref.read(playbackProvider.notifier).next();
-                      },
+                    _buildHoverable(
+                      _ControlIcon(
+                        iconKey: playerNextKey,
+                        icon: Icons.skip_next,
+                        label: 'Next video',
+                        onPressed: () {
+                          _wake();
+                          ref.read(playbackProvider.notifier).next();
+                        },
+                      ),
                     ),
-                  _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
+                  _buildHoverable(
+                    _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
+                  ),
                   const SizedBox(width: 8),
                   // **One flex child between the clusters, not two**
                   // (architecture §2.7). A loose `Flexible` clock plus a
@@ -603,18 +628,20 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   if (captions.hasTracks)
                     KeyedSubtree(
                       key: captionsButtonAnchorKey,
-                      child: _MenuButton(
-                        key: playerCaptionsKey,
-                        icon: captions.isOn
-                            ? Icons.closed_caption
-                            : Icons.closed_caption_outlined,
-                        busy: captions.isLoadingTrack,
-                        open: ref.watch(
-                          playerMenuProvider.select(
-                            (menu) => menu.open && menu.page == SettingsPage.captions,
+                      child: _buildHoverable(
+                        _MenuButton(
+                          key: playerCaptionsKey,
+                          icon: captions.isOn
+                              ? Icons.closed_caption
+                              : Icons.closed_caption_outlined,
+                          busy: captions.isLoadingTrack,
+                          open: ref.watch(
+                            playerMenuProvider.select(
+                              (menu) => menu.open && menu.page == SettingsPage.captions,
+                            ),
                           ),
+                          onPressed: _toggleCaptions,
                         ),
-                        onPressed: _toggleCaptions,
                       ),
                     ),
                   // **Quality, then the gear** — specific before general. It is
@@ -626,43 +653,49 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // click-outside measures it by. See `settingsMenuAnchorKey`.
                   KeyedSubtree(
                     key: qualityButtonAnchorKey,
-                    child: _MenuButton(
-                      key: playerQualityButtonKey,
-                      icon: Icons.hd_outlined,
-                      busy: playback.isSwitchingQuality,
-                      open: ref.watch(
-                        playerMenuProvider.select(
-                          (menu) => menu.open && menu.page == SettingsPage.quality,
+                    child: _buildHoverable(
+                      _MenuButton(
+                        key: playerQualityButtonKey,
+                        icon: Icons.hd_outlined,
+                        busy: playback.isSwitchingQuality,
+                        open: ref.watch(
+                          playerMenuProvider.select(
+                            (menu) => menu.open && menu.page == SettingsPage.quality,
+                          ),
                         ),
+                        onPressed: playback.variants.isEmpty ? null : _toggleQuality,
                       ),
-                      onPressed: playback.variants.isEmpty ? null : _toggleQuality,
                     ),
                   ),
                   KeyedSubtree(
                     key: settingsMenuAnchorKey,
-                    child: _MenuButton(
-                      key: playerSettingsButtonKey,
-                      icon: Icons.settings,
-                      // The two pages that are *not* the gear's, named rather
-                      // than `!= quality`: adding the captions page to that
-                      // test would have lit the gear up whenever the caption
-                      // panel was open, which reads as two menus at once.
-                      open: ref.watch(
-                        playerMenuProvider.select(
-                          (menu) => menu.open && _isGearPage(menu.page),
+                    child: _buildHoverable(
+                      _MenuButton(
+                        key: playerSettingsButtonKey,
+                        icon: Icons.settings,
+                        // The two pages that are *not* the gear's, named rather
+                        // than `!= quality`: adding the captions page to that
+                        // test would have lit the gear up whenever the caption
+                        // panel was open, which reads as two menus at once.
+                        open: ref.watch(
+                          playerMenuProvider.select(
+                            (menu) => menu.open && _isGearPage(menu.page),
+                          ),
                         ),
+                        onPressed: _toggleMenu,
                       ),
-                      onPressed: _toggleMenu,
                     ),
                   ),
-                  _ControlIcon(
-                    iconKey: playerMiniPlayerKey,
-                    icon: Icons.branding_watermark_outlined,
-                    label: 'Miniplayer',
-                    onPressed: () {
-                      _wake();
-                      toMiniPlayer(ref);
-                    },
+                  _buildHoverable(
+                    _ControlIcon(
+                      iconKey: playerMiniPlayerKey,
+                      icon: Icons.branding_watermark_outlined,
+                      label: 'Miniplayer',
+                      onPressed: () {
+                        _wake();
+                        toMiniPlayer(ref);
+                      },
+                    ),
                   ),
                   // **State, not action — and only this one.** Every other icon
                   // here says what pressing it does; this one says which mode
@@ -671,23 +704,27 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // an instruction. Fullscreen keeps action semantics next to
                   // it: `fullscreen_exit` is legible as a verb in a way the
                   // crop icons are not.
-                  _ControlIcon(
-                    iconKey: playerTheatreKey,
-                    icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
-                    label: view.theatre ? 'Default view' : 'Theatre mode',
-                    onPressed: () {
-                      _wake();
-                      ref.read(playerViewProvider.notifier).toggleTheatre();
-                    },
+                  _buildHoverable(
+                    _ControlIcon(
+                      iconKey: playerTheatreKey,
+                      icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
+                      label: view.theatre ? 'Default view' : 'Theatre mode',
+                      onPressed: () {
+                        _wake();
+                        ref.read(playerViewProvider.notifier).toggleTheatre();
+                      },
+                    ),
                   ),
-                  _ControlIcon(
-                    iconKey: playerFullscreenKey,
-                    icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                    label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
-                    onPressed: () {
-                      _wake();
-                      ref.read(playerViewProvider.notifier).toggleFullscreen();
-                    },
+                  _buildHoverable(
+                    _ControlIcon(
+                      iconKey: playerFullscreenKey,
+                      icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                      label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                      onPressed: () {
+                        _wake();
+                        ref.read(playerViewProvider.notifier).toggleFullscreen();
+                      },
+                    ),
                   ),
                   const SizedBox(width: 4),
                 ],
