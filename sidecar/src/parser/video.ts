@@ -15,7 +15,7 @@ import type { FeedItem, VideoDetail } from '../types.ts';
 import { parseFeed } from './feed.ts';
 import { premiereStartMs } from './premiere.ts';
 import { bestImageUrl, channelIdFrom, durationToSeconds, scanOwnerBadges, text } from './text.ts';
-import { deepCollect, deepFind, get, isObject, num, str, type Json } from './tree.ts';
+import { deepCollect, deepFind, get, isObject, num, str, type Json, type JsonObject } from './tree.ts';
 
 function findRenderer(root: Json, key: string): Json {
   const holder = deepFind(root, (node) => isObject(node[key]));
@@ -107,8 +107,23 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
 
   const ownerBadges = scanOwnerBadges(owner);
 
-  const badges = deepCollect(body, (node) => isObject(node['metadataBadgeRenderer']))
-    .map((node) => text(get(node, 'metadataBadgeRenderer', 'label')))
+  // Every `metadataBadgeRenderer` on the page, split into the members-only flag
+  // and the display labels — the same split `scanBadges` makes for a tile, and
+  // for the same reason: `style` is stable across locales where `label` is not,
+  // and a fact with a DTO field of its own must not also travel as a label.
+  const badgeNodes = deepCollect(body, (node) => isObject(node['metadataBadgeRenderer'])).map(
+    (node) => node['metadataBadgeRenderer'] as JsonObject,
+  );
+
+  const isMembersOnly = badgeNodes.some(
+    (badge) =>
+      /MEMBERS_ONLY/i.test(str(badge['style']) ?? '') ||
+      str(get(badge, 'icon', 'iconType')) === 'SPONSORSHIP_STAR',
+  );
+
+  const badges = badgeNodes
+    .filter((badge) => !/MEMBERS_ONLY/i.test(str(badge['style']) ?? ''))
+    .map((badge) => text(badge['label']))
     .filter((label): label is string => label !== null);
 
   return {
@@ -140,6 +155,7 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     isVerified: ownerBadges.isVerified,
     isArtistChannel: ownerBadges.isArtistChannel,
     badges: [...new Set(badges)],
+    isMembersOnly,
     // Deep-searched for the same reason the tiles are: the watch page hangs this
     // off a different renderer depending on generation, and no premiere is in
     // the fixture corpus to pin a path against. Null here is ordinary —

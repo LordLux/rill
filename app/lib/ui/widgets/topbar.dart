@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../pages/search_results.dart';
 import '../search_suggest_controller.dart';
+import 'account_button.dart';
 
 class TopBar extends StatelessWidget implements PreferredSizeWidget {
   const TopBar({
@@ -126,12 +127,10 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                         ),
                         const SizedBox(width: 24),
 
-                        // User Profile Avatar
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: scheme.surfaceContainerHighest,
-                          child: Icon(Icons.person, color: scheme.onSurfaceVariant, size: 20),
-                        ),
+                        // The account surface — Task 22 §7. The placeholder
+                        // person glyph that used to sit here is now what
+                        // `AccountButton` draws when nobody is signed in.
+                        const AccountButton(),
 
                         // Include any extra actions passed to the widget
                         ...actions,

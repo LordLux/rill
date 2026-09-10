@@ -74,7 +74,7 @@ inferred from a video that will not play.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `auth.status` | — | `{state, accountName?}` |
+| `auth.status` | — | `{state, accountName, accountHandle, accountAvatarUrl}` |
 | `auth.verify` | — | `{state, tileCount}` |
 | `auth.setCookie` | `{cookie}` | `{state}` |
 | `auth.signOut` | — | `{}` |
@@ -85,6 +85,82 @@ inferred from a video that will not play.
 empty feed and no error. Verify by fetching home and counting tiles: zero means
 degraded. Run on startup and after any empty feed. Never trust a `logged_in`
 flag derived from cookie presence.
+
+**`auth.status` is wider than it was, and its fields are never omitted — Task
+22 §7.** This row read `{state, accountName?}`; the top bar needs a picture as
+well as a name, and a handle is what tells two accounts with the same display
+name apart, so all three ship. They are **values or `null`**, following the DTO
+rule the rest of this document holds to, because the alternative is a client
+that cannot tell "this account has no name" from "this sidecar is older than
+the field".
+
+```jsonc
+// auth.status → the account behind the avatar in the top bar
+{"state": "authenticated", "accountName": "Ada Lovelace",
+ "accountHandle": "@ada", "accountAvatarUrl": "https://yt3.ggpht.com/…"}
+
+// every other state — the account fields are null, not absent
+{"state": "degraded", "accountName": null,
+ "accountHandle": null, "accountAvatarUrl": null}
+```
+
+**They come from `/account/account_menu`, not from the home feed.** The home
+response's topbar carries an avatar and an "Account menu" accessibility label
+and no account *name*, and the name is the half that distinguishes one account
+from another — which is the entire reason for showing it. The menu response is
+fetched once and cached with the session, so a status call after the first is
+free; `parser/account.ts` walks for the `accountItem` node by shape rather than
+by path, preferring `isSelected`, because every layer above it is menu chrome.
+
+**A failed account fetch is not a failed status.** `state` is what drives a
+re-authentication prompt and it is measured independently; the name and picture
+are decoration. Answering `AUTH_DEGRADED` because a menu endpoint hiccuped
+would send a perfectly good session to a login page.
+
+**`auth.setCookie`'s `{state}` is measured before it answers.** It replaces the
+browse session, **drops the base-browse cache**, then fetches home and counts
+tiles — so the state it returns is the same one the `auth.verify` a client
+sends next will give, and that second call is free because it hits the cache
+this one filled. Dropping the cache is not an optimisation detail: an entry
+written by the session a sign-in replaced would otherwise answer that verify
+with an empty feed, reporting `degraded` for a sign-in that worked. Silent, and
+indistinguishable from a genuinely stale cookie.
+
+An empty or non-string `cookie` is `BAD_REQUEST`, **not** a sign-out. A caller
+that sends one believed it had credentials, and answering "you are now
+anonymous" would make that bug look like a successful sign-out. The rejection
+names the field and never the value.
+
+**`YT_COOKIE` seeds; the client overrides — Task 22 §8.** The environment
+variable is still the development path and still works unchanged: it is the
+cookie the first session is built with. Note that it does not have to be *set*
+in the environment to arrive: Bun auto-loads a gitignored `.env` from the
+sidecar's working directory (the repo root), compiled binary included, so a
+checkout can be signed in with `YT_COOKIE` nowhere in `env`. Measured
+2026-09-08, after a session came up authenticated with the variable unset in the
+process, the user environment and the machine environment alike. Any `auth.setCookie` or `auth.signOut`
+replaces it for the life of the process, because a user's own action is more
+recent and more specific than an environment variable — and because the
+alternative means a developer who once exported `YT_COOKIE` can never sign in
+as anybody else, with the UI reporting success either way. The consequence is
+worth stating: **sign-out cannot unset an environment variable**, so a sidecar
+restarted with `YT_COOKIE` still set comes back signed in. That is the
+environment restoring it, not the sign-out failing, and `auth.signOut` logs a
+warning saying exactly that.
+
+**`auth.signOut` drops four things and the list is the point:** the cookie, the
+session, the base-browse cache and the cached account. Leaving any one of them
+is a sign-out that reads as successful while the next request still carries the
+old identity, or serves the signed-in home feed to an anonymous session for the
+next thirty seconds. It is not an error to sign out of nothing.
+
+**No cookie value ever reaches this wire, or stderr.** Two chokepoints —
+`logger()` and the error envelope — pass every outbound string through
+`redact.ts`, which strikes both the values the process was handed and anything
+shaped like a Google auth cookie. The sidecar's own code interpolates a cookie
+nowhere; what this guards against is a third party doing it (youtubei.js
+quoting a failed request, a `fetch` rejection carrying headers), which is
+unreachable by reading the source and silent when it happens.
 
 ### 3.2 Feeds
 
@@ -869,6 +945,7 @@ them has a `retry` value:
 | `BAD_REQUEST` | `no` | This is a client bug. Surface it — never retry, never swallow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
 | `VIDEO_UPCOMING` | `no` | The premiere slate: thumbnail, scheduled time, reminder. **Not** an error state |
+| `VIDEO_MEMBERS_ONLY` | `no` | The members slate: thumbnail, the channel, a Join affordance. **Not** an error state |
 | `RATE_LIMITED` | `auto` | App backs off and retries silently |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
 
@@ -896,6 +973,38 @@ scheduled time and a reminder. It arrives with YouTube's own prose as its messag
 ("Premieres in 9 days"), which is enough to render the slate before `video.info`
 answers; the machine-readable time is `VideoDetail.premiereAtMs` (§3.3), on a
 call the watch page already makes.
+
+**`VIDEO_MEMBERS_ONLY` is `VIDEO_UPCOMING`'s shape, for a different clock —
+added 2026-09-09.** A members-only video exists and works; it is behind the
+channel's paid tier, and no rung of the ladder can buy a membership. So it ends
+the ladder rather than declining down it, and it is `no` because retrying is
+arithmetic-proof in the same way a premiere's is. It is deliberately **not**
+`AUTH_REQUIRED`: signing in does not help, and the user is usually signed in
+already.
+
+**Two signals, and only one of them is structural.** The flag on the DTOs —
+`VideoItem.isMembersOnly` and `VideoDetail.isMembersOnly` — comes from
+`BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) on a
+`metadataBadgeRenderer`, which YouTube does not localise. **The error code does
+not have that luxury.** Measured 2026-09-09 on `rAWLNJoE5_Y`, the whole of
+`playabilityStatus` on the resolve clients is `{status, reason,
+playableInEmbed}`: VISIONOS carries no `errorScreen` at all, MWEB's is a generic
+`playerErrorMessageRenderer`, and only the authenticated `WEB` response — which
+the resolve path never makes — has the specific
+`playerLegacyDesktopYpcOfferRenderer`. So `playback.open` classifies from the
+`reason` prose.
+
+That is tolerable only because of where it sits: it refines a response that has
+**already failed**, so a locale the pattern misses falls back to
+`STREAM_UNAVAILABLE` — today's behaviour — and it can never make a working video
+fail. The watch page draws its slate from the structural flag on `video.info`,
+not from the error, for exactly this reason.
+
+**The slate does not claim the user is not a member**, and that is a correctness
+point rather than a wording one. Stream resolution is anonymous (§2.3), so a
+members-only video refuses even for a paying member; YouTube's own "Join this
+channel" prose describes the anonymous session that asked, not the person
+reading it.
 
 `STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
 very good bet and not a promise (§3.5, F9): every rung can decline for a video

@@ -1,12 +1,30 @@
 /**
- * The poisoned-bucket retry (F20).
+ * The poisoned-bucket retry (F20) — **retired, and this file now guards the
+ * retirement rather than the mechanism.**
  *
- * About 27% of resolve sessions are minted into a YouTube experiment bucket
- * whose URLs refuse ffmpeg's request shape for the life of the session. These
- * pin the three things that make retrying it safe rather than superstitious:
- * that a flagged mint is recognised from the URL alone, that the cap is
- * respected, and — the one that matters most — that only the **resolve** session
- * is ever replaced.
+ * The history, because it is the reason for the shape of this file. About 27%
+ * of resolve sessions were minted into a YouTube experiment bucket
+ * (`fexp=51946838`) whose URLs refuse ffmpeg's request shape for the life of
+ * the session, and re-minting the session escaped it — measured 26.7% → 3.3%
+ * over four rounds. That worked only because the rollout was partial and a
+ * fresh mint could randomly draw an *unflagged* bucket. The rollout reached
+ * 100% (`architecture.md` F5, F20), unflagged buckets stopped existing, and the
+ * escape rate went to zero. `MAX_REMINTS` was set to 0 in `c53fb54` and the
+ * behavioural blocks below were skipped in the same commit.
+ *
+ * They are kept, skipped, because they are the executable record of what was
+ * measured. **`describe('the retirement')` at the bottom is live**, and it is
+ * the part that matters: it fails if anyone re-wires `playback.open` to the
+ * re-mint wrapper. That is not hypothetical — Task 22 did exactly that on
+ * 2026-09-09, reading a leftover `remintResolveSession` argument (an excess
+ * property left behind when `663edb1` unwired the call site by accident) as
+ * evidence the wiring was broken, and restored a mechanism the docs record as
+ * retired. Nothing failed, because nothing was watching. Now something is.
+ *
+ * One invariant outlives the mechanism and is asserted below: if anything here
+ * ever re-mints a session again, it replaces the **resolve** session only.
+ * `browseSessionPromise` carries the user's cookies, and dropping it to fix a
+ * stream URL signs them out silently (F7).
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -236,30 +254,51 @@ describe.skip('requirement 1 — only the resolve session is ever replaced', () 
     expect(Object.keys(deps).sort()).toEqual(['remintResolveSession', 'session']);
   });
 
-  test('the server re-mints the resolve promise and leaves the browse one alone', async () => {
-    // A source-level assertion, and labelled as one. `browseSessionPromise` and
-    // `resolveSessionPromise` are module-private, so the alternative is exposing
-    // them purely to be tested. Dropping the browse session would sign the user
-    // out on a quarter of launches and do it silently (F7), which is worth a
-    // blunt guard.
-    const server = await Bun.file('src/rpc/server.ts').text();
-    const body = server.slice(
-      server.indexOf('function remintResolveSession'),
-      server.indexOf('function getResolveSession'),
-    );
-    expect(body).toContain('resolveSessionPromise = null');
-    expect(body).not.toContain('browseSessionPromise');
-  });
+  // The companion test — that the *server* re-mints the resolve promise and
+  // leaves the browse one alone — is gone with `remintResolveSession()` itself.
+  // Its invariant is restated in `server.ts` where the function used to be, and
+  // the retirement block below asserts nothing has re-introduced a caller.
 });
 
-describe.skip('the cap', () => {
-  test('is two, and the table beside it is what changing it trades', () => {
-    // Named rather than inline so the residual-rate table travels with it:
-    // 0 → 26.7%, 1 → 7.1%, 2 → 1.9%, 3 → 0.5%.
-    expect(MAX_REMINTS).toBe(2);
+describe('the retirement', () => {
+  // Live, unlike everything above. Read the file header first.
+
+  test('the cap is zero — re-minting escapes nothing at 100% rollout', () => {
+    // The table this number used to be chosen from, kept because it is what a
+    // future partial rollout would make relevant again:
+    // 0 → 26.7%, 1 → 7.1%, 2 → 1.9%, 3 → 0.5%. Those residuals assume
+    // unflagged buckets exist to be drawn. They do not (F20, amended
+    // 2026-08-18), which is why the answer is 0 and not 2.
+    expect(MAX_REMINTS).toBe(0);
   });
 
-  test('the flag is a list, because YouTube can retire or fork it', () => {
+  test('`playback.open` resolves through the bare ladder, not the re-mint wrapper', async () => {
+    // The guard that would have caught Task 22. Source-level and blunt on
+    // purpose: the alternative is asserting on a dynamic import inside a 400-line
+    // `if`/`else` chain, and this failure needs to be legible to whoever trips
+    // it rather than clever.
+    const server = await Bun.file('src/rpc/server.ts').text();
+    const code = server
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('//') && !line.trimStart().startsWith('*'))
+      .join('\n');
+
+    // Booleans, not `toContain` on the source: a failing `toContain` prints the
+    // entire 900-line file, which buries the one sentence that explains it.
+    const mentions = (name: string) => code.includes(name);
+
+    expect({
+      revivedTheWrapper: mentions('openPlaybackPastBucket'),
+      revivedTheRemint: mentions('remintResolveSession'),
+      importsTheBareLadder: mentions("import('../playback/resolve.ts')"),
+    }).toEqual({
+      revivedTheWrapper: false,
+      revivedTheRemint: false,
+      importsTheBareLadder: true,
+    });
+  });
+
+  test('the flag list survives, because YouTube can retire or fork it', () => {
     expect(Array.isArray(POISONED_FEXP_FLAGS)).toBe(true);
     expect(POISONED_FEXP_FLAGS).toContain('51946838');
   });

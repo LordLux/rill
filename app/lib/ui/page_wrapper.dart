@@ -4,7 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'pages/all_subscriptions.dart' show allSubscriptionsRouteName;
 import 'pages/subscriptions.dart';
-import 'player_shell.dart' show currentRouteProvider, rootNavigatorKey;
+import 'player_shell.dart'
+    show currentRouteProvider, homeRouteName, rootNavigatorKey, sectionRouteProvider;
 import 'widgets/topbar.dart';
 
 const String drawerPrefsKey = 'left_drawer_open';
@@ -62,18 +63,29 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
   @override
   Widget build(BuildContext context) {
     final isDrawerOpen = ref.watch(drawerStateProvider);
-    final currentRoute = ref.watch(currentRouteProvider);
+    // **The section, not the route.** Opening a video does not leave the
+    // section it was opened from — a watch page reached from Home is still
+    // Home, and lighting nothing while it plays reads as the rail losing its
+    // place. `sectionRouteProvider` is the last page route that was not the
+    // watch page; see `player_shell.dart`.
+    final section = ref.watch(sectionRouteProvider);
     // "All subscriptions" is reached from the Subscriptions page (Task 21
     // §4) and is still part of that section, not a route of its own the
     // drawer knows about — so it keeps Subscriptions highlighted rather
     // than falling through to `!isOnSubscriptions` and lighting up Home,
     // which is wrong for *any* non-subscriptions, non-home page (watch,
     // search — this just happened to be the one someone noticed first).
-    final isOnSubscriptions = currentRoute == subscriptionsRouteName || currentRoute == allSubscriptionsRouteName;
-    // The root route never gets a `RouteSettings.name` (see `CurrentRoute.build`
-    // in `player_shell.dart`), so `null` *is* "on home" — not "isn't on
-    // Subscriptions".
-    final isOnHome = currentRoute == null;
+    final isOnSubscriptions =
+        section == subscriptionsRouteName || section == allSubscriptionsRouteName;
+    // **`'/'`, not `null`.** This used to read `currentRoute == null` on the
+    // belief that the root route carries no name. It carries `'/'` —
+    // `MaterialApp(home:)` routes it through `Navigator.defaultRouteName` —
+    // so Home was never lit while on Home. Verified 2026-09-09; the constant
+    // and the evidence are on `homeRouteName`.
+    //
+    // `null` is still accepted, because that is the state before the observer
+    // has reported anything at all, and the first frame is on Home.
+    final isOnHome = section == null || section == homeRouteName;
 
     return Scaffold(
       appBar: TopBar(

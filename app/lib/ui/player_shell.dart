@@ -15,6 +15,20 @@ import 'widgets/topbar.dart';
 
 const String watchRouteName = 'watch';
 
+/// The home route's name, and it is **not `null`**.
+///
+/// `MaterialApp(home:)` builds its route through `onGenerateRoute` with
+/// `Navigator.defaultRouteName`, so the settings it carries are
+/// `RouteSettings(name: '/')`. Verified 2026-09-09 by logging every route the
+/// observer sees: `name=/ type=MaterialPageRoute<dynamic>`.
+///
+/// This used to be assumed to be `null` — `page_wrapper.dart` said so in a
+/// comment and keyed the rail's Home highlight on it — which is why Home was
+/// never lit while on Home. The one moment it *was* `null` was while a popup
+/// was open, because a `PopupRoute` carries no name, so the highlight appeared
+/// only when a menu or dialog was covering it.
+const String homeRouteName = '/';
+
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 class CurrentRoute extends Notifier<String?> {
@@ -26,33 +40,125 @@ class CurrentRoute extends Notifier<String?> {
   }
 }
 
+/// The topmost **page** route's name. Popups and dialogs do not change it.
 final currentRouteProvider = NotifierProvider<CurrentRoute, String?>(CurrentRoute.new);
 
-class RouteTracker extends NavigatorObserver {
-  RouteTracker(this._onChange);
+/// The section the user is in, which the watch page does not change.
+///
+/// The rail highlights a *section*, and opening a video is not leaving one — a
+/// video opened from Home is still Home, and lighting nothing while it plays
+/// reads as the rail losing its place. So this holds the last page route that
+/// was not the watch page.
+final sectionRouteProvider = NotifierProvider<CurrentRoute, String?>(CurrentRoute.new);
 
-  final void Function(String? routeName) _onChange;
+/// Whether a popup or dialog is currently on top of the page stack.
+///
+/// Not a route *name* — a `PopupRoute` has none — but the fact that one exists,
+/// which is what anything reaching for `maybePop` needs to know before it pops
+/// somebody else's dialog.
+class TransientRouteOpen extends Notifier<bool> {
+  int _depth = 0;
+
+  @override
+  bool build() => false;
+
+  void push() {
+    _depth += 1;
+    state = true;
+  }
+
+  void pop() {
+    // Clamped: `didRemove` and `didPop` can both fire for one route in some
+    // teardown orders, and a negative depth would latch this false forever.
+    _depth = _depth > 0 ? _depth - 1 : 0;
+    state = _depth > 0;
+  }
+}
+
+final transientRouteOpenProvider =
+    NotifierProvider<TransientRouteOpen, bool>(TransientRouteOpen.new);
+
+/// Watches the navigator and reports the topmost **page** route.
+///
+/// **Popups and dialogs are deliberately invisible to this.** A
+/// `PopupMenuButton` pushes a `_PopupMenuRoute` and `showDialog` pushes a
+/// `DialogRoute`; both extend `PopupRoute`, neither is a `PageRoute`, and
+/// neither carries a `settings.name`. Reporting them set the current route to
+/// `null`, which two separate features then read as "the user navigated away":
+///
+///   - `PlayerShell` popped the mini-player up over the watch page the moment
+///     you opened the account menu or the share dialog, because `null` is not
+///     `watchRouteName`.
+///   - the rail lit Home, because `null` was mistaken for the home route.
+///
+/// Filtering on `route is PageRoute` fixes both at the source rather than
+/// teaching each consumer to recognise a dialog. `PageRoute` and `PopupRoute`
+/// are siblings under `ModalRoute`, so the test is exact rather than a guess
+/// about class names.
+class RouteTracker extends NavigatorObserver {
+  RouteTracker({required this.onPageRoute, required this.onTransientChange});
+
+  final void Function(String? routeName) onPageRoute;
+  final void Function(bool pushed) onTransientChange;
 
   void _report(Route<dynamic>? route) {
     final name = route?.settings.name;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onChange(name));
+    WidgetsBinding.instance.addPostFrameCallback((_) => onPageRoute(name));
+  }
+
+  void _transient(bool pushed) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => onTransientChange(pushed));
   }
 
   @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => _report(route);
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PageRoute) {
+      _report(route);
+    } else if (route is PopupRoute) {
+      _transient(true);
+    }
+  }
 
   @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => _report(previousRoute);
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PageRoute) {
+      _report(previousRoute);
+    } else if (route is PopupRoute) {
+      _transient(false);
+    }
+  }
 
   @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => _report(previousRoute);
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PageRoute) {
+      _report(previousRoute);
+    } else if (route is PopupRoute) {
+      _transient(false);
+    }
+  }
 
   @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) => _report(newRoute);
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    if (newRoute is PageRoute) _report(newRoute);
+  }
 }
 
 final routeTrackerProvider = Provider<RouteTracker>((ref) {
-  return RouteTracker((name) => ref.read(currentRouteProvider.notifier).set(name));
+  return RouteTracker(
+    onPageRoute: (name) {
+      ref.read(currentRouteProvider.notifier).set(name);
+      // The watch page is a route but not a section — see [sectionRouteProvider].
+      if (name != watchRouteName) ref.read(sectionRouteProvider.notifier).set(name);
+    },
+    onTransientChange: (pushed) {
+      final notifier = ref.read(transientRouteOpenProvider.notifier);
+      if (pushed) {
+        notifier.push();
+      } else {
+        notifier.pop();
+      }
+    },
+  );
 });
 
 // Polls the leader size once per rendered frame — see `_scheduleCheck` for
@@ -149,6 +255,12 @@ void toMiniPlayer(WidgetRef ref) => toMiniPlayerIn(_containerOf(ref));
 void toMiniPlayerIn(ProviderContainer container) {
   container.read(playerViewProvider.notifier).reset();
   if (container.read(currentRouteProvider) != watchRouteName) return;
+  // **Never pop somebody else's dialog.** `currentRouteProvider` now ignores
+  // popups, so it still reads `watch` while a share dialog or a menu is open —
+  // and `maybePop` would close *that* instead of leaving the watch page. Before
+  // popups were filtered out this could not happen, because the guard above
+  // saw `null` and returned; the filter is what makes this check necessary.
+  if (container.read(transientRouteOpenProvider)) return;
   rootNavigatorKey.currentState?.maybePop();
 }
 

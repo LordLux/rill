@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'tile_badges.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
 import '../../theme/tokens.dart';
@@ -58,6 +59,10 @@ class TileSpec {
   final String? durationText;
   final DurationBadgeTone durationTone;
   final List<String> badges;
+
+  /// Members-only content — drives the green pill. A flag rather than a
+  /// [badges] entry, because the label is localised and the style is not.
+  final bool isMembersOnly;
   final bool canWatchLater;
   final bool canAddToQueue;
 
@@ -96,6 +101,7 @@ class TileSpec {
     this.durationText,
     required this.durationTone,
     required this.badges,
+    this.isMembersOnly = false,
     required this.canWatchLater,
     required this.canAddToQueue,
     this.premiereAtMs,
@@ -136,6 +142,7 @@ TileSpec? specFor(FeedItem item) {
             ? DurationBadgeTone.live
             : (v.isMusic ? DurationBadgeTone.music : DurationBadgeTone.normal),
         badges: v.badges,
+        isMembersOnly: v.isMembersOnly,
         canWatchLater: v.canWatchLater,
         canAddToQueue: v.canAddToQueue,
         premiereAtMs: v.premiereAtMs,
@@ -771,36 +778,10 @@ class _MediaTileState extends State<MediaTile> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
               ),
-            // Badges
-            if (widget.spec.badges.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  children: widget.spec.badges
-                      .map(
-                        (b) => Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: scheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          child: Text(
-                            b,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ),
+            TileBadges(
+              badges: widget.spec.badges,
+              isMembersOnly: widget.spec.isMembersOnly,
+            ),
           ],
         );
       }
@@ -924,38 +905,11 @@ class _MediaTileState extends State<MediaTile> {
                       ),
                     ),
                   ),
-                // Badges
-                if (widget.spec.badges.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4.0),
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: widget.spec.badges
-                          .map(
-                            // Badges stay on a surface role — §3.3 keeps the accent
-                            // off them.
-                            (b) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: scheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                              child: Text(
-                                b,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
+                TileBadges(
+                  badges: widget.spec.badges,
+                  isMembersOnly: widget.spec.isMembersOnly,
+                  topPadding: 4.0,
+                ),
                 // **The premiere CTA, at the foot of the card.**
                 //
                 // Disabled, like the watch page's: the affordance is real, the
@@ -1012,10 +966,10 @@ class _MediaTileState extends State<MediaTile> {
         final bool isShort = widget.spec.isShort || widget.layout == MediaTileLayout.shorts;
         final EdgeInsets hoverExpansion = isHovering
             ? isShort
-                  ? EdgeInsets.all(-10.0).copyWith(top: -9.0)
+                  ? EdgeInsets.all(-10.0).copyWith(top: -9.0) // Shorts
                   : widget.layout == MediaTileLayout.standard
-                      ? EdgeInsets.symmetric(horizontal: -10.0).copyWith(top: -10.0, bottom: -4.0)
-                      : EdgeInsets.all(-4.0)
+                      ? EdgeInsets.symmetric(horizontal: -10.0).copyWith(top: -9.0, bottom: -4.0) // Standard
+                      : EdgeInsets.all(-4.0) // Wide
             : EdgeInsets.zero;
 
         return MouseRegion(

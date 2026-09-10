@@ -38,6 +38,12 @@ abstract class VideoDetail with _$VideoDetail {
     @Default(false) bool isVerified,
     @Default(false) bool isArtistChannel,
     @Default(<String>[]) List<String> badges,
+    /// Members-only content. Same badge and same rule as
+    /// `FeedItem.video.isMembersOnly`, read off the watch page.
+    ///
+    /// This is what the members slate is drawn from — it is structural, where
+    /// the `playback.open` failure's message is localised prose.
+    @Default(false) bool isMembersOnly,
     /// When a premiere starts, unix ms. The watch page's slate reads this;
     /// `playback.open`'s `VIDEO_UPCOMING` says only *that* it is a premiere.
     int? premiereAtMs,
