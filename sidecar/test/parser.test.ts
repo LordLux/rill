@@ -80,6 +80,7 @@ const SHAPES = {
     badges: 'string[]',
     isShort: 'boolean',
     isMusic: 'boolean',
+    isMembersOnly: 'boolean',
     isVerified: 'boolean',
     isArtistChannel: 'boolean',
     premiereAtMs: 'number?',

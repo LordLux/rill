@@ -1,7 +1,9 @@
 import { createInterface } from 'node:readline';
 import type { Session } from '../innertube/session.ts';
+import { browseAuth, HOME_BROWSE_ID } from '../innertube/auth.ts';
 import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
+import { redact } from '../redact.ts';
 import { announceCapabilities } from '../capabilities.ts';
 import { PLAYBACK_REPORT_STATES } from '../types.ts';
 import type { CaptionOffset, CaptionStyle } from '../types.ts';
@@ -10,19 +12,18 @@ import type { SearchFilters } from '../parser/search-filters.ts';
 
 const log = logger('rpc');
 
-let browseSessionPromise: Promise<Session> | null = null;
 let resolveSessionPromise: Promise<Session> | null = null;
 
-// Memoise the promise, not the resolved value: two concurrent callers arriving
-// before the first session settles would otherwise each create one.
 /**
  * The browse session, and the only one that ever sees a cookie.
  *
- * `YT_COOKIE` is read from the environment rather than a file: the sidecar
- * inherits it from whatever launched it (Dart's `Process.start` passes the
- * parent environment through by default), so nothing has to live on disk next
- * to the code. Unset or blank means anonymous, which is a supported state and
- * not an error — `auth.verify` reports `anonymous` and the feed says so.
+ * The state behind this now lives in `innertube/auth.ts` (Task 22), because the
+ * cookie can change at runtime: `auth.setCookie` replaces the session, and the
+ * base-browse cache below has to be replaced with it or a sign-in verifies
+ * against the anonymous response it just superseded. That file has the rest.
+ *
+ * `YT_COOKIE` still seeds it — the development path is unchanged — and a client
+ * `auth.setCookie` overrides that seed for the life of the process.
  *
  * Browse and resolve are deliberately different clients (§2.3): this session
  * browses and reports as `WEB` with cookies, while `getResolveSession` stays
@@ -34,21 +35,7 @@ let resolveSessionPromise: Promise<Session> | null = null;
  * empty feed, and `auth.verify` is what tells the difference.
  */
 function getBrowseSession(): Promise<Session> {
-  if (!browseSessionPromise) {
-    browseSessionPromise = (async () => {
-      try {
-        const { createSession } = await import('../innertube/session.ts');
-        return await createSession({
-          clientType: 'WEB',
-          cookie: process.env.YT_COOKIE?.trim() || undefined,
-        });
-      } catch (e) {
-        browseSessionPromise = null;
-        throw e;
-      }
-    })();
-  }
-  return browseSessionPromise;
+  return browseAuth.session();
 }
 
 /**
@@ -64,21 +51,19 @@ async function videoDeps(): Promise<{ browse: Session; resolve: Session }> {
   return { browse, resolve };
 }
 
-/**
- * Throw away the resolve session and mint a replacement.
+/*
+ * `remintResolveSession()` used to live here — its only caller was F20's
+ * poisoned-bucket retry, which is retired (`architecture.md` F20, and the note
+ * at `playback.open` below). Removed with it rather than left dead, because a
+ * dead exported helper is what the revival reached for last time.
  *
- * **Resolve only, and that is the whole safety property.** `browseSessionPromise`
- * is untouched: it is the `WEB` session carrying the user's cookies, and
- * dropping it would sign them out on a quarter of launches to fix a stream URL —
- * a worse failure, and a silent one, because a degraded session answers HTTP 200
- * with an empty feed (F7). Asserted in `bucket.test.ts`.
- *
- * Used only by the poisoned-bucket retry (`playback/bucket.ts`, F20).
+ * Its safety property is the part worth keeping, and it applies to anything
+ * that ever re-mints a session here: **replace the resolve session only.**
+ * `browseSessionPromise` is the `WEB` session carrying the user's cookies, and
+ * dropping it to fix a stream URL signs them out — silently, because a degraded
+ * session answers HTTP 200 with an empty feed (F7). That is a worse failure
+ * than the one being fixed.
  */
-function remintResolveSession(): Promise<Session> {
-  resolveSessionPromise = null;
-  return getResolveSession();
-}
 
 function getResolveSession(): Promise<Session> {
   if (!resolveSessionPromise) {
@@ -96,24 +81,17 @@ function getResolveSession(): Promise<Session> {
 }
 
 /**
- * `auth.verify` and `feed.home` both fetch base home, and the app calls them
- * back to back at startup — auth.verify counts tiles and throws the payload
- * away. Hold it briefly so the feed.home moments later is free.
+ * A base browse response, briefly cached — see `innertube/auth.ts`.
  *
- * Base browse ids only. A continuation or a chip token is a different request
- * and is never served from, or written to, this cache.
+ * The cache moved onto the session holder in Task 22, and it moved for a
+ * reason: a cookie can change at runtime now, so an entry written by the
+ * session a sign-in replaced would answer the `auth.verify` that immediately
+ * follows it — reporting `degraded` for a session that just authenticated. The
+ * session is no longer a parameter because it is no longer the caller's to
+ * choose; it is whichever one the cookie currently implies.
  */
-const BROWSE_CACHE_TTL_MS = 30_000;
-const browseCache = new Map<string, { at: number; data: unknown }>();
-
-async function fetchBaseBrowse(session: Session, browseId: string): Promise<unknown> {
-  const hit = browseCache.get(browseId);
-  if (hit && Date.now() - hit.at < BROWSE_CACHE_TTL_MS) {
-    return hit.data;
-  }
-  const data = await session.execute('/browse', { browseId });
-  browseCache.set(browseId, { at: Date.now(), data });
-  return data;
+function fetchBaseBrowse(browseId: string): Promise<unknown> {
+  return browseAuth.baseBrowse(browseId);
 }
 
 const abortControllers = new Map<number | string, AbortController>();
@@ -123,6 +101,20 @@ function emitResponse(id: number | string, result: unknown) {
 }
 
 function emitError(id: number | string, error: unknown) {
+  process.stdout.write(errorLine(id, error) + '\n');
+}
+
+/**
+ * The NDJSON line a failure becomes — separated from the write so it can be
+ * asserted on.
+ *
+ * Exported for `redact.test.ts`, which needs to prove that a cookie inside an
+ * error message never reaches this wire. Proving that by spawning a sidecar and
+ * provoking a real upstream failure would need a network and a way to make
+ * YouTube fail on demand; proving it here needs neither and tests the same
+ * bytes.
+ */
+export function errorLine(id: number | string, error: unknown): string {
   let envelope;
   if (isRpcError(error)) {
     try {
@@ -151,7 +143,14 @@ function emitError(id: number | string, error: unknown) {
       retry: 'auto'
     };
   }
-  process.stdout.write(JSON.stringify({ id, error: envelope }) + '\n');
+  // The second chokepoint (Task 22 §5, `redact.ts`). An error envelope is the
+  // one thing on this wire built from a message the sidecar did not write: a
+  // rejection from youtubei.js or from `fetch` can quote the request it failed
+  // on, cookie header included, and the app renders that message in a snackbar.
+  // Redacting the whole envelope rather than the message field alone costs one
+  // pass over a short string and cannot be got wrong later by a `code` or a
+  // field someone adds.
+  return redact(JSON.stringify({ id, error: envelope }));
 }
 
 function emitEvent(method: string, params: unknown) {
@@ -287,10 +286,21 @@ async function handleRequest(request: RpcRequest) {
 
   try {
     if (method === 'auth.verify') {
-      const { verifyAuth } = await import('../innertube/session.ts');
-      const session = await getBrowseSession();
-      const result = await verifyAuth(session, (s) => fetchBaseBrowse(s, 'FEwhat_to_watch'));
-      emitResponse(id, result);
+      emitResponse(id, await browseAuth.verify());
+    } else if (method === 'auth.setCookie') {
+      // The cookie is validated for *shape* and never for content, and it never
+      // appears in an error message. `requireString` reports the field name, not
+      // the value — which is the whole of Task 22 §5 as it applies to this line.
+      const cookie = requireString(params, 'cookie', 'auth.setCookie');
+      const result = await browseAuth.setCookie(cookie);
+      // `{state}` per §3.1, and the state is measured — `setCookie` fetched
+      // home and counted tiles before answering. Never cookie presence.
+      emitResponse(id, { state: result.state });
+    } else if (method === 'auth.signOut') {
+      browseAuth.signOut();
+      emitResponse(id, {});
+    } else if (method === 'auth.status') {
+      emitResponse(id, await browseAuth.status());
     } else if (method === 'feed.home') {
       const { parseFeed } = await import('../parser/feed.ts');
       const session = await getBrowseSession();
@@ -302,7 +312,7 @@ async function handleRequest(request: RpcRequest) {
       const token = continuation || chipToken;
       const raw = token
         ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
-        : await fetchBaseBrowse(session, 'FEwhat_to_watch');
+        : await fetchBaseBrowse(HOME_BROWSE_ID);
       const result = parseFeed(raw, 'home');
       // Explicit rather than `emitResponse(id, result)`: `FeedResult` carries
       // an internal `artistPanel` field search.query uses (below), and the
@@ -323,7 +333,7 @@ async function handleRequest(request: RpcRequest) {
       const continuation = optionalString(params, 'continuation', 'feed.subscriptions');
       const raw = continuation
         ? await session.execute('/browse', { continuation })
-        : await fetchBaseBrowse(session, 'FEsubscriptions');
+        : await fetchBaseBrowse('FEsubscriptions');
       const result = parseFeed(raw, 'subscriptions');
       emitResponse(id, { items: result.items, continuation: result.continuation });
     } else if (method === 'subscriptions.channels') {
@@ -343,7 +353,7 @@ async function handleRequest(request: RpcRequest) {
       const continuation = optionalString(params, 'continuation', 'subscriptions.channels');
       const raw = continuation
         ? await session.execute('/browse', { continuation })
-        : await fetchBaseBrowse(session, 'FEchannels');
+        : await fetchBaseBrowse('FEchannels');
       const result = parseFeed(raw, 'channels');
 
       // The app's A–Z scrubber depends on that fixed order, and nothing in the
@@ -409,11 +419,27 @@ async function handleRequest(request: RpcRequest) {
       // Order matters beyond tidiness: `import('../playback/resolve.ts')` pulls
       // in the whole resolution module graph, and doing that first made a
       // rejected request pay for a ladder it was never going to use.
+      //
+      // **`openPlayback`, not `openPlaybackPastBucket` — F20's re-mint is
+      // retired, and this line is where it gets revived by accident.** Read
+      // `architecture.md` F20 before touching it. Short version: the re-mint
+      // worked in August only because it randomly drew *unflagged* buckets;
+      // the PO-token rollout it was escaping is now at 100%, so there is
+      // nothing left to draw and `MAX_REMINTS` is 0. `bucket.test.ts` asserts
+      // this call site stays on the bare ladder.
+      //
+      // It has already been revived once. `663edb1` (a captions refactor)
+      // unwired it by accident but left `remintResolveSession` in the argument
+      // object; `c53fb54` retired the mechanism the next day and left the call
+      // site alone, correctly. Task 22 then read that leftover argument — an
+      // excess property `PlaybackDeps` does not declare, and a real typecheck
+      // error — as evidence the wiring was *broken* and restored the wrapper.
+      // Dropping the argument, not restoring the wrapper, was the fix.
       const videoId = requireString(params, 'videoId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
       const result = await openPlayback(
-        { session, remintResolveSession },
+        { session },
         { videoId, preload: params?.preload === true },
       );
       emitResponse(id, result);

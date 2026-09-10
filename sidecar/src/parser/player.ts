@@ -14,6 +14,17 @@ import { premiereStartMs } from './premiere.ts';
 import type { PlayerFormat, PlayerResult, Storyboard } from '../types.ts';
 import { asArray, deepFind, get, isObject, num, str, type Json } from './tree.ts';
 
+/**
+ * YouTube's refusal text for members-only content, in the wordings observed.
+ *
+ * Loose on purpose — it matches the phrase rather than a whole sentence, so the
+ * two known variants ("Join this channel from your computer or mobile app to
+ * get access to members-only content like this video." on VISIONOS/MWEB, and
+ * "…and other exclusive perks." on WEB/ANDROID) both hit, and a reworded
+ * English string very likely still does.
+ */
+const MEMBERS_ONLY_REASON = /members[- ]only|members[- ]first|channel membership/i;
+
 /** `video/mp4; codecs="avc1.640028"` → `{ mime: 'video/mp4', codecs: 'avc1.640028' }`. */
 function splitMimeType(value: string | null): { mime: string | null; codecs: string | null } {
   if (!value) return { mime: null, codecs: null };
@@ -179,18 +190,48 @@ export function parsePlayer(raw: Json): PlayerResult {
     get(details, 'isUpcoming') === true ||
     str(get(body, 'playabilityStatus', 'status')) === 'LIVE_STREAM_OFFLINE';
 
+  // Members-only, classified from the refusal text — **and this one really is a
+  // localised-string match**, which everything else in this parser avoids.
+  //
+  // There is no alternative in this response. Measured 2026-09-09 on
+  // `rAWLNJoE5_Y`: the whole of `playabilityStatus` on the resolve clients is
+  // `{status, reason, playableInEmbed}`. VISIONOS carries no `errorScreen` at
+  // all, MWEB's is a generic `playerErrorMessageRenderer` with an
+  // `ERROR_OUTLINE` icon, and only the authenticated `WEB` response — which the
+  // resolve path deliberately never makes — has the specific
+  // `playerLegacyDesktopYpcOfferRenderer`.
+  //
+  // It is safe *because of where it sits*: this only ever refines a response
+  // that has already failed, so a locale this pattern does not cover falls back
+  // to `STREAM_UNAVAILABLE`, which is exactly today's behaviour. It can make an
+  // error more specific; it cannot make a working video fail.
+  //
+  // The **structural** answer lives on `VideoDetail.isMembersOnly`, read off
+  // `/next`'s `BADGE_STYLE_TYPE_MEMBERS_ONLY`, and that is what the watch page
+  // draws its slate from. This is here so the error envelope carries
+  // `retry: "no"` rather than offering a Try again that cannot work.
+  // **`messages` is an array, and `get` cannot walk into one.** `get` guards
+  // every hop with `isObject`, which excludes arrays by design, so
+  // `get(…, 'messages', '0')` — how this was written since the initial commit —
+  // returned `null` for every response that had messages and no `reason`. The
+  // fallback existed, was documented, and had never once fired. `asArray` is
+  // how the rest of the parser reaches into a list.
+  const playabilityReason =
+    str(get(body, 'playabilityStatus', 'reason')) ??
+    str(asArray(get(body, 'playabilityStatus', 'messages'))[0]);
+  const isMembersOnly = playabilityReason !== null && MEMBERS_ONLY_REASON.test(playabilityReason);
+
   return {
     videoId: str(get(details, 'videoId')),
     formats,
     storyboards: extractStoryboards(body),
     cpn: extractCpn(body),
     playabilityStatus: str(get(body, 'playabilityStatus', 'status')),
-    playabilityReason:
-      str(get(body, 'playabilityStatus', 'reason')) ??
-      str(get(body, 'playabilityStatus', 'messages', '0')),
+    playabilityReason,
     durationSeconds: isLive ? null : lengthSeconds,
     isLive,
     isUpcoming,
+    isMembersOnly,
     scheduledStartMs: isUpcoming ? premiereStartMs(body) : null,
     // Deliberately about the *adaptive* ladder, not about every format — a
     // SABR-only WEB response still carries a working itag 18. The rule lives in

@@ -14,3 +14,6 @@ formatter:
 analyzer:
   errors:
     curly_braces_in_flow_control_structures: ignore
+  exclude:
+    - build/**
+    - windows/**

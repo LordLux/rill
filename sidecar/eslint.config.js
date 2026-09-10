@@ -30,6 +30,28 @@ export default tseslint.config(
   {
     // `scratch/` is ad-hoc probes against the live API — not shipped, not
     // imported, and console output is the whole point of one.
-    ignores: ['node_modules/**', 'fixtures/**', 'scratch/**'],
+    //
+    // The files below are the same kind of throwaway probe/measurement
+    // harness — standalone scripts run directly with `bun run <file>.ts`,
+    // never imported by src/ or loaded into the sidecar process — they just
+    // predate the scratch/ convention and live at the package root instead.
+    // Exempting them by exact filename (never a directory-wide or extension
+    // glob at the root) is what keeps this narrow: hard invariant 3's
+    // no-console rule, and every other rule here, still guards all of src/
+    // at full strength, and a new file added under src/ can never land in
+    // this list by accident. Confirmed by `bun run lint` at the time this
+    // was written: these seven names are exactly the files with violations.
+    ignores: [
+      'node_modules/**',
+      'fixtures/**',
+      'scratch/**',
+      'compare-captions.ts',
+      'dump-player.ts',
+      'feed-test.ts',
+      'session-test.ts',
+      'test-captions.ts',
+      'test-l-bgx.ts',
+      'test-web-subs.ts',
+    ],
   },
 );
