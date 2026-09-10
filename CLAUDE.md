@@ -97,9 +97,10 @@ interface VideoItem {
   viewCountText: string | null;     // display string, not parsed
   publishedText: string | null;
   descriptionSnippet: string | null;
-  badges: string[];                 // "4K", "New", "Members only"
+  badges: string[];                 // "4K", "New" — never a fact with a field
   isShort: boolean;                 // Task 21 — classified, not stripped
   isMusic: boolean;                 // the ♪ on the duration badge, per video
+  isMembersOnly: boolean;           // BADGE_STYLE_TYPE_MEMBERS_ONLY, not the label
   isVerified: boolean;              // the uploading channel's checkmark
   isArtistChannel: boolean;         // the uploading channel's artist badge
   premiereAtMs: number | null;      // unix ms; null unless it is a premiere
@@ -167,6 +168,15 @@ classified instead: `VideoItem.isShort`, with `"SHORTS"` deliberately kept
 out of `badges[]` so the fact ships once. The client decides what to do with
 the flag, and `feed_view.dart` does render them, in a shelf of their own.
 
+**Members-only is a flag, not a badge string — added 2026-09-09.** Same rule as
+the two below, and the same reason the verified badge is read by `style`:
+`BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) is stable,
+while the `"Members only"` label is localised. It ships as
+`VideoItem.isMembersOnly` / `VideoDetail.isMembersOnly` and is kept out of
+`badges[]`. **A tile carrying it says nothing about whether this account can
+watch** — YouTube puts members-only videos in a subscriber's feed either way,
+and the resolve path is anonymous besides.
+
 **A fact with a DTO field of its own does not also travel as a label.** That is
 the general rule `isShort` is one case of, and `isLive` is the other. `LIVE`
 used to be pushed into `BadgeScan.labels` and then filtered back out by each
@@ -202,7 +212,20 @@ cd sidecar && bun run test:network  # live decipher tests — real requests, ~24
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
 cd sidecar && bun run build     # compile to dist/sidecar.exe — see below
 cd app && flutter run -d windows
+cd app && dart run tool/test_suite_guard.dart   # flutter test + the guard below
 ```
+
+**Run the app's tests through `tool/test_suite_guard.dart`, not `flutter test`
+alone.** A test file that does not compile fails to *load*, and `flutter test`
+scores that as a single `-1` — identical to one failed expectation, while every
+test in the file silently stops running. That is not hypothetical: nineteen
+tests stopped running on 2026-08-18 when `bf2e288` renamed
+`PlayerAction.toggleCaptions`, and it went unnoticed for three weeks because the
+suite already carried two known failures and `+403 -2` read as normal. The guard
+fails on any file in `test/` that produced no tests, which is never intentional
+and needs no maintenance. **The sidecar needs no equivalent** — measured
+2026-09-10, `bun test` reports an unloadable file as a separate `1 error` and
+exits 1, so the ambiguity is specific to `flutter test`'s reporter.
 
 The app prefers `sidecar/dist/sidecar.exe` and falls back to `bun run
 src/main.ts` when it is absent, so an unbuilt checkout still runs. The fallback
@@ -247,6 +270,25 @@ the answer.
   touches the account. Export from an incognito window parked on
   `youtube.com/robots.txt`, then close it without logging out. Keep main-profile
   YouTube tabs closed while testing.
+- **No cookie value goes to stderr or into an error envelope, and two
+  chokepoints enforce that rather than a rule per call site.** `logger()` and
+  the RPC error envelope both pass their text through `redact.ts`, which strikes
+  the values the process was handed *and* anything shaped like a Google auth
+  cookie. The sidecar's own code interpolates a cookie nowhere; what this
+  catches is a third party doing it — youtubei.js quoting a failed request, a
+  `fetch` rejection carrying headers — which is unreachable by reading this repo
+  and silent when it happens. `redact.test.ts` proves the redaction;
+  `rpc.test.ts`'s end-to-end check is a regression guard and, mutation-checked
+  2026-09-08, currently passes for the second reason too.
+- **The browse session's cookie changes at runtime now, and the base-browse
+  cache belongs to it.** `innertube/auth.ts` owns the cookie, the session, the
+  30-second `feed.home`/`auth.verify` cache and the cached account, and drops
+  all four together. Keeping the cache beside the session instead of on it means
+  a sign-in is verified against the *anonymous* response it just superseded —
+  `degraded` reported for a login that worked, silent and indistinguishable from
+  a genuinely stale cookie. `YT_COOKIE` seeds the first session and any
+  `auth.setCookie`/`auth.signOut` overrides it for the life of the process; a
+  sign-out cannot unset an environment variable, and says so on stderr.
 - **Fixtures must be captured with `parse: false`.** Parsed objects are lossy
   and make a useless corpus.
 - **Never mix fixtures across capture runs.** Clear the directory first. A stale
@@ -254,6 +296,26 @@ the answer.
 - **Fixtures are one moment.** The home feed's renderer mix shifted measurably
   within 8½ hours. Never assert that a given surface contains a given
   generation; search the corpus for wherever it lives.
+- **"Is this an object?" exists three times in the parser, and the three do not
+  share a line of code.** `isObject` in `tree.ts`, the inline `Array.isArray`
+  branch inside `walk`, and a hand-rolled `traverse()` in `parser/feed.ts`. They
+  agree today. Nothing makes them agree, and they are the kind of thing that is
+  changed one at a time — so if you touch one, read the other two before
+  deciding it was safe.
+  **`get()` is where that already cost something.** Every hop was guarded by
+  `isObject`, which excludes arrays *by design* (its `value is JsonObject`
+  predicate would otherwise be a lie, and ~30 call sites gate on "is this a
+  renderer payload"). So `get` could not walk *through* a list: the moment a
+  path stepped onto one, every remaining segment answered `null`.
+  `parsePlayer`'s `playabilityStatus.messages[0]` fallback for a refusal reason
+  was therefore dead from the initial commit — written, documented, believed in,
+  and never once firing, with nothing thrown and nothing logged. Fixed
+  2026-09-09 in `get` rather than in `isObject`, because only `get` walks a
+  *path*; a numeric segment now indexes an array, and a non-numeric one against
+  an array is still `null` so that `get(x, 'runs', 'length')` cannot answer with
+  a property of the container. `src/` was swept at the same time and had no
+  other such caller, so this is a trap rather than a fleet of live bugs — but it
+  is a trap that reads as correct code.
 - **Hover previews are the real video, muted, in the tile** (revised 2026-08-11;
   this note used to say sprite sheets, and `architecture.md` §2.6 records why it
   changed). **Never instantiate a player per tile** — that part is unchanged and
@@ -278,8 +340,6 @@ the answer.
   non-empty adaptive ladder — not just on `LOGIN_REQUIRED`, because no one has
   ever seen a server-issued id expire and so nobody knows what shape that
   failure takes. A SABR-only response is not an identity refusal.
-- **`build_runner` crashes on compilation with `media_kit` (dart:ffi):** 
-  Running `dart run build_runner build` or `flutter pub run build_runner build` crashes with `type 'InvalidType' is not a subtype of type 'FunctionType' in type cast` inside `_FfiUseSiteTransformer._verifyAndReplaceNativeCallable`. This is a known Dart SDK bug where the kernel compiler crashes when encountering FFI use sites. Because `build_runner` bootstraps and compiles its entrypoint (`build.dart`), this crash **blocks ALL `build_runner` codegen in this project** — not just `freezed`, but `json_serializable`, `riverpod_generator`, and any other builder. Running `build_runner` in JIT mode (e.g. `dart run .dart_tool/build/entrypoint/build.dart build`) also crashes with the same kernel generation error. There is no known one-line escape hatch or flag. The permanent policy is to use hand-written DTOs instead of generated ones to avoid needing to run `build_runner` entirely.
 - **When `app/pubspec.yaml` is first created**, pin
   `media_kit_libs_windows_video: 1.0.11` exactly (not caret). A bump lands
   modern FFmpeg and reintroduces the F13 seek freeze. See §2.4.
@@ -310,6 +370,28 @@ the answer.
   **not** help — it still runs `dart compile kernel`. The pin is removed with a
   comment in `app/pubspec.yaml`; it generated nothing (no `@ShapeshifterAsset`
   exists), so nothing was lost.
+
+  **This note used to have a companion above it blaming `media_kit`'s
+  `dart:ffi` and declaring hand-written DTOs the "permanent policy". That
+  diagnosis was wrong and the two sat contradicting each other in the file
+  loaded into every session — deleted 2026-09-10.** The symptom it described
+  was real and is the one above; the cause it named was not. Codegen works.
+
+  **There were two causes, not one, and `16b70c7` introduced both.** That
+  commit ("added initial Watch Later animated icon assets") added
+  `animated_vector_gen` *and* added `analyzer` / `dart_style` to
+  `dependency_overrides` to make the tree resolve. `bf2e288` removed the
+  generator and codegen started running — which is why this note reads
+  "build_runner works" — but the overrides survived, and they break a
+  *different phase*: the build script compiles fine, then `freezed` fails at
+  builder runtime against an analyzer API it was not written for. An override
+  bypasses constraint checking entirely, so pub resolved analyzer 13.0.0 while
+  freezed needs 12.x and `dart_style` needed 13.1+, and nothing warned. Found
+  and removed 2026-09-09; `app/pubspec.yaml` carries a comment saying which two
+  are deliberately *not* overridden and why. So: **both diagnoses were real and
+  sequential, and this note's "removing it fixes all codegen" was too broad** —
+  it fixed the bootstrap, not the builders. If codegen breaks again, check
+  which phase fails before assuming either cause.
 - **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
   draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
   `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:

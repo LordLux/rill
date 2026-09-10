@@ -126,6 +126,13 @@ class PlaybackState {
   /// "This video would not open" over a *Try again* that cannot work yet.
   bool get isUpcoming => errorCode == 'VIDEO_UPCOMING';
 
+  /// Members-only: the video is fine, it is behind the channel's paid tier.
+  ///
+  /// Same shape as [isUpcoming] and for the same reason — `retry` is `no`,
+  /// because retrying cannot buy a membership, so the page owes the user an
+  /// explanation rather than a *Try again*.
+  bool get isMembersOnly => errorCode == 'VIDEO_MEMBERS_ONLY';
+
   /// The ladder the quality menu lists. Empty when nothing is open.
   List<PlaybackVariant> get variants => source?.variants ?? const [];
 

@@ -10,6 +10,8 @@ import 'domain/feed_item.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
 import 'ui/audio_delay_probe.dart';
+import 'ui/auth_controller.dart';
+import 'ui/auth_probe.dart';
 import 'ui/debug_player.dart';
 import 'ui/hover_preview.dart';
 import 'ui/page_wrapper.dart';
@@ -35,6 +37,14 @@ Future<void> main() async {
       stderr.writeln('harness: $error');
       runApp(FailedApp(message: '$error'));
     }
+    return;
+  }
+
+  // `RILL_AUTH_PROBE=1` checks Task 22's two WebView2 stop conditions — can it
+  // return cookies, and can sign-out clear the jar — against a signed-out
+  // youtube.com, and exits. No account, no credentials.
+  if (Platform.environment['RILL_AUTH_PROBE'] == '1') {
+    runAuthProbe();
     return;
   }
 
@@ -73,6 +83,14 @@ Future<void> main() async {
       child: const RillApp(),
     ),
   );
+
+  // Restore the stored session before anything asks the sidecar a question the
+  // answer depends on — Task 22 §6's last paragraph. Not awaited: a cold
+  // credential-store read plus an `auth.setCookie` round trip is not something
+  // the first frame should wait behind, and every surface that cares reloads on
+  // `authRefreshProvider` when the answer lands. Anonymous browsing works
+  // meanwhile, which is the whole reason it is a supported state.
+  unawaited(container.read(authProvider.notifier).restore());
 
   _openOnLaunch(container);
   runControlsProbe(container);

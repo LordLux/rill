@@ -506,22 +506,6 @@ describe('the ladder as openPlayback wires it', () => {
     expect(session.calls).toEqual(['VISIONOS']);
   });
 
-  test.skip('a SABR-only VISIONOS response falls through to ANDROID, which serves progressive', async () => {
-    const session = fakeSession({
-      VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),
-      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
-    });
-
-    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
-    const best = source.variants[0]!;
-
-    const video = new URL(best.videoUrl);
-    expect(video.searchParams.get('c')).toBe('ANDROID');
-    // Deciphered, not merely present — the raw value would throttle to ~50 KB/s.
-    expect(video.searchParams.get('n')).toBe('n(RAWN315)');
-    expect(session.calls).toEqual(['VISIONOS', 'ANDROID']);
-  });
-
   test('a SABR-only VISIONOS response falls through to the progressive floor, on one ANDROID call', async () => {
     const session = fakeSession({
       VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),

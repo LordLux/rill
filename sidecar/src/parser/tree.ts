@@ -73,15 +73,43 @@ export function walk(root: Json, visit: (node: JsonObject) => boolean): void {
 /**
  * Read a nested path, tolerating anything missing along the way.
  * `get(node, 'metadata', 'lockupMetadataViewModel', 'title', 'content')`
+ *
+ * **A numeric segment indexes an array** — `get(node, 'messages', '0')`. That
+ * looks obvious and was not true until 2026-09-09: every hop was guarded by
+ * `isObject`, which excludes arrays *by design*, so the moment a path stepped
+ * onto a list every remaining segment answered `null`. The one caller that
+ * relied on it (`parser/player.ts`'s `playabilityStatus.messages[0]` fallback
+ * for a refusal reason) had therefore been dead since the initial commit —
+ * written, documented, believed in, and never once firing. Nothing threw and
+ * nothing logged; the field was simply always absent.
+ *
+ * Audited when it was found: that was the only such caller in `src/`, so this
+ * is a latent trap rather than a fleet of silent bugs. It is fixed here rather
+ * than in `isObject` because `isObject` is right — its `value is JsonObject`
+ * predicate would become a lie, and ~30 call sites that gate on "is this a
+ * renderer payload" would start accepting lists. Only `get`, which walks a
+ * *path*, ever needed to step through one.
+ *
+ * A **non**-numeric segment against an array is still `null`, deliberately:
+ * `get(node, 'runs', 'length')` reading `3` off the JS array would be a path
+ * silently answering with a property of the container rather than with data.
  */
 export function get(root: Json, ...path: string[]): unknown {
   let cursor: unknown = root;
   for (const segment of path) {
+    if (Array.isArray(cursor)) {
+      if (!ARRAY_INDEX.test(segment)) return null;
+      cursor = cursor[Number(segment)];
+      continue;
+    }
     if (!isObject(cursor)) return null;
     cursor = cursor[segment];
   }
   return cursor ?? null;
 }
+
+/** A path segment that addresses an array position. Non-negative, digits only. */
+const ARRAY_INDEX = /^\d+$/;
 
 /** A string value, or null. Empty and whitespace-only strings count as absent. */
 export function str(value: unknown): string | null {

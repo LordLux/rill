@@ -35,6 +35,8 @@ dependencies:
   animated_vector: ^0.2.2
   animated_vector_annotations:
   google_fonts: ^8.2.1
+  flutter_inappwebview: 6.1.5
+  flutter_secure_storage: 9.2.4
 
 dev_dependencies:
   flutter_test:
@@ -64,9 +66,38 @@ dev_dependencies:
 
 dependency_overrides:
   source_gen: ^4.1.2
-  dart_style: ^3.1.4
   build: ^4.0.4
-  analyzer: ">=10.0.0 <15.0.0"
+  # **`analyzer` and `dart_style` are deliberately NOT overridden here.**
+  #
+  # They used to be (`analyzer: ">=10.0.0 <15.0.0"`, `dart_style: ^3.1.4`), and
+  # that pair is what broke `build_runner` — differently from, and in addition
+  # to, the FFI failure CLAUDE.md documents.
+  #
+  # An override bypasses constraint checking, so the wide analyzer range let pub
+  # pick **13.0.0** and call it solved, while the packages that actually consume
+  # it disagreed: `freezed` 3.2.6-dev.1 wants `analyzer >=12.0.0 <13.0.0`, and
+  # `dart_style` 3.1.13 wants `>=13.1.0`. Both failures land at *compile* time
+  # with messages about someone else's AST — `namePart isn't defined for
+  # ExtensionTypeDeclaration` from dart_style, `Variable pattern 'type' doesn't
+  # have the same type or finality` from freezed — and neither names a version.
+  #
+  # Pinning the way out is not available: analyzer 13.1 needs `meta ^1.18.3`
+  # and `flutter_test` from this SDK pins `meta 1.18.0`. Letting pub solve it
+  # unaided is what works, and the constraint the solver has to respect is the
+  # one freezed declares.
+  #
+  # If codegen breaks again, check this block first: `dart run build_runner
+  # build` failing inside a *package you did not change* is what a bad override
+  # looks like from the outside.
+  #
+  # **Expect the lockfile to move backwards, and that is the fix working.**
+  # Removing the overrides lets the solver pick a set that actually agrees, and
+  # the whole generator toolchain settles a few versions down —
+  # `analyzer 13.0.0 → 12.1.0`, `dart_style 3.1.13 → 3.1.8`,
+  # `build_runner 2.16.1 → 2.15.1`, plus `build`, `source_gen` and
+  # `_fe_analyzer_shared` alongside them. All six are `direct dev` or transitive
+  # under it, so nothing shipped in the app changes. A reviewer looking only at
+  # `pubspec.lock` sees six downgrades and no reason; this is the reason.
 
 flutter:
   uses-material-design: true

@@ -11,6 +11,8 @@
  * for "YouTube changed something and items are silently disappearing".
  */
 
+import { redact } from './redact.ts';
+
 const LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LEVELS)[number];
 
@@ -18,10 +20,21 @@ const envLevel = (process.env.SIDECAR_LOG_LEVEL ?? 'info').toLowerCase();
 const threshold = LEVELS.indexOf(envLevel as LogLevel);
 const minLevel = threshold === -1 ? LEVELS.indexOf('info') : threshold;
 
+/**
+ * One write, one redaction pass.
+ *
+ * Task 22 §5. Every log line in the sidecar goes through here, so this is the
+ * cheapest place to make "no cookie ever reaches stderr" a property of the
+ * transport rather than a rule each call site has to remember. The sidecar's
+ * own code never interpolates a cookie; what this catches is a *third party*
+ * doing it — youtubei.js quoting a failed request, a fetch rejection carrying
+ * headers — which is unreachable by reading this repo and silent when it
+ * happens. See `redact.ts`.
+ */
 function emit(level: LogLevel, scope: string, message: string): void {
   if (LEVELS.indexOf(level) < minLevel) return;
   const stamp = new Date().toISOString();
-  process.stderr.write(`${stamp} ${level.toUpperCase().padEnd(5)} [${scope}] ${message}\n`);
+  process.stderr.write(`${stamp} ${level.toUpperCase().padEnd(5)} [${scope}] ${redact(message)}\n`);
 }
 
 export interface Logger {

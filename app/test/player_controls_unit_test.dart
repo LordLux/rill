@@ -153,6 +153,7 @@ void main() {
       expect(resolve(LogicalKeyboardKey.keyM)?.action, PlayerAction.mute);
       expect(resolve(LogicalKeyboardKey.keyF)?.action, PlayerAction.fullscreen);
       expect(resolve(LogicalKeyboardKey.keyT)?.action, PlayerAction.theatre);
+      expect(resolve(LogicalKeyboardKey.keyC)?.action, PlayerAction.captions);
       expect(resolve(LogicalKeyboardKey.escape)?.action, PlayerAction.escape);
       expect(resolve(LogicalKeyboardKey.keyI)?.action, PlayerAction.miniPlayer);
     });
