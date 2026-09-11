@@ -240,6 +240,50 @@ void main() {
     disposeContainer();
   });
 
+  testWidgets('the busy spinner being on screen keeps the controls up, and its own grace period still applies',
+      (tester) async {
+    // MUTATION: read the raw buffering signal instead of `_BusySpinner`'s own
+    // `_shown` callback and this still passes the "stays up" half — it is the
+    // 200 ms assertion below, taken before the spinner's 250 ms grace period
+    // elapses, that pins the bar to the spinner's on-screen state rather than
+    // to buffering starting.
+    await pumpWatching(tester);
+
+    engine.setPlaying(true);
+    await tester.pump();
+    engine.setBuffering(true);
+
+    // Short of the spinner's own grace period: nothing shown yet, but the bar
+    // has not hidden either — too little time for its own 1 s delay.
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byKey(playerBusySpinnerKey), findsNothing);
+    expect(barOpacity(tester), 1.0);
+
+    // Past the spinner's grace period.
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(playerBusySpinnerKey), findsOneWidget, reason: 'buffering long enough to show it');
+
+    // Well past where the bar would otherwise have auto-hidden.
+    //
+    // `pump`, not `pumpAndSettle` — the spinner is an indeterminate
+    // `CircularProgressIndicator`, which schedules a frame forever while it
+    // is in the tree, so `pumpAndSettle` here would just time out. `opacity`
+    // is `AnimatedOpacity`'s target value, set synchronously on rebuild, so a
+    // plain pump is enough to read it correctly without waiting the fade out.
+    await tester.pump(const Duration(seconds: 2));
+    expect(barOpacity(tester), 1.0,
+        reason: 'a stall must not hide the controls out from under someone reaching for mute or pause');
+
+    // Buffering clears: the ordinary countdown resumes from here.
+    engine.setBuffering(false);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(barOpacity(tester), 0.0, reason: 'once the stall clears, the bar auto-hides again');
+
+    disposeContainer();
+  });
+
   // -------------------------------------------------------------------------
   // Click vs double-click
   // -------------------------------------------------------------------------
