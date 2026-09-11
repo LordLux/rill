@@ -117,6 +117,19 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   int _hoveredClickables = 0;
 
+  /// Mirrors `_BusySpinnerState._shown` — set by the callback passed to
+  /// [_BusySpinner] below, not derived independently. Deriving it here too
+  /// would be a second copy of the grace-period timer with its own chance to
+  /// disagree with the spinner about whether it is currently on screen; this
+  /// way the bar is visible exactly when the spinner is, never a frame off.
+  bool _busyShown = false;
+
+  void _onBusyChanged(bool busy) {
+    if (_busyShown == busy) return;
+    _busyShown = busy;
+    _restartHideTimer();
+  }
+
   Widget _buildHoverable(Widget child) {
     return MouseRegion(
       onEnter: (_) {
@@ -165,11 +178,14 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   /// Restarts the countdown that hides the bar.
   ///
   /// Hides only while **playing**, only after [autoHideDelay], never while
-  /// the settings menu is open, and never when hovering a clickable control.
+  /// the settings menu is open, never when hovering a clickable control, and
+  /// never while the busy spinner is on screen — a stall is exactly when
+  /// someone reaches for mute or pause, and the controls must not have
+  /// vanished out from under that reach.
   void _restartHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = null;
-    if (!_playing || ref.read(playerMenuProvider).open || _hoveredClickables > 0) {
+    if (!_playing || ref.read(playerMenuProvider).open || _hoveredClickables > 0 || _busyShown) {
       _setVisible(true);
       return;
     }
@@ -314,7 +330,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // its grace timer cancelled at the exact moment a switch started.
             IgnorePointer(
               key: const ValueKey('player-busy'),
-              child: _BusySpinner(engine: widget.engine),
+              child: _BusySpinner(engine: widget.engine, onBusyChanged: _onBusyChanged),
             ),
             // **Mounted unconditionally now that it fades.** The `if` used to
             // be here, and an `if` cannot animate an exit: the panel was gone
@@ -941,9 +957,14 @@ class _FullscreenHeader extends ConsumerWidget {
 /// **Known gap (F18):** a resume after a long pause costs 0.5–2.3 s and touches
 /// neither `core-idle` nor `paused-for-cache`, so nothing fires for it.
 class _BusySpinner extends ConsumerStatefulWidget {
-  const _BusySpinner({required this.engine});
+  const _BusySpinner({required this.engine, required this.onBusyChanged});
 
   final PlaybackEngine engine;
+
+  /// Fired whenever the spinner's own on-screen state flips — never polled,
+  /// so the bar's hide timer can key off exactly what the viewer sees rather
+  /// than the raw (and grace-delayed) busy signal underneath it.
+  final ValueChanged<bool> onBusyChanged;
 
   @override
   ConsumerState<_BusySpinner> createState() => _BusySpinnerState();
@@ -981,7 +1002,10 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     if (!busy) {
       _graceTimer?.cancel();
       _graceTimer = null;
-      if (_shown) setState(() => _shown = false);
+      if (_shown) {
+        setState(() => _shown = false);
+        widget.onBusyChanged(false);
+      }
       return;
     }
     // Already counting, or already up. Restarting the timer on every tick of a
@@ -990,6 +1014,7 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     _graceTimer = Timer(busySpinnerDelay, () {
       if (!mounted || !_busy()) return;
       setState(() => _shown = true);
+      widget.onBusyChanged(true);
     });
   }
 
@@ -1008,13 +1033,16 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     );
 
     if (!_shown) return const SizedBox.shrink();
-    final tokens = Theme.of(context).tokens;
+    // `primaryFixed` rather than `primary`: a fixed light tone of the accent,
+    // one step lighter than the role the rest of the player paints with —
+    // legible over an arbitrary video frame without reading as saturated.
+    final accent = Theme.of(context).colorScheme.primaryFixed;
     return Center(
       key: playerBusySpinnerKey,
       child: SizedBox(
         width: 48,
         height: 48,
-        child: CircularProgressIndicator(color: tokens.onScrim, strokeWidth: 3),
+        child: CircularProgressIndicator(color: accent, strokeWidth: 3),
       ),
     );
   }
