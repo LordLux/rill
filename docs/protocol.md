@@ -408,6 +408,22 @@ shapes carry a Short, and only one is changed:
   tile from at all. It stays stripped; building a second mapper for a shelf
   this app still does not render is out of this task's scope.
 
+**A 24/7 station is `VideoItem.isStation` — `architecture.md` F22.** YouTube
+labels continuous radio/music content `"STATION"` instead of `"LIVE"`, and
+F22 found it is not tied to a particular client: a plain `youtube.com`
+session was observed flipping from `"LIVE"` to `"STATION"` mid-session with
+nothing on the viewer's end changing, so the label is a rollout any client
+can serve at any time. **Its `badgeStyle` is `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE`**
+— the same style an ordinary live badge carries, confirmed live 2026-09-11
+against a real search result — so `isStation` has to be read from the label
+*before* the generic style-based LIVE match runs, not instead of checking the
+style at all: checking style first classifies every station as an ordinary
+live tile and never reaches the label. It ships **alongside** `isLive: true`,
+never instead of it: the null-duration and "watching" behaviour a live tile
+needs is unaffected, this only tells the client which pill text to draw.
+Kept out of `badges[]`, the
+same rule `isShort` and `isLive` already follow.
+
 **`search.suggest` is not an InnerTube endpoint — Task 20 §2 asked to confirm
 rather than assume, and it does not hold.** There is no `/youtubei/v1/*` POST,
 no session, and nothing to run `parse: false` over. It is a plain,
@@ -524,9 +540,15 @@ gaining `inWatchLater` / `playlistIds` would settle the first, an
 {
   "sessionId": "…",
   "durationMs": 634000,
+  // Unix ms when a live broadcast started, for the "how long has this been
+  // live" clock (§2.9-adjacent UI, not documented further here) — null for
+  // anything that is not live, and for a live stream whose own /player
+  // response carried no start time (an MWEB fallback then fills it in;
+  // see the live-manifest note below).
+  "startTimestamp": null,
   "storyboardTemplate": "https://…",
   "qualityDegraded": false,
-  "transport": "plain",            // "plain" | "sabr-dash" | "ytdlp"
+  "transport": "plain",            // "plain" | "hls" | "dash" | "sabr-dash" | "ytdlp"
   // Ranked best-first. The client picks one and may switch without
   // reopening — all variants come from a single /player response.
   "variants": [
@@ -579,6 +601,20 @@ came back carrying no progressive format at all, so every rung can decline and
 fine. The UI obligation follows from that: **"Unavailable" is a state the user
 can retry out of, not a verdict on the video.** That is what `retry: "user"`
 means in §4 — show the error, offer the retry, and do not loop silently.
+
+**Tier 1 has a second path, gated on `response.isLive`, for a stream that
+is actually live** (Task 24; `architecture.md` F23). A `VISIONOS` `/player`
+response for a live broadcast carries `hlsManifestUrl`/`dashManifestUrl`
+instead of (or alongside) the ordinary adaptive ladder; when `isLive` is set,
+`tierPlainAdaptive` hands that manifest URL to mpv directly — signed through
+the same `sign()` door as everything else, per hard invariant 2 — and reports
+`transport: "hls"` or `"dash"`. **The gate is load-bearing, not defensive
+boilerplate**: `VISIONOS` includes an `hlsManifestUrl` on ordinary VOD
+responses too (confirmed on four unrelated non-live videos), so without the
+`isLive` check this path took over essentially every tier-1 open — F23 has
+the full story, including the reported symptom, and it is the reason Task
+24's own test list says "assert the VOD case too" rather than only the live
+one.
 
 **`playback.report` is load-bearing.** Watch events must land or the recommender
 stops training and the homepage drifts from the real one — which defeats the

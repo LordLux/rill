@@ -94,6 +94,7 @@ interface VideoItem {
   thumbnailUrl: string;
   durationSeconds: number | null;   // null when live
   isLive: boolean;
+  isStation: boolean;               // 24/7 station (F22) — alongside isLive, not instead
   viewCountText: string | null;     // display string, not parsed
   publishedText: string | null;
   descriptionSnippet: string | null;
@@ -176,6 +177,27 @@ while the `"Members only"` label is localised. It ships as
 `badges[]`. **A tile carrying it says nothing about whether this account can
 watch** — YouTube puts members-only videos in a subscriber's feed either way,
 and the resolve path is anonymous besides.
+
+**A 24/7 station is live, and separately flagged — added 2026-09-11 (F22).**
+YouTube ships a `"STATION"` label instead of `"LIVE"` for continuous
+radio/music content. It is not tied to one client: first measured from
+`ANDROID` only, then observed flipping a plain `youtube.com` session from
+`"LIVE"` to `"STATION"` mid-session with nothing on the viewer's end
+changing — a rollout any client can receive at any time, not a fixed
+per-client split. `VideoItem.isStation` ships **alongside** `isLive: true`,
+never instead of it — the null-duration/sort behaviour a live tile needs is
+unchanged — so the client can draw its own `"STATION"` pill instead of
+`"LIVE"` without losing anything `isLive` already provides. Kept out of
+`badges[]` for the same reason `"LIVE"` is.
+
+**Its `badgeStyle` is `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE` — confirmed live
+2026-09-11, and this shipped wrong for one round because of it.** The
+`"STATION"` label has to be checked *before* `scanBadges`'s generic
+style-based LIVE match in `src/parser/text.ts`, not after: checking style
+first classifies every station as an ordinary live tile and the label is
+never reached, so `isStation` stays false. A synthetic test built on the
+(wrong) assumption that the style carried nothing LIVE-ish passed against
+exactly this bug.
 
 **A fact with a DTO field of its own does not also travel as a label.** That is
 the general rule `isShort` is one case of, and `isLive` is the other. `LIVE`

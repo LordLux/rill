@@ -189,9 +189,34 @@ export interface BadgeScan {
    * already deals with. Only the classic shape above is confirmed live.
    */
   isMembersOnly: boolean;
+  /**
+   * A 24/7 radio/music station — ships as `VideoItem.isStation`, alongside
+   * `isLive: true` rather than instead of it, and never as a `"STATION"`
+   * entry in `badges[]`.
+   *
+   * F22 (`architecture.md`): first measured from the `ANDROID` client, which
+   * reasoned (wrongly) that `MWEB`/`WEB` were unaffected; then observed live
+   * on the plain `youtube.com` web client flipping from `"LIVE"` to
+   * `"STATION"` mid-session with nothing on the viewer's end changing. So
+   * this is a rollout any client can receive at any time, not a fixed
+   * per-client split — the label is read on its own merits, never gated on
+   * which client answered.
+   *
+   * **Its `badgeStyle` is `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE`** — the same
+   * style an ordinary live badge carries. An earlier version of this note said
+   * it carried no `LIVE`-ish style at all; that was never checked against a
+   * real response, and it was wrong (confirmed live 2026-09-11, `h4hy2Gn-FVE`).
+   * `consider` below checks the `"STATION"` label *before* the generic
+   * style-based LIVE match for exactly this reason — checking the style first
+   * would classify every station as an ordinary live tile and never reach the
+   * label at all, which is what shipped for one round.
+   */
+  isStation: boolean;
 }
 
 const LIVE_LABEL = /^(live|live now|in diretta)$/i;
+/** See {@link BadgeScan.isStation}. Checked before the generic style-based LIVE match — its `badgeStyle` is `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE` too. */
+const STATION_LABEL = /^station$/i;
 const SHORTS_LABEL = /^shorts$/i;
 
 /** `thumbnailBadgeViewModel.icon.sources[].clientResource.imageName === 'MUSIC'`. */
@@ -225,6 +250,7 @@ export function scanBadges(node: Json): BadgeScan {
   const labels: string[] = [];
   let durationSeconds: number | null = null;
   let isLive = false;
+  let isStation = false;
   let isShort = false;
   let isMembersOnly = false;
 
@@ -250,6 +276,22 @@ export function scanBadges(node: Json): BadgeScan {
     if (!value) return;
     if (looksLikeDuration(value)) {
       durationSeconds ??= durationToSeconds(value);
+      return;
+    }
+    // **Station before the generic LIVE check, and it has to be.** Confirmed
+    // live 2026-09-11 against a real search result for `h4hy2Gn-FVE`: the
+    // badge's `text` is `"STATION"` but its `badgeStyle` is
+    // `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE` — it *does* carry a `LIVE`-ish
+    // style, which the doc here previously said it did not. Checking the
+    // generic style-based LIVE match first swallowed every station: `isLive`
+    // was set and this returned before the label was ever read against
+    // `STATION_LABEL`, so `isStation` stayed false in production while every
+    // synthetic test (built from the wrong assumption) kept passing. A station
+    // is live too (see BadgeScan.isStation) — set alongside isLive, never
+    // instead of it, so duration/sort behaviour is unaffected.
+    if (STATION_LABEL.test(value)) {
+      isLive = true;
+      isStation = true;
       return;
     }
     if (LIVE_LABEL.test(value) || (style !== null && /LIVE/i.test(style))) {
@@ -289,7 +331,7 @@ export function scanBadges(node: Json): BadgeScan {
     return true;
   });
 
-  return { labels, durationSeconds, isLive, isShort, hasMusicNote, isMembersOnly };
+  return { labels, durationSeconds, isLive, isStation, isShort, hasMusicNote, isMembersOnly };
 }
 
 const VERIFIED_STYLE = 'BADGE_STYLE_TYPE_VERIFIED';

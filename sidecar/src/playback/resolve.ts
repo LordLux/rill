@@ -323,16 +323,33 @@ export async function tierPlainAdaptive(
     );
   }
 
-  if (response.hlsManifestUrl || response.dashManifestUrl) {
+  const player = await getPlayer(deps.session);
+
+  // **Gated on `isLive`.** `VISIONOS` hands back an `hlsManifestUrl` on
+  // ordinary VOD responses too — confirmed live against `dQw4w9WgXcQ` and
+  // three other unrelated non-live videos, all with a perfectly usable
+  // adaptive ladder sitting right below this check. Without the gate this
+  // branch hijacked essentially every open on tier 1, trading the single
+  // direct `videoplayback` GET the plain-adaptive path below would have made
+  // for mpv's multi-hop HLS fetch chain (master playlist → variant playlist →
+  // segments) against a manifest-pinned edge host — measured as the cause of
+  // the "mpv could not open the stream" / `WSAETIMEDOUT` reports on 2026-09-10,
+  // ordinary videos only, healed by a retry because a re-resolve rarely lands
+  // on the same fragile chain twice. Routed through `sign` now too, rather
+  // than cast directly to `SignedUrl` — hard invariant 2 has to hold for the
+  // genuine live case this branch exists for, even though `VISIONOS` manifest
+  // URLs carry no cipher or `n` today.
+  if (response.isLive && (response.hlsManifestUrl || response.dashManifestUrl)) {
     const isHls = !!response.hlsManifestUrl;
-    const url = (response.hlsManifestUrl ?? response.dashManifestUrl) as string;
-    
+    const rawUrl = (response.hlsManifestUrl ?? response.dashManifestUrl) as string;
+    const signedUrl = await sign(rawUrl, player, { poToken });
+
     // We can infer a max resolution from the available formats to satisfy the type.
     const maxVideo = rankVideo(response.formats)[0];
-    
+
     return assemble({
       variants: [{
-        videoUrl: url as SignedUrl,
+        videoUrl: signedUrl,
         audioUrl: null,
         itag: maxVideo?.itag ?? null,
         height: maxVideo?.height ?? 1080,
@@ -354,7 +371,6 @@ export async function tierPlainAdaptive(
     );
   }
 
-  const player = await getPlayer(deps.session);
   const bestAudio = rankedAudios[0]!;
 
   // Sign the best audio once — it serves every video variant (§3.5 rule 5).
@@ -896,7 +912,7 @@ export async function openPlayback(
       if (mweb.startTimestamp) {
         source.startTimestamp = mweb.startTimestamp;
       }
-    } catch (error) {
+    } catch {
       log.warn(`${videoId}: MWEB fallback for startTimestamp failed`);
     }
   }

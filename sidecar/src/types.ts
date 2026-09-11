@@ -27,6 +27,17 @@ export interface VideoItem {
   /** null when live — a live stream has no final duration. */
   durationSeconds: number | null;
   isLive: boolean;
+  /**
+   * A 24/7 radio/music station (architecture.md F22) — functionally live
+   * (continuous, no fixed duration, a "N watching" count), but YouTube ships
+   * its own `"STATION"` label rather than `"LIVE"`. Always `true` alongside
+   * {@link isLive}, never instead of it: the duration/sort behaviour a live
+   * tile needs still applies here, this only tells Flutter which pill text
+   * to draw. Observed as a live, mid-session rollout rather than a fixed
+   * per-client split — F22's second half — so this is read from the label
+   * alone, never from which client answered.
+   */
+  isStation: boolean;
   /** Display string as YouTube formatted it ("22K views"), never parsed. */
   viewCountText: string | null;
   publishedText: string | null;

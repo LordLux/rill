@@ -88,6 +88,65 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a station tile draws a STATION pill, not LIVE, and the pill is not hidden', (WidgetTester tester) async {
+    // MUTATION: drop the `DurationBadgeTone.station` arm from the `if` that
+    // decides whether the duration badge mounts at all (media_tile.dart) and
+    // this fails — a station's `durationText` is null, same as an ordinary
+    // live tile, so without that arm the pill silently never appears.
+    final item = const FeedItem.video(
+      kind: 'video',
+      id: 'stationstat',
+      title: 'MV STATION',
+      channelName: 'DECO*27',
+      channelId: 'chan1',
+      channelAvatarUrl: 'https://example.com/avatar.jpg',
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+      durationSeconds: null,
+      isLive: true,
+      isStation: true,
+      viewCountText: '78 watching',
+      badges: [],
+      canWatchLater: true,
+      canAddToQueue: true,
+    );
+
+    final spec = specFor(item)!;
+    expect(spec.durationTone, DurationBadgeTone.station);
+
+    await tester.pumpWidget(buildTile(spec));
+    await tester.pumpAndSettle();
+
+    expect(find.text('STATION'), findsOneWidget);
+    expect(find.text('LIVE'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an ordinary live tile still draws LIVE, not STATION', (WidgetTester tester) async {
+    final item = const FeedItem.video(
+      kind: 'video',
+      id: 'liveliveliv',
+      title: 'A live stream',
+      channelName: 'Some Channel',
+      channelId: 'chan1',
+      channelAvatarUrl: 'https://example.com/avatar.jpg',
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+      durationSeconds: null,
+      isLive: true,
+      viewCountText: '1.2K watching',
+      badges: [],
+      canWatchLater: true,
+      canAddToQueue: true,
+    );
+
+    final spec = specFor(item)!;
+    await tester.pumpWidget(buildTile(spec));
+    await tester.pumpAndSettle();
+
+    expect(find.text('LIVE'), findsOneWidget);
+    expect(find.text('STATION'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('MediaTile smoke test - MixItem', (WidgetTester tester) async {
     final item = const FeedItem.mix(
       kind: 'mix',

@@ -125,3 +125,17 @@ what already works. Any UI beyond what the fix requires.
   is load-bearing.
 - **The measurements contradict the per-stream hypothesis** entirely. Say so;
   that is the most useful outcome §1 can have.
+
+## Outcome (added 2026-09-11, `architecture.md` F23)
+
+The manifest branch shipped without the `isLive` gate §2 and §3 both call for
+("A manifest exists and is ignored... with `isLive` selecting the path";
+"the resolution path does not \[distinguish them\]"), and without the
+mutation-checked VOD test the "Tests" section above requires. The result was
+not the reported freeze-then-stop on a live broadcast — it was ordinary,
+non-live videos silently routed through the same manifest path, since
+`VISIONOS` carries an `hlsManifestUrl` on VOD responses too. See F23 for the
+full finding and the fix. The original live-freeze symptom this task was
+opened for was never independently re-measured once the ungated branch was
+found; if it recurs on a broadcast confirmed live at the time, treat it as
+open again rather than assumed-fixed by F23.
