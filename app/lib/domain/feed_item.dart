@@ -20,6 +20,13 @@ sealed class FeedItem with _$FeedItem {
     String? viewCountText,
     String? publishedText,
     String? descriptionSnippet,
+    /// A 24/7 radio/music station (`architecture.md` F22) — functionally
+    /// live (continuous, no fixed duration, a "N watching" count), but
+    /// YouTube ships its own `"STATION"` label rather than `"LIVE"`. Always
+    /// true alongside [isLive], never instead of it — the duration/sort
+    /// behaviour a live tile needs still applies; this only tells the UI
+    /// which pill text to draw.
+    @Default(false) bool isStation,
     @Default([]) List<String> badges,
     /// A Short, classified rather than stripped (Task 21 §1) — the ordinary
     /// videoRenderer/lockupViewModel shape carrying a SHORTS-styled duration

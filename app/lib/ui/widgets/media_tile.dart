@@ -24,7 +24,7 @@ const List<String> tmpMenuContents = [];
 // the thumbnail, cached off the UI isolate.
 // -------------------------------------
 
-enum DurationBadgeTone { normal, live, music }
+enum DurationBadgeTone { normal, live, music, station }
 
 /// The reminder CTA on a premiere tile.
 const Key tileNotifyKey = ValueKey('tile-notify');
@@ -138,9 +138,11 @@ TileSpec? specFor(FeedItem item) {
         isStackedCards: false,
         isShort: v.isShort,
         durationText: durText,
-        durationTone: v.isLive
-            ? DurationBadgeTone.live
-            : (v.isMusic ? DurationBadgeTone.music : DurationBadgeTone.normal),
+        durationTone: v.isStation
+            ? DurationBadgeTone.station
+            : (v.isLive
+                  ? DurationBadgeTone.live
+                  : (v.isMusic ? DurationBadgeTone.music : DurationBadgeTone.normal)),
         badges: v.badges,
         isMembersOnly: v.isMembersOnly,
         canWatchLater: v.canWatchLater,
@@ -368,10 +370,17 @@ class _MediaTileState extends State<MediaTile> {
     );
   }
 
-  /// The duration / LIVE pill. Scrim family rather than a surface role: it sits over an
-  /// arbitrary thumbnail.
+  /// The duration / LIVE / STATION pill. Scrim family rather than a surface
+  /// role: it sits over an arbitrary thumbnail.
+  ///
+  /// STATION shares LIVE's red background and broadcast icon — a station is
+  /// `isLive: true` underneath (architecture.md F22) and reads the same way
+  /// at a glance — but draws its own text, since that is the one thing about
+  /// it worth telling apart from an ordinary live stream.
   Widget _durationBadge(RillTokens tokens) {
     final isLive = widget.spec.durationTone == DurationBadgeTone.live;
+    final isStation = widget.spec.durationTone == DurationBadgeTone.station;
+    final isLiveLike = isLive || isStation;
     return Container(
       padding: const EdgeInsets.only(
         left: 4.5,
@@ -380,7 +389,7 @@ class _MediaTileState extends State<MediaTile> {
         top: .5,
       ),
       decoration: BoxDecoration(
-        color: isLive
+        color: isLiveLike
             ? tokens.liveBadge.withValues(alpha: 0.8)
             : tokens.scrim.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(4),
@@ -388,7 +397,7 @@ class _MediaTileState extends State<MediaTile> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (isLive)
+          if (isLiveLike)
             Padding(
               padding: const EdgeInsets.only(right: 4.0),
               child: Icon(Icons.sensors, size: 12, color: tokens.onScrim),
@@ -403,7 +412,7 @@ class _MediaTileState extends State<MediaTile> {
               ),
             ),
           Text(
-            isLive ? 'LIVE' : (widget.spec.durationText ?? ''),
+            isStation ? 'STATION' : (isLive ? 'LIVE' : (widget.spec.durationText ?? '')),
             style: TextStyle(
               color: tokens.onScrim,
               fontSize: 11.2,
@@ -605,7 +614,9 @@ class _MediaTileState extends State<MediaTile> {
                     ),
                     // Duration badge — hidden while a preview is playing: it describes the
                     // thumbnail, and over a running video it is stale chrome.
-                    if (widget.spec.durationText != null || widget.spec.durationTone == DurationBadgeTone.live)
+                    if (widget.spec.durationText != null ||
+                        widget.spec.durationTone == DurationBadgeTone.live ||
+                        widget.spec.durationTone == DurationBadgeTone.station)
                       Positioned(
                         bottom: 6,
                         right: 6,

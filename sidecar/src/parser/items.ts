@@ -142,6 +142,7 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     thumbnailUrl: thumbnailUrl ?? '',
     durationSeconds: badges.isLive ? null : badges.durationSeconds,
     isLive: badges.isLive || detailRows.some((row) => /watching now/i.test(row)),
+    isStation: badges.isStation,
     viewCountText: detailRows.find(isViewCountText) ?? null,
     publishedText: detailRows.find(isPublishedText) ?? null,
     descriptionSnippet: null,
@@ -195,6 +196,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     thumbnailUrl: bestImageUrl(node['thumbnail']) ?? '',
     durationSeconds: isLive ? null : (Number.isFinite(lengthSeconds) ? lengthSeconds : null),
     isLive,
+    isStation: badges.isStation,
     viewCountText,
     publishedText: text(node['publishedTimeText']),
     descriptionSnippet:

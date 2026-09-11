@@ -422,6 +422,32 @@ function rawPlayerBody(options: {
 }
 
 /**
+ * `rawPlayerBody`, with an `hlsManifestUrl` grafted on — what a real `VISIONOS`
+ * `/player` response carries regardless of whether the video is live. Measured
+ * 2026-09-10 against `dQw4w9WgXcQ` and three other ordinary videos: all four
+ * carried one, live or not, which is exactly what made the ungated branch in
+ * `tierPlainAdaptive` hijack essentially every tier-1 open rather than only the
+ * live ones it was written for.
+ */
+function rawPlayerBodyWithHlsManifest(
+  options: Parameters<typeof rawPlayerBody>[0] & { isLive?: boolean },
+): unknown {
+  const { isLive = false, ...rest } = options;
+  const body = rawPlayerBody(rest) as {
+    videoDetails: Record<string, unknown>;
+    streamingData: Record<string, unknown>;
+  };
+  return {
+    ...body,
+    videoDetails: { ...body.videoDetails, isLive },
+    streamingData: {
+      ...body.streamingData,
+      hlsManifestUrl: `https://manifest.googlevideo.com/api/manifest/hls_variant/index.m3u8?c=${rest.client}`,
+    },
+  };
+}
+
+/**
  * The JS player youtubei.js would have downloaded, with the two transforms
  * stubbed. Not the identity — `sign` refuses that, correctly.
  */
@@ -544,6 +570,46 @@ describe('the ladder as openPlayback wires it', () => {
     expect(new URL(source.variants[0]!.videoUrl).searchParams.get('c')).toBe('ANDROID');
     // One VISIONOS call, not two: no retry happened.
     expect(session.calls).toEqual(['VISIONOS', 'ANDROID']);
+  });
+
+  test('an hlsManifestUrl on an ordinary (non-live) response is ignored — the 2026-09-10 regression',
+    async () => {
+      // MUTATION: drop the `response.isLive &&` half of the gate in
+      // `tierPlainAdaptive` and this fails. The response below is `isLive: false`
+      // but still carries an `hlsManifestUrl` — exactly what every ordinary
+      // VISIONOS response measured on 2026-09-10 turned out to carry — and the
+      // ungated branch took it anyway, handing mpv a manifest URL instead of the
+      // plain adaptive pair sitting one check below. That produced the reported
+      // symptom: a slow, then-timing-out open on ordinary (non-live) videos,
+      // healed by a retry because a fresh resolve rarely lands on the same
+      // fragile multi-hop HLS fetch chain twice.
+      const session = fakeSession({
+        VISIONOS: rawPlayerBodyWithHlsManifest({ client: 'VISIONOS' }),
+        ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
+      });
+
+      const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+      expect(source.transport).toBe('plain');
+      expect(source.variants[0]!.audioUrl).not.toBeNull();
+      expect(session.calls).toEqual(['VISIONOS']);
+    },
+  );
+
+  test('a live response with an hlsManifestUrl uses it, signed rather than cast', async () => {
+    const session = fakeSession({
+      VISIONOS: rawPlayerBodyWithHlsManifest({ client: 'VISIONOS', isLive: true }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
+    });
+
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    expect(source.transport).toBe('hls');
+    // No audio track in an HLS variant — the manifest carries its own.
+    expect(source.variants[0]!.audioUrl).toBeNull();
+    // Hard invariant 2: even a client that carries no cipher today goes through
+    // `sign`, not a bare cast, so a day it starts carrying one is not silent.
+    expect(source.variants[0]!.videoUrl).toContain('manifest.googlevideo.com');
   });
 });
 

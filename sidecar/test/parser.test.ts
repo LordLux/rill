@@ -74,6 +74,7 @@ const SHAPES = {
     thumbnailUrl: 'string',
     durationSeconds: 'number?',
     isLive: 'boolean',
+    isStation: 'boolean',
     viewCountText: 'string?',
     publishedText: 'string?',
     descriptionSnippet: 'string?',
@@ -449,6 +450,78 @@ describe.if(HAS_CAPTURES)('renderer generations', () => {
     expect(item.kind === 'video' && item.isLive).toBe(true);
     expect(item.kind === 'video' && item.durationSeconds).toBeNull();
     // LIVE drives the flag; it is not also repeated as a display badge.
+    expect(item.kind === 'video' && item.badges).toEqual([]);
+    // An ordinary LIVE tile is not a station — isStation does not just mirror isLive.
+    expect(item.kind === 'video' && item.isStation).toBe(false);
+  });
+
+  test('a STATION badge is treated as live too, and flagged distinctly (F22, 2026-09-11)', () => {
+    // Same shape as the LIVE test above, with the label YouTube ships for a
+    // 24/7 radio/music station instead. "78 watching" deliberately omits
+    // "now" — the lockup mapper's own view-count fallback only fires on the
+    // literal "watching now", so this isolates the label match rather than
+    // riding along on that fallback.
+    //
+    // `badgeStyle` is deliberately `..._LIVE`, not a made-up "default" style —
+    // that is the real shape, confirmed live 2026-09-11 against a search
+    // result for `h4hy2Gn-FVE`. The first version of this test used an
+    // invented style and passed against a real ordering bug: `consider`
+    // checked the generic style-based LIVE match before the STATION label,
+    // so every real station's `LIVE`-style badge was classified as ordinary
+    // live and never reached the label — `isStation` silently stayed false in
+    // production while this test, built on the wrong assumption, kept passing.
+    const raw = {
+      contents: [
+        {
+          lockupViewModel: {
+            contentId: 'stationstat',
+            contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+            contentImage: {
+              thumbnailViewModel: {
+                image: { sources: [{ url: 'https://i.ytimg.com/vi/x/hq.jpg', width: 360 }] },
+                overlays: [
+                  {
+                    thumbnailOverlayBadgeViewModel: {
+                      thumbnailBadges: [
+                        {
+                          thumbnailBadgeViewModel: {
+                            text: 'STATION',
+                            badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE',
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            metadata: {
+              lockupMetadataViewModel: {
+                title: { content: 'MV STATION' },
+                metadata: {
+                  contentMetadataViewModel: {
+                    metadataRows: [
+                      { metadataParts: [{ text: { content: 'DECO*27' } }] },
+                      { metadataParts: [{ text: { content: '78 watching' } }] },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    const item = parseFeed(raw, 'synthetic').items[0]!;
+    expect(item.kind).toBe('video');
+    // A station is live too — the duration/sort behaviour still applies.
+    expect(item.kind === 'video' && item.isLive).toBe(true);
+    expect(item.kind === 'video' && item.durationSeconds).toBeNull();
+    // …but it is also flagged distinctly, so the UI can draw its own pill.
+    expect(item.kind === 'video' && item.isStation).toBe(true);
+    // STATION drives the flag; it is not also repeated as a display badge —
+    // the same convention as LIVE and Shorts.
     expect(item.kind === 'video' && item.badges).toEqual([]);
   });
 
