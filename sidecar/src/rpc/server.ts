@@ -436,11 +436,15 @@ async function handleRequest(request: RpcRequest) {
       // error — as evidence the wiring was *broken* and restored the wrapper.
       // Dropping the argument, not restoring the wrapper, was the fix.
       const videoId = requireString(params, 'videoId', 'playback.open');
+      // Task 26: recorded on the playback session so `playback.report` can put
+      // `list=` on the watchtime ping. It is deliberately *not* passed to the
+      // resolution ladder — see `OpenParams.playlistId`.
+      const playlistId = optionalString(params, 'playlistId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
       const result = await openPlayback(
         { session },
-        { videoId, preload: params?.preload === true },
+        { videoId, preload: params?.preload === true, playlistId },
       );
       emitResponse(id, result);
     } else if (method === 'video.info') {

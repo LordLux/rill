@@ -96,8 +96,14 @@ async function ping(
 async function trackingUrls(
   deps: ReportDeps,
   videoId: string,
+  playlistId: string | null,
 ): Promise<{ playback: string | null; watchtime: string }> {
-  const response = await getPlayerResponse(deps.browse, videoId, 'WEB');
+  // `playlistId` is what puts `list=` on the watchtime URL — measured
+  // 2026-09-12: the same `/player` call without it carries no such parameter,
+  // so every watch inside a mix was being reported as a standalone watch. A
+  // mix is one of the strongest recommendation signals there is, and F6 is
+  // about exactly this path.
+  const response = await getPlayerResponse(deps.browse, videoId, 'WEB', { playlistId });
   if (!response.videostatsWatchtimeUrl) {
     throw new RpcError(
       'UPSTREAM_ERROR',
@@ -135,7 +141,7 @@ export async function reportPlayback(
   }
 
   const positionSeconds = Math.max(0, params.positionMs / 1000);
-  const urls = await trackingUrls(deps, session.videoId);
+  const urls = await trackingUrls(deps, session.videoId, session.playlistId);
 
   if (!session.playbackPinged && urls.playback) {
     await ping(
