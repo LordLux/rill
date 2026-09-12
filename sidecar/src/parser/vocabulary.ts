@@ -109,6 +109,19 @@ const CONTAINERS = [
   'verticallist',
   'expandedshelfcontents',
   'playlistvideolist',
+  // **Matches nothing today, and is kept deliberately — Task 26, 2026-09-12.**
+  // The watch page's mix/playlist panel is now a *bare object* at
+  // `twoColumnWatchNextResults.playlist.playlist` with no renderer wrapper, so
+  // `playlistPanelRenderer` occurs zero times in a real response — verified for
+  // both a mix (`RD…`) and an ordinary `PL…` playlist. `parser/mix.ts` reaches
+  // the bare object by path instead, which is the actual fix.
+  //
+  // Removing this line is not the neutral tidy-up it looks like. An unknown
+  // container is *pruned*, not descended (`handleRenderer`'s `default` returns
+  // false), so if YouTube ever ships the wrapped form again — and the wrapper
+  // is what every other client library still expects — the whole panel subtree
+  // would be dropped and every mix entry silently lost. One dead line is the
+  // cheaper side of that trade.
   'playlistpanel',
   'brandvideoshelf',
   'watchnextsecondaryresults',

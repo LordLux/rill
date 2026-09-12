@@ -620,6 +620,40 @@ export interface ItemListResult {
 }
 
 // ---------------------------------------------------------------------------
+// Mixes (Task 26)
+// ---------------------------------------------------------------------------
+
+/**
+ * `mix.start` — a mix opened, with the window YouTube leads with.
+ *
+ * **No `continuation`, and that is measured rather than omitted** (2026-09-12):
+ * a mix `/next` response carries no continuation token anywhere. Extension goes
+ * through `mix.extend`, which re-anchors. `mix/service.ts` has the full shape.
+ */
+export interface MixStartResult {
+  playlistId: string;
+  /** "My Mix", "Mix - <video title>", "Chroma: Today's Dance Hits". Null if absent. */
+  title: string | null;
+  items: FeedItem[];
+}
+
+/**
+ * `mix.extend` — the radio's next stretch, or the end of it.
+ *
+ * **`exhausted` is a field rather than an empty `items[]`** because the two
+ * ends a mix can reach are genuinely different upstream behaviours — the
+ * anchor being the last item the server has, versus the server no longer
+ * placing the anchor in this sequence at all and answering with a re-seeded
+ * window. Both mean "stop asking", and a client that had to infer that from
+ * `items.length === 0` could not tell either of them from a transient empty
+ * answer. The sidecar logs which of the two fired.
+ */
+export interface MixExtendResult {
+  items: FeedItem[];
+  exhausted: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Playlists — the save-to-playlist dialog (Task 25 §5)
 // ---------------------------------------------------------------------------
 

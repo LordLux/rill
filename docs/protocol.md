@@ -195,13 +195,69 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
-| `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` |
-| `mix.start` | `{videoId}` | `{playlistId, items[], continuation?}` |
+| `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
+| `mix.start` | `{playlistId, videoId?}` | `{playlistId, title, items[]}` |
+| `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
 | `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
-Mixes are `RD*` radio playlists that auto-extend; fetch the continuation as the
-user nears the end. Same code path as queue autoplay.
+**`playlist.get` is specified and does not exist.** There is no handler for it
+in `rpc/server.ts` — calling it answers `Unknown method`. The row stays because
+the shape is still the intended one, but it is marked so the table cannot be
+read as a list of things that work. Found while implementing Task 26, which hit
+the same thing with `mix.start`.
+
+#### Mixes — Task 26, measured 2026-09-12
+
+**This section used to specify `mix.start {videoId}` →
+`{playlistId, items[], continuation?}`. Every part of that was wrong, and it was
+wrong in the direction that reads as working.** What a live `/next` actually
+does:
+
+- **The playlist id is the parameter.** One video has at least three valid
+  mixes — `RD<id>`, `RDMM<id>`, `RDAMVM<id>` — returning different contents, so
+  a video id cannot name one. `videoId` survives as the optional *seed*.
+- **There is no continuation token.** Not a missing one: zero occurrences of
+  `"continuation"` anywhere in a mix response.
+- **`index` and `playlistIndex` are ignored.** The server resolves position
+  from `videoId` and corrects the caller — asking for the seed at `index: 24`
+  comes back `currentIndex: 0`.
+
+A mix response is a **sliding window centred on the anchor video**: at most 25
+items of history, and exactly 24 of lookahead, every time. So extension is
+re-anchoring rather than paging, and `mix.extend` is where that lives — the
+client says which item it last holds, and the sidecar anchors there, slices the
+tail and returns only what is new. **The window arithmetic never crosses the RPC
+boundary** (hard invariant 6): a client handed a raw window would have to
+reimplement InnerTube's history/lookahead semantics in Dart.
+
+```jsonc
+// mix.start {playlistId: "RD…", videoId?: "…"} — videoId is the seed, not the identity
+{"playlistId": "RDdQw4w9WgXcQ", "title": "My Mix", "items": [ /* FeedItem[] */ ]}
+
+// mix.extend {playlistId, afterVideoId} — afterVideoId is the last item the client holds
+{"items": [ /* FeedItem[] */ ], "exhausted": false}
+```
+
+**`exhausted` is a field rather than an empty `items[]`, because a mix ends two
+different ways** and a client cannot tell them apart from the item count alone:
+the anchor is the last item the server has (how a curated `RDCLAK…` list
+finishes, at ~51 items), or the server no longer places the anchor in this
+sequence and answers with a re-seeded window (an auto radio, after ~169). Both
+mean stop asking; the sidecar logs which fired.
+
+**Nothing branches on `isInfinite`, which every mix sets to `true`** — including
+the curated ones that demonstrably run out.
+
+**Mixes need no auth, but they are heavily personalised.** Anonymous always
+returns a full panel. The same list ids opened anonymously and signed-in at the
+same moment shared 2 items of 25 (`RD`/`RDAMVM`), 1 of 25 (`RDMM`) and 7 of 25
+(`RDEM`) — while a curated `RDCLAK…` was identical both ways. That is why §4 of
+the task forbids caching mix contents, and why nothing here does.
+
+**A plain watch page does not carry its own mix.** `/next {videoId}` with no
+`playlistId` has no panel at all, and the video's own `RD<id>` appears nowhere
+in it. `mix.start` is not redundant for the watch-page entry path.
 
 **`search.query`'s `filters` — decided in Task 20 §3, not chips.** A chip is a
 token the server hands back in a response; a filter (upload date, type,

@@ -503,6 +503,24 @@ async function handleRequest(request: RpcRequest) {
       const { getRelated } = await import('../video/info.ts');
       const result = await getRelated(await videoDeps(), { videoId, continuation });
       emitResponse(id, result);
+    } else if (method === 'mix.start') {
+      // `playlistId`, not `videoId` — §3.3's old signature could not name
+      // which of a video's several mixes was meant. `videoId` is the optional
+      // seed. Task 26.
+      const playlistId = requireString(params, 'playlistId', 'mix.start');
+      const videoId = optionalString(params, 'videoId', 'mix.start');
+      const { startMix } = await import('../mix/service.ts');
+      const result = await startMix({ browse: await getBrowseSession() }, { playlistId, videoId });
+      emitResponse(id, result);
+    } else if (method === 'mix.extend') {
+      const playlistId = requireString(params, 'playlistId', 'mix.extend');
+      const afterVideoId = requireString(params, 'afterVideoId', 'mix.extend');
+      const { extendMix } = await import('../mix/service.ts');
+      const result = await extendMix(
+        { browse: await getBrowseSession() },
+        { playlistId, afterVideoId },
+      );
+      emitResponse(id, result);
     } else if (method === 'action.addToWatchLater') {
       const videoId = requireString(params, 'videoId', 'action.addToWatchLater');
       const { addToWatchLater } = await import('../actions/playlist.ts');
