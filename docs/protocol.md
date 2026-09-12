@@ -502,30 +502,157 @@ is carried across. `/next` stays on the authenticated `WEB` session, because a
 personalised sidebar, the like count and subscription state are what the cookie
 is for.
 
+**`VideoDetail.myRating` — Task 25 §3, `'like' | 'dislike' | 'none'`.** A like
+button needs to know it is already liked before the first render, or the
+first click toggles the wrong way; a closed set rather than two independent
+booleans, because `isLiked`/`isDisliked` both `true` at once is a state
+YouTube cannot produce and the type should not admit it either. Read off
+`/next`'s like/dislike toggle button, which carries the state itself
+(`likeButtonRenderer.likeStatus` on the classic layout, the view-based
+button's own inline `likeStatusEntity.likeStatus` on the newer one) — neither
+resolved through `frameworkUpdates.entityBatchUpdate`, unlike the search
+artist panel's subscribe button (§3.3 above), because this button's own
+subtree already says which way it is toggled. **The view-based path is
+unverified against a live capture** — built from a community reference
+implementation's typed accessor for this renderer, read as documentation of
+the raw shape only (hard invariant 1), not from a fixture in this repo. If
+`myRating` reads wrong on a real account, start there.
+
 ### 3.4 Actions
 
-| Method | Params |
-| --- | --- |
-| `action.addToWatchLater` | `{videoId}` |
-| `action.addToPlaylist` | `{videoId, playlistId}` |
-| `action.like` / `action.dislike` | `{videoId}` |
-| `action.subscribe` | `{channelId}` |
+| Method | Params | Result |
+| --- | --- | --- |
+| `action.addToWatchLater` | `{videoId}` | `{}` |
+| `action.addToPlaylist` | `{videoId, playlistId}` | `{}` |
+| `action.removeFromPlaylist` | `{playlistId, removeToken}` | `{}` |
+| `action.like` / `action.dislike` | `{videoId}` | `{}` |
+| `action.removeRating` | `{videoId}` | `{}` |
+| `action.subscribe` / `action.unsubscribe` | `{channelId}` | `{}` |
 
 All execute against the authenticated `WEB` session.
 
-**The surface is write-only, for now, and three pieces of UI are shaped around that.**
-Nothing here, for now, reads state back, nothing undoes, and nothing enumerates:
+**Task 25 closed the write-only gap this section used to describe.** Before
+this task, nothing here read state back, nothing undid a like or a Watch Later
+save, and there was no way to list a video's playlists — three pieces of UI
+were shaped around admitting that rather than pretending otherwise (a pill
+that means "you saved it just now" rather than "is saved", a latched Watch
+Later pill saying removal is not wired up). `VideoDetail.myRating` (§3.3),
+`action.removeRating`, and `playlist.forVideo` below are what closed each one.
+**Two of the four table rows existed only as calls the Flutter app already
+made** — `action.subscribe` (`ArtistPanelCard`) and `action.like`/`dislike`
+were nowhere in `rpc/server.ts`'s dispatch, so every one of those calls had
+been answering `BAD_REQUEST: Unknown method` in production. `action.subscribe`
+is the sharper version of the same gap `action.addToWatchLater` was in before
+this task ("written and never exercised") — this one was written and could
+never have run at all.
 
-| Missing | What the UI does instead |
-| --- | --- |
-| No way to ask whether a video is *already* in Watch Later | The pill means "you saved it just now", never "is saved" — it starts unlatched on every video, including ones saved last week |
-| No inverse for `action.addToWatchLater` | A latched pill says removing is not wired up rather than quietly re-adding |
-| No `playlist.list` (only `playlist.get`, for a playlist you can already name) | The save dialog ships one real row and placeholders, with a line saying so |
+**`action.like`/`dislike`/`removeRating` do not switch `context.client`.**
+youtubei.js's own `InteractionManager.like`/`dislike`/`removeRating` force the
+request to `client: 'TV'` for that one call; `subscribe`/`unsubscribe` do not.
+Switching client for a single call is the shape the "an action needs a client
+other than WEB" stop condition describes, so it was not replicated without
+evidence it is required.
 
-When these land, all three should be revisited together — they are one gap, and
-each workaround is a lie the UI is currently telling carefully. `videoDetail`
-gaining `inWatchLater` / `playlistIds` would settle the first, an
-`action.removeFromWatchLater` the second, a `playlist.list` the third.
+**And live testing found a 400, but `client` was very likely never the
+cause — measured 2026-09-11.** A first version sent `target` as the bare
+video-id string `InteractionManager.like`/`dislike` build, and that same
+method is the one forcing `client: 'TV'` — so the live HTTP 400 against plain
+`WEB` briefly read as evidence for the client stop condition. It was more
+likely a shape bug: this library's own declared type for the request is
+`LikeRequest { target?: LikeTarget }` with `LikeTarget = { videoId: string }`
+— an object — and the `buildRequest()` method that ships the bare string
+never matches the type declared two files away, which is a stronger sign of
+"written against whatever `client: 'TV'` happens to tolerate" than of "WEB
+needs different treatment." Fixed to `{ target: { videoId } }` in
+`actions/interaction.ts`. **Still not confirmed against a real request** —
+if the object shape still 400s on `WEB`, that reopens the client question for
+real.
+
+**`action.removeFromPlaylist` takes an opaque `removeToken`, not a
+`{videoId, playlistId}` pair symmetric with `addToPlaylist`.** Removing a
+video from a playlist needs a `setVideoId` — the playlist *entry's* id, not
+the video's, because a video can appear in one playlist more than once —
+where adding does not. Recovering a `setVideoId` by browsing the playlist and
+matching (what a community reference implementation's `removeVideos` does) is
+an extra round trip, unbounded on a long playlist, and this task's own scope
+excludes building pagination for it (`docs/tasks/25-actions.md`, "Playlist
+reordering" is out of scope). `playlist.forVideo` below already receives a
+ready-made removal endpoint per playlist row from YouTube's own
+`get_add_to_playlist` service — the same one the real "Save to…" dialog
+removes a checkbox with — so `removeToken` is that payload, round-tripped by
+the client exactly like a feed `continuation` token: opaque, minted by one
+call, replayed verbatim by another, never constructed or read by anything
+outside the sidecar. `playlistId` is required and checked against the token
+rather than trusted from it alone, so a stale token from a previous video's
+dialog cannot edit the wrong playlist silently.
+
+### 3.9 Playlists — the save dialog
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `playlist.forVideo` | `{videoId}` | `{playlists: PlaylistMembership[]}` |
+| `playlist.create` | `{title, privacy?}` | `{playlistId}` |
+| `playlist.delete` | `{playlistId}` | `{}` |
+
+```ts
+type PlaylistPrivacy = 'public' | 'unlisted' | 'private';
+
+interface PlaylistMembership {
+  id: string;
+  title: string;
+  privacy: PlaylistPrivacy | null;   // null when the response carried no recognised value
+  containsVideo: boolean;
+  removeToken: string | null;        // opaque; hand back to action.removeFromPlaylist. Present only when containsVideo
+}
+```
+
+**One call answers both halves the save dialog needs** — Task 25 §5 asked for
+"the user's playlists" and, separately, "which playlists already contain this
+video." `playlist/get_add_to_playlist` is the single InnerTube endpoint
+YouTube's own dialog is backed by, and it answers both at once: splitting them
+into a generic playlist listing plus a per-video membership check would
+invent a round trip that dialog never pays. Watch Later needs no special
+case either (Task 25 §7): it is one row of this same response, at its fixed
+id `'WL'`.
+
+**Not paginated, as a property of the endpoint rather than a choice made
+here.** The request (`{videoIds, playlistId?, params?, excludeWatchLater}`)
+and the response carry no continuation-shaped field in the shape this was
+built against. **Unverified against a live capture in this repo** — read from
+a community reference implementation's typed request/response classes,
+treated as documentation of the raw shape only (hard invariant 1), not from a
+fixture. Confirm against a real account, especially one with many playlists.
+
+**Reading it structurally, not by a fixed container path, for the same
+reason every other parser in this codebase does.** The exact wrapping
+renderer name above `playlistAddToOptionRenderer` was not confirmed against a
+live response either; `playlistsForVideo` scans for that renderer by key
+wherever it sits.
+
+**The Save dialog's checkbox does not wait for `action.addToPlaylist` /
+`action.removeFromPlaylist`, and does not revert on failure — a deliberate
+exception to §4's optimistic-then-revert rule, not an oversight.**
+`ACTION_ADD_VIDEO` and `ACTION_REMOVE_VIDEO` are idempotent server-side (an
+already-added video or an already-removed one both just no-op), so there is
+nothing a client waiting for the answer could still get right that tapping
+alone did not already settle. An earlier version *did* wait — for a
+`playlist.forVideo` refetch meant to confirm the edit took — and that produced
+a worse bug live: the refetch could still answer "not in the playlist" for an
+entry its own preceding write had just created (propagation lag, not a client
+bug), silently un-ticking a save that had, in fact, already landed, and
+driving a real duplicate-add loop as the user retried a checkbox that kept
+looking like it failed. Not waiting removes the failure mode instead of
+timing around it. The UI shows a brief (~150–300 ms) spinner unrelated to the
+real round trip, purely so a tap reads as registered; a failure still reaches
+the user as a snack bar, it just does not roll the checkbox back.
+`playlist.delete` has no UI entry point in the dialog by product decision —
+the method stays for whatever surface picks it up later.
+
+**`playlist.create`'s `privacy` is optional**, and omitting it sends no
+`privacyStatus` at all — untested what YouTube defaults a bare
+`playlist/create` to. **`playlist.delete` asks for no confirmation of its
+own**; that step is the client's job, like any other destructive action in
+this app.
 
 ### 3.5 Playback
 
@@ -615,6 +742,15 @@ responses too (confirmed on four unrelated non-live videos), so without the
 the full story, including the reported symptom, and it is the reason Task
 24's own test list says "assert the VOD case too" rather than only the live
 one.
+
+**`isLiveContent` is a permanent tag, not a current-status signal.** Confirmed
+live 2026-09-11 on a VOD that ended a year prior: `isLiveContent` stays `true`
+forever, while `isLive` becomes absent and `liveBroadcastDetails.isLiveNow`
+becomes `false`. OR-ing `isLiveContent` into an `isLive` check breaks VODs
+because it nulls the duration, causing the player to treat an ordinary VOD
+as a live stream computing its "live edge" from a year-old `startTimestamp`
+and refusing to seek backward. The authoritative signal is `liveBroadcastDetails.isLiveNow`,
+with `isLive` as the fallback for clients that carry no microformat.
 
 **`playback.report` is load-bearing.** Watch events must land or the recommender
 stops training and the homepage drifts from the real one — which defeats the

@@ -255,7 +255,33 @@ export interface VideoDetail {
   isLive: boolean;
   viewCountText: string | null;
   publishedText: string | null;
+  /**
+   * The exact upload date ("Dec 6, 2009"), for a tooltip on {@link
+   * publishedText}'s relative one ("14 years ago") — YouTube ships both as
+   * siblings on the same renderer, not as alternatives; `publishedText`
+   * already prefers the relative one when present, and this is the exact one
+   * regardless of which way that preference went. Null when the layout
+   * carries no exact date at all.
+   */
+  publishedDateText: string | null;
   likeText: string | null;
+  /**
+   * Task 25 §3: a like button needs to know it is already liked before the
+   * first render, or the first click toggles the wrong way. A closed set
+   * rather than two independent booleans — `isLiked`/`isDisliked` can both be
+   * `true` at once with nothing to stop it, a state YouTube itself cannot
+   * produce, so the type should not admit it either.
+   *
+   * Read from `likeButtonRenderer.likeStatus` (classic) or the view-based
+   * button's own inline `likeStatusEntity.likeStatus` — `parser/video.ts` has
+   * both. **The view-based path is unverified against a live capture**: it is
+   * built from a community library's typed accessor for this exact renderer
+   * (`LikeButtonView`, read as documentation only — hard invariant 1), not
+   * from a fixture in this repo. If it turns out wrong, the failure is silent
+   * — `'none'` looks identical to "really not rated" — so this is the first
+   * thing to check against a real watch page.
+   */
+  myRating: 'like' | 'dislike' | 'none';
   isSubscribed: boolean;
   /** The uploading channel's verified checkmark. Same badge as {@link VideoItem.isVerified}. */
   isVerified: boolean;
@@ -591,6 +617,37 @@ export interface PlayerResult {
 export interface ItemListResult {
   items: FeedItem[];
   continuation: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Playlists — the save-to-playlist dialog (Task 25 §5)
+// ---------------------------------------------------------------------------
+
+/** A closed set rather than the raw `PUBLIC`/`UNLISTED`/`PRIVATE` InnerTube sends — the DTO rule the rest of this file holds to. */
+export type PlaylistPrivacy = 'public' | 'unlisted' | 'private';
+
+/**
+ * One row of `playlist.forVideo`'s answer: one of the user's playlists (Watch
+ * Later included, at its fixed id `'WL'`), and whether the video asked about
+ * is already in it.
+ */
+export interface PlaylistMembership {
+  id: string;
+  title: string;
+  /** `null` when the response carried no recognised privacy value — never guessed. */
+  privacy: PlaylistPrivacy | null;
+  containsVideo: boolean;
+  /**
+   * Hand this back verbatim to `action.removeFromPlaylist` to un-check this
+   * row. Opaque — nothing outside the sidecar parses it, the same rule a feed
+   * `continuation` token already follows. Present only when
+   * {@link containsVideo} is true; there is nothing to remove otherwise.
+   */
+  removeToken: string | null;
+}
+
+export interface PlaylistMembershipResult {
+  playlists: PlaylistMembership[];
 }
 
 // ---------------------------------------------------------------------------

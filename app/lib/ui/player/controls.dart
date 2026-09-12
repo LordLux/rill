@@ -6,10 +6,19 @@
 /// mode change moves the controls and leaves the texture alone.
 ///
 /// **Two constraints shape the whole file.** Everything read comes off
-/// `player.stream.*`, never `getProperty` (hard invariant 9). And nothing here
-/// may use a tooltip, a `PopupMenuButton` or any other route — at the fullscreen
-/// mount point this is above the `Navigator`, with no `Overlay` to host one, so
-/// the quality menu is a panel in this `Stack` rather than a popup.
+/// `player.stream.*`, never `getProperty` (hard invariant 9). And the quality
+/// menu is a panel in this `Stack` rather than a `PopupMenuButton` — that one
+/// still needs a route this `Stack` cannot give it.
+///
+/// **A `tooltip:`/`Tooltip` is fine here now, and was not always.** This file
+/// used to say neither mount point had an `Overlay` to host one, and at the
+/// fullscreen mount point — above the `Navigator` — that was true once. It
+/// stopped being true when `_FullscreenPlayer` (`player_shell.dart`) was given
+/// its own local `Overlay`, added because Material's `Slider` renders its
+/// value indicator through an `OverlayPortal` and needed one regardless
+/// (`architecture.md` §2.8). That fix never made it back to this comment,
+/// which kept telling the next person to route around a constraint that no
+/// longer existed.
 library;
 
 import 'dart:async';
@@ -28,6 +37,8 @@ import '../captions_controller.dart';
 import '../playback_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
+import '../widgets/shortcut_tooltip.dart';
+import 'shortcuts.dart' show PlayerAction;
 import 'settings_menu.dart';
 import 'shortcuts.dart' show volumeStep;
 import 'view_mode.dart';
@@ -426,6 +437,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                       icon: ref.watch(captionsProvider.select((c) => c.isOn))
                                           ? Icons.closed_caption
                                           : Icons.closed_caption_outlined,
+                                      label: 'Captions',
+                                      action: PlayerAction.captions,
                                       busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
                                       open: ref.watch(
                                         playerMenuProvider.select(
@@ -444,6 +457,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                   _MenuButton(
                                     key: playerQualityButtonKey,
                                     icon: Icons.hd_outlined,
+                                    label: 'Quality',
                                     busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
                                     open: ref.watch(
                                       playerMenuProvider.select(
@@ -461,6 +475,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                   _MenuButton(
                                     key: playerSettingsButtonKey,
                                     icon: Icons.settings,
+                                    label: 'Settings',
                                     open: ref.watch(
                                       playerMenuProvider.select(
                                         (menu) => menu.open && _isGearPage(menu.page),
@@ -578,6 +593,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                           iconKey: playerPlayPauseKey,
                           icon: playing ? Icons.pause : Icons.play_arrow,
                           label: playing ? 'Pause' : 'Play',
+                          action: PlayerAction.playPause,
                           onPressed: () {
                             _wake();
                             unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
@@ -592,6 +608,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         iconKey: playerPreviousKey,
                         icon: Icons.skip_previous,
                         label: 'Previous video',
+                        action: PlayerAction.previous,
                         onPressed: () {
                           _wake();
                           ref.read(playbackProvider.notifier).previous();
@@ -604,6 +621,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         iconKey: playerNextKey,
                         icon: Icons.skip_next,
                         label: 'Next video',
+                        action: PlayerAction.next,
                         onPressed: () {
                           _wake();
                           ref.read(playbackProvider.notifier).next();
@@ -650,6 +668,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                           icon: captions.isOn
                               ? Icons.closed_caption
                               : Icons.closed_caption_outlined,
+                          label: 'Captions',
+                          action: PlayerAction.captions,
                           busy: captions.isLoadingTrack,
                           open: ref.watch(
                             playerMenuProvider.select(
@@ -673,6 +693,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       _MenuButton(
                         key: playerQualityButtonKey,
                         icon: Icons.hd_outlined,
+                        label: 'Quality',
                         busy: playback.isSwitchingQuality,
                         open: ref.watch(
                           playerMenuProvider.select(
@@ -689,6 +710,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       _MenuButton(
                         key: playerSettingsButtonKey,
                         icon: Icons.settings,
+                        label: 'Settings',
                         // The two pages that are *not* the gear's, named rather
                         // than `!= quality`: adding the captions page to that
                         // test would have lit the gear up whenever the caption
@@ -707,6 +729,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       iconKey: playerMiniPlayerKey,
                       icon: Icons.branding_watermark_outlined,
                       label: 'Miniplayer',
+                      action: PlayerAction.miniPlayer,
                       onPressed: () {
                         _wake();
                         toMiniPlayer(ref);
@@ -725,6 +748,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       iconKey: playerTheatreKey,
                       icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
                       label: view.theatre ? 'Default view' : 'Theatre mode',
+                      action: PlayerAction.theatre,
                       onPressed: () {
                         _wake();
                         ref.read(playerViewProvider.notifier).toggleTheatre();
@@ -736,6 +760,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       iconKey: playerFullscreenKey,
                       icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
                       label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                      action: PlayerAction.fullscreen,
                       onPressed: () {
                         _wake();
                         ref.read(playerViewProvider.notifier).toggleFullscreen();
@@ -771,6 +796,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                 iconKey: playerPlayPauseKey,
                 icon: playing ? Icons.pause : Icons.play_arrow,
                 label: playing ? 'Pause' : 'Play',
+                action: PlayerAction.playPause,
                 onPressed: () {
                   _wake();
                   unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
@@ -783,6 +809,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               iconKey: playerPreviousKey,
               icon: Icons.skip_previous,
               label: 'Previous video',
+              action: PlayerAction.previous,
               onPressed: () {
                 _wake();
                 ref.read(playbackProvider.notifier).previous();
@@ -793,6 +820,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               iconKey: playerNextKey,
               icon: Icons.skip_next,
               label: 'Next video',
+              action: PlayerAction.next,
               onPressed: () {
                 _wake();
                 ref.read(playbackProvider.notifier).next();
@@ -831,6 +859,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             iconKey: playerFullscreenKey,
             icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
             label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            action: PlayerAction.fullscreen,
             onPressed: () {
               _wake();
               ref.read(playerViewProvider.notifier).toggleFullscreen();
@@ -860,26 +889,37 @@ extension on Widget {
 }
 
 class _ControlIcon extends StatelessWidget {
-  const _ControlIcon({required this.iconKey, required this.icon, required this.label, required this.onPressed});
+  const _ControlIcon({
+    required this.iconKey,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.action,
+  });
 
   final Key iconKey;
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
 
+  /// Which keyboard shortcut does the same thing, if any — drives the
+  /// tooltip's badge. See `ShortcutTooltip`.
+  final PlayerAction? action;
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    return IconButton(
-      key: iconKey,
-      // No `tooltip:`. At the fullscreen mount point this is above the
-      // `Navigator`, and a tooltip there throws "No Overlay widget found" —
-      // in front of the user, the first time the controls are drawn.
-      mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      icon: Icon(icon, semanticLabel: label),
-      color: tokens.onScrim,
-      disabledColor: tokens.onScrim.withValues(alpha: 0.35),
-      onPressed: onPressed,
+    return ShortcutTooltip(
+      label: label,
+      action: action,
+      child: IconButton(
+        key: iconKey,
+        mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+        icon: Icon(icon, semanticLabel: label),
+        color: tokens.onScrim,
+        disabledColor: tokens.onScrim.withValues(alpha: 0.35),
+        onPressed: onPressed,
+      ),
     );
   }
 }
@@ -1148,6 +1188,7 @@ class _Scrubber extends StatelessWidget {
                 trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
                 padding: pad / 1.5,
               ),
               child: Slider(
@@ -1305,38 +1346,48 @@ class _VolumeState extends ConsumerState<_Volume> {
           // to the other never leaves it.
           onEnter: (_) => _enter(),
           onExit: (_) => _exit(),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Stack(
+            fit: StackFit.loose,
             children: [
               _ControlIcon(
                 iconKey: playerMuteKey,
                 icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
                 label: volume == 0 ? 'Unmute' : 'Mute',
+                action: PlayerAction.mute,
                 onPressed: () {
                   widget.onChanged();
                   unawaited(ref.read(playbackProvider.notifier).toggleMute());
                 },
               ),
               ClipRect(
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 140),
-                  curve: Curves.easeOut,
-                  child: SizedBox(
-                    key: playerVolumeSliderKey,
-                    width: open ? 120 : 0,
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                      ),
-                      child: Slider(
-                        value: volume,
-                        max: 100,
-                        onChanged: (next) {
-                          widget.onChanged();
-                          unawaited(ref.read(playbackProvider.notifier).setVolume(next));
-                        },
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 42),
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOut,
+                    child: SizedBox(
+                      key: playerVolumeSliderKey,
+                      width: open ? 120 : 0,
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6, pressedElevation: 5),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                          thumbSize: const WidgetStatePropertyAll<Size?>(Size(2, 6)),
+                          inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                        ),
+                        child: ShortcutTooltip(
+                          label: 'Volume: ${volume.round()}%',
+                          child: Slider(
+                            value: volume,
+                            max: 100,
+                            onChanged: (next) {
+                              widget.onChanged();
+                              unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                            },
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1419,13 +1470,16 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
                             overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                           ),
-                          child: Slider(
-                            value: volume,
-                            max: 100,
-                            onChanged: (next) {
-                              widget.onChanged();
-                              unawaited(ref.read(playbackProvider.notifier).setVolume(next));
-                            },
+                          child: ShortcutTooltip(
+                            label: 'Volume: ${volume.round()}%',
+                            child: Slider(
+                              value: volume,
+                              max: 100,
+                              onChanged: (next) {
+                                widget.onChanged();
+                                unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                              },
+                            ),
                           ),
                         ),
                       ),
@@ -1437,6 +1491,7 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
                 iconKey: playerMuteKey,
                 icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
                 label: volume == 0 ? 'Unmute' : 'Mute',
+                action: PlayerAction.mute,
                 onPressed: () {
                   widget.onChanged();
                   unawaited(ref.read(playbackProvider.notifier).toggleMute());
@@ -1463,12 +1518,19 @@ class _MenuButton extends StatelessWidget {
   const _MenuButton({
     super.key,
     required this.icon,
+    required this.label,
     required this.open,
     required this.onPressed,
     this.busy = false,
+    this.action,
   });
 
   final IconData icon;
+
+  /// Tooltip text, and — new — the icon's `semanticLabel` too: captions,
+  /// quality and settings had no accessible text at all before this, visual
+  /// or otherwise.
+  final String label;
   final bool open;
 
   /// Null draws it disabled — the quality button with an empty ladder.
@@ -1476,26 +1538,34 @@ class _MenuButton extends StatelessWidget {
 
   final bool busy;
 
+  /// Which keyboard shortcut does the same thing, if any. Captions is the
+  /// only one of the three with one today; quality and settings have none.
+  final PlayerAction? action;
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).tokens;
 
-    return IconButton(
-      onPressed: onPressed,
-      mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      iconSize: 20,
-      style: IconButton.styleFrom(
-        foregroundColor: tokens.onScrim,
-        disabledForegroundColor: tokens.onScrim.withValues(alpha: 0.35),
-        backgroundColor: open ? tokens.onScrim.withValues(alpha: 0.15) : Colors.transparent,
+    return ShortcutTooltip(
+      label: label,
+      action: action,
+      child: IconButton(
+        onPressed: onPressed,
+        mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+        iconSize: 20,
+        style: IconButton.styleFrom(
+          foregroundColor: tokens.onScrim,
+          disabledForegroundColor: tokens.onScrim.withValues(alpha: 0.35),
+          backgroundColor: open ? tokens.onScrim.withValues(alpha: 0.15) : Colors.transparent,
+        ),
+        icon: busy
+            ? SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: tokens.onScrim),
+              )
+            : Icon(icon, semanticLabel: label),
       ),
-      icon: busy
-          ? SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2, color: tokens.onScrim),
-            )
-          : Icon(icon),
     );
   }
 }

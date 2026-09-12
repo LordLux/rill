@@ -1234,6 +1234,67 @@ describe.if(HAS_CAPTURES)('parsePlayer', () => {
     expect(progressive.length).toBeGreaterThan(0);
     expect(progressive.some((format) => format.itag === 18)).toBe(true);
   });
+
+  test('isLiveContent alone does not mean live — a finished broadcast keeps its duration', () => {
+    // MUTATION: OR `isLiveContent === true` back into `isLive` and this fails.
+    // Confirmed live 2026-09-11 on `0QnMv0bRyk0` (NTO — a "Live Session" that
+    // ended June 2024): every client's `videoDetails.isLiveContent` is still
+    // `true` a year and a half later — it is a permanent "this is/was live-form
+    // content" tag, not a current-status flag — while `videoDetails.isLive` is
+    // correctly absent and `liveBroadcastDetails.isLiveNow` is explicitly
+    // `false`. Treating `isLiveContent` as sufficient nulled `durationSeconds`
+    // for an ordinary 2442-second VOD, and downstream that null `durationMs`
+    // plus the still-present `startTimestamp` (a real historical fact — the
+    // broadcast really did start in June 2024) is exactly what the Flutter
+    // live-scrubber gates on: a finished video computed a "live edge" from a
+    // year-and-a-half-old start time and refused to seek backward.
+    const raw = {
+      videoDetails: {
+        videoId: 'aqz-KE-bpKQ',
+        lengthSeconds: '2442',
+        isLiveContent: true,
+        // isLive deliberately absent — that is the real shape.
+      },
+      playabilityStatus: { status: 'OK' },
+      microformat: {
+        playerMicroformatRenderer: {
+          liveBroadcastDetails: {
+            isLiveNow: false,
+            startTimestamp: '2024-06-13T21:55:36+00:00',
+            endTimestamp: '2024-06-13T22:44:48+00:00',
+          },
+        },
+      },
+      streamingData: { adaptiveFormats: [], formats: [] },
+    };
+
+    const result = parsePlayer(raw);
+    expect(result.isLive).toBe(false);
+    expect(result.durationSeconds).toBe(2442);
+    // The start time is a historical fact and still ships — it is `isLive`
+    // being wrong, not `startTimestamp` being present, that broke playback.
+    expect(result.startTimestamp).toBe('2024-06-13T21:55:36+00:00');
+  });
+
+  test('liveBroadcastDetails.isLiveNow: true is still recognised as live', () => {
+    const raw = {
+      videoDetails: { videoId: 'aqz-KE-bpKQ', lengthSeconds: '0', isLiveContent: true },
+      playabilityStatus: { status: 'OK' },
+      microformat: {
+        playerMicroformatRenderer: {
+          liveBroadcastDetails: {
+            isLiveNow: true,
+            startTimestamp: '2026-09-11T12:00:00+00:00',
+          },
+        },
+      },
+      streamingData: { adaptiveFormats: [], formats: [] },
+    };
+
+    const result = parsePlayer(raw);
+    expect(result.isLive).toBe(true);
+    expect(result.durationSeconds).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

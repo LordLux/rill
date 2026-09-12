@@ -180,7 +180,27 @@ export function parsePlayer(raw: Json): PlayerResult {
   const details = get(body, 'videoDetails');
 
   const lengthSeconds = num(get(details, 'lengthSeconds'));
-  const isLive = get(details, 'isLive') === true || get(details, 'isLiveContent') === true;
+
+  // **`isLiveContent` is a permanent tag, not a current-status signal, and
+  // must never be OR'd into "is live now."** Confirmed live 2026-09-11 on
+  // `0QnMv0bRyk0` (NTO — a "Live Session" recording that ended in June 2024):
+  // `videoDetails.isLiveContent` is still `true` on every client — VISIONOS,
+  // MWEB and WEB alike — a year and a half after the broadcast finished,
+  // while `videoDetails.isLive` is correctly `undefined` and MWEB/WEB's
+  // `microformat…liveBroadcastDetails` explicitly says `isLiveNow: false`
+  // (with `startTimestamp` from June 2024 still present, because that is a
+  // historical fact, not a liveness flag). Treating `isLiveContent` as
+  // sufficient for "is live" set `durationSeconds` (and downstream,
+  // `PlaybackSource.durationMs`) to `null` for a perfectly ordinary
+  // 2442-second VOD, which is what the Flutter live-scrubber gates on — the
+  // reported symptom was a finished video computing its "live edge" from a
+  // startTimestamp over a year old (a ~19680-hour clock) and refusing to seek
+  // backward. `liveBroadcastDetails.isLiveNow` is the authoritative signal
+  // where present; `videoDetails.isLive` covers `VISIONOS`, which carries no
+  // `microformat` at all.
+  const isLive =
+    get(details, 'isLive') === true ||
+    get(body, 'microformat', 'playerMicroformatRenderer', 'liveBroadcastDetails', 'isLiveNow') === true;
 
   // A premiere or scheduled stream. `isUpcoming` is the flag YouTube sets, and
   // `LIVE_STREAM_OFFLINE` is the status the ladder sees for the same video — both

@@ -325,7 +325,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (variant == null) {
         // An empty ladder is the same dead end as `STREAM_UNAVAILABLE` and gets
         // the same affordance: the user may try again.
-        _fail('No playable stream for this video.', RpcRetryMode.user);
+        await _failOpen('No playable stream for this video.', RpcRetryMode.user);
         return;
       }
 
@@ -347,12 +347,12 @@ class PlaybackController extends Notifier<PlaybackState> {
       _reportTimer = Timer.periodic(reportInterval, (_) => unawaited(_report(null)));
     } on RpcException catch (e) {
       if (generation != _generation || _disposed) return;
-      _fail(e.message, e.retry, code: e.code);
+      await _failOpen(e.message, e.retry, code: e.code);
     } catch (e) {
       if (generation != _generation || _disposed) return;
       // Not an envelope — a bug on this side. `user` is the honest reading:
       // nothing will fix itself, but letting the user try again costs nothing.
-      _fail(e.toString(), RpcRetryMode.user);
+      await _failOpen(e.toString(), RpcRetryMode.user);
     }
   }
 
@@ -366,6 +366,35 @@ class PlaybackController extends Notifier<PlaybackState> {
       errorCode: code,
       errorRetry: retry,
     );
+  }
+
+  /// `_fail`, plus actually stopping the video — for `open()` only.
+  ///
+  /// A premiere, a members-only slate, a dead ladder or any other `open()`
+  /// failure all mean the same thing: this navigation produced no video to
+  /// show. Until this fix, none of them told `_engine` that — `_engine.open`
+  /// is only ever called on the *success* path, so a failed `open()` left
+  /// whatever was already loaded (the previous video) playing silently under
+  /// the slate or the error screen. Reported live: click a video, then a
+  /// premiere from the sidebar, and the first video kept playing underneath
+  /// the "Premieres in…" card.
+  ///
+  /// **Not folded into `_fail` itself** — `switchQuality`'s own failure path
+  /// shares that helper, and there the previous stream is already gone by the
+  /// time it fails (`engine.open` has already replaced the source before
+  /// erroring out), so stopping again would be redundant at best and a
+  /// regression at worst if that ever changes to keep the old stream alive on
+  /// a failed switch.
+  ///
+  /// If the user has already navigated again by the time this runs, the
+  /// caller's own generation check has already returned before reaching
+  /// here, so nothing has to be re-checked — `_engine.stop()` racing a newer
+  /// `_engine.open()` is left to media_kit's own command ordering, the same
+  /// trust every other overlapping engine call in this file already extends.
+  Future<void> _failOpen(String message, RpcRetryMode retry, {String? code}) async {
+    _fail(message, retry, code: code);
+    if (_disposed) return;
+    await _engine.stop();
   }
 
   /// The user answering a `retry: "user"` error (§4).

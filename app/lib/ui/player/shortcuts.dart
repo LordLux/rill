@@ -32,6 +32,35 @@ enum PlayerAction {
   captions,
 }
 
+/// The visible label for an action's current keybinding — a tooltip's own
+/// "M" badge reads straight from here rather than carrying its own copy of
+/// the letter.
+///
+/// **This is the one thing a future rebind feature should have to change.**
+/// Hand-kept in sync with [resolvePlayerShortcut] rather than derived from
+/// it — that function is an if-chain matching on modifier combinations
+/// (`Shift+P`) that `LogicalKeyboardKey` has no single-glyph label for, and a
+/// derivation clever enough to produce these strings automatically would be
+/// more code, and less legible, than the dozen entries below. When shortcuts
+/// become user-configurable, this becomes a lookup into whatever holds the
+/// user's bindings instead of a `const` — every tooltip that reads it today
+/// needs no change at all.
+///
+/// Omitted rather than guessed for anything with no single clean label: the
+/// two-speed seeks (arrows vs. `,`/`.`, plain vs. Shift), volume up/down (no
+/// discrete button shows them today), and `escape`/`seekToDecile` (neither is
+/// a button).
+const Map<PlayerAction, String> playerActionKeyLabel = {
+  PlayerAction.playPause: 'Space',
+  PlayerAction.mute: 'M',
+  PlayerAction.fullscreen: 'F',
+  PlayerAction.theatre: 'T',
+  PlayerAction.miniPlayer: 'I',
+  PlayerAction.captions: 'C',
+  PlayerAction.previous: 'Shift+P',
+  PlayerAction.next: 'Shift+N',
+};
+
 /// One resolved key press. [seconds] carries ∓5 or ∓10; [decile] carries 0–9.
 @immutable
 class PlayerShortcut {

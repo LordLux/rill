@@ -91,6 +91,7 @@ void main() {
           title: 't',
           channelName: 'c',
           isLive: false,
+          myRating: VideoRating.none,
           isSubscribed: false,
           isMembersOnly: membersOnly,
         );

@@ -743,6 +743,7 @@ describe('fetchWithVisitorRetry', () => {
 const SOURCE_SHAPE = {
   sessionId: 'string',
   durationMs: 'number?',
+  startTimestamp: 'string?',
   storyboardTemplate: 'string?',
   qualityDegraded: 'boolean',
   transport: 'string',

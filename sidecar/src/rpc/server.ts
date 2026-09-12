@@ -6,7 +6,7 @@ import { logger } from '../log.ts';
 import { redact } from '../redact.ts';
 import { announceCapabilities } from '../capabilities.ts';
 import { PLAYBACK_REPORT_STATES } from '../types.ts';
-import type { CaptionOffset, CaptionStyle } from '../types.ts';
+import type { CaptionOffset, CaptionStyle, PlaylistPrivacy } from '../types.ts';
 import type { RgbaColor } from '../captions/cues.ts';
 import type { SearchFilters } from '../parser/search-filters.ts';
 
@@ -510,6 +510,53 @@ async function handleRequest(request: RpcRequest) {
       const { addToPlaylist } = await import('../actions/playlist.ts');
       const result = await addToPlaylist(await getBrowseSession(), videoId, playlistId);
       emitResponse(id, result);
+    } else if (method === 'action.removeFromPlaylist') {
+      const playlistId = requireString(params, 'playlistId', 'action.removeFromPlaylist');
+      const removeToken = requireString(params, 'removeToken', 'action.removeFromPlaylist');
+      const { removeFromPlaylist } = await import('../actions/playlist.ts');
+      const result = await removeFromPlaylist(await getBrowseSession(), playlistId, removeToken);
+      emitResponse(id, result);
+    } else if (method === 'playlist.forVideo') {
+      const videoId = requireString(params, 'videoId', 'playlist.forVideo');
+      const { playlistsForVideo } = await import('../actions/playlist.ts');
+      const result = await playlistsForVideo(await getBrowseSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'playlist.create') {
+      const title = requireString(params, 'title', 'playlist.create');
+      const privacy = playlistPrivacyParam(params);
+      const { createPlaylist } = await import('../actions/playlist.ts');
+      const result = await createPlaylist(await getBrowseSession(), title, privacy);
+      emitResponse(id, result);
+    } else if (method === 'playlist.delete') {
+      const playlistId = requireString(params, 'playlistId', 'playlist.delete');
+      const { deletePlaylist } = await import('../actions/playlist.ts');
+      const result = await deletePlaylist(await getBrowseSession(), playlistId);
+      emitResponse(id, result);
+    } else if (method === 'action.like') {
+      const videoId = requireString(params, 'videoId', 'action.like');
+      const { like } = await import('../actions/interaction.ts');
+      const result = await like(await getBrowseSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'action.dislike') {
+      const videoId = requireString(params, 'videoId', 'action.dislike');
+      const { dislike } = await import('../actions/interaction.ts');
+      const result = await dislike(await getBrowseSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'action.removeRating') {
+      const videoId = requireString(params, 'videoId', 'action.removeRating');
+      const { removeRating } = await import('../actions/interaction.ts');
+      const result = await removeRating(await getBrowseSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'action.subscribe') {
+      const channelId = requireString(params, 'channelId', 'action.subscribe');
+      const { subscribe } = await import('../actions/interaction.ts');
+      const result = await subscribe(await getBrowseSession(), channelId);
+      emitResponse(id, result);
+    } else if (method === 'action.unsubscribe') {
+      const channelId = requireString(params, 'channelId', 'action.unsubscribe');
+      const { unsubscribe } = await import('../actions/interaction.ts');
+      const result = await unsubscribe(await getBrowseSession(), channelId);
+      emitResponse(id, result);
     } else if (method === 'playback.report') {
       // Validated before the import, like `playback.open`: a malformed report is
       // a client bug, and answering it with anything `auto` would have the app
@@ -681,6 +728,21 @@ function searchFiltersParam(
     duration: enumOrUndefined('duration', ['short', 'medium', 'long'] as const),
     sortBy: enumOrUndefined('sortBy', ['viewCount'] as const),
   };
+}
+
+/** `playlist.create`'s optional `privacy` — one of the closed set, or `BAD_REQUEST` naming it. */
+function playlistPrivacyParam(
+  params: Record<string, unknown> | undefined,
+): PlaylistPrivacy | null {
+  const raw = params?.['privacy'];
+  if (raw === undefined || raw === null) return null;
+  if (raw !== 'public' && raw !== 'unlisted' && raw !== 'private') {
+    throw new RpcError(
+      'BAD_REQUEST',
+      "playlist.create: 'privacy' must be one of public, unlisted, private",
+    );
+  }
+  return raw;
 }
 
 function captionOffsetParam(
