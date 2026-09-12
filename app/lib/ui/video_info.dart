@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
+import '../domain/playlist_membership.dart';
 import '../domain/video_detail.dart';
 
 /// `video.info` for one video (`protocol.md` §3.3).
@@ -41,3 +42,28 @@ Future<({List<FeedItem> items, String? continuation})> fetchRelated(
 
   return (items: items, continuation: response['continuation'] as String?);
 }
+
+/// `playlist.forVideo` for one video (`protocol.md` §3.9) — the Watch Later
+/// pill's and the Save dialog's shared source of truth for "is this video
+/// already saved," per video.
+///
+/// Fetched concurrently with [videoInfoProvider] rather than folded into it,
+/// the same reason `captions.list` runs alongside rather than inside the
+/// watch page's open path (§3.8): `/next` carries no playlist membership at
+/// all, so this is a genuinely separate call, and the watch page needs both
+/// without either waiting on the other. Not `autoDispose`, to match
+/// [videoInfoProvider] — a mini-player round trip should not re-fetch this
+/// either.
+///
+/// On an anonymous session this resolves to an `AUTH_REQUIRED` error, which
+/// callers should read as "membership unknown" rather than surface as a
+/// watch-page error — most viewers are anonymous, and a save pill has no
+/// business demanding a sign-in nobody asked for yet.
+final playlistMembershipProvider =
+    FutureProvider.family<List<PlaylistMembership>, String>((ref, videoId) async {
+  final response = await RpcClient.instance.call('playlist.forVideo', {'videoId': videoId})
+      as Map<String, dynamic>;
+  return (response['playlists'] as List<dynamic>? ?? [])
+      .map((p) => PlaylistMembership.fromJson(p as Map<String, dynamic>))
+      .toList();
+});

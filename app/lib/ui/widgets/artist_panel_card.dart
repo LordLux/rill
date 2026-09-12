@@ -29,10 +29,11 @@ import 'subscribe_button.dart';
 /// "View Channel" and "Mix" are still inert: this app has no channel page and
 /// no `mix.start` RPC wired yet (both pre-existing gaps), so they fall back to
 /// the same "Not implemented" snackbar `search_results.dart`'s own filter
-/// pills use. **Subscribe** is real — `action.subscribe`, via
-/// [SubscribeButton]'s `onSubscribe` hook — and remains the one call site
-/// where that button's dropdown is a stub, because `protocol.md` has no
-/// `action.unsubscribe` or notification-preference endpoint at all yet.
+/// pills use. **Subscribe and unsubscribe are both real** (Task 25) —
+/// `action.subscribe`/`action.unsubscribe`, via [SubscribeButton]'s
+/// `onSubscribe`/`onUnsubscribe` hooks. The dropdown's notification-level
+/// picker is still a local-only stub: `protocol.md` has no notification-
+/// preference endpoint.
 class ArtistPanelCard extends ConsumerStatefulWidget {
   const ArtistPanelCard({super.key, required this.artist});
 
@@ -59,6 +60,22 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
     } on RpcException catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to subscribe' : e.message)),
+      );
+      return false;
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return false;
+    }
+  }
+
+  Future<bool> _unsubscribe(String channelId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await RpcClient.instance.call('action.unsubscribe', {'channelId': channelId});
+      return true;
+    } on RpcException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to unsubscribe' : e.message)),
       );
       return false;
     } on Object catch (e) {
@@ -121,6 +138,7 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
                       artist: artist,
                       tint: tint,
                       onSubscribe: _subscribe,
+                      onUnsubscribe: _unsubscribe,
                       onNotImplemented: _notImplemented,
                     ),
                   ),
@@ -331,12 +349,14 @@ class _Header extends StatelessWidget {
     required this.artist,
     required this.tint,
     required this.onSubscribe,
+    required this.onUnsubscribe,
     required this.onNotImplemented,
   });
 
   final ArtistPanel artist;
   final ArtistPanelTint tint;
   final Future<bool> Function(String channelId) onSubscribe;
+  final Future<bool> Function(String channelId) onUnsubscribe;
   final VoidCallback onNotImplemented;
 
   @override
@@ -412,6 +432,7 @@ class _Header extends StatelessWidget {
               channelId: artist.channelId,
               initiallySubscribed: artist.isSubscribed,
               onSubscribe: onSubscribe,
+              onUnsubscribe: onUnsubscribe,
               // The pill's own defaults are the app's surface roles, which
               // are invisible against an arbitrary artist tint.
               foreground: tint.onSurface,

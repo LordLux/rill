@@ -29,6 +29,8 @@ import '../widgets/tile_badges.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
+import '../widgets/save_dialog.dart';
+import '../widgets/shortcut_tooltip.dart';
 import '../widgets/subscribe_button.dart';
 import 'watch_layout.dart';
 import '../../theme/screen_values.dart';
@@ -795,6 +797,8 @@ class _Meta extends ConsumerWidget {
                     channelId: detail?.channelId ?? item.channelId,
                     initiallySubscribed: detail?.isSubscribed ?? false,
                     minHeight: 45,
+                    onSubscribe: (channelId) => _subscribeChannel(context, channelId),
+                    onUnsubscribe: (channelId) => _unsubscribeChannel(context, channelId),
                   ),
                 ],
               ),
@@ -809,6 +813,43 @@ class _Meta extends ConsumerWidget {
           ),
       ],
     );
+  }
+}
+
+/// [SubscribeButton.onSubscribe] for the watch page's channel row — the same
+/// pattern `ArtistPanelCard._subscribe` uses, duplicated rather than shared
+/// because the two live in different widgets with different `context`s and a
+/// shared helper would need to take both as parameters anyway.
+Future<bool> _subscribeChannel(BuildContext context, String channelId) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await RpcClient.instance.call('action.subscribe', {'channelId': channelId});
+    return true;
+  } on RpcException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to subscribe' : e.message)),
+    );
+    return false;
+  } on Object catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    return false;
+  }
+}
+
+/// [SubscribeButton.onUnsubscribe] for the watch page's channel row.
+Future<bool> _unsubscribeChannel(BuildContext context, String channelId) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await RpcClient.instance.call('action.unsubscribe', {'channelId': channelId});
+    return true;
+  } on RpcException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to unsubscribe' : e.message)),
+    );
+    return false;
+  } on Object catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    return false;
   }
 }
 
@@ -867,21 +908,26 @@ class _Actions extends ConsumerStatefulWidget {
 class _ActionsState extends ConsumerState<_Actions> {
   _OpenSheet? _sheet;
 
-  /// Optimistic — it leads the round trip, and a failure moves it back.
-  ///
-  /// **"You saved it just now", not "is saved".** The actions surface is
-  /// write-only today (protocol §3.4), so a video saved last week opens
-  /// unlatched. When the protocol can report it, this becomes real state seeded
-  /// from `video.info` — and the two workarounds beside it go at the same time.
-  // TODO(protocol §3.4): seed from `videoDetail.inWatchLater` once it exists.
-  bool _inWatchLater = false;
+  /// Bumped whenever the video changes, to invalidate replies still in the
+  /// air for *any* of this widget's optimistic actions — ratings and Watch
+  /// Later both key off it, rather than each keeping its own counter.
+  int _videoGeneration = 0;
 
-  /// A save in flight, so a second tap cannot land on a pill that only looks
-  /// saved while the first is still in the air.
+  // ---- Watch Later (Task 25 §7) ----
+
+  /// Overrides `playlistMembershipProvider`'s answer once the user has acted
+  /// on this pill for this video. Null defers to the provider's real
+  /// membership — the seed the pill lacked entirely before this task, when
+  /// the surface was write-only and "you saved it just now" was the most it
+  /// could honestly say. Not cleared back to null after a successful
+  /// mutation: this page keeps trusting what it was just told rather than
+  /// re-reading the provider and risking a one-frame flicker back to
+  /// "unsaved" while the invalidated fetch is still in flight.
+  bool? _watchLaterOverride;
+
+  /// A save or remove in flight, so a second tap cannot land on a pill that
+  /// only looks settled while the first is still in the air.
   bool _savingWatchLater = false;
-
-  /// Bumped whenever the video changes, to invalidate replies still in the air.
-  int _saveGeneration = 0;
 
   /// The white has had its moment and stepped back.
   ///
@@ -892,17 +938,25 @@ class _ActionsState extends ConsumerState<_Actions> {
   bool _watchLaterSettled = false;
   Timer? _settleTimer;
 
+  // ---- Like / dislike (Task 25 §3–§4) ----
+
+  /// Same override pattern as Watch Later, over `VideoDetail.myRating`.
+  VideoRating? _ratingOverride;
+  bool _ratingBusy = false;
+
   @override
   void didUpdateWidget(_Actions oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.id == widget.item.id) return;
-    _saveGeneration++;
+    _videoGeneration++;
     _sheet = null;
-    _inWatchLater = false;
+    _watchLaterOverride = null;
     _savingWatchLater = false;
     _watchLaterSettled = false;
     _settleTimer?.cancel();
     _settleTimer = null;
+    _ratingOverride = null;
+    _ratingBusy = false;
   }
 
   @override
@@ -917,10 +971,26 @@ class _ActionsState extends ConsumerState<_Actions> {
     final item = widget.item;
     final detail = widget.info.value;
     final playback = ref.watch(playbackProvider);
+    // Fetched concurrently with `video.info`, the same reason `captions.list`
+    // runs alongside rather than inside the watch page's open path (§3.8):
+    // this pill needs real state before the first render, and `/next` does
+    // not carry it — `playlist/get_add_to_playlist` is a separate call.
+    final membership = ref.watch(playlistMembershipProvider(item.id));
 
     final views = detail?.viewCountText ?? item.viewCountText ?? '';
     final date = detail?.publishedText ?? '';
+    // Null whenever it would just repeat `date` — a layout with no relative
+    // date at all falls back to the exact one for both fields (§ sidecar
+    // `parser/video.ts`), and a tooltip that says exactly what is already on
+    // screen is not a tooltip worth having.
+    final exactDate = detail?.publishedDateText != null && detail!.publishedDateText != date
+        ? detail.publishedDateText
+        : null;
     final likes = detail?.likeText ?? 'Like';
+
+    final rating = _ratingOverride ?? detail?.myRating ?? VideoRating.none;
+    final inWatchLater =
+        _watchLaterOverride ?? (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ?? false);
 
     return Wrap(
       spacing: 8,
@@ -929,7 +999,13 @@ class _ActionsState extends ConsumerState<_Actions> {
       children: [
         // The read-outs, one `Wrap` child each — see [_MetaStat].
         if (views.isNotEmpty) _MetaStat(icon: Icons.visibility_outlined, text: views),
-        if (date.isNotEmpty) _MetaStat(icon: Icons.calendar_today_outlined, text: date),
+        if (date.isNotEmpty)
+          exactDate == null
+              ? _MetaStat(icon: Icons.calendar_today_outlined, text: date)
+              : ShortcutTooltip(
+                  label: exactDate,
+                  child: _MetaStat(icon: Icons.calendar_today_outlined, text: date),
+                ),
 
         // Like & Dislike
         Container(
@@ -940,35 +1016,49 @@ class _ActionsState extends ConsumerState<_Actions> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () {},
-                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 16, right: 12, top: 8, bottom: 8),
-                    child: Row(
-                      children: [
-                        Icon(Icons.thumb_up_outlined, size: 18, color: scheme.onSurface),
-                        const SizedBox(width: 6),
-                        Text(
-                          likes,
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                        ),
-                      ],
+              ShortcutTooltip(
+                label: rating == VideoRating.like ? 'Remove like' : 'Like',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _ratingBusy ? null : () => _setRating(VideoRating.like),
+                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 16, right: 12, top: 8, bottom: 8),
+                      child: Row(
+                        children: [
+                          Icon(
+                            rating == VideoRating.like ? Icons.thumb_up : Icons.thumb_up_outlined,
+                            size: 18,
+                            color: scheme.onSurface,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            likes,
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
               Container(width: 1, height: 18, color: scheme.outlineVariant.withValues(alpha: 0.5)),
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () {},
-                  borderRadius: const BorderRadius.horizontal(right: Radius.circular(18)),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 12, right: 16, top: 8, bottom: 8),
-                    child: Icon(Icons.thumb_down_outlined, size: 18, color: scheme.onSurface),
+              ShortcutTooltip(
+                label: rating == VideoRating.dislike ? 'Remove dislike' : 'Dislike',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _ratingBusy ? null : () => _setRating(VideoRating.dislike),
+                    borderRadius: const BorderRadius.horizontal(right: Radius.circular(18)),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 12, right: 16, top: 8, bottom: 8),
+                      child: Icon(
+                        rating == VideoRating.dislike ? Icons.thumb_down : Icons.thumb_down_outlined,
+                        size: 18,
+                        color: scheme.onSurface,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -977,34 +1067,46 @@ class _ActionsState extends ConsumerState<_Actions> {
         ),
 
         // Share
-        _ActionChip(
-          icon: Icons.reply,
-          activeLabel: 'Share',
-          active: _sheet == _OpenSheet.share,
-          onTap: _openShare,
+        ShortcutTooltip(
+          label: 'Share',
+          child: _ActionChip(
+            icon: Icons.reply,
+            activeLabel: 'Share',
+            active: _sheet == _OpenSheet.share,
+            onTap: _openShare,
+          ),
         ),
 
         // Playlist
-        _ActionChip(
-          icon: Icons.playlist_add,
-          activeIcon: Icons.playlist_add_check,
-          activeLabel: 'Save',
-          active: _sheet == _OpenSheet.save,
-          onTap: _openSave,
+        ShortcutTooltip(
+          label: 'Save to playlist',
+          child: _ActionChip(
+            icon: Icons.playlist_add,
+            activeIcon: Icons.playlist_add_check,
+            activeLabel: 'Save',
+            active: _sheet == _OpenSheet.save,
+            onTap: _openSave,
+          ),
         ),
 
         // Watch Later
-        _ActionChip(
-          icon: Icons.schedule,
-          activeIcon: Icons.check,
-          activeLabel: 'Watch Later',
-          active: _inWatchLater && !_watchLaterSettled,
-          marked: _inWatchLater && _watchLaterSettled,
-          onTap: _tapWatchLater,
+        ShortcutTooltip(
+          label: inWatchLater ? 'Remove from Watch Later' : 'Watch Later',
+          child: _ActionChip(
+            icon: Icons.schedule,
+            activeIcon: Icons.check,
+            activeLabel: 'Watch Later',
+            active: inWatchLater && !_watchLaterSettled,
+            marked: inWatchLater && _watchLaterSettled,
+            onTap: () => _tapWatchLater(inWatchLater),
+          ),
         ),
 
         // More
-        _ActionChip(icon: Icons.more_horiz, semanticLabel: 'More', onTap: () {}),
+        ShortcutTooltip(
+          label: 'More',
+          child: _ActionChip(icon: Icons.more_horiz, semanticLabel: 'More', onTap: () {}),
+        ),
 
         if (playback.source?.qualityDegraded ?? false) ...[
           _ActionChip(
@@ -1033,14 +1135,17 @@ class _ActionsState extends ConsumerState<_Actions> {
 
   Future<void> _openSave() async {
     setState(() => _sheet = _OpenSheet.save);
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _SaveDialog(
-        inWatchLater: _inWatchLater,
-        onWatchLater: _saveToWatchLater,
-      ),
-    );
-    if (mounted) setState(() => _sheet = null);
+    await showSaveDialog(context, widget.item.id);
+    // The dialog is the more thorough source of truth once it has been
+    // opened — whatever it left checked or unchecked, this pill should agree
+    // rather than keep showing whatever it thought before the dialog ran.
+    ref.invalidate(playlistMembershipProvider(widget.item.id));
+    if (mounted) {
+      setState(() {
+        _sheet = null;
+        _watchLaterOverride = null;
+      });
+    }
   }
 
   /// Where the video is right now, for the share dialog's "Start at".
@@ -1052,17 +1157,12 @@ class _ActionsState extends ConsumerState<_Actions> {
     return playback.hold?.position ?? ref.read(playbackEngineProvider).position;
   }
 
-  /// The pill — distinct from [_saveToWatchLater] because the second tap is not a second save.
-  /// `action.addToWatchLater` has no inverse (protocol §3.4), so
-  /// a latched pill says so rather than quietly re-adding.
-  // TODO(protocol §3.4): make this a real toggle once a removal method exists.
-  Future<void> _tapWatchLater() async {
-    if (_savingWatchLater) return;
-    if (_inWatchLater) {
-      _say('Already in Watch Later — removing is not wired up yet');
-      return;
-    }
-    await _saveToWatchLater();
+  /// Toggles both ways now that `action.removeFromPlaylist` exists — Watch
+  /// Later is a playlist with a fixed id (§7), so removing from it is exactly
+  /// the mechanism §5 built for the save dialog.
+  Future<void> _tapWatchLater(bool currentlyInWatchLater) {
+    if (_savingWatchLater) return Future.value();
+    return currentlyInWatchLater ? _removeFromWatchLater() : _saveToWatchLater();
   }
 
   /// Latches first, asks after, and puts it back if the answer is no.
@@ -1075,9 +1175,9 @@ class _ActionsState extends ConsumerState<_Actions> {
   /// way: any swap invalidates every reply that was already in the air.
   Future<bool> _saveToWatchLater() async {
     final videoId = widget.item.id;
-    final generation = _saveGeneration;
+    final generation = _videoGeneration;
     setState(() {
-      _inWatchLater = true;
+      _watchLaterOverride = true;
       _savingWatchLater = true;
     });
 
@@ -1090,13 +1190,13 @@ class _ActionsState extends ConsumerState<_Actions> {
       failure = '$e';
     }
 
-    if (!mounted || generation != _saveGeneration || widget.item.id != videoId) {
+    if (!mounted || generation != _videoGeneration || widget.item.id != videoId) {
       return failure == null;
     }
 
     setState(() {
       _savingWatchLater = false;
-      if (failure != null) _inWatchLater = false;
+      if (failure != null) _watchLaterOverride = false;
     });
     _say(failure ?? 'Saved to Watch Later');
 
@@ -1104,12 +1204,104 @@ class _ActionsState extends ConsumerState<_Actions> {
     // gap is already most of the two seconds, and a pill that settles the
     // instant the save lands never reads as a confirmation of it.
     if (failure == null) {
+      ref.invalidate(playlistMembershipProvider(videoId));
       _settleTimer?.cancel();
       _settleTimer = Timer(_watchLaterSettleDelay, () {
         if (mounted) setState(() => _watchLaterSettled = true);
       });
     }
     return failure == null;
+  }
+
+  /// The inverse. Removing needs a `setVideoId`, not just a video id
+  /// (§5's `action.removeFromPlaylist` note), so this looks up Watch Later's
+  /// own `removeToken` via `playlist.forVideo` — the same call the Save
+  /// dialog already makes — and replays it. Two round trips rather than one,
+  /// spent on a rare, deliberate tap rather than the hot path.
+  Future<void> _removeFromWatchLater() async {
+    final videoId = widget.item.id;
+    final generation = _videoGeneration;
+    setState(() {
+      _watchLaterOverride = false;
+      _savingWatchLater = true;
+      _watchLaterSettled = false;
+    });
+    _settleTimer?.cancel();
+
+    String? failure;
+    try {
+      final response =
+          await RpcClient.instance.call('playlist.forVideo', {'videoId': videoId}) as Map<String, dynamic>;
+      String? token;
+      for (final raw in (response['playlists'] as List<dynamic>? ?? [])) {
+        final row = raw as Map<String, dynamic>;
+        if (row['id'] == 'WL') {
+          token = row['removeToken'] as String?;
+          break;
+        }
+      }
+      // No token means the server never thought it was there — nothing to
+      // remove, and not a failure to report.
+      if (token != null) {
+        await RpcClient.instance.call('action.removeFromPlaylist', {
+          'playlistId': 'WL',
+          'removeToken': token,
+        });
+      }
+    } on RpcException catch (e) {
+      failure = e.code == 'AUTH_REQUIRED' ? 'Sign in to edit Watch Later' : e.message;
+    } catch (e) {
+      failure = '$e';
+    }
+
+    if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
+
+    setState(() {
+      _savingWatchLater = false;
+      if (failure != null) _watchLaterOverride = true;
+    });
+    if (failure == null) ref.invalidate(playlistMembershipProvider(videoId));
+    _say(failure ?? 'Removed from Watch Later');
+  }
+
+  /// Like, dislike and un-rate, all through one path: tapping the currently
+  /// active side clears the rating, tapping the other switches straight to
+  /// it. `action.dislike` while liked removes the like server-side on its
+  /// own, so this never has to call `action.removeRating` first.
+  Future<void> _setRating(VideoRating target) async {
+    if (_ratingBusy) return;
+    final videoId = widget.item.id;
+    final generation = _videoGeneration;
+    final current = _ratingOverride ?? widget.info.value?.myRating ?? VideoRating.none;
+    final next = current == target ? VideoRating.none : target;
+
+    setState(() {
+      _ratingBusy = true;
+      _ratingOverride = next;
+    });
+
+    final method = switch (next) {
+      VideoRating.like => 'action.like',
+      VideoRating.dislike => 'action.dislike',
+      VideoRating.none => 'action.removeRating',
+    };
+
+    String? failure;
+    try {
+      await RpcClient.instance.call(method, {'videoId': videoId});
+    } on RpcException catch (e) {
+      failure = e.code == 'AUTH_REQUIRED' ? 'Sign in to rate videos' : e.message;
+    } catch (e) {
+      failure = '$e';
+    }
+
+    if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
+
+    setState(() {
+      _ratingBusy = false;
+      if (failure != null) _ratingOverride = current;
+    });
+    if (failure != null) _say(failure);
   }
 
   void _say(String message) {
@@ -1708,193 +1900,6 @@ class _ShareTargetState extends State<_ShareTarget> {
   }
 }
 
-/// Save to a playlist.
-/// **Only the first row is real** — the protocol has `action.addToPlaylist` but
-/// no `playlist.list` to populate the rest (protocol §3.4).
-/// The rows below tick without saving, and the line at the bottom says so.
-// TODO(protocol §3.4): build these rows from `playlist.list` once it exists.
-class _SaveDialog extends StatefulWidget {
-  const _SaveDialog({required this.inWatchLater, required this.onWatchLater});
-
-  final bool inWatchLater;
-
-  /// Answers whether the save landed, so a failed tick can be put back.
-  final Future<bool> Function() onWatchLater;
-
-  @override
-  State<_SaveDialog> createState() => _SaveDialogState();
-}
-
-class _SaveDialogState extends State<_SaveDialog> {
-  late bool _watchLater = widget.inWatchLater;
-
-  /// Layout stand-ins. Delete the moment a `playlist.list` method exists — they
-  /// are here to size the dialog, not to be shipped as a feature.
-  static const List<({String name, bool private})> _placeholders = [
-    (name: 'Favourites', private: true),
-    (name: 'Music to code to', private: false),
-    (name: 'Watch on the TV', private: true),
-  ];
-
-  final Set<String> _ticked = {};
-
-  Future<void> _toggleWatchLater(bool next) async {
-    if (!next) {
-      // Same missing inverse the pill runs into — see `_tapWatchLater`.
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Removing from Watch Later is not wired up yet')));
-      return;
-    }
-    setState(() => _watchLater = true);
-    final saved = await widget.onWatchLater();
-    if (!saved && mounted) setState(() => _watchLater = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Dialog(
-      backgroundColor: scheme.surfaceContainerHigh,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SizedBox(
-        width: 340,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 12, 8, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      'Save video to…',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, size: 20),
-                    tooltip: 'Close',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              // Bounded and scrollable rather than however tall the account
-              // happens to be. An account with forty playlists is not unusual,
-              // and a dialog that grows to the height of one of those is a
-              // dialog with its footer off the bottom of the window.
-              Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 260),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _SaveRow(
-                          name: 'Watch later',
-                          private: true,
-                          ticked: _watchLater,
-                          onChanged: _toggleWatchLater,
-                        ),
-                        for (final playlist in _placeholders)
-                          _SaveRow(
-                            name: playlist.name,
-                            private: playlist.private,
-                            ticked: _ticked.contains(playlist.name),
-                            onChanged: (next) => setState(() {
-                              if (next) {
-                                _ticked.add(playlist.name);
-                              } else {
-                                _ticked.remove(playlist.name);
-                              }
-                            }),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.5)),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: TextButton.icon(
-                  // Nowhere to create it. `action.addToPlaylist` takes a
-                  // playlistId it cannot mint.
-                  onPressed: null,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('New playlist'),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  'Only Watch later saves; the rest are placeholders.',
-                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SaveRow extends StatelessWidget {
-  const _SaveRow({
-    required this.name,
-    required this.private,
-    required this.ticked,
-    required this.onChanged,
-  });
-
-  final String name;
-  final bool private;
-  final bool ticked;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return InkWell(
-      onTap: () => onChanged(!ticked),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-        child: Row(
-          children: [
-            Checkbox(
-              value: ticked,
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              onChanged: (next) => onChanged(next ?? false),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14, color: scheme.onSurface),
-              ),
-            ),
-            Icon(
-              private ? Icons.lock_outline : Icons.public,
-              size: 16,
-              color: scheme.onSurfaceVariant,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// The last description measured, kept because these two `TextPainter.layout()`
 /// calls are the most expensive thing on the page and they are not asked for

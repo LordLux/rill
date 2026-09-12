@@ -79,7 +79,11 @@ class SubscribeButton extends StatefulWidget {
   final SubscriptionNotificationLevel initialNotificationLevel;
 
   final Future<bool> Function(String channelId)? onSubscribe;
-  final void Function(String channelId)? onUnsubscribe;
+
+  /// Answers whether the unsubscribe landed, so a failed one can be put back —
+  /// the same contract [onSubscribe] already has. `action.unsubscribe` exists
+  /// now, so this is no longer a fire-and-forget local flip.
+  final Future<bool> Function(String channelId)? onUnsubscribe;
   final void Function(String channelId, SubscriptionNotificationLevel level)? onNotificationLevelChanged;
 
   /// Match the surrounding row's button height — 36 in every feed tile, 45
@@ -128,11 +132,26 @@ class _SubscribeButtonState extends State<SubscribeButton> {
     });
   }
 
-  void _unsubscribe() {
+  bool _unsubscribing = false;
+
+  /// Update immediately, revert on failure — the same rule [_subscribe]
+  /// follows. A tap here is far rarer than a like or a Watch Later save, but
+  /// the account state it changes is exactly as real.
+  Future<void> _unsubscribe() async {
     final channelId = widget.channelId;
-    if (channelId == null) return;
-    widget.onUnsubscribe?.call(channelId);
-    setState(() => _subscribed = false);
+    if (channelId == null || _unsubscribing) return;
+
+    setState(() {
+      _unsubscribing = true;
+      _subscribed = false;
+    });
+    final unsubscribed =
+        widget.onUnsubscribe == null ? true : await widget.onUnsubscribe!(channelId);
+    if (!mounted) return;
+    setState(() {
+      _unsubscribing = false;
+      if (!unsubscribed) _subscribed = true;
+    });
   }
 
   void _setLevel(SubscriptionNotificationLevel level) {

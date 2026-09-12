@@ -138,7 +138,10 @@ void main() {
         SubscribeButton(
           channelId: 'chan_7',
           initiallySubscribed: true,
-          onUnsubscribe: (id) => seenChannelId = id,
+          onUnsubscribe: (id) async {
+            seenChannelId = id;
+            return true;
+          },
         ),
       ),
     );
@@ -153,5 +156,43 @@ void main() {
     expect(find.text('Subscribe'), findsOneWidget);
     expect(find.text('Subscribed'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('onUnsubscribe returning false reverts to the Subscribed pill', (tester) async {
+    // Mutation guard: a widget that always shows "Subscribe" after the click
+    // would also pass the test above — this is the case that only fails if
+    // the revert is missing.
+    await tester.pumpWidget(
+      _harness(
+        SubscribeButton(
+          channelId: 'chan_8',
+          initiallySubscribed: true,
+          onUnsubscribe: (_) async => false,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Subscribed'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unsubscribe'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Subscribed'), findsOneWidget);
+    expect(find.text('Subscribe'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('with no onUnsubscribe hook, unsubscribing still flips the pill', (tester) async {
+    await tester.pumpWidget(_harness(const SubscribeButton(channelId: 'chan_9', initiallySubscribed: true)));
+    await tester.pump();
+
+    await tester.tap(find.text('Subscribed'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unsubscribe'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Subscribe'), findsOneWidget);
+    expect(find.text('Subscribed'), findsNothing);
   });
 }

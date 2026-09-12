@@ -17,6 +17,13 @@ part 'video_detail.g.dart';
 /// `isLive` is a live stream that has no final duration, and `null` without it
 /// is a `/player` response the sidecar could not get — the watch page shows the
 /// player's own duration in both cases, so neither is a dead end.
+/// `VideoDetail.myRating` — `docs/protocol.md` §3.3. A closed set rather than
+/// two independent booleans: `isLiked`/`isDisliked` both `true` at once is a
+/// state YouTube cannot produce, so the type should not admit it either. The
+/// enum's own names match the wire strings the sidecar sends (`'like'` /
+/// `'dislike'` / `'none'`), so json_serializable needs no converter.
+enum VideoRating { like, dislike, none }
+
 @freezed
 abstract class VideoDetail with _$VideoDetail {
   const VideoDetail._();
@@ -33,7 +40,14 @@ abstract class VideoDetail with _$VideoDetail {
     required bool isLive,
     String? viewCountText,
     String? publishedText,
+
+    /// The exact upload date ("Dec 6, 2009"), for a tooltip on
+    /// [publishedText]'s relative one ("14 years ago") — the sidecar carries
+    /// both as siblings off the same renderer, not as alternatives. Null when
+    /// the layout carries no exact date at all.
+    String? publishedDateText,
     String? likeText,
+    required VideoRating myRating,
     required bool isSubscribed,
     @Default(false) bool isVerified,
     @Default(false) bool isArtistChannel,

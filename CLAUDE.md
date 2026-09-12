@@ -311,6 +311,7 @@ the answer.
   a genuinely stale cookie. `YT_COOKIE` seeds the first session and any
   `auth.setCookie`/`auth.signOut` overrides it for the life of the process; a
   sign-out cannot unset an environment variable, and says so on stderr.
+- **Community references are hypotheses, not specifications.** An InnerTube request shape or parser path copied from a reference implementation (like youtubei.js or others) is a hypothesis, not a specification, and gets verified against a real response like anything else. The like/dislike `target` shape came from a reference and was wrong, producing 400s until corrected.
 - **Fixtures must be captured with `parse: false`.** Parsed objects are lossy
   and make a useless corpus.
 - **Never mix fixtures across capture runs.** Clear the directory first. A stale

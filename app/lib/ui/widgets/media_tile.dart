@@ -115,34 +115,41 @@ class TileSpec {
   });
 }
 
+/// The duration text for a video tile's badge — `null` while live, or when
+/// YouTube gave no duration at all (a mix's synthetic seed-video entry, for
+/// instance).
+String? formatVideoDuration(VideoItem v) {
+  if (v.isLive || v.durationSeconds == null) return null;
+  final d = Duration(seconds: v.durationSeconds!);
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60);
+  final s = d.inSeconds.remainder(60);
+  if (h > 0) {
+    return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+  return '$m:${s.toString().padLeft(2, '0')}';
+}
+
+/// Which badge a video tile draws — station and live share a look but not a
+/// label (architecture.md F22).
+DurationBadgeTone durationToneFor(VideoItem v) {
+  if (v.isStation) return DurationBadgeTone.station;
+  if (v.isLive) return DurationBadgeTone.live;
+  if (v.isMusic) return DurationBadgeTone.music;
+  return DurationBadgeTone.normal;
+}
+
 TileSpec? specFor(FeedItem item) {
   return item.map(
     video: (v) {
-      String? durText;
-      if (!v.isLive && v.durationSeconds != null) {
-        final d = Duration(seconds: v.durationSeconds!);
-        final h = d.inHours;
-        final m = d.inMinutes.remainder(60);
-        final s = d.inSeconds.remainder(60);
-        if (h > 0) {
-          durText =
-              '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-        } else {
-          durText = '$m:${s.toString().padLeft(2, '0')}';
-        }
-      }
       return TileSpec(
         title: v.title,
         thumbnailUrl: v.thumbnailUrl,
         previewVideoId: v.id.isEmpty ? null : v.id,
         isStackedCards: false,
         isShort: v.isShort,
-        durationText: durText,
-        durationTone: v.isStation
-            ? DurationBadgeTone.station
-            : (v.isLive
-                  ? DurationBadgeTone.live
-                  : (v.isMusic ? DurationBadgeTone.music : DurationBadgeTone.normal)),
+        durationText: formatVideoDuration(v),
+        durationTone: durationToneFor(v),
         badges: v.badges,
         isMembersOnly: v.isMembersOnly,
         canWatchLater: v.canWatchLater,
@@ -218,12 +225,19 @@ class MediaTile extends StatefulWidget {
   final VoidCallback? onWatchLater;
   final VoidCallback? onAddToQueue;
 
+  /// The 3-dot menu (Task 25 §5: "the tile's 3-dot menu... opens this" — the
+  /// save-to-playlist dialog). Null renders the icon disabled rather than
+  /// absent, so a tile whose kind has nothing to offer there does not shift
+  /// its neighbours' layout.
+  final VoidCallback? onMore;
+
   const MediaTile({
     super.key,
     required this.spec,
     this.onTap,
     this.onWatchLater,
     this.onAddToQueue,
+    this.onMore,
   }) : layout = MediaTileLayout.standard,
        size = MediaTileSize.standard;
 
@@ -233,6 +247,7 @@ class MediaTile extends StatefulWidget {
     this.onTap,
     this.onWatchLater,
     this.onAddToQueue,
+    this.onMore,
     this.size = MediaTileSize.standard,
   }) : layout = MediaTileLayout.wide;
 
@@ -242,6 +257,7 @@ class MediaTile extends StatefulWidget {
     this.onTap,
     this.onWatchLater,
     this.onAddToQueue,
+    this.onMore,
   }) : layout = MediaTileLayout.shorts,
        size = MediaTileSize.standard;
 
@@ -724,7 +740,7 @@ class _MediaTileState extends State<MediaTile> {
                       minHeight: 34,
                     ),
                     mouseCursor: SystemMouseCursors.click,
-                    onPressed: () {},
+                    onPressed: widget.onMore,
                   ),
                 ),
               ],
@@ -869,7 +885,7 @@ class _MediaTileState extends State<MediaTile> {
                           minHeight: 34,
                         ),
                         mouseCursor: SystemMouseCursors.click,
-                        onPressed: () {},
+                        onPressed: widget.onMore,
                       ),
                     ),
                   ],

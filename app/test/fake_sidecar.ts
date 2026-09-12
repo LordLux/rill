@@ -66,6 +66,30 @@ const NO_CAPTIONS_ID = 'nocaps1';
 /** `captions.list` fails. A caption failure must not touch playback. */
 const CAPTIONS_FAIL_ID = 'capsfail1';
 
+/**
+ * Task 25. The one video id every action (`action.like`/`dislike`/
+ * `removeRating`/`addToWatchLater`/`removeFromPlaylist`) refuses for —
+ * `watch_actions_test.dart`'s only way to reach the optimistic-revert path
+ * from outside the widget.
+ */
+const ACTION_FAIL_ID = 'actionfail1';
+
+/** Per-video like/dislike state, mutable so a rating round-trips into the
+ *  next `video.info` — 'LIKE' | 'DISLIKE' | 'INDIFFERENT', matching the real
+ *  sidecar's `likeStatus` vocabulary (`sidecar/src/parser/video.ts`). */
+const ratings: Record<string, string> = {};
+
+/** Per-video Watch Later membership, for `playlist.forVideo`. */
+const watchLaterMembership = new Set<string>();
+
+/**
+ * An ordinary (non-Watch-Later) playlist, so `playlist.forVideo` has more
+ * than one row to test rendering against — `save_dialog_test.dart`'s "renders
+ * existing membership correctly".
+ */
+const TEST_PLAYLIST_ID = 'PL_TEST';
+const testPlaylistMembership = new Set<string>();
+
 const captionLists: unknown[] = [];
 const captionGets: unknown[] = [];
 const searchCalls: unknown[] = [];
@@ -310,7 +334,9 @@ rl.on('line', (line) => {
           isLive: false,
           viewCountText: '31,000,000 views',
           publishedText: '16 years ago',
+          publishedDateText: 'Dec 6, 2009',
           likeText: '1.1M',
+          myRating: ratings[videoId] === 'LIKE' ? 'like' : ratings[videoId] === 'DISLIKE' ? 'dislike' : 'none',
           isSubscribed: false,
           badges: [],
           // Structural, from `BADGE_STYLE_TYPE_MEMBERS_ONLY` — true for both
@@ -322,6 +348,115 @@ rl.on('line', (line) => {
           relatedContinuation: null,
         },
       }) + '\n');
+    } else if (req.method === 'action.like' || req.method === 'action.dislike' || req.method === 'action.removeRating') {
+      const videoId = req.params?.videoId;
+      if (videoId === ACTION_FAIL_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'UPSTREAM_ERROR', message: 'rating refused', retry: 'auto' },
+        }) + '\n');
+        return;
+      }
+      ratings[videoId] = req.method === 'action.like'
+        ? 'LIKE'
+        : req.method === 'action.dislike'
+          ? 'DISLIKE'
+          : 'INDIFFERENT';
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'action.subscribe' || req.method === 'action.unsubscribe') {
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'action.addToWatchLater') {
+      const videoId = req.params?.videoId;
+      if (videoId === ACTION_FAIL_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'UPSTREAM_ERROR', message: 'watch later refused', retry: 'auto' },
+        }) + '\n');
+        return;
+      }
+      watchLaterMembership.add(videoId);
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'playlist.forVideo') {
+      const videoId = req.params?.videoId;
+      const inWatchLater = watchLaterMembership.has(videoId);
+      const inTestPlaylist = testPlaylistMembership.has(videoId);
+      // `_videoId`/`_playlistId` are not part of the real contract (the real
+      // token is exactly `{playlistId, actions}` — `sidecar/src/actions/
+      // playlist.ts`) — smuggled in here only so this fake's
+      // `action.removeFromPlaylist` below can tell which video/playlist pair
+      // to clear, since the real request never carries a video id at all.
+      process.stdout.write(JSON.stringify({
+        id: req.id,
+        result: {
+          playlists: [
+            {
+              id: 'WL',
+              title: 'Watch later',
+              privacy: 'private',
+              containsVideo: inWatchLater,
+              removeToken: inWatchLater
+                ? JSON.stringify({
+                    playlistId: 'WL',
+                    _videoId: videoId,
+                    _playlistId: 'WL',
+                    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'fake_set_video_id' }],
+                  })
+                : null,
+            },
+            {
+              id: TEST_PLAYLIST_ID,
+              title: 'My Mix',
+              privacy: 'public',
+              containsVideo: inTestPlaylist,
+              removeToken: inTestPlaylist
+                ? JSON.stringify({
+                    playlistId: TEST_PLAYLIST_ID,
+                    _videoId: videoId,
+                    _playlistId: TEST_PLAYLIST_ID,
+                    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'fake_set_video_id_2' }],
+                  })
+                : null,
+            },
+          ],
+        },
+      }) + '\n');
+    } else if (req.method === 'action.addToPlaylist') {
+      const videoId = req.params?.videoId;
+      const playlistId = req.params?.playlistId;
+      if (videoId === ACTION_FAIL_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'UPSTREAM_ERROR', message: 'add refused', retry: 'auto' },
+        }) + '\n');
+        return;
+      }
+      if (playlistId === 'WL') watchLaterMembership.add(videoId);
+      else testPlaylistMembership.add(videoId);
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'action.removeFromPlaylist') {
+      let videoId: string | undefined;
+      let playlistId: string | undefined;
+      try {
+        const token = JSON.parse(req.params?.removeToken ?? '{}');
+        videoId = token._videoId;
+        playlistId = token._playlistId;
+      } catch {
+        // fall through — an unparseable token below is treated as "nothing to remove"
+      }
+      if (videoId === ACTION_FAIL_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: { code: 'UPSTREAM_ERROR', message: 'removal refused', retry: 'auto' },
+        }) + '\n');
+        return;
+      }
+      if (videoId && playlistId === 'WL') watchLaterMembership.delete(videoId);
+      else if (videoId) testPlaylistMembership.delete(videoId);
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
+    } else if (req.method === 'playlist.create') {
+      process.stdout.write(JSON.stringify({ id: req.id, result: { playlistId: 'PL_NEW_FAKE' } }) + '\n');
+    } else if (req.method === 'playlist.delete') {
+      process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
     } else if (req.method === 'captions.list') {
       // Three shapes, keyed on the video id so one sidecar serves a whole file:
       // NO_CAPTIONS_ID has none (the CC control must hide), CAPTIONS_FAIL_ID
@@ -439,6 +574,9 @@ rl.on('line', (line) => {
       suggestCalls.length = 0;
       authCookies.length = 0;
       signOuts = 0;
+      for (const key of Object.keys(ratings)) delete ratings[key];
+      watchLaterMembership.clear();
+      testPlaylistMembership.clear();
       // `test.reset {authState}` puts the session where a test needs to start
       // without going through `auth.signOut` — which would land in `signOuts`
       // and be counted against the test that follows. Default restores the

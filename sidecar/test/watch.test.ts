@@ -16,7 +16,15 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { addToPlaylist, addToWatchLater } from '../src/actions/playlist.ts';
+import {
+  addToPlaylist,
+  addToWatchLater,
+  createPlaylist,
+  deletePlaylist,
+  playlistsForVideo,
+  removeFromPlaylist,
+} from '../src/actions/playlist.ts';
+import { dislike, like, removeRating, subscribe, unsubscribe } from '../src/actions/interaction.ts';
 import { hasCode, isRpcError, type RpcError } from '../src/errors.ts';
 import { forgetPlayerResponse } from '../src/innertube/player-response.ts';
 import { resetPlayerCache } from '../src/innertube/player.ts';
@@ -676,6 +684,421 @@ describe('action.addToWatchLater / addToPlaylist', () => {
     const session = stubSession({ '/browse/edit_playlist': { status: 'STATUS_FAILED' } });
     const failure = await addToWatchLater(session, VIDEO_ID).catch((e: unknown) => e);
     expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// action.like / dislike / removeRating, action.subscribe / unsubscribe
+// ---------------------------------------------------------------------------
+
+describe('action.like / dislike / removeRating', () => {
+  test('like posts to /like/like with target as {videoId}, not a bare string', async () => {
+    // A bare-string target answered a real HTTP 400 (2026-09-11) — the
+    // library's own declared type for this request is `{ target: { videoId } }`,
+    // and this is the regression test for going back to the wrong shape.
+    const session = stubSession({ '/like/like': { status: 'STATUS_SUCCEEDED' } });
+    await like(session, VIDEO_ID);
+    expect(session.calls[0]).toEqual({
+      endpoint: '/like/like',
+      params: { target: { videoId: VIDEO_ID } },
+    });
+  });
+
+  test('dislike posts to /like/dislike', async () => {
+    const session = stubSession({ '/like/dislike': { status: 'STATUS_SUCCEEDED' } });
+    await dislike(session, VIDEO_ID);
+    expect(session.calls[0]!.endpoint).toBe('/like/dislike');
+  });
+
+  test('removeRating posts to /like/removelike — the un-like/un-dislike path', async () => {
+    const session = stubSession({ '/like/removelike': { status: 'STATUS_SUCCEEDED' } });
+    await removeRating(session, VIDEO_ID);
+    expect(session.calls[0]!.endpoint).toBe('/like/removelike');
+  });
+
+  test('none of the three ever touch the TV client override', async () => {
+    // The deliberate departure from youtubei.js's InteractionManager
+    // (`actions/interaction.ts`'s own doc comment) — every call here goes over
+    // whatever session it is handed, unmodified, and the stub session accepts
+    // only endpoints it was given a body for, so a `client` override reaching
+    // `execute`'s params would show up here.
+    const session = stubSession({ '/like/like': { status: 'STATUS_SUCCEEDED' } });
+    await like(session, VIDEO_ID);
+    expect(session.calls[0]!.params['client']).toBeUndefined();
+  });
+
+  test('no cookie is AUTH_REQUIRED for all three, and never leaves the process', async () => {
+    for (const [action, endpoint] of [
+      [like, '/like/like'],
+      [dislike, '/like/dislike'],
+      [removeRating, '/like/removelike'],
+    ] as const) {
+      const session = stubSession({ [endpoint]: { status: 'STATUS_SUCCEEDED' } }, false);
+      const failure = await action(session, VIDEO_ID).catch((e: unknown) => e);
+      expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+      expect(session.calls).toHaveLength(0);
+    }
+  });
+
+  test('STATUS_FAILED is a failure, not a success', async () => {
+    const session = stubSession({ '/like/like': { status: 'STATUS_FAILED' } });
+    const failure = await like(session, VIDEO_ID).catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+});
+
+const CHANNEL_ID = 'UCSMOQeBJ2RAnuFungnQOxLg';
+
+describe('action.subscribe / unsubscribe', () => {
+  test('subscribe posts channelIds to /subscription/subscribe', async () => {
+    const session = stubSession({ '/subscription/subscribe': { status: 'STATUS_SUCCEEDED' } });
+    await subscribe(session, CHANNEL_ID);
+    expect(session.calls[0]).toEqual({
+      endpoint: '/subscription/subscribe',
+      params: { channelIds: [CHANNEL_ID] },
+    });
+  });
+
+  test('unsubscribe posts to /subscription/unsubscribe', async () => {
+    const session = stubSession({ '/subscription/unsubscribe': { status: 'STATUS_SUCCEEDED' } });
+    await unsubscribe(session, CHANNEL_ID);
+    expect(session.calls[0]!.endpoint).toBe('/subscription/unsubscribe');
+  });
+
+  test('no cookie is AUTH_REQUIRED for both, and never leaves the process', async () => {
+    for (const [action, endpoint] of [
+      [subscribe, '/subscription/subscribe'],
+      [unsubscribe, '/subscription/unsubscribe'],
+    ] as const) {
+      const session = stubSession({ [endpoint]: { status: 'STATUS_SUCCEEDED' } }, false);
+      const failure = await action(session, CHANNEL_ID).catch((e: unknown) => e);
+      expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+      expect(session.calls).toHaveLength(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// playlist.forVideo, action.removeFromPlaylist, playlist.create/delete
+// ---------------------------------------------------------------------------
+
+const PLAYLIST_ID = 'PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+
+/** A `/playlist/get_add_to_playlist` body: one row already containing the video, one not. */
+function addToPlaylistBody(): unknown {
+  return {
+    contents: {
+      addToPlaylistRenderer: {
+        videoId: VIDEO_ID,
+        playlists: [
+          {
+            playlistAddToOptionRenderer: {
+              playlistId: 'WL',
+              title: { simpleText: 'Watch later' },
+              privacy: 'PRIVATE',
+              containsSelectedVideos: true,
+              removeFromPlaylistServiceEndpoint: {
+                playlistEditEndpoint: {
+                  playlistId: 'WL',
+                  actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+                },
+              },
+            },
+          },
+          {
+            playlistAddToOptionRenderer: {
+              playlistId: PLAYLIST_ID,
+              title: { simpleText: 'My mix tape' },
+              privacy: 'PUBLIC',
+              containsSelectedVideos: false,
+              addToPlaylistServiceEndpoint: {
+                playlistEditEndpoint: {
+                  playlistId: PLAYLIST_ID,
+                  actions: [{ action: 'ACTION_ADD_VIDEO', addedVideoId: VIDEO_ID }],
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+describe('playlist.forVideo', () => {
+  test('reports membership per playlist, Watch Later included at its fixed id', async () => {
+    const session = stubSession({ '/playlist/get_add_to_playlist': addToPlaylistBody() });
+    const result = await playlistsForVideo(session, VIDEO_ID);
+
+    expect(result.playlists).toHaveLength(2);
+    const wl = result.playlists.find((p) => p.id === 'WL');
+    const other = result.playlists.find((p) => p.id === PLAYLIST_ID);
+
+    expect(wl).toMatchObject({ title: 'Watch later', privacy: 'private', containsVideo: true });
+    expect(other).toMatchObject({ title: 'My mix tape', privacy: 'public', containsVideo: false });
+  });
+
+  test('only a row already containing the video carries a removeToken', () => {
+    return playlistsForVideo(stubSession({ '/playlist/get_add_to_playlist': addToPlaylistBody() }), VIDEO_ID).then(
+      (result) => {
+        const wl = result.playlists.find((p) => p.id === 'WL')!;
+        const other = result.playlists.find((p) => p.id === PLAYLIST_ID)!;
+        expect(wl.removeToken).not.toBeNull();
+        expect(other.removeToken).toBeNull();
+        expect(JSON.parse(wl.removeToken!)).toEqual({
+          playlistId: 'WL',
+          actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+        });
+      },
+    );
+  });
+
+  test('an unrecognised privacy value is null, never guessed', async () => {
+    const body = addToPlaylistBody() as {
+      contents: { addToPlaylistRenderer: { playlists: Array<{ playlistAddToOptionRenderer: Record<string, unknown> }> } };
+    };
+    body.contents.addToPlaylistRenderer.playlists[0]!.playlistAddToOptionRenderer['privacy'] = 'SOMETHING_NEW';
+    const result = await playlistsForVideo(stubSession({ '/playlist/get_add_to_playlist': body }), VIDEO_ID);
+    expect(result.playlists.find((p) => p.id === 'WL')!.privacy).toBeNull();
+  });
+
+  test('no cookie is AUTH_REQUIRED, and never leaves the process', async () => {
+    const session = stubSession({ '/playlist/get_add_to_playlist': addToPlaylistBody() }, false);
+    const failure = await playlistsForVideo(session, VIDEO_ID).catch((e: unknown) => e);
+    expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+    expect(session.calls).toHaveLength(0);
+  });
+});
+
+describe('action.removeFromPlaylist', () => {
+  const TOKEN = JSON.stringify({
+    playlistId: 'WL',
+    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+  });
+
+  test('replays the token verbatim against /browse/edit_playlist', async () => {
+    const session = stubSession({ '/browse/edit_playlist': { status: 'STATUS_SUCCEEDED' } });
+    await removeFromPlaylist(session, 'WL', TOKEN);
+    expect(session.calls[0]).toEqual({
+      endpoint: '/browse/edit_playlist',
+      params: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }] },
+    });
+  });
+
+  test('a token minted for a different playlist is refused, not replayed', async () => {
+    const session = stubSession({ '/browse/edit_playlist': { status: 'STATUS_SUCCEEDED' } });
+    const failure = await removeFromPlaylist(session, 'PL_OTHER', TOKEN).catch((e: unknown) => e);
+    expect(hasCode(failure, 'BAD_REQUEST')).toBe(true);
+    expect(session.calls).toHaveLength(0);
+  });
+
+  test('malformed JSON is BAD_REQUEST, not a crash', async () => {
+    const session = stubSession({ '/browse/edit_playlist': { status: 'STATUS_SUCCEEDED' } });
+    const failure = await removeFromPlaylist(session, 'WL', '{not json').catch((e: unknown) => e);
+    expect(hasCode(failure, 'BAD_REQUEST')).toBe(true);
+    expect(session.calls).toHaveLength(0);
+  });
+
+  test('no cookie is AUTH_REQUIRED, and never leaves the process', async () => {
+    const session = stubSession({ '/browse/edit_playlist': { status: 'STATUS_SUCCEEDED' } }, false);
+    const failure = await removeFromPlaylist(session, 'WL', TOKEN).catch((e: unknown) => e);
+    expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+    expect(session.calls).toHaveLength(0);
+  });
+});
+
+describe('playlist.create / playlist.delete', () => {
+  test('create sends title and an uppercased privacy, and reads playlistId back', async () => {
+    const session = stubSession({ '/playlist/create': { playlistId: 'PL_NEW' } });
+    const result = await createPlaylist(session, 'Road trip', 'unlisted');
+    expect(session.calls[0]).toEqual({
+      endpoint: '/playlist/create',
+      params: { title: 'Road trip', privacyStatus: 'UNLISTED' },
+    });
+    expect(result).toEqual({ playlistId: 'PL_NEW' });
+  });
+
+  test('a null privacy sends no privacyStatus at all', async () => {
+    const session = stubSession({ '/playlist/create': { playlistId: 'PL_NEW' } });
+    await createPlaylist(session, 'Road trip', null);
+    expect(session.calls[0]!.params).not.toHaveProperty('privacyStatus');
+  });
+
+  test('a response with no playlistId is UPSTREAM_ERROR, not a silent success', async () => {
+    const session = stubSession({ '/playlist/create': {} });
+    const failure = await createPlaylist(session, 'Road trip', null).catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('delete sends the playlistId', async () => {
+    const session = stubSession({ '/playlist/delete': {} });
+    await deletePlaylist(session, 'PL_NEW');
+    expect(session.calls[0]).toEqual({ endpoint: '/playlist/delete', params: { playlistId: 'PL_NEW' } });
+  });
+
+  test('no cookie is AUTH_REQUIRED for both, and never leaves the process', async () => {
+    const createSession = stubSession({ '/playlist/create': { playlistId: 'PL_NEW' } }, false);
+    const createFailure = await createPlaylist(createSession, 'x', null).catch((e: unknown) => e);
+    expect(hasCode(createFailure, 'AUTH_REQUIRED')).toBe(true);
+    expect(createSession.calls).toHaveLength(0);
+
+    const deleteSession = stubSession({ '/playlist/delete': {} }, false);
+    const deleteFailure = await deletePlaylist(deleteSession, 'PL_NEW').catch((e: unknown) => e);
+    expect(hasCode(deleteFailure, 'AUTH_REQUIRED')).toBe(true);
+    expect(deleteSession.calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// VideoDetail.myRating
+// ---------------------------------------------------------------------------
+
+describe('parseVideoDetail — myRating', () => {
+  function withClassicLikeButton(likeStatus: string): unknown {
+    return {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoPrimaryInfoRenderer: {
+                    videoActions: {
+                      menuRenderer: {
+                        topLevelButtons: [
+                          {
+                            likeButtonRenderer: {
+                              target: { videoId: VIDEO_ID },
+                              likeStatus,
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+  }
+
+  test('a classic LIKE status maps to "like"', () => {
+    expect(parseVideoDetail(withClassicLikeButton('LIKE'), 'rate').myRating).toBe('like');
+  });
+
+  test('a classic DISLIKE status maps to "dislike"', () => {
+    expect(parseVideoDetail(withClassicLikeButton('DISLIKE'), 'rate').myRating).toBe('dislike');
+  });
+
+  test('a classic INDIFFERENT status maps to "none" — the not-liked case', () => {
+    // Mutation guard: a parser that always answers "like" would pass the LIKE
+    // test above and only fail here.
+    expect(parseVideoDetail(withClassicLikeButton('INDIFFERENT'), 'rate').myRating).toBe('none');
+  });
+
+  test('no like button at all is also "none"', () => {
+    expect(parseVideoDetail(rawNextBody(), 'rate').myRating).toBe('none');
+  });
+
+  function withViewBasedLikeButton(likeStatus: string): unknown {
+    return {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoPrimaryInfoRenderer: {
+                    videoActions: {
+                      buttonViewModel: {
+                        segmentedLikeDislikeButtonViewModel: {
+                          likeButtonViewModel: {
+                            likeButtonViewModel: {
+                              toggleButtonViewModel: {},
+                              likeStatusEntityKey: 'key1',
+                              likeStatusEntity: { key: 'key1', likeStatus },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+  }
+
+  test('a view-based LIKE status maps to "like"', () => {
+    expect(parseVideoDetail(withViewBasedLikeButton('LIKE'), 'rate').myRating).toBe('like');
+  });
+
+  test('a view-based DISLIKE status maps to "dislike"', () => {
+    expect(parseVideoDetail(withViewBasedLikeButton('DISLIKE'), 'rate').myRating).toBe('dislike');
+  });
+
+  test('a view-based INDIFFERENT status maps to "none"', () => {
+    expect(parseVideoDetail(withViewBasedLikeButton('INDIFFERENT'), 'rate').myRating).toBe('none');
+  });
+
+  test.if(hasFixture('watch'))('reads the captured watch page without throwing', () => {
+    const detail = parseVideoDetail(fixture('watch'), 'rate');
+    expect(['like', 'dislike', 'none']).toContain(detail.myRating);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// VideoDetail.publishedDateText
+// ---------------------------------------------------------------------------
+
+describe('parseVideoDetail — publishedDateText', () => {
+  function withDates(relative?: string, exact?: string): unknown {
+    return {
+      contents: {
+        twoColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                {
+                  videoPrimaryInfoRenderer: {
+                    ...(relative ? { relativeDateText: { simpleText: relative } } : {}),
+                    ...(exact ? { dateText: { simpleText: exact } } : {}),
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+  }
+
+  test('both siblings are kept independently, not folded into one another', () => {
+    const detail = parseVideoDetail(withDates('14 years ago', 'Dec 6, 2009'), 'dates');
+    expect(detail.publishedText).toBe('14 years ago');
+    expect(detail.publishedDateText).toBe('Dec 6, 2009');
+  });
+
+  test('publishedText still falls back to dateText when relativeDateText is missing', () => {
+    // The pre-existing `??` — a layout that only ships the exact date must
+    // not lose the headline just because this task added a second field.
+    const detail = parseVideoDetail(withDates(undefined, 'Dec 6, 2009'), 'dates');
+    expect(detail.publishedText).toBe('Dec 6, 2009');
+    expect(detail.publishedDateText).toBe('Dec 6, 2009');
+  });
+
+  test('no exact date at all is null, not the relative text guessed twice', () => {
+    // Mutation guard: a `publishedDateText` that just mirrored `publishedText`
+    // would pass the first test above and only fail here.
+    const detail = parseVideoDetail(withDates('14 years ago', undefined), 'dates');
+    expect(detail.publishedText).toBe('14 years ago');
+    expect(detail.publishedDateText).toBeNull();
   });
 });
 

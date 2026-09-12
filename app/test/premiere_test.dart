@@ -154,6 +154,7 @@ void main() {
   testWidgets('a premiere opened after a real video replaces its state', (tester) async {
     await open(tester, 'aaa');
     expect(container.read(playbackProvider).isUpcoming, isFalse);
+    expect(engine.playing, isTrue, reason: 'the real video must actually be playing first');
 
     container.read(queueProvider.notifier).play(video(premiereId));
     await tester.pump();
@@ -161,6 +162,15 @@ void main() {
 
     expect(container.read(playbackProvider).isUpcoming, isTrue,
         reason: 'the error code has to be set on the new open, not left behind');
+
+    // Reported live: clicking a premiere from the sidebar left the *previous*
+    // video playing, inaudibly, underneath the "Premieres in…" card — nothing
+    // called `open` failing ever told the engine to stop, because `engine.open`
+    // is only ever reached on the success path.
+    expect(engine.stopCount, greaterThan(0),
+        reason: 'a failed open must stop whatever was already playing');
+    expect(engine.playing, isFalse,
+        reason: 'the previous video must not keep playing under the premiere slate');
 
     // And back again — the code must be *cleared*, which `??` in a copyWith
     // cannot do (hard invariant 10).

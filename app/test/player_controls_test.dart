@@ -650,6 +650,37 @@ void main() {
     disposeContainer();
   });
 
+  testWidgets('a tooltip renders in fullscreen without the missing-Overlay crash', (tester) async {
+    // `controls.dart`'s own header comment used to say nothing here could use
+    // `Tooltip` — true once, stale since `_FullscreenPlayer` was given its own
+    // local `Overlay` for the volume slider's value indicator
+    // (`architecture.md` §2.8). This is the regression test for reviving that
+    // comment's claim by accident: a `Tooltip` mounted without a reachable
+    // `Overlay` throws "No Overlay widget found" the instant it tries to show.
+    await pumpWatching(tester);
+
+    await tester.tap(find.byKey(playerFullscreenKey));
+    await tester.pumpAndSettle();
+    expect(container.read(playerViewProvider).fullscreen, isTrue);
+
+    // `ensureTooltipVisible` (the documented way to test a `Tooltip` without
+    // fighting pointer/hover simulation) triggers the exact call — inserting
+    // an `OverlayEntry` — that throws "No Overlay widget found" if none is
+    // reachable. If this mounted no `Overlay`, this line throws.
+    final tooltip = find.ancestor(of: find.byKey(playerFullscreenKey), matching: find.byType(Tooltip));
+    expect(tooltip, findsOneWidget);
+    tester.state<TooltipState>(tooltip).ensureTooltipVisible();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    // `textContaining`, not `text`: this tooltip carries a `richMessage` (the
+    // "F" badge is a `WidgetSpan`), so the rendered text is "Exit fullscreen"
+    // plus trailing spacing rather than an exact match.
+    expect(find.textContaining('Exit fullscreen'), findsOneWidget);
+
+    disposeContainer();
+  });
+
   testWidgets('fullscreen survives a route change without stranding the app', (tester) async {
     await pumpWatching(tester);
 

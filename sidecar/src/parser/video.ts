@@ -91,9 +91,15 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     text(get(primary, 'viewCount', 'videoViewCountRenderer', 'viewCount')) ??
     text(get(primary, 'viewCount', 'videoViewCountRenderer', 'shortViewCount'));
 
+  // `isLiveContent` dropped deliberately — it is a permanent "this is/was
+  // live-form content" tag, not a current-status signal, and stays `true`
+  // forever once a broadcast has ever gone live. See `player.ts`'s
+  // `parsePlayer` for the measurement (`0QnMv0bRyk0`, ended June 2024, still
+  // `isLiveContent: true` in 2026) that caught it there; `/next`'s own
+  // `videoDetails` is sparser and did not carry the field for that video, but
+  // nothing rules out a layout where it does.
   const isLive =
     get(details, 'isLive') === true ||
-    get(details, 'isLiveContent') === true ||
     isObject(get(primary, 'viewCount', 'videoViewCountRenderer', 'isLive'));
 
   // A `/next` response carries no duration — `lengthSeconds` lives on the
@@ -104,6 +110,7 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     num(get(details, 'lengthSeconds')) ?? durationToSeconds(get(primary, 'lengthText'));
 
   const likeText = findLikeText(body);
+  const myRating = findMyRating(body);
 
   const ownerBadges = scanOwnerBadges(owner);
 
@@ -150,7 +157,16 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     viewCountText,
     publishedText:
       text(get(primary, 'relativeDateText')) ?? text(get(primary, 'dateText')),
+    // The exact date, kept as a field of its own rather than folded into the
+    // `??` above: `relativeDateText` ("14 years ago") and `dateText` ("Dec 6,
+    // 2009") are siblings on the same renderer when both are present, not
+    // alternatives — `publishedText` prefers the relative one for the
+    // headline, and this is the exact one for a tooltip on it. Null exactly
+    // when the layout carries no exact date at all, same as `publishedText`
+    // falling back to it only when the relative one is missing.
+    publishedDateText: text(get(primary, 'dateText')),
     likeText,
+    myRating,
     isSubscribed: hasSubscribedButton(body),
     isVerified: ownerBadges.isVerified,
     isArtistChannel: ownerBadges.isArtistChannel,
@@ -188,6 +204,62 @@ function findLikeText(body: Json): string | null {
       isObject(node['defaultText']) && /LIKE/i.test(str(get(node, 'defaultIcon', 'iconType')) ?? ''),
   );
   return classic ? text(classic['defaultText']) : null;
+}
+
+/**
+ * The raw `likeStatus` value off the watch page's like/dislike button —
+ * `'LIKE' | 'DISLIKE' | 'INDIFFERENT'`, or `null` if neither shape was found.
+ *
+ * Two generations, read structurally rather than by a fixed path, the same
+ * discipline `findOwner`/`findLikeText` already use above:
+ *
+ *  - **Classic**: `likeButtonRenderer.likeStatus` sits directly on the
+ *    renderer, next to `target.videoId` — the same field name and enum
+ *    `action.like`/`dislike`/`removeRating` send as `status`
+ *    (`actions/interaction.ts`). Long-stable shape.
+ *  - **View-based**: `likeButtonViewModel`'s own payload carries
+ *    `likeStatusEntity.{key, likeStatus}` *inline* — unlike the search artist
+ *    panel's subscribe button (`protocol.md` §3.3), which carries no
+ *    current-state boolean of its own and has to be resolved through
+ *    `frameworkUpdates.entityBatchUpdate`. This button is not that case: its
+ *    own subtree already says which way it is toggled.
+ *
+ * Both come from a community library's typed renderer classes
+ * (`LikeButton`, `LikeButtonView`), read as documentation of the raw shape
+ * only (hard invariant 1) — **neither is confirmed against a fixture in this
+ * repo.** If `myRating` reads wrong on a real account, this is where to look
+ * first, and the view-based path is the more likely place it is wrong: it is
+ * newer and has rotated shape before (F22, the STATION badge, on an unrelated
+ * renderer).
+ */
+function likeStatusFrom(body: Json): string | null {
+  const classic = deepFind(body, (node) => isObject(node['likeButtonRenderer']));
+  if (classic) {
+    const status = str(get(classic, 'likeButtonRenderer', 'likeStatus'));
+    if (status) return status;
+  }
+
+  const viewBased = deepFind(body, (node) => isObject(node['likeStatusEntity']));
+  if (viewBased) {
+    const status = str(get(viewBased, 'likeStatusEntity', 'likeStatus'));
+    if (status) return status;
+  }
+
+  return null;
+}
+
+/**
+ * `'INDIFFERENT'` and "shape not found" both mean the same thing to a caller —
+ * no rating — so both collapse to `'none'` rather than the DTO carrying a
+ * third `null` state nothing could ever act on differently. See
+ * {@link likeStatusFrom} for which case is which; this function does not
+ * distinguish them on purpose.
+ */
+function findMyRating(body: Json): 'like' | 'dislike' | 'none' {
+  const status = likeStatusFrom(body);
+  if (status === 'LIKE') return 'like';
+  if (status === 'DISLIKE') return 'dislike';
+  return 'none';
 }
 
 function hasSubscribedButton(body: Json): boolean {

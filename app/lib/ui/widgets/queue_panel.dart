@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/feed_item.dart';
+import '../../theme/tokens.dart';
 import '../queue_controller.dart';
 import 'channel_badge.dart';
+import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
 import 'silky_scroll_absorber.dart';
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
@@ -734,6 +736,39 @@ class _QueueItemTile extends StatefulWidget {
 class _QueueItemTileState extends State<_QueueItemTile> {
   bool _isHovered = false;
 
+  /// The duration / LIVE / STATION pill, scaled down for the queue row's
+  /// 72×40 thumbnail. Same source of truth as the grid tiles
+  /// ([formatVideoDuration], [durationToneFor]) — a mix's synthetic seed-video
+  /// entry has neither a duration nor a live flag, so this draws nothing for
+  /// it, which is deliberate (see `CLAUDE.md`'s mix-in-queue note).
+  Widget _durationBadge(BuildContext context) {
+    final tokens = Theme.of(context).tokens;
+    final tone = durationToneFor(widget.item);
+    final text = tone == DurationBadgeTone.station
+        ? 'STATION'
+        : (tone == DurationBadgeTone.live ? 'LIVE' : formatVideoDuration(widget.item));
+    if (text == null) return const SizedBox.shrink();
+
+    final isLiveLike = tone == DurationBadgeTone.live || tone == DurationBadgeTone.station;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0.5),
+      decoration: BoxDecoration(
+        color: isLiveLike ? tokens.liveBadge.withValues(alpha: 0.8) : tokens.scrim.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: tokens.onScrim,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.2,
+          height: 1.4,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final inert = widget.clearing || widget.removing;
@@ -745,16 +780,26 @@ class _QueueItemTileState extends State<_QueueItemTile> {
         selected: widget.isCurrent,
         selectedTileColor: widget.scheme.surfaceContainerHigh,
         mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
         leading: SizedBox(
-          width: 72,
-          height: 40,
+          width: 72 + 10,
+          height: 40 + 20,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: Image.network(
-              widget.item.thumbnailUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.network(
+                  widget.item.thumbnailUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+                ),
+                Positioned(
+                  bottom: 2,
+                  right: 2,
+                  child: _durationBadge(context),
+                ),
+              ],
             ),
           ),
         ),

@@ -59,7 +59,7 @@ const FIXTURES = join(ROOT, 'sidecar', 'fixtures');
  * Deliberately NOT here: titles, channel names, mix subtitles, chip labels
  * (taste profile); ids and continuation tokens (identity and session context).
  */
-const KEEP_REAL = new Set(['viewCountText', 'publishedText', 'badges']);
+const KEEP_REAL = new Set(['viewCountText', 'publishedText', 'publishedDateText', 'badges']);
 
 /**
  * The shape each sanitised field must have, keyed by field name.
@@ -72,6 +72,9 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // Discriminator and contract vocabulary — not capture-derived.
   kind: /^(video|mix|playlist|channel)$/,
   scope: /^(feed|shelf)$/,
+  // Task 25 §3 — a closed set the sidecar itself defines, not free text off
+  // the watch page. Same treatment as `kind`/`scope` above.
+  myRating: /^(like|dislike|none)$/,
 
   // Ids are replaced outright, never truncated, and indexed to the item.
   id: /^(vid|mix|list|chan|item)_\d{3,}$/,
