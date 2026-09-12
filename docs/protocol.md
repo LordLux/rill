@@ -658,7 +658,7 @@ this app.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `playback.open` | `{videoId, preload?}` | `PlaybackSource` |
+| `playback.open` | `{videoId, preload?, playlistId?}` | `PlaybackSource` |
 | `playback.report` | `{sessionId, positionMs, state}` | `{}` |
 | `playback.close` | `{sessionId}` | `{}` |
 
@@ -767,6 +767,26 @@ the homepage slowly ceasing to resemble the account.
 opens no session (§3.6), so its `sessionId` is not reportable — a preloaded item
 that is never played must not appear in anyone's history. Reporting against an
 unknown or closed session is `BAD_REQUEST`.
+
+**A watch inside a mix is reported as one — Task 26, measured 2026-09-12.**
+`playback.open`'s optional `playlistId` is recorded on the playback session and
+reaches the watchtime ping as `list=`. It has to travel this way because
+`playback.report` takes a `sessionId` and nothing else, so the session is the
+only thing that still knows which playlist the watch belonged to by the time a
+report goes out. Measured: a `WEB` `/player` asked with a `playlistId` carries
+`list=<id>` in its `videostatsWatchtimeUrl` and one asked without carries no
+such parameter at all — so before this, every mix watch trained the recommender
+as a standalone watch, which is the signal F6 exists to protect.
+
+**The playlist id is part of the `/player` cache key, not a variant of it.**
+`client:videoId` was already wrong — it served one entry for two responses that
+genuinely differ — and the mix work is what made that visible rather than what
+caused it. A call with no playlist keeps exactly the old key, so every existing
+caller still shares one entry and one fetch; `player-response.test.ts` pins
+that, including that an explicit `null` keys the same as an absent one. **The
+resolution ladder deliberately asks without a playlist id**: a mix changes
+nothing about which streams exist, and splitting the resolve cache by playlist
+would buy a second `/player` round trip per open for nothing.
 
 The report itself goes out over the authenticated `WEB` session with a CPN of the
 sidecar's own, one per session (F6, and A5 which rejects bridging a resolution
