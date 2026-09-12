@@ -440,23 +440,39 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              _expanded ? 'Queue' : (nextItem != null ? 'Next: ${nextItem.title}' : 'Queue'),
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSurface,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              children: [
+                                // A mix says so, and says which one. The queue
+                                // behaves differently at its end — it extends
+                                // rather than stopping — so the panel naming
+                                // it is not decoration (Task 26 §3).
+                                if (queue.isMix) ...[
+                                  Icon(Icons.podcasts, size: 15, color: scheme.onSurfaceVariant),
+                                  const SizedBox(width: 6),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    _headerTitle(queue, nextItem),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: scheme.onSurface,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              queue.currentIndex != null ? '${queue.currentIndex! + 1} / ${queue.items.length}' : '${queue.items.length} items',
+                              _headerSubtitle(queue, controller),
                               style: TextStyle(
                                 fontSize: 12,
                                 color: scheme.onSurfaceVariant,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
@@ -694,6 +710,33 @@ class _ParticlePainter extends CustomPainter {
 }
 
 /// Queue item tile
+/// The panel's headline.
+///
+/// A mix is named rather than called "Queue": it is the one queue the user did
+/// not assemble, so which mix it is, is the only thing that identifies it.
+String _headerTitle(QueueState queue, VideoItem? nextItem) {
+  final mix = queue.mix;
+  if (mix != null) return mix.title ?? 'Mix';
+  return nextItem != null ? 'Next: ${nextItem.title}' : 'Queue';
+}
+
+/// The line under it: position, and — for a mix — whether it is still growing.
+///
+/// §4 asks for the user to be told if a mix stopped. Three states worth
+/// distinguishing, because they mean different things to somebody watching:
+/// still extending, genuinely finished, and could not extend.
+String _headerSubtitle(QueueState queue, QueueController controller) {
+  final position = queue.currentIndex != null
+      ? '${queue.currentIndex! + 1} / ${queue.items.length}'
+      : '${queue.items.length} items';
+
+  final mix = queue.mix;
+  if (mix == null) return position;
+  if (controller.mixError != null) return '$position · paused — could not load more';
+  if (mix.exhausted) return '$position · end of mix';
+  return '$position · mix';
+}
+
 class _QueueItemTile extends StatefulWidget {
   const _QueueItemTile({
     required super.key,

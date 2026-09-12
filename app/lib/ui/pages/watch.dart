@@ -303,14 +303,14 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     if (!asGrid) {
       return MediaTile.wide(
         spec: spec,
-        onTap: () => openFromTile(ref, related),
+        onTap: tapHandlerFor(context, ref, related),
         onAddToQueue: () => queueFromTile(ref, related),
         onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
       );
     }
     return MediaTile(
       spec: spec,
-      onTap: () => openFromTile(ref, related),
+      onTap: tapHandlerFor(context, ref, related),
       onAddToQueue: () => queueFromTile(ref, related),
       onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
     );

@@ -421,13 +421,13 @@ class _FeedViewState extends ConsumerState<FeedView> {
                               ? MediaTile.wide(
                                   spec: spec,
                                   size: MediaTileSize.large,
-                                  onTap: watchTargetFor(feedItem) == null ? null : () => openFromTile(ref, feedItem),
+                                  onTap: tapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
                                 )
                               : MediaTile(
                                   spec: spec,
-                                  onTap: watchTargetFor(feedItem) == null ? null : () => openFromTile(ref, feedItem),
+                                  onTap: tapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
                                 ))
@@ -585,7 +585,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                         width: itemWidth,
                         child: MediaTile(
                           spec: spec,
-                          onTap: watchTargetFor(item) == null ? null : () => openFromTile(ref, item),
+                          onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                         ),
@@ -668,7 +668,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                         width: itemWidth,
                         child: MediaTile.shorts(
                           spec: spec,
-                          onTap: watchTargetFor(item) == null ? null : () => openFromTile(ref, item),
+                          onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                         ),
