@@ -67,6 +67,9 @@ Future<void> startMixFromTile(
   if (!queue.canUndoStartMix) return;
   messenger.showSnackBar(
     SnackBar(
+      // Explicit: the undo is a convenience, not a decision the user has to
+      // make, so it should not sit on screen waiting for one.
+      duration: const Duration(seconds: 5),
       content: Text(title == null ? 'Queue replaced by the mix' : 'Queue replaced by $title'),
       action: SnackBarAction(
         label: 'Undo',
