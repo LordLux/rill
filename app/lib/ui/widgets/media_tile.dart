@@ -24,7 +24,11 @@ const List<String> tmpMenuContents = [];
 // the thumbnail, cached off the UI isolate.
 // -------------------------------------
 
-enum DurationBadgeTone { normal, live, music, station }
+/// `mix` is the odd one out: the others describe a *duration*, and a mix has
+/// none — it is a list whose length changes as it extends. It reuses this enum
+/// because it occupies the same corner of the thumbnail and nothing else about
+/// the badge differs.
+enum DurationBadgeTone { normal, live, music, station, mix }
 
 /// The reminder CTA on a premiere tile.
 const Key tileNotifyKey = ValueKey('tile-notify');
@@ -178,8 +182,11 @@ TileSpec? specFor(FeedItem item) {
       previewVideoId: null,
       isStackedCards: true,
       isShort: false,
+      // A mix tile usually carries no count at all — YouTube ships the literal
+      // word "Mix" where a playlist ships "24 videos" — so the badge is drawn
+      // from the tone rather than from text that is normally absent.
       durationText: m.videoCount != null ? '${m.videoCount} videos' : null,
-      durationTone: DurationBadgeTone.normal,
+      durationTone: DurationBadgeTone.mix,
       badges: const [],
       canWatchLater: false,
       canAddToQueue: false,
@@ -400,6 +407,8 @@ class _MediaTileState extends State<MediaTile> {
     final isLive = widget.spec.durationTone == DurationBadgeTone.live;
     final isStation = widget.spec.durationTone == DurationBadgeTone.station;
     final isLiveLike = isLive || isStation;
+    final isMix = widget.spec.durationTone == DurationBadgeTone.mix;
+    final badgeText = isStation ? 'STATION' : (isLive ? 'LIVE' : (widget.spec.durationText ?? ''));
     return Container(
       padding: const EdgeInsets.only(
         left: 4.5,
@@ -416,7 +425,14 @@ class _MediaTileState extends State<MediaTile> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (isLiveLike)
+          if (isMix)
+            Padding(
+              // No right padding when the badge is icon-only, which is the
+              // usual case for a mix.
+              padding: EdgeInsets.only(right: badgeText.isEmpty ? 0 : 4.0),
+              child: Icon(Icons.playlist_play, size: 14, color: tokens.onScrim),
+            )
+          else if (isLiveLike)
             Padding(
               padding: const EdgeInsets.only(right: 4.0),
               child: Icon(Icons.sensors, size: 12, color: tokens.onScrim),
@@ -430,16 +446,17 @@ class _MediaTileState extends State<MediaTile> {
                 )
               ),
             ),
-          Text(
-            isStation ? 'STATION' : (isLive ? 'LIVE' : (widget.spec.durationText ?? '')),
-            style: TextStyle(
-              color: tokens.onScrim,
-              fontSize: 11.2,
-              letterSpacing: 0.5,
-              fontWeight: FontWeight.w500,
-              height: 1.6,
+          if (badgeText.isNotEmpty)
+            Text(
+              badgeText,
+              style: TextStyle(
+                color: tokens.onScrim,
+                fontSize: 11.2,
+                letterSpacing: 0.5,
+                fontWeight: FontWeight.w500,
+                height: 1.6,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -635,7 +652,8 @@ class _MediaTileState extends State<MediaTile> {
                     // thumbnail, and over a running video it is stale chrome.
                     if (widget.spec.durationText != null ||
                         widget.spec.durationTone == DurationBadgeTone.live ||
-                        widget.spec.durationTone == DurationBadgeTone.station)
+                        widget.spec.durationTone == DurationBadgeTone.station ||
+                        widget.spec.durationTone == DurationBadgeTone.mix)
                       Positioned(
                         bottom: 6,
                         right: 6,

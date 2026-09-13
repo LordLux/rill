@@ -477,6 +477,17 @@ class QueueController extends Notifier<QueueState> {
   /// Whether [undoStartMix] has anything to restore.
   bool get canUndoStartMix => _replaced != null;
 
+  /// A `mix.start` is on the wire.
+  ///
+  /// `mix.start` is a real round trip (~0.5-1 s measured), and until it
+  /// returns there is nothing on screen to show the tap registered — so it
+  /// reads as a dead click and gets repeated. Without a guard the second tap
+  /// starts a second mix, and the two land in sequence: the queue fills, then
+  /// is immediately replaced again, and the undo snapshot taken by the second
+  /// call is *the first mix* rather than what the user actually had.
+  bool get isStartingMix => _starting;
+  bool _starting = false;
+
   /// The last extension failure, or null.
   ///
   /// Read by the queue panel so a mix that stopped early can say why rather
@@ -555,7 +566,20 @@ class QueueController extends Notifier<QueueState> {
   /// replaced when the call fails, so a failed mix leaves the existing queue
   /// playing rather than emptying it.
   Future<void> startMix(String playlistId, {String? videoId}) async {
-    final result = await ref.read(mixServiceProvider).start(playlistId, videoId: videoId);
+    // A second tap while the first is still in flight is the same tap. See
+    // [isStartingMix] for what it used to cost.
+    if (_starting) return;
+    _starting = true;
+
+    final MixStart result;
+    try {
+      result = await ref.read(mixServiceProvider).start(playlistId, videoId: videoId);
+    } finally {
+      // Cleared before the state below is touched, and in a `finally` so a
+      // failed start does not wedge every later attempt.
+      _starting = false;
+    }
+
     if (result.items.isEmpty) {
       throw StateError('mix.start returned no items for $playlistId');
     }

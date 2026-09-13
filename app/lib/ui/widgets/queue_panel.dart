@@ -426,90 +426,109 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Ink(
-              key: _headerKey,
-              color: scheme.surfaceContainerHighest,
-              child: InkWell(
-                onTap: _clearing ? null : () => setState(() => _expanded = !_expanded),
-                borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
-                child: Padding(
-                  padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                // A mix says so, and says which one. The queue
-                                // behaves differently at its end — it extends
-                                // rather than stopping — so the panel naming
-                                // it is not decoration (Task 26 §3).
-                                if (queue.isMix) ...[
-                                  Icon(Icons.podcasts, size: 15, color: scheme.onSurfaceVariant),
-                                  const SizedBox(width: 6),
-                                ],
-                                Expanded(
-                                  child: Text(
-                                    _headerTitle(queue, nextItem),
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: scheme.onSurface,
+            Material(
+              color: Colors.transparent,
+              child: Ink(
+                key: _headerKey,
+                color: scheme.surfaceContainerHighest,
+                child: InkWell(
+                  onTap: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                  borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  // A mix says so, and says which one. The queue
+                                  // behaves differently at its end — it extends
+                                  // rather than stopping — so the panel naming
+                                  // it is not decoration (Task 26 §3).
+                                  if (queue.isMix) ...[
+                                    Icon(Icons.podcasts, size: 15, color: scheme.onSurfaceVariant),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      _headerTitle(queue, nextItem),
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: scheme.onSurface,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Builder(
+                                builder: (context) {
+                                  final (text, icon) = _headerSubtitle(queue, controller, _expanded);
+                                  final textWidget = Text(
+                                    text,
+                                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _headerSubtitle(queue, controller),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurfaceVariant,
+                                  );
+                                  return AnimatedCrossFade(
+                                    duration: const Duration(milliseconds: 200),
+                                    crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                    // subtitle slides upwards when appearing
+                                    firstChild: _mixSubtitle(icon, textWidget),
+                                    secondChild: _mixSubtitle(icon, textWidget),
+                                  );
+                                },
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_expanded) ...[
-                        TextButton(
-                          onPressed: _clearing ? null : () => _animateClear(controller),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            foregroundColor: scheme.onSurface,
-                          ),
-                          child: Row(
-                            children: [
-                              RotationTransition(
-                                turns: _iconSpinCtrl.drive(
-                                  Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
-                                ),
-                                child: const Icon(Icons.clear_all_sharp, size: 18),
-                              ),
-                              const SizedBox(width: 4),
-                              const Text('Clear'),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 2),
-                      ],
-                      AnimatedRotation(
-                        turns: _expanded ? 0 : 0.5,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeOutCubic,
-                        child: IconButton(
-                          icon: Icon(Icons.keyboard_arrow_up),
-                          color: scheme.onSurfaceVariant,
-                          onPressed: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                        AnimatedCrossFade(
+                          duration: const Duration(milliseconds: 200),
+                          crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                          firstChild: Row(
+                            children: [
+                              TextButton(
+                                onPressed: _clearing ? null : () => _animateClear(controller),
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  foregroundColor: scheme.onSurface,
+                                ),
+                                child: Row(
+                                  children: [
+                                    RotationTransition(
+                                      turns: _iconSpinCtrl.drive(
+                                        Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
+                                      ),
+                                      child: const Icon(Icons.clear_all_sharp, size: 18),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text('Clear'),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                            ],
+                          ),
+                          secondChild: const SizedBox.shrink(),
                         ),
-                      ),
-                    ],
+                        AnimatedRotation(
+                          turns: _expanded ? 0 : 0.5,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          child: IconButton(
+                            icon: Icon(Icons.keyboard_arrow_up),
+                            color: scheme.onSurfaceVariant,
+                            onPressed: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -596,6 +615,19 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     }
 
     return panel;
+  }
+
+  Widget _mixSubtitle(Widget? icon, Text textWidget) {
+    if (icon != null)
+      return Row(
+        children: [
+          icon,
+          const SizedBox(width: 4),
+          textWidget,
+        ],
+      );
+
+    return textWidget;
   }
 }
 
@@ -720,21 +752,26 @@ String _headerTitle(QueueState queue, VideoItem? nextItem) {
   return nextItem != null ? 'Next: ${nextItem.title}' : 'Queue';
 }
 
-/// The line under it: position, and — for a mix — whether it is still growing.
+/// The line under the headline.
 ///
-/// §4 asks for the user to be told if a mix stopped. Three states worth
-/// distinguishing, because they mean different things to somebody watching:
-/// still extending, genuinely finished, and could not extend.
-String _headerSubtitle(QueueState queue, QueueController controller) {
-  final position = queue.currentIndex != null
-      ? '${queue.currentIndex! + 1} / ${queue.items.length}'
-      : '${queue.items.length} items';
+/// **A mix shows no position, deliberately.** `n / total` is honest for a
+/// hand-built queue and misleading for a radio: the total is a sliding window
+/// that grows by 24 every time the queue tops itself up, so a viewer watching
+/// the denominator climb would reasonably read it as the list changing under
+/// them rather than as the thing working. What a mix shows instead is what is
+/// coming next, and — per §4 — whether it has stopped.
+(String, Widget?) _headerSubtitle(QueueState queue, QueueController controller, bool expanded) {
+  final position = queue.currentIndex != null ? '${queue.currentIndex! + 1} / ${queue.items.length}' : '${queue.items.length} items';
 
   final mix = queue.mix;
-  if (mix == null) return position;
-  if (controller.mixError != null) return '$position · paused — could not load more';
-  if (mix.exhausted) return '$position · end of mix';
-  return '$position · mix';
+
+  if (expanded) return ('Mixes are playlists YouTube makes for you', null);
+  if (mix == null) return (position, null);
+  if (controller.mixError != null) return ('Paused — could not load more', null);
+  if (mix.exhausted) return ('End of mix', null);
+
+  final nextItem = queue.next;
+  return (nextItem?.title != null ? 'Next: ${nextItem?.title}' : 'Mix', null);
 }
 
 class _QueueItemTile extends StatefulWidget {
@@ -787,9 +824,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
   Widget _durationBadge(BuildContext context) {
     final tokens = Theme.of(context).tokens;
     final tone = durationToneFor(widget.item);
-    final text = tone == DurationBadgeTone.station
-        ? 'STATION'
-        : (tone == DurationBadgeTone.live ? 'LIVE' : formatVideoDuration(widget.item));
+    final text = tone == DurationBadgeTone.station ? 'STATION' : (tone == DurationBadgeTone.live ? 'LIVE' : formatVideoDuration(widget.item));
     if (text == null) return const SizedBox.shrink();
 
     final isLiveLike = tone == DurationBadgeTone.live || tone == DurationBadgeTone.station;

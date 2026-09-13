@@ -52,9 +52,14 @@ class FakeMixService implements MixService {
   /// guard actually do something.
   Completer<MixExtension>? pending;
 
+  /// The same, for `start` — a real `mix.start` takes ~0.5-1 s, which is the
+  /// whole window the double-tap bug lived in.
+  Completer<void>? pendingStart;
+
   @override
   Future<MixStart> start(String playlistId, {String? videoId}) async {
     startCalls++;
+    if (pendingStart != null) await pendingStart!.future;
     final items = videos(25, from: _issued);
     _issued += 25;
     return MixStart(playlistId: playlistId, title: 'My Mix', items: items);
@@ -76,7 +81,7 @@ class FakeMixService implements MixService {
   }
 }
 
-ProviderContainer containerWith(FakeMixService service) {
+ProviderContainer containerWith(MixService service) {
   final container = ProviderContainer(
     overrides: [mixServiceProvider.overrideWithValue(service)],
   );
@@ -151,6 +156,66 @@ void main() {
       queue.undoStartMix();
       expect(stateOf(c).items.map((v) => v.id), after.items.map((v) => v.id));
       expect(queue.canUndoStartMix, isFalse);
+    });
+
+    test('a second tap while the first is in flight is ignored', () async {
+      // Reported from the app: `mix.start` is a ~1 s round trip with nothing on
+      // screen to show the tap registered, so it reads as a dead click and gets
+      // repeated. Both starts used to land, one after the other — the queue
+      // filled and was then immediately replaced again.
+      final service = FakeMixService();
+      service.pendingStart = Completer<void>();
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+      queue.addToQueue(video('mine1'));
+
+      final first = queue.startMix('RDxyz');
+      expect(queue.isStartingMix, isTrue);
+      final second = queue.startMix('RDxyz');
+
+      service.pendingStart!.complete();
+      await first;
+      await second;
+
+      expect(service.startCalls, 1, reason: 'the second tap never reached the wire');
+      expect(stateOf(c).items, hasLength(25));
+    });
+
+    test('and the undo still restores the hand-built queue, not the mix', () async {
+      // The sharp edge of the double-start: the second call captured the
+      // *first mix* as the queue to restore, so Undo put back a mix the user
+      // never built.
+      final service = FakeMixService();
+      service.pendingStart = Completer<void>();
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+      queue.addToQueue(video('mine1'));
+      queue.addToQueue(video('mine2'));
+
+      final first = queue.startMix('RDxyz');
+      final second = queue.startMix('RDxyz');
+      service.pendingStart!.complete();
+      await first;
+      await second;
+
+      queue.undoStartMix();
+      expect(stateOf(c).items.map((v) => v.id), ['mine1', 'mine2']);
+      expect(stateOf(c).isMix, isFalse);
+    });
+
+    test('a failed start does not wedge later attempts', () async {
+      // The guard is cleared in a `finally`, or one network blip would make
+      // every mix tile inert for the rest of the session.
+      final service = FailingStartService();
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      await expectLater(queue.startMix('RDxyz'), throwsA(isA<StateError>()));
+      expect(queue.isStartingMix, isFalse);
+
+      service.fail = false;
+      await queue.startMix('RDxyz');
+      expect(stateOf(c).items, hasLength(25));
     });
 
     test('there is nothing to undo when the queue was empty', () async {
@@ -396,6 +461,21 @@ void main() {
       expect(queue.canUndoStartMix, isFalse);
     });
   });
+}
+
+/// A service whose `start` throws until `fail` is cleared.
+class FailingStartService implements MixService {
+  bool fail = true;
+
+  @override
+  Future<MixStart> start(String playlistId, {String? videoId}) async {
+    if (fail) throw StateError('mix.start blew up');
+    return MixStart(playlistId: playlistId, title: 'My Mix', items: videos(25));
+  }
+
+  @override
+  Future<MixExtension> extend(String playlistId, String afterVideoId) async =>
+      const MixExtension(items: [], exhausted: true);
 }
 
 /// Let every pending microtask settle — the extensions are fire-and-forget, so
