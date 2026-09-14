@@ -228,6 +228,13 @@ that do not exist yet.
 /docs             architecture.md, protocol.md, tasks/
 ```
 
+## Reports
+
+**A report is either text in the chat or an HTML file in the repository root —
+never a Markdown file under `docs/`.** `docs/tasks/` holds task specs, not
+reports. Root `*.html` is gitignored, so an HTML report is not committed either.
+Default to chat text unless asked for HTML.
+
 ## Commands
 
 ```bash
