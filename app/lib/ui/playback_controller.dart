@@ -297,6 +297,11 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// slower one must not open its video over the newer one's.
   Future<void> open(VideoItem item) async {
     final generation = ++_generation;
+    // A pending resume belongs to one video. Dropped the moment a different one
+    // opens — otherwise an open superseded before it resolved (a quick tap on
+    // something else during an undo) returns at its generation check without
+    // consuming it, and the *next* video seeks to that position.
+    if (_resumeAt?.videoId != item.id) _resumeAt = null;
 
     _endSession(reportState: 'paused');
 
@@ -353,7 +358,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // the media open, so the seek has something to seek in.
       final resume = _resumeAt;
       _resumeAt = null;
-      if (resume != null) unawaited(seek(resume));
+      if (resume != null && resume.videoId == item.id) unawaited(seek(resume.position));
 
       // Immediately, not on the first tick: this is the report that registers
       // the view at all, and a 15 s wait would lose every short watch.
@@ -433,10 +438,13 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// Cleared on any failure path too, so a resume cannot leak into a later,
   /// unrelated open.
   void resumeAt(Duration position) {
-    if (position > Duration.zero) _resumeAt = position;
+    if (position <= Duration.zero) return;
+    // Bound to the video the queue is on now — the one the restore reopens.
+    final videoId = ref.read(queueProvider).current?.id;
+    if (videoId != null) _resumeAt = (videoId: videoId, position: position);
   }
 
-  Duration? _resumeAt;
+  ({String videoId, Duration position})? _resumeAt;
 
   /// The user answering a `retry: "user"` error (§4).
   Future<void> retry() async {
@@ -459,8 +467,9 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   Future<void> _onCompleted() async {
     _endSession(reportState: 'ended');
-    // Autoplay, or stop. `advance` answers false at the end of the queue, and
-    // pulling from related or a mix is explicitly a later task.
+    // Autoplay, or stop. `advance` answers false at the end of the queue — and
+    // at the end of a mix with a top-up still out, the queue remembers and
+    // advances itself when it lands (`QueueController._advanceWhenExtended`).
     ref.read(queueProvider.notifier).advance();
   }
 

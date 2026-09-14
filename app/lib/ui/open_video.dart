@@ -68,6 +68,10 @@ Future<void> startMixFromTile(
     // `startMix` has already put the old queue back; this re-seeks it, so a
     // failed mix costs the user nothing but the message.
     if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+    // Nothing was playing before, so nothing came back — and the watch page was
+    // pushed on the tap. Leaving it up would strand the user on "Nothing
+    // playing." with an error snackbar over it; take them back where they were.
+    if (container.read(queueProvider).isEmpty) toMiniPlayerIn(container);
     final message = switch (e) {
       RpcException(code: 'AUTH_REQUIRED') => 'Sign in to play mixes',
       RpcException(:final message) => message,

@@ -45,7 +45,8 @@ class WatchSkeleton extends ConsumerStatefulWidget {
   ConsumerState<WatchSkeleton> createState() => _WatchSkeletonState();
 }
 
-class _WatchSkeletonState extends ConsumerState<WatchSkeleton> with SingleTickerProviderStateMixin {
+class _WatchSkeletonState extends ConsumerState<WatchSkeleton>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 900),
@@ -64,68 +65,80 @@ class _WatchSkeletonState extends ConsumerState<WatchSkeleton> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
-    final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
+    final theatre = ref.watch(
+      playerViewProvider.select((view) => view.theatre),
+    );
     final playback = ref.watch(playbackProvider);
-    final item = ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
+    final item =
+        ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
 
     return FadeTransition(
       opacity: _pulse,
-      // Excluded from semantics, not just visually inert: a screen reader
-      // announcing a page of empty boxes is worse than announcing nothing.
-      child: ExcludeSemantics(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final geometry = computeWatchGeometry(
-              availableWidth: constraints.maxWidth,
-              viewportHeight: MediaQuery.of(context).size.height,
-              aspectRatio: ScreenValues.normalAspectRatio,
-              theatre: theatre,
-            );
+      // The boxes are excluded — a screen reader announcing a page of empty
+      // placeholders is noise — but the page is not left silent: for the second
+      // a mix takes to load, it says what it is doing.
+      child: Semantics(
+        container: true,
+        liveRegion: true,
+        label: 'Loading',
+        child: ExcludeSemantics(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final geometry = computeWatchGeometry(
+                availableWidth: constraints.maxWidth,
+                viewportHeight: MediaQuery.of(context).size.height,
+                aspectRatio: ScreenValues.normalAspectRatio,
+                theatre: theatre,
+              );
 
-            return WatchLayout(
-              geometry: geometry,
-              playerSlot: _Block(radius: theatre ? 0 : 12),
-              theatreBackground: theatre ? Colors.black : null,
-              metadataSlot: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _MetaBlock(),
-                    // Collapsed to one column: the queue and the related list
-                    // move under the metadata, exactly as the real page moves
-                    // them.
-                    if (!geometry.isTwoColumn) ...[
-                      const SizedBox(height: 24),
-                      const _QueueBlock(maxHeight: 400),
-                      const SizedBox(height: 24),
-                      const _RelatedBlock(asGrid: true),
+              return WatchLayout(
+                geometry: geometry,
+                playerSlot: _Block(radius: theatre ? 0 : 12),
+                theatreBackground: theatre ? Colors.black : null,
+                metadataSlot: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const _MetaBlock(),
+                      // Collapsed to one column: the queue and the related list
+                      // move under the metadata, exactly as the real page moves
+                      // them.
+                      if (!geometry.isTwoColumn) ...[
+                        const SizedBox(height: 24),
+                        const _QueueBlock(maxHeight: 400),
+                        const SizedBox(height: 24),
+                        const _RelatedBlock(asGrid: true),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              railSlot: Padding(
-                padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _QueueBlock(maxHeight: geometry.playerHeight, randomSeed: item.hashCode),
-                    const SizedBox(height: 24),
-                    const _RelatedBlock(),
-                  ],
+                railSlot: Padding(
+                  padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _QueueBlock(
+                        maxHeight: geometry.playerHeight,
+                        randomSeed: item.hashCode,
+                      ),
+                      const SizedBox(height: 24),
+                      const _RelatedBlock(),
+                    ],
+                  ),
                 ),
-              ),
-              // Never scrollable. It is a placeholder, and letting it scroll
-              // would let a user drag it about as though it were content.
-              scrollView: (children) => SingleChildScrollView(
-                physics: const NeverScrollableScrollPhysics(),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: children,
+                // Never scrollable. It is a placeholder, and letting it scroll
+                // would let a user drag it about as though it were content.
+                scrollView: (children) => SingleChildScrollView(
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: children,
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -228,12 +241,12 @@ class _QueueBlock extends StatelessWidget {
   static const int rows = 11;
   final double maxHeight;
   final int randomSeed;
-  
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final random = math.Random(randomSeed);
-    
+
     return Container(
       constraints: BoxConstraints(maxHeight: math.max(0.0, maxHeight)),
       decoration: BoxDecoration(
@@ -251,7 +264,9 @@ class _QueueBlock extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(12),
+                  ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 14, 16),
@@ -276,11 +291,22 @@ class _QueueBlock extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Icon(Icons.clear_all_sharp, color: Theme.of(context).colorScheme.surfaceContainerHighest, size: 18),
+                      Icon(
+                        Icons.clear_all_sharp,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
+                        size: 18,
+                      ),
                       const SizedBox(width: 2.5),
                       const _Block(height: 14, width: 33.5, radius: 10),
                       const SizedBox(width: 22),
-                      Icon(Icons.keyboard_arrow_up_rounded, color: Theme.of(context).colorScheme.surfaceContainerHighest),
+                      Icon(
+                        Icons.keyboard_arrow_up_rounded,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
+                      ),
                     ],
                   ),
                 ),
@@ -289,7 +315,11 @@ class _QueueBlock extends StatelessWidget {
                 Stack(
                   children: [
                     Container(
-                      color: i == 0 ? scheme.surfaceContainerHighest.withValues(alpha: 0.35) : null,
+                      color: i == 0
+                          ? scheme.surfaceContainerHighest.withValues(
+                              alpha: 0.35,
+                            )
+                          : null,
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(12, 12, 14, 12),
                         child: Row(
@@ -306,14 +336,20 @@ class _QueueBlock extends StatelessWidget {
                                   // Title
                                   FractionallySizedBox(
                                     alignment: Alignment.centerLeft,
-                                    widthFactor: 0.8 * (random.nextDouble() * 0.6 + 0.4), // Randomize width a bit
+                                    widthFactor:
+                                        0.8 *
+                                        (random.nextDouble() * 0.6 +
+                                            0.4), // Randomize width a bit
                                     child: const _Block(height: 12),
                                   ),
                                   const SizedBox(height: 10),
                                   // Channel name
                                   FractionallySizedBox(
                                     alignment: Alignment.centerLeft,
-                                    widthFactor: 0.3 * (random.nextDouble() * 0.6 + 0.4), // Randomize width a bit
+                                    widthFactor:
+                                        0.3 *
+                                        (random.nextDouble() * 0.6 +
+                                            0.4), // Randomize width a bit
                                     child: const _Block(height: 9),
                                   ),
                                 ],
@@ -321,7 +357,10 @@ class _QueueBlock extends StatelessWidget {
                             ),
                             // Handle
                             const SizedBox(width: 12),
-                            Icon(Icons.drag_handle_rounded, color: scheme.surfaceContainerHighest),
+                            Icon(
+                              Icons.drag_handle_rounded,
+                              color: scheme.surfaceContainerHighest,
+                            ),
                           ],
                         ),
                       ),
@@ -331,7 +370,11 @@ class _QueueBlock extends StatelessWidget {
                         left: -0.5,
                         top: 0,
                         bottom: 0,
-                        child: Icon(Icons.play_arrow, color: scheme.surfaceContainerHighest, size: 12),
+                        child: Icon(
+                          Icons.play_arrow,
+                          color: scheme.surfaceContainerHighest,
+                          size: 12,
+                        ),
                       ),
                   ],
                 ),
