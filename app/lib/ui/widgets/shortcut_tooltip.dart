@@ -31,6 +31,41 @@ class ShortcutTooltip extends StatelessWidget {
         child: child,
       );
     }
+
+    final keys = keyLabel.split('+');
+    if (keys.length < 2) {
+      return Tooltip(
+        preferBelow: false,
+        decoration: _bubbleDecoration,
+        waitDuration: const Duration(milliseconds: 300),
+        richMessage: TextSpan(
+          style: _textStyle,
+          children: [
+            TextSpan(text: '$label  '),
+            WidgetSpan(alignment: PlaceholderAlignment.middle, child: _KeyBadge(keys.first)),
+          ],
+        ),
+        child: child,
+      );
+    }
+    
+    final shortcut = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < keys.length; i++) ...[
+          if (i > 0) ...[
+            const SizedBox(width: 2),
+            Transform.translate(
+              offset: const Offset(0, -2),
+              child: Text('+', style: _textStyle),
+            ),
+            const SizedBox(width: 2),
+          ],
+          _KeyBadge(keys[i]),
+        ],
+      ],
+    );
+
     return Tooltip(
       preferBelow: false,
       decoration: _bubbleDecoration,
@@ -39,7 +74,7 @@ class ShortcutTooltip extends StatelessWidget {
         style: _textStyle,
         children: [
           TextSpan(text: '$label  '),
-          WidgetSpan(alignment: PlaceholderAlignment.middle, child: _KeyBadge(keyLabel)),
+          WidgetSpan(alignment: PlaceholderAlignment.middle, child: shortcut),
         ],
       ),
       child: child,
@@ -78,19 +113,32 @@ class _KeyBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
+        color: Colors.black.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.5),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
-          height: 1.1,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 3.5),
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.5),
+          ),
+          // Removed the Center widget and added textAlign here:
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+              height: 1.2,
+            ),
+          ),
         ),
       ),
     );

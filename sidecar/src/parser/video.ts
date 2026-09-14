@@ -14,7 +14,14 @@
 import type { FeedItem, VideoDetail } from '../types.ts';
 import { parseFeed } from './feed.ts';
 import { premiereStartMs } from './premiere.ts';
-import { bestImageUrl, channelIdFrom, durationToSeconds, scanOwnerBadges, text } from './text.ts';
+import {
+  bestImageUrl,
+  channelIdFrom,
+  durationToSeconds,
+  exactCountFromText,
+  scanOwnerBadges,
+  text,
+} from './text.ts';
 import { deepCollect, deepFind, get, isObject, num, str, type Json, type JsonObject } from './tree.ts';
 
 function findRenderer(root: Json, key: string): Json {
@@ -91,6 +98,24 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     text(get(primary, 'viewCount', 'videoViewCountRenderer', 'viewCount')) ??
     text(get(primary, 'viewCount', 'videoViewCountRenderer', 'shortViewCount'));
 
+  // **The text first, because it is the number on screen.** The tooltip shows
+  // `viewCountText` verbatim, so deriving the short form from the same string
+  // makes the two agree by construction rather than by coincidence.
+  //
+  // `originalViewCount` is only a fallback, and **`"0"` there means "not filled
+  // in", not zero** — measured 2026-09-13 across 24 watch pages: 18 carried
+  // `"0"` beside a real count ("0" next to "67,867 views"), 6 carried the actual
+  // number. The first version of this read that field first, trusting a single
+  // measurement that happened to land on one of the six, and `0 ?? fallback`
+  // never falls back — so most videos showed "0 views". A genuinely unwatched
+  // video is still right: its text reads "0 views" and parses to 0 above.
+  const originalViewCount = num(
+    str(get(primary, 'viewCount', 'videoViewCountRenderer', 'originalViewCount')),
+  );
+  const viewCount =
+    exactCountFromText(viewCountText) ??
+    (originalViewCount !== null && originalViewCount > 0 ? originalViewCount : null);
+
   // `isLiveContent` dropped deliberately — it is a permanent "this is/was
   // live-form content" tag, not a current-status signal, and stays `true`
   // forever once a broadcast has ever gone live. See `player.ts`'s
@@ -155,6 +180,7 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     durationSeconds: isLive ? null : lengthSeconds,
     isLive,
     viewCountText,
+    viewCount,
     publishedText:
       text(get(primary, 'relativeDateText')) ?? text(get(primary, 'dateText')),
     // The exact date, kept as a field of its own rather than folded into the

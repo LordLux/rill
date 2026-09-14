@@ -100,6 +100,11 @@ void main() {
   Future<void> clickRemoveOn(WidgetTester tester, Finder row) async {
     await mouse.moveTo(tester.getCenter(row));
     await tester.pump();
+    // The X fades in over 50 ms (`AnimatedCrossFade`), and since the row became
+    // a `Stack` it is not hit-testable on the very first frame of that fade —
+    // a tap aimed at its centre lands on the `ListTile` body. No person can
+    // click inside one frame of hovering, so this waits the way a pointer does.
+    await tester.pump(const Duration(milliseconds: 100));
 
     final remove = find.descendant(of: row, matching: find.byTooltip('Remove'));
     expect(remove, findsOneWidget, reason: 'the X is not reachable on this row');
@@ -249,6 +254,7 @@ void main() {
     addTearDown(mouse.removePointer);
     await mouse.moveTo(tester.getCenter(row));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100)); // the X's fade-in; see clickRemoveOn
 
     final x = find.descendant(of: row, matching: find.byTooltip('Remove'));
     await mouse.moveTo(tester.getCenter(x));

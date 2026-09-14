@@ -94,6 +94,8 @@ const SHAPES = {
     subtitle: 'string?',
     thumbnailUrl: 'string',
     videoCount: 'number?',
+    seedVideoId: 'string?',
+    startParams: 'string?',
   },
   playlist: {
     id: 'string',
@@ -702,13 +704,15 @@ describe.if(HAS_CAPTURES)('shorts', () => {
   // a SHORTS-styled duration overlay — is classified, not stripped. By id,
   // per the task's own mutation-check instruction: a hardcoded `false` would
   // pass a test that only checked "the field exists".
-  // `search-artist.json` (query "Ado"), not `history`: this capture's watch
-  // history happened to carry no SHORTS-badged entry, and the task's own
-  // premise (§1) is that Shorts interleave with ordinary videos in *search*.
-  test.skipIf(!hasFixture('search-artist'))('a SHORTS-badged video is flagged isShort, and the badge is not duplicated', () => {
-    const raw = fixture('search-artist');
-    const items = parseFeed(raw, 'search-artist').items;
-    const short = items.find((item) => item.kind === 'video' && item.id === 'T0oRfI3PYCU');
+  // The fixture moves with the capture, because the Short does: in the Task 21
+  // capture it was `search-artist.json`'s `T0oRfI3PYCU`; re-captured
+  // 2026-09-14 that same video arrives inside a `gridShelfViewModel` of
+  // `shortsLockupViewModel`s (stripped whole, correctly), and the corpus's only
+  // SHORTS-styled `videoRenderer` is this watch-history entry. Checked against
+  // the raw overlay (`"style":"SHORTS"`), not against this parser's output.
+  test('a SHORTS-badged video is flagged isShort, and the badge is not duplicated', () => {
+    const items = parseFeed(history, 'history').items;
+    const short = items.find((item) => item.kind === 'video' && item.id === 'i7Cinf_GUto');
     expect(short?.kind).toBe('video');
     if (short?.kind !== 'video') return;
     expect(short.isShort).toBe(true);
@@ -738,9 +742,11 @@ describe.if(HAS_CAPTURES)('music note (per video)', () => {
     expect(musicVideo.isMusic).toBe(true);
   });
 
+  // A classic tile carrying no badge of any kind in the raw response — see
+  // the "flagged neither" test for why it is not a lockup.
   test('an ordinary video is not flagged isMusic', () => {
-    const items = parseFeed(history, 'history').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'EgpLbFbC_4o');
+    const items = parseFeed(fixture('search'), 'search').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'zW5wpJY1rgQ');
     expect(ordinary?.kind).toBe('video');
     if (ordinary?.kind !== 'video') return;
     expect(ordinary.isMusic).toBe(false);
@@ -748,14 +754,17 @@ describe.if(HAS_CAPTURES)('music note (per video)', () => {
 });
 
 describe.if(HAS_CAPTURES)('verified / artist-channel badges', () => {
-  test('an official artist channel is flagged isArtistChannel, not isVerified', () => {
-    const search = fixture('search');
-    const items = parseFeed(search, 'search').items;
-    const lofiGirl = items.find((item) => item.kind === 'channel' && item.id === 'UCSJ4gkVC6NrvII8umztf0Ow');
-    expect(lofiGirl?.kind).toBe('channel');
-    if (lofiGirl?.kind !== 'channel') return;
-    expect(lofiGirl.isArtistChannel).toBe(true);
-    expect(lofiGirl.isVerified).toBe(false);
+  // Search stopped carrying channel tiles at all in the 2026-09-14 capture (0
+  // `channelRenderer`s in either search fixture), so this reads the
+  // subscriptions list. Its raw badge is `BADGE_STYLE_TYPE_VERIFIED_ARTIST`
+  // with no plain `BADGE_STYLE_TYPE_VERIFIED` beside it.
+  test.skipIf(!hasFixture('channels'))('an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    const items = parseFeed(fixture('channels'), 'channels').items;
+    const artist = items.find((item) => item.kind === 'channel' && item.id === 'UCUnHZYgNkPRP2lBIStjdrmA');
+    expect(artist?.kind).toBe('channel');
+    if (artist?.kind !== 'channel') return;
+    expect(artist.isArtistChannel).toBe(true);
+    expect(artist.isVerified).toBe(false);
   });
 
   test('a video from an official artist channel is flagged isArtistChannel', () => {
@@ -778,9 +787,13 @@ describe.if(HAS_CAPTURES)('verified / artist-channel badges', () => {
     expect(verifiedVideo.isArtistChannel).toBe(false);
   });
 
+  // Deliberately a *classic* tile. A lockup would pass this for the wrong
+  // reason: `scanOwnerBadges` reads only `metadataBadgeRenderer`, and a
+  // lockup carries its tick as an `attachmentRuns` image on the channel name,
+  // so no lockup is ever flagged verified (open defect, CLAUDE.md).
   test('an unbadged channel/video is flagged neither', () => {
-    const items = parseFeed(history, 'history').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'EgpLbFbC_4o');
+    const items = parseFeed(fixture('search'), 'search').items;
+    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'zW5wpJY1rgQ');
     expect(ordinary?.kind).toBe('video');
     if (ordinary?.kind !== 'video') return;
     expect(ordinary.isVerified).toBe(false);

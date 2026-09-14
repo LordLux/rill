@@ -261,11 +261,21 @@ export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'VISIONOS
  * `VISIONOS`). `signatureTimestamp` is sent for every client, including the
  * ones whose formats need no deciphering — it describes the player script, not
  * the caller, and spike 03 measured `VISIONOS` passing with it.
+ *
+ * **`playlistId` changes the response, which is why it is a parameter and not
+ * a detail — Task 26, measured 2026-09-12.** A `/player` call that names the
+ * playlist comes back with `list=<playlistId>` in its
+ * `videostatsWatchtimeUrl`; the same call without it does not carry the
+ * parameter at all. That is the difference between a watch reported as part of
+ * a mix and one reported standalone, and `playback.report` is load-bearing
+ * (F6). Only the reporting path passes it — the resolution ladder asks without
+ * one, because a mix changes nothing about which streams exist.
  */
 export function playerPayload(
   session: Session,
   videoId: string,
   client?: PlayerClient,
+  playlistId?: string | null,
 ): Record<string, unknown> {
   return {
     videoId,
@@ -280,6 +290,7 @@ export function playerPayload(
       },
     },
     ...(client ? { client } : {}),
+    ...(playlistId ? { playlistId } : {}),
   };
 }
 

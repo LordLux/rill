@@ -116,6 +116,8 @@ interface MixItem {
   subtitle: string | null;
   thumbnailUrl: string;
   videoCount: number | null;
+  seedVideoId: string | null;       // the song the tile advertises — plays first
+  startParams: string | null;       // the tile's click-target params, opaque
 }
 
 interface PlaylistItem { kind: 'playlist'; id: string; title: string;
@@ -156,6 +158,7 @@ view-based surface.
 | Video tile | `videoRenderer`, `richItemRenderer`, `playlistVideoRenderer` | `lockupViewModel` |
 | Filter bar | `chipCloudChipRenderer` (top level) | `ChipsShelfView` → `ChipView` (shelf) |
 | Mix tile | — | `CollectionThumbnailView` + `"Mix"` badge |
+| Mix/playlist panel | — | *(none — a bare object, see below)* |
 | Hover actions | — | `ThumbnailHoverOverlayToggleActionsView` |
 | Continuation | `continuationItemRenderer` | `ContinuationItem` |
 
@@ -224,6 +227,13 @@ that do not exist yet.
   /lib/ui         screens, tiles, player
 /docs             architecture.md, protocol.md, tasks/
 ```
+
+## Reports
+
+**A report is either text in the chat or an HTML file in the repository root —
+never a Markdown file under `docs/`.** `docs/tasks/` holds task specs, not
+reports. Root `*.html` is gitignored, so an HTML report is not committed either.
+Default to chat text unless asked for HTML.
 
 ## Commands
 
@@ -472,6 +482,27 @@ the answer.
   history, and history about a retired client has to survive. The cost is real
   and worth knowing: adding a dated note to a sentence also stops it being
   checked.
+- **A mix is a sliding window, and the watch page's playlist panel is not a
+  renderer at all — Task 26, measured 2026-09-12.** The panel sits at
+  `contents.twoColumnWatchNextResults.playlist.playlist` as a **bare object**
+  with no wrapping renderer key, so the walker cannot see it: `isRendererKey`
+  needs a `Renderer`/`ViewModel`/`Model` suffix, and a whole-body `parseFeed`
+  therefore returns the panel's rows interleaved with the related rail's (45
+  items for a page whose panel holds 25). `parser/mix.ts` reaches it by path;
+  its *rows* are ordinary renderers and map through the ordinary mappers.
+  `playlistPanelRenderer` now occurs **nowhere** — checked for a mix and for an
+  ordinary `PL…` playlist — but the `playlistpanel` vocabulary entry is kept
+  deliberately, because an unknown container is *pruned, not descended*
+  (`handleRenderer`'s default returns false), so removing it would turn a
+  reappearance of the wrapper into total silent loss.
+  **There is no continuation token**, `index` is ignored, and the response is a
+  window of ≤25 history + exactly 24 lookahead around whatever video you anchor
+  on. So `mix.extend {playlistId, afterVideoId}` re-anchors and returns only the
+  tail — the arithmetic stays in the sidecar (invariant 6). It answers
+  `{items[], exhausted}` because a mix ends two distinguishable ways (empty
+  tail; anchor absent after a server re-seed) that an empty `items[]` would
+  conflate. **`isInfinite` is `true` on every mix, including curated ones that
+  run out after ~51 items** — never branch on it.
 - **`bun run export-contract-corpus` runs the auditor itself, and exits 1 if it
   is red.** Not a courtesy — the export is what breaks `corpus.test.ts`, by
   writing a field with no sanitiser, and it breaks it *in a different file from
@@ -486,3 +517,9 @@ bridge) is specified but **not** to be built speculatively.
 
 Findings in `architecture.md` are dated where they were measured. They are
 dated observations, not permanent properties.
+
+## Deferred items
+
+- `MediaTile.onMore` is never wired up, so every 3-dot menu button on media tiles is disabled.
+- `ShortcutTooltip`'s plain tooltips show with no delay (the layout-crash risk described in architecture.md §2.8).
+- `deletePlaylist` does not assert that the delete actually succeeded (`assertSucceeded`).

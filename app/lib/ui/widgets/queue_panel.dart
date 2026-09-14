@@ -188,7 +188,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
 
       // Figure out which items are visible inside the list viewport.
       final entries = controller.entries;
-      // The row that survives the sweep is the one `clearUpcoming` keeps, which
+      // The row that survives the sweep is the one `clearAllButCurrent` keeps, which
       // is the *current* one — not row 0. They are the same only until autoplay
       // has advanced once.
       final keptEntry = ref.read(queueProvider).currentEntry;
@@ -255,7 +255,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
           if (!present.contains(entry)) entry,
       };
 
-      controller.clearUpcoming(keep: arrived);
+      controller.clearAllButCurrent(keep: arrived);
 
       if (mounted) {
         _resetClearState();
@@ -426,74 +426,119 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Ink(
-              key: _headerKey,
-              color: scheme.surfaceContainerHighest,
-              child: InkWell(
-                onTap: _clearing ? null : () => setState(() => _expanded = !_expanded),
-                borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
-                child: Padding(
-                  padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _expanded ? 'Queue' : (nextItem != null ? 'Next: ${nextItem.title}' : 'Queue'),
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSurface,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              queue.currentIndex != null ? '${queue.currentIndex! + 1} / ${queue.items.length}' : '${queue.items.length} items',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_expanded) ...[
-                        TextButton(
-                          onPressed: _clearing ? null : () => _animateClear(controller),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            foregroundColor: scheme.onSurface,
-                          ),
-                          child: Row(
+            Material(
+              color: Colors.transparent,
+              child: Ink(
+                key: _headerKey,
+                color: scheme.surfaceContainerHighest,
+                child: InkWell(
+                  onTap: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                  borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              RotationTransition(
-                                turns: _iconSpinCtrl.drive(
-                                  Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
-                                ),
-                                child: const Icon(Icons.clear_all_sharp, size: 18),
+                              Row(
+                                children: [
+                                  // A mix says so, and says which one. The queue
+                                  // behaves differently at its end — it extends
+                                  // rather than stopping — so the panel naming
+                                  // it is not decoration (Task 26 §3).
+                                  if (queue.isMix) ...[
+                                    Icon(Icons.podcasts, size: 15, color: scheme.onSurfaceVariant),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      _headerTitle(queue, nextItem),
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: scheme.onSurface,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              const Text('Clear'),
+                              const SizedBox(height: 2),
+                              Builder(
+                                builder: (context) {
+                                  // Both states built every time. Passing the *current*
+                                  // subtitle to both slots meant the text swapped
+                                  // instantly and the crossfade faded between two
+                                  // copies of the same thing.
+                                  Widget subtitleFor(bool expanded) {
+                                    final (text, icon) = _headerSubtitle(queue, controller, expanded);
+                                    return _mixSubtitle(
+                                      icon,
+                                      Text(
+                                        text,
+                                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    );
+                                  }
+
+                                  return AnimatedCrossFade(
+                                    duration: const Duration(milliseconds: 200),
+                                    crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                    // subtitle slides upwards when appearing
+                                    firstChild: subtitleFor(false),
+                                    secondChild: subtitleFor(true),
+                                  );
+                                },
+                              ),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 2),
-                      ],
-                      AnimatedRotation(
-                        turns: _expanded ? 0 : 0.5,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeOutCubic,
-                        child: IconButton(
-                          icon: Icon(Icons.keyboard_arrow_up),
-                          color: scheme.onSurfaceVariant,
-                          onPressed: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                        AnimatedCrossFade(
+                          duration: const Duration(milliseconds: 200),
+                          crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                          firstChild: Row(
+                            children: [
+                              TextButton(
+                                onPressed: _clearing ? null : () => _animateClear(controller),
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  foregroundColor: scheme.onSurface,
+                                ),
+                                child: Row(
+                                  children: [
+                                    RotationTransition(
+                                      turns: _iconSpinCtrl.drive(
+                                        Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
+                                      ),
+                                      child: const Icon(Icons.clear_all_sharp, size: 18),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text('Clear'),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                            ],
+                          ),
+                          secondChild: const SizedBox.shrink(),
                         ),
-                      ),
-                    ],
+                        AnimatedRotation(
+                          turns: _expanded ? 0 : 0.5,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          child: IconButton(
+                            icon: Icon(Icons.keyboard_arrow_up),
+                            color: scheme.onSurfaceVariant,
+                            onPressed: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -507,7 +552,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
               secondChild: const SizedBox(width: double.infinity, height: 0),
               firstChild: ConstrainedBox(
                 key: _listBoxKey,
-                constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 64.0)),
+                constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
                 child: SilkyScroll(
                   controller: _listScroll,
                   builder: (context, scrollController, physics, pointerDeviceKind) {
@@ -544,7 +589,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     );
 
     panel = Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 20),
       child: panel,
     );
 
@@ -580,6 +625,19 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     }
 
     return panel;
+  }
+
+  Widget _mixSubtitle(Widget? icon, Text textWidget) {
+    if (icon != null)
+      return Row(
+        children: [
+          icon,
+          const SizedBox(width: 4),
+          textWidget,
+        ],
+      );
+
+    return textWidget;
   }
 }
 
@@ -694,6 +752,38 @@ class _ParticlePainter extends CustomPainter {
 }
 
 /// Queue item tile
+/// The panel's headline.
+///
+/// A mix is named rather than called "Queue": it is the one queue the user did
+/// not assemble, so which mix it is, is the only thing that identifies it.
+String _headerTitle(QueueState queue, VideoItem? nextItem) {
+  final mix = queue.mix;
+  if (mix != null) return mix.title ?? 'Mix';
+  return nextItem != null ? 'Next: ${nextItem.title}' : 'Queue';
+}
+
+/// The line under the headline.
+///
+/// **A mix shows no position, deliberately.** `n / total` is honest for a
+/// hand-built queue and misleading for a radio: the total is a sliding window
+/// that grows by 24 every time the queue tops itself up, so a viewer watching
+/// the denominator climb would reasonably read it as the list changing under
+/// them rather than as the thing working. What a mix shows instead is what is
+/// coming next, and — per §4 — whether it has stopped.
+(String, Widget?) _headerSubtitle(QueueState queue, QueueController controller, bool expanded) {
+  final position = queue.currentIndex != null ? '${queue.currentIndex! + 1} / ${queue.items.length}' : '${queue.items.length} items';
+
+  final mix = queue.mix;
+
+  if (expanded) return ('Mixes are playlists YouTube makes for you', null);
+  if (mix == null) return (position, null);
+  if (controller.mixError != null) return ('Paused. Couldn\'t load more', null);
+  if (mix.exhausted) return ('End of mix', null);
+
+  final nextItem = queue.next;
+  return (nextItem?.title != null ? 'Next: ${nextItem?.title}' : 'Mix', null);
+}
+
 class _QueueItemTile extends StatefulWidget {
   const _QueueItemTile({
     required super.key,
@@ -744,9 +834,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
   Widget _durationBadge(BuildContext context) {
     final tokens = Theme.of(context).tokens;
     final tone = durationToneFor(widget.item);
-    final text = tone == DurationBadgeTone.station
-        ? 'STATION'
-        : (tone == DurationBadgeTone.live ? 'LIVE' : formatVideoDuration(widget.item));
+    final text = tone == DurationBadgeTone.station ? 'STATION' : (tone == DurationBadgeTone.live ? 'LIVE' : formatVideoDuration(widget.item));
     if (text == null) return const SizedBox.shrink();
 
     final isLiveLike = tone == DurationBadgeTone.live || tone == DurationBadgeTone.station;
@@ -776,91 +864,105 @@ class _QueueItemTileState extends State<_QueueItemTile> {
     Widget tile = MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: ListTile(
-        selected: widget.isCurrent,
-        selectedTileColor: widget.scheme.surfaceContainerHigh,
-        mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
-        leading: SizedBox(
-          width: 72 + 10,
-          height: 40 + 20,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  widget.item.thumbnailUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+      child: Stack(
+        children: [
+          ListTile(
+            selected: widget.isCurrent,
+            selectedTileColor: widget.scheme.surfaceContainerHigh,
+            mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
+            leading: SizedBox(
+              width: 82,
+              height: 60,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      widget.item.thumbnailUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+                    ),
+                    Positioned(
+                      bottom: 2,
+                      right: 2,
+                      child: _durationBadge(context),
+                    ),
+                  ],
                 ),
-                Positioned(
-                  bottom: 2,
-                  right: 2,
-                  child: _durationBadge(context),
+              ),
+            ),
+            title: Text(
+              widget.item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
+              ),
+            ),
+            subtitle: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.item.channelName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+                  ),
+                ),
+                ChannelBadge(
+                  channelId: widget.item.channelId,
+                  isArtistChannel: widget.item.isArtistChannel,
+                  isVerified: widget.item.isVerified,
+                  size: 12,
+                  paddingLeft: 4,
                 ),
               ],
             ),
-          ),
-        ),
-        title: Text(
-          widget.item.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 14,
-            color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
-          ),
-        ),
-        subtitle: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                widget.item.channelName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
-              ),
-            ),
-            ChannelBadge(
-              channelId: widget.item.channelId,
-              isArtistChannel: widget.item.isArtistChannel,
-              isVerified: widget.item.isVerified,
-              size: 12,
-              paddingLeft: 4,
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Visibility(
-              visible: !inert && _isHovered,
-              maintainSize: true,
-              maintainAnimation: true,
-              maintainState: true,
-              child: Tooltip(
-                message: 'Remove',
-                waitDuration: const Duration(milliseconds: 300),
-                child: IconButton(
-                  mouseCursor: SystemMouseCursors.click,
-                  icon: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant),
-                  onPressed: widget.onRemove,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedCrossFade(
+                  duration: const Duration(milliseconds: 50),
+                  crossFadeState: !inert && _isHovered ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                  firstChild: Tooltip(
+                    message: 'Remove',
+                    waitDuration: const Duration(milliseconds: 300),
+                    preferBelow: false,
+                    showDuration: const Duration(milliseconds: 800),
+                    exitDuration: const Duration(milliseconds: 0),
+                    child: IconButton(
+                      mouseCursor: SystemMouseCursors.click,
+                      icon: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant),
+                      onPressed: widget.onRemove,
+                    ),
+                  ),
+                  secondChild: const SizedBox.shrink(),
                 ),
-              ),
+                if (!inert)
+                  ReorderableDragStartListener(
+                    index: widget.index,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.grab,
+                      child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                    ),
+                  ),
+              ],
             ),
-            if (!inert)
-              ReorderableDragStartListener(
-                index: widget.index,
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.grab,
-                  child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
-                ),
-              ),
-          ],
-        ),
-        onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+            onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+          ),
+          // Current indicator
+          if (widget.isCurrent)
+            Positioned(
+              left: -0.5,
+              top: 0,
+              bottom: 0,
+              child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
+            ),
+        ],
       ),
     );
 

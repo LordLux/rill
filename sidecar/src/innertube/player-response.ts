@@ -40,8 +40,23 @@ interface Entry {
 const cache = new Map<string, Entry>();
 const inFlight = new Map<string, Promise<Entry>>();
 
-function keyFor(videoId: string, client: PlayerClient): string {
-  return `${client}:${videoId}`;
+/**
+ * **The playlist id is part of the identity, not a variant of it — Task 26.**
+ *
+ * `client:videoId` was already the wrong key, and the mix work is what made
+ * that visible rather than what caused it: a `/player` asked with a
+ * `playlistId` and one asked without return *different responses* — the former
+ * carries `list=` in its `videostatsWatchtimeUrl`, the latter has no such
+ * parameter — and both were being served from one entry. Whichever call
+ * happened to land first decided what every later caller got, which is the
+ * silent kind of wrong.
+ *
+ * A call with no playlist keeps exactly the old key, so every existing caller
+ * still shares one entry and pays for one fetch. `player-response.test.ts`
+ * pins that.
+ */
+function keyFor(videoId: string, client: PlayerClient, playlistId?: string | null): string {
+  return playlistId ? `${client}:${videoId}:${playlistId}` : `${client}:${videoId}`;
 }
 
 /** Insertion-ordered eviction — oldest key first, which is close enough to LRU here. */
@@ -57,11 +72,15 @@ async function fetchPlayer(
   session: Session,
   videoId: string,
   client: PlayerClient,
+  playlistId?: string | null,
 ): Promise<Entry> {
   // `playerPayload` carries the signatureTimestamp. Hard invariant 7: without it
   // YouTube answers UNPLAYABLE — "The page needs to be reloaded." — which reads
   // like a dead or region-locked video and is neither.
-  const raw = await session.execute('/player', playerPayload(session, videoId, client));
+  const raw = await session.execute(
+    '/player',
+    playerPayload(session, videoId, client, playlistId),
+  );
   const result = parsePlayer(raw);
 
   log.debug(
@@ -81,6 +100,16 @@ export interface PlayerRequestOptions {
    * and a request already on the wire were made under the old one.
    */
   refresh?: boolean;
+
+  /**
+   * The playlist this watch belongs to, for `playback.report` (Task 26).
+   *
+   * Only the reporting path sets it. The resolution ladder deliberately does
+   * not: a mix changes nothing about which streams exist, and asking with one
+   * would split the resolve cache by playlist and buy a second `/player` round
+   * trip per open for nothing.
+   */
+  playlistId?: string | null;
 }
 
 /**
@@ -107,7 +136,7 @@ export async function getPlayerEntry(
   client: PlayerClient,
   options: PlayerRequestOptions = {},
 ): Promise<{ result: PlayerResult; raw: unknown }> {
-  const key = keyFor(videoId, client);
+  const key = keyFor(videoId, client, options.playlistId);
 
   if (options.refresh) {
     cache.delete(key);
@@ -119,7 +148,7 @@ export async function getPlayerEntry(
     if (pending) return pending;
   }
 
-  const request = fetchPlayer(session, videoId, client)
+  const request = fetchPlayer(session, videoId, client, options.playlistId)
     .then((entry) => {
       cache.set(key, entry);
       evictIfFull();
@@ -143,5 +172,15 @@ export function forgetPlayerResponse(videoId?: string): void {
     cache.clear();
     return;
   }
-  for (const client of PLAYER_CLIENTS) cache.delete(keyFor(videoId, client));
+  for (const client of PLAYER_CLIENTS) {
+    cache.delete(keyFor(videoId, client));
+    // Playlist-scoped entries for the same video (Task 26). Dropping only the
+    // bare key would leave a mix's reporting response cached after the video it
+    // belongs to was explicitly forgotten — the one thing this function exists
+    // to prevent, just one key along.
+    const scoped = `${client}:${videoId}:`;
+    for (const key of cache.keys()) {
+      if (key.startsWith(scoped)) cache.delete(key);
+    }
+  }
 }

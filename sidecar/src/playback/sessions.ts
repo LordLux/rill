@@ -29,6 +29,17 @@ export interface PlaybackSessionState {
   readonly sessionId: string;
   readonly videoId: string;
   /**
+   * The mix or playlist this watch belongs to, or `null` for a standalone one
+   * (Task 26).
+   *
+   * Held here because `playback.report` takes a `sessionId` and nothing else
+   * (§3.5), so this is the only place that can still answer "in aid of which
+   * playlist" by the time the report goes out. It reaches the watchtime ping as
+   * `list=`, which is what makes a mix watch train the recommender *as* a mix
+   * watch.
+   */
+  readonly playlistId: string | null;
+  /**
    * The client playback nonce, minted here and used for every ping of this
    * session.
    *
@@ -63,10 +74,15 @@ export function generateCpn(): string {
   return out;
 }
 
-export function openPlaybackSession(sessionId: string, videoId: string): PlaybackSessionState {
+export function openPlaybackSession(
+  sessionId: string,
+  videoId: string,
+  playlistId: string | null = null,
+): PlaybackSessionState {
   const state: PlaybackSessionState = {
     sessionId,
     videoId,
+    playlistId,
     cpn: generateCpn(),
     playbackPinged: false,
     lastPositionSeconds: 0,

@@ -100,6 +100,17 @@ export interface OpenParams {
    * does not need a protocol change later.
    */
   preload?: boolean;
+
+  /**
+   * The mix or playlist this watch belongs to (Task 26).
+   *
+   * **Recorded on the playback session, never sent to the resolution ladder.**
+   * A playlist context changes nothing about which streams exist, so asking for
+   * one here would split the `/player` cache by playlist and buy a second round
+   * trip per open for nothing. It matters only at report time, where it becomes
+   * `list=` on the watchtime ping.
+   */
+  playlistId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -903,7 +914,7 @@ export async function openPlayback(
   // paying nothing for it, because the `/player` response the preload fetched is
   // still cached.
   if (!preload) {
-    openPlaybackSession(source.sessionId, videoId);
+    openPlaybackSession(source.sessionId, videoId, params.playlistId ?? null);
   }
 
   if (source.durationMs === null && source.startTimestamp === null) {

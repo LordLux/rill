@@ -104,36 +104,30 @@ void main() {
       expect(watchTargetFor(videoItem())?.id, 'aaaaaaaaaaa');
     });
 
-    test('a mix opens its seed video, read from the thumbnail', () {
+    test('a mix is not a watch target — it needs mix.start (Task 26)', () {
+      // Until Task 26 this synthesised a VideoItem from a seed id *derived*
+      // from the thumbnail URL, and playing that one video was the whole of
+      // "opening a mix". `mix.start` takes the RD id directly, so the
+      // derivation is gone and a mix is no longer a thing `watchTargetFor`
+      // can answer for. `tapHandlerFor` routes it to `startMixFromTile`.
       const mix = MixItem(
         kind: 'mix',
         id: 'RDCLAK5uy_kLWIr9gv1XLlPbaDS965-Db4TrBoUTxQ8',
         title: 'Mix - something',
         thumbnailUrl: 'https://i.ytimg.com/vi/bbbbbbbbbbb/hqdefault.jpg',
       );
-      // The curated case, where the id is nowhere in the playlist id.
-      expect(watchTargetFor(mix)?.id, 'bbbbbbbbbbb');
-      expect(mixSeedVideoId(mix), 'bbbbbbbbbbb');
+      expect(watchTargetFor(mix), isNull);
     });
 
-    test('a mix falls back to the RD-prefixed playlist id', () {
+    test('openFromTile ignores a mix rather than opening something wrong', () {
+      // The guard that matters now: a caller that still routes a mix through
+      // the video path must do nothing at all, not play a derived video.
       const mix = MixItem(
         kind: 'mix',
         id: 'RD3T0NqvdUiWI',
         title: 'Mix',
-        thumbnailUrl: 'https://example.invalid/no-video-id-here.jpg',
+        thumbnailUrl: 'https://i.ytimg.com/vi/3T0NqvdUiWI/hqdefault.jpg',
       );
-      expect(mixSeedVideoId(mix), '3T0NqvdUiWI');
-    });
-
-    test('a mix with neither stays inert rather than opening a made-up id', () {
-      const mix = MixItem(
-        kind: 'mix',
-        id: 'RDCLAK5uy_not_eleven',
-        title: 'Mix',
-        thumbnailUrl: 'https://example.invalid/nothing.jpg',
-      );
-      expect(mixSeedVideoId(mix), isNull);
       expect(watchTargetFor(mix), isNull);
     });
 
