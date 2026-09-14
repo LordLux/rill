@@ -27,6 +27,12 @@ describe('exact counts, parsed', () => {
     ['347 watching', 347],
     ['1 view', 1],
     ['0 views', 0],
+    // Ungrouped runs of four or more digits. Some locales do not group them,
+    // and the first version read "10625 views" as 106 — the grouped pattern
+    // matched three digits and nothing refused the "25" left behind.
+    ['10625 views', 10625],
+    ['1234 visualizaciones', 1234],
+    ['67573', 67573],
   ])('%s -> %p', (input, expected) => {
     expect(exactCountFromText(input)).toBe(expected);
   });
