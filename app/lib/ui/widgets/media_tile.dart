@@ -408,7 +408,7 @@ class _MediaTileState extends State<MediaTile> {
     final isStation = widget.spec.durationTone == DurationBadgeTone.station;
     final isLiveLike = isLive || isStation;
     final isMix = widget.spec.durationTone == DurationBadgeTone.mix;
-    final badgeText = isStation ? 'STATION' : (isLive ? 'LIVE' : (widget.spec.durationText ?? ''));
+    final badgeText = _getBadgeText(isStation, isLive, isMix);
     return Container(
       padding: const EdgeInsets.only(
         left: 4.5,
@@ -460,6 +460,13 @@ class _MediaTileState extends State<MediaTile> {
         ],
       ),
     );
+  }
+
+  String _getBadgeText(bool isStation, bool isLive, bool isMix) {
+    if (isStation) return 'STATION';
+    if (isLive) return 'LIVE';
+    if (isMix) return 'Mix';
+    return widget.spec.durationText ?? '';
   }
 
   /// The top-right hover cluster: mute and CC while previewing, Watch Later and Add to
