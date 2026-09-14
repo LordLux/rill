@@ -61,7 +61,8 @@ import { RpcError, messageOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import type { Session } from '../innertube/session.ts';
 import { mixItemIds, parseMixPanel, type MixPanel } from '../parser/mix.ts';
-import type { MixExtendResult, MixStartResult } from '../types.ts';
+import { parseVideoDetail } from '../parser/video.ts';
+import type { FeedItem, MixExtendResult, MixStartResult, VideoDetail, VideoItem } from '../types.ts';
 
 const log = logger('mix');
 
@@ -70,18 +71,80 @@ export interface MixDeps {
   browse: Session;
 }
 
+async function fetchNext(
+  deps: MixDeps,
+  params: Record<string, unknown>,
+  description: string,
+): Promise<unknown> {
+  try {
+    return await deps.browse.execute('/next', params);
+  } catch (error) {
+    throw new RpcError('UPSTREAM_ERROR', `${description}: ${messageOf(error)}`);
+  }
+}
+
 async function fetchPanel(
   deps: MixDeps,
   params: Record<string, unknown>,
   description: string,
 ): Promise<MixPanel | null> {
-  let raw: unknown;
-  try {
-    raw = await deps.browse.execute('/next', params);
-  } catch (error) {
-    throw new RpcError('UPSTREAM_ERROR', `${description}: ${messageOf(error)}`);
-  }
-  return parseMixPanel(raw, description);
+  return parseMixPanel(await fetchNext(deps, params, description), description);
+}
+
+/**
+ * The seed at the front of the list, or `null` if it is not in the list at all.
+ *
+ * Moving it rather than rebuilding around it: everything after the seed is the
+ * radio's own order and stays that way, and the *tail* — which is what
+ * `mix.extend` anchors on — is untouched by anything done to the head.
+ */
+function seedFirst(items: FeedItem[], seed: string): FeedItem[] | null {
+  const at = items.findIndex((item) => item.id === seed);
+  if (at < 0) return null;
+  if (at === 0) return items;
+  return [items[at]!, ...items.slice(0, at), ...items.slice(at + 1)];
+}
+
+/**
+ * A queue entry for the seed, built from the watch page the same `/next`
+ * already returned — so a seed missing from the panel costs no extra round
+ * trip when the page is for the seed.
+ *
+ * `null` unless that page really is the seed's: when YouTube swaps the opener
+ * it can swap the page with it, and prepending the wrong video under the
+ * seed's name is worse than not prepending.
+ *
+ * `durationSeconds` is whatever `/next` carries, usually `null` — `/player`
+ * has the real one and `playback.open` fetches it anyway. The thumbnail is
+ * YouTube's standard still for the id, the same URL shape the panel's own
+ * rows use.
+ */
+function seedItemFrom(detail: VideoDetail, seed: string): VideoItem | null {
+  if (detail.id !== seed || !detail.title) return null;
+  return {
+    kind: 'video',
+    id: seed,
+    title: detail.title,
+    channelName: detail.channelName,
+    channelId: detail.channelId,
+    channelAvatarUrl: detail.channelAvatarUrl,
+    thumbnailUrl: `https://i.ytimg.com/vi/${seed}/hqdefault.jpg`,
+    durationSeconds: detail.isLive ? null : detail.durationSeconds,
+    isLive: detail.isLive,
+    isStation: false,
+    viewCountText: detail.viewCountText,
+    publishedText: detail.publishedText,
+    descriptionSnippet: null,
+    badges: [],
+    isShort: false,
+    isMusic: false,
+    isMembersOnly: detail.isMembersOnly,
+    isVerified: detail.isVerified,
+    isArtistChannel: detail.isArtistChannel,
+    premiereAtMs: detail.premiereAtMs,
+    canWatchLater: true,
+    canAddToQueue: true,
+  };
 }
 
 /**
@@ -94,15 +157,20 @@ async function fetchPanel(
  */
 export async function startMix(
   deps: MixDeps,
-  params: { playlistId: string; videoId?: string | null },
+  params: { playlistId: string; videoId?: string | null; params?: string | null },
 ): Promise<MixStartResult> {
   const { playlistId, videoId } = params;
+  const description = `mix.start ${playlistId}`;
+  const request = {
+    playlistId,
+    ...(videoId ? { videoId } : {}),
+    // The tile's own click-target `params`. Signed in, it is what makes the
+    // server honour `videoId` as the opener (114/114 with, 86/90 without).
+    ...(params.params ? { params: params.params } : {}),
+  };
 
-  const panel = await fetchPanel(
-    deps,
-    { playlistId, ...(videoId ? { videoId } : {}) },
-    `mix.start ${playlistId}`,
-  );
+  const raw = await fetchNext(deps, request, description);
+  let panel = parseMixPanel(raw, description);
 
   if (!panel) {
     // A playlist id YouTube will not open as a watch context: a deleted or
@@ -114,15 +182,58 @@ export async function startMix(
     );
   }
 
+  let items = panel.items;
+
+  // **The advertised video plays first, whatever the response says.** A mix
+  // tile is titled and thumbnailed after one song, and opening it on another
+  // is a user clicking one thing and getting something else — so this is
+  // enforced here rather than trusted to the seed and `params` alone, which
+  // are very reliable but were measured, not guaranteed.
+  if (videoId) {
+    const ordered = seedFirst(items, videoId);
+    if (ordered) {
+      if (ordered !== items) log.info(`${description}: seed ${videoId} was not first — moved to the front`);
+      items = ordered;
+    } else {
+      const fromPage = seedItemFrom(parseVideoDetail(raw, description), videoId);
+      if (fromPage) {
+        log.info(`${description}: seed ${videoId} absent from the panel — prepended from its own watch page`);
+        items = [fromPage, ...items];
+      } else {
+        log.warn(`${description}: seed ${videoId} absent and the page is another video's — retrying once`);
+        const retryRaw = await fetchNext(deps, request, `${description} (retry)`);
+        const retry = parseMixPanel(retryRaw, description);
+        const retried = retry ? seedFirst(retry.items, videoId) : null;
+        const retriedPage = retried ? null : seedItemFrom(parseVideoDetail(retryRaw, description), videoId);
+        if (retry && retried) {
+          panel = retry;
+          items = retried;
+        } else if (retry && retriedPage) {
+          panel = retry;
+          items = [retriedPage, ...retry.items];
+        } else {
+          // Nothing left to build the seed's entry from. Plays what YouTube
+          // gave — the retry's answer, being the more recent — and says so.
+          // This is the one case the guarantee cannot keep.
+          if (retry) {
+            panel = retry;
+            items = retry.items;
+          }
+          log.warn(`${description}: seed ${videoId} still absent after a retry — opening on YouTube's choice`);
+        }
+      }
+    }
+  }
+
   log.info(
-    `mix.start ${playlistId}: ${panel.items.length} items ` +
+    `${description}: ${items.length} items ` +
       `(currentIndex ${panel.currentIndex}, infinite=${panel.isInfinite})`,
   );
 
   return {
     playlistId: panel.playlistId,
     title: panel.title,
-    items: panel.items,
+    items,
   };
 }
 

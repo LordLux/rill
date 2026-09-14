@@ -41,6 +41,7 @@ Future<void> startMixFromTile(
   WidgetRef ref,
   String playlistId, {
   String? videoId,
+  String? params,
   String? title,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
@@ -62,7 +63,7 @@ Future<void> startMixFromTile(
   showWatchPage(ref);
 
   try {
-    await queue.startMix(playlistId, videoId: videoId);
+    await queue.startMix(playlistId, videoId: videoId, params: params);
   } on Object catch (e) {
     // `startMix` has already put the old queue back; this re-seeks it, so a
     // failed mix costs the user nothing but the message.
@@ -120,7 +121,16 @@ Future<void> startMixFromTile(
 /// rather than inside it.
 VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) {
   if (item is MixItem) {
-    return () => unawaited(startMixFromTile(context, ref, item.id, title: item.title));
+    // The tile's own seed and params, so the mix opens on the song the tile
+    // advertises rather than wherever YouTube chooses (protocol.md §3.3).
+    return () => unawaited(startMixFromTile(
+          context,
+          ref,
+          item.id,
+          videoId: item.seedVideoId,
+          params: item.startParams,
+          title: item.title,
+        ));
   }
   return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);
 }

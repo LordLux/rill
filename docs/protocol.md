@@ -196,7 +196,7 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
-| `mix.start` | `{playlistId, videoId?}` | `{playlistId, title, items[]}` |
+| `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
 | `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
 | `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
@@ -258,6 +258,50 @@ the task forbids caching mix contents, and why nothing here does.
 **A plain watch page does not carry its own mix.** `/next {videoId}` with no
 `playlistId` has no panel at all, and the video's own `RD<id>` appears nowhere
 in it. `mix.start` is not redundant for the watch-page entry path.
+
+#### A mix opens on the song it advertises — decided 2026-09-14
+
+**Decision: starting a mix from a tile always plays the video that tile
+advertises first**, whatever YouTube's response puts first. The tile is titled
+"Mix - <song>" and thumbnailed with that song, so opening it on anything else is
+a user clicking one thing and hearing another. It is also a consistency rule:
+the same tile opens the same way every time. youtube.com does not hold this —
+signed in, it regularly opens such a mix on a different song, sometimes one that
+is not in the mix at all — and this app deliberately does better than it here.
+
+**`MixItem` carries what that needs, read off the tile itself** — `seedVideoId`
+and `startParams`, the `videoId` and `params` of the tile's own click target
+(`watchEndpoint`). They are read from the click target rather than derived: an
+auto-radio's `RD<id>` suffix happens to equal the seed, but `RDMM…` and
+`RDGMEM…` mixes have no suffix while their tiles still name the video. Every
+mix tile sampled carried a click target; where one does not, both fields are
+`null` and the mix opens on YouTube's choice. `mix.start`'s `videoId` and
+`params` are these two, passed back verbatim; `params` is opaque to the client
+like a `continuation`.
+
+**Measured, signed in, 2026-09-14** — first item is the advertised video:
+
+| Request | Result |
+| --- | --- |
+| `{playlistId}` only (what a tile sent before) | 1 / 3 |
+| `{playlistId, videoId}` | 86 / 90 — the misses clustered in one session |
+| `{playlistId, videoId, params}` | **114 / 114**, including on a fresh session |
+| `{playlistId, videoId}`, signed out | 9 / 9 |
+
+So personalisation is what overrides the seed, and the click target's `params`
+is what makes the server honour it. `params` was the same constant on every tile
+sampled (`OALAAQE%3D`); it is carried from the tile rather than hardcoded so
+that a change to it arrives with the response.
+
+**The sidecar enforces the rule rather than trusting those numbers**, because a
+miss appeared in roughly one session in four and 114 clean runs is evidence, not
+proof. When the seed is in the returned window but not first it is moved to the
+front — everything after it keeps the radio's order, and the tail `mix.extend`
+anchors on is untouched. When it is absent, the same `/next` response is also
+the watch page for whatever it opened on: if that page is the seed's, the seed is
+prepended from it at no extra cost; otherwise the request is retried once. Only
+if the seed is still absent after that does the mix open on YouTube's choice,
+logged as the one case the rule cannot keep.
 
 **`search.query`'s `filters` — decided in Task 20 §3, not chips.** A chip is a
 token the server hands back in a response; a filter (upload date, type,

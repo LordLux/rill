@@ -32,8 +32,16 @@ VideoItem _video(String id) => VideoItem(
     );
 
 class _Mixes implements MixService {
+  /// What the last `start` was asked for — the seed and params a tile sends.
+  static ({String playlistId, String? videoId, String? params})? lastStart;
+
   @override
-  Future<MixStart> start(String playlistId, {String? videoId}) async => MixStart(
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) async {
+    lastStart = (playlistId: playlistId, videoId: videoId, params: params);
+    return _started(playlistId);
+  }
+
+  MixStart _started(String playlistId) => MixStart(
         playlistId: playlistId,
         title: 'My Mix',
         items: [for (var i = 0; i < 25; i++) _video('m$i')],
@@ -121,6 +129,48 @@ void main() {
 
     expect(find.text('Queue replaced by My Mix'), findsOneWidget);
     expect(_queue.canUndoStartMix, isTrue);
+  });
+
+  testWidgets("tapping a mix tile sends the tile's seed and params", (tester) async {
+    // The end-to-end half of "a mix opens on the song it advertises"
+    // (protocol.md §3.3): the tile's own click target has to reach mix.start,
+    // or the sidecar has nothing to enforce.
+    _Mixes.lastStart = null;
+    _container = ProviderContainer(
+      overrides: [
+        mixServiceProvider.overrideWithValue(_Mixes()),
+        playbackProvider.overrideWith(_SilentPlayback.new),
+      ],
+    );
+    addTearDown(_container.dispose);
+    const tile = MixItem(
+      kind: 'mix',
+      id: 'RDadvertised',
+      title: 'Mix - Some Song',
+      thumbnailUrl: 'https://i.ytimg.com/vi/advertised1/hq.jpg',
+      seedVideoId: 'advertised1',
+      startParams: 'OALAAQE%3D',
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: _container,
+        child: MaterialApp(
+          home: Scaffold(
+            body: Consumer(
+              builder: (context, ref, _) => TextButton(
+                onPressed: tapHandlerFor(context, ref, tile),
+                child: const Text('tile'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('tile'));
+    await tester.pump();
+
+    expect(_Mixes.lastStart, (playlistId: 'RDadvertised', videoId: 'advertised1', params: 'OALAAQE%3D'));
   });
 
   testWidgets('Undo puts the hand-built queue back', (tester) async {

@@ -100,6 +100,33 @@ export interface MixItem {
   subtitle: string | null;
   thumbnailUrl: string;
   videoCount: number | null;
+  /**
+   * The video this tile advertises — the song in its title ("Mix - <song>")
+   * and thumbnail — read off the tile's own click target
+   * (`watchEndpoint.videoId`). Null when the tile carries no click target.
+   *
+   * **Carried so a mix always opens on the song it advertised.** Without it
+   * YouTube picks the opener, and signed in it often picks a different song,
+   * sometimes one not in the mix at all; youtube.com does the same. That is a
+   * user clicking one song and hearing another, and the same tile opening
+   * differently on different days. `mix.start` sends this as the seed and the
+   * sidecar enforces that it plays first — see `protocol.md` §3.3.
+   *
+   * Read from the click target, not derived from the `RD<id>` suffix: an
+   * auto-radio's suffix happens to equal it, but `RDMM…` and `RDGMEM…` mixes
+   * have no suffix while their tiles still name the video.
+   */
+  seedVideoId: string | null;
+  /**
+   * The tile's click-target `params`, handed back verbatim to `mix.start`.
+   * Opaque — nothing outside the sidecar reads it, like a `continuation`.
+   *
+   * It is what makes a signed-in `/next` honour the seed: measured 2026-09-14,
+   * the advertised video opened first 114/114 with it and 86/90 without. It is
+   * currently one constant on every tile, and is carried from the tile rather
+   * than hardcoded so a change to it arrives with the response.
+   */
+  startParams: string | null;
 }
 
 export interface PlaylistItem {

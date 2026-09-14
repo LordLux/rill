@@ -60,12 +60,38 @@ function nextBody(options: {
   isInfinite?: boolean;
   /** Tiles in the related rail, which must never reach the queue. */
   relatedIds?: string[];
+  /** The video the watch page itself is for — `currentVideoEndpoint`. */
+  pageFor?: string;
 }): unknown {
   const { playlistId = 'RDseed0000001', title = 'My Mix', ids, currentIndex = 0 } = options;
   return {
+    ...(options.pageFor
+      ? { currentVideoEndpoint: { watchEndpoint: { videoId: options.pageFor } } }
+      : {}),
     contents: {
       twoColumnWatchNextResults: {
-        results: { results: { contents: [] } },
+        results: {
+          results: {
+            contents: options.pageFor
+              ? [
+                  {
+                    videoPrimaryInfoRenderer: {
+                      title: { runs: [{ text: `The advertised song ${options.pageFor}` }] },
+                    },
+                  },
+                  {
+                    videoSecondaryInfoRenderer: {
+                      owner: {
+                        videoOwnerRenderer: {
+                          title: { runs: [{ text: 'Its Channel' }] },
+                        },
+                      },
+                    },
+                  },
+                ]
+              : [],
+          },
+        },
         secondaryResults: {
           secondaryResults: {
             results: (options.relatedIds ?? []).map((id) => ({
@@ -307,6 +333,109 @@ describe('mix.extend', () => {
       { playlistId: 'RDseed0000001', afterVideoId: 'anything123' },
     ).catch((e: unknown) => e);
     expect(hasCode(error, 'UPSTREAM_ERROR')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mix.start — the advertised video plays first (2026-09-14)
+// ---------------------------------------------------------------------------
+
+/**
+ * A mix tile is titled and thumbnailed after one song. Opening it on another is
+ * a user clicking one thing and getting something else, and youtube.com does
+ * exactly that when signed in. The seed and the tile's `params` fix it in
+ * everything measured (114/114); these pin that the sidecar *enforces* it on
+ * top, for the responses that were not measured.
+ */
+describe('mix.start — the advertised video plays first', () => {
+  /** A browse session that answers each call from a list, in order. */
+  function scripted(bodies: unknown[]) {
+    const calls: Record<string, unknown>[] = [];
+    const browse = {
+      hasCookie: true,
+      visitorId: 'v'.repeat(558),
+      innertube: {} as Session['innertube'],
+      async execute(_endpoint: string, params: Record<string, unknown> = {}) {
+        calls.push(params);
+        return bodies[Math.min(calls.length - 1, bodies.length - 1)];
+      },
+    } as unknown as Session;
+    return { deps: { browse }, calls };
+  }
+
+  const SEED = 'seedVideo01';
+
+  test("sends the tile's seed and params", async () => {
+    const { deps, calls } = scripted([nextBody({ ids: [SEED, ...ids(24)] })]);
+    await startMix(deps, { playlistId: 'RDx', videoId: SEED, params: 'OALAAQE%3D' });
+    expect(calls[0]).toEqual({ playlistId: 'RDx', videoId: SEED, params: 'OALAAQE%3D' });
+  });
+
+  test('already first: the list is left exactly as YouTube sent it', async () => {
+    const window = [SEED, ...ids(24)];
+    const { deps, calls } = scripted([nextBody({ ids: window })]);
+    const result = await startMix(deps, { playlistId: 'RDx', videoId: SEED });
+    expect(result.items.map((i) => i.id)).toEqual(window);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('present but not first: moved to the front, the rest in the radio\'s order', async () => {
+    const others = ids(24);
+    const window = [...others.slice(0, 3), SEED, ...others.slice(3)];
+    const { deps, calls } = scripted([nextBody({ ids: window })]);
+
+    const result = await startMix(deps, { playlistId: 'RDx', videoId: SEED });
+
+    expect(result.items.map((i) => i.id)).toEqual([SEED, ...others]);
+    // The tail is what `mix.extend` anchors on, so it must be untouched.
+    expect(result.items.at(-1)!.id).toBe(window.at(-1)!);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('absent, and the page is the seed\'s: prepended from it, no extra call', async () => {
+    const window = ids(24);
+    const { deps, calls } = scripted([nextBody({ ids: window, pageFor: SEED })]);
+
+    const result = await startMix(deps, { playlistId: 'RDx', videoId: SEED });
+
+    expect(result.items[0]).toMatchObject({ kind: 'video', id: SEED, title: `The advertised song ${SEED}` });
+    expect(result.items.slice(1).map((i) => i.id)).toEqual(window);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('absent, and the page is another video\'s: never prepended under the seed\'s name', async () => {
+    // YouTube can swap the page along with the opener. Labelling that video as
+    // the seed would be worse than not prepending at all.
+    const { deps } = scripted([
+      nextBody({ ids: ids(24), pageFor: 'someoneElse' }),
+      nextBody({ ids: ids(24), pageFor: 'someoneElse' }),
+    ]);
+    const result = await startMix(deps, { playlistId: 'RDx', videoId: SEED });
+    expect(result.items.some((i) => i.id === SEED)).toBe(false);
+    expect(result.items.some((i) => 'title' in i && String(i.title).includes('advertised'))).toBe(false);
+  });
+
+  test('absent twice: retried exactly once, then YouTube\'s order', async () => {
+    const { deps, calls } = scripted([nextBody({ ids: ids(24) }), nextBody({ ids: ids(24, 50) })]);
+    const result = await startMix(deps, { playlistId: 'RDx', videoId: SEED });
+    expect(calls).toHaveLength(2);
+    expect(result.items.map((i) => i.id)).toEqual(ids(24, 50));
+  });
+
+  test('absent, then present on the retry: the retry is used, seed first', async () => {
+    const retryWindow = [...ids(5), SEED, ...ids(18, 100)];
+    const { deps, calls } = scripted([nextBody({ ids: ids(24) }), nextBody({ ids: retryWindow })]);
+    const result = await startMix(deps, { playlistId: 'RDx', videoId: SEED });
+    expect(calls).toHaveLength(2);
+    expect(result.items[0]!.id).toBe(SEED);
+  });
+
+  test('no seed: nothing is enforced and nothing is retried', async () => {
+    const window = ids(24);
+    const { deps, calls } = scripted([nextBody({ ids: window })]);
+    const result = await startMix(deps, { playlistId: 'RDx' });
+    expect(result.items.map((i) => i.id)).toEqual(window);
+    expect(calls).toHaveLength(1);
   });
 });
 

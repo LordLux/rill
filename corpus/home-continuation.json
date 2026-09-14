@@ -166,7 +166,9 @@
       "title": "Sanitised Title 6",
       "subtitle": "Sanitised Subtitle 6",
       "thumbnailUrl": "https://fake.url/img6.jpg",
-      "videoCount": null
+      "videoCount": null,
+      "seedVideoId": "vid_006",
+      "startParams": "START_PARAMS"
     },
     {
       "kind": "video",
@@ -418,7 +420,9 @@
       "title": "Sanitised Title 18",
       "subtitle": "Sanitised Subtitle 18",
       "thumbnailUrl": "https://fake.url/img18.jpg",
-      "videoCount": 20
+      "videoCount": 20,
+      "seedVideoId": "vid_018",
+      "startParams": "START_PARAMS"
     },
     {
       "kind": "video",

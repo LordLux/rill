@@ -116,6 +116,8 @@ interface MixItem {
   subtitle: string | null;
   thumbnailUrl: string;
   videoCount: number | null;
+  seedVideoId: string | null;       // the song the tile advertises — plays first
+  startParams: string | null;       // the tile's click-target params, opaque
 }
 
 interface PlaylistItem { kind: 'playlist'; id: string; title: string;
