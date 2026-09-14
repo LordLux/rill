@@ -67,6 +67,15 @@ sealed class FeedItem with _$FeedItem {
     String? subtitle,
     required String thumbnailUrl,
     int? videoCount,
+
+    /// The song this tile advertises — the one in its title and thumbnail —
+    /// which starting the mix plays first. `protocol.md` §3.3: a mix opens on
+    /// the song it advertised, so a user who clicked expecting it hears it.
+    String? seedVideoId,
+
+    /// The tile's click-target `params`, handed back to `mix.start` verbatim.
+    /// Opaque; nothing in the app reads it.
+    String? startParams,
   }) = MixItem;
 
   @FreezedUnionValue('playlist')

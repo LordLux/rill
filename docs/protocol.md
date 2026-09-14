@@ -195,13 +195,113 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
-| `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` |
-| `mix.start` | `{videoId}` | `{playlistId, items[], continuation?}` |
+| `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
+| `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
+| `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
 | `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
-Mixes are `RD*` radio playlists that auto-extend; fetch the continuation as the
-user nears the end. Same code path as queue autoplay.
+**`playlist.get` is specified and does not exist.** There is no handler for it
+in `rpc/server.ts` — calling it answers `Unknown method`. The row stays because
+the shape is still the intended one, but it is marked so the table cannot be
+read as a list of things that work. Found while implementing Task 26, which hit
+the same thing with `mix.start`.
+
+#### Mixes — Task 26, measured 2026-09-12
+
+**This section used to specify `mix.start {videoId}` →
+`{playlistId, items[], continuation?}`. Every part of that was wrong, and it was
+wrong in the direction that reads as working.** What a live `/next` actually
+does:
+
+- **The playlist id is the parameter.** One video has at least three valid
+  mixes — `RD<id>`, `RDMM<id>`, `RDAMVM<id>` — returning different contents, so
+  a video id cannot name one. `videoId` survives as the optional *seed*.
+- **There is no continuation token.** Not a missing one: zero occurrences of
+  `"continuation"` anywhere in a mix response.
+- **`index` and `playlistIndex` are ignored.** The server resolves position
+  from `videoId` and corrects the caller — asking for the seed at `index: 24`
+  comes back `currentIndex: 0`.
+
+A mix response is a **sliding window centred on the anchor video**: at most 25
+items of history, and exactly 24 of lookahead, every time. So extension is
+re-anchoring rather than paging, and `mix.extend` is where that lives — the
+client says which item it last holds, and the sidecar anchors there, slices the
+tail and returns only what is new. **The window arithmetic never crosses the RPC
+boundary** (hard invariant 6): a client handed a raw window would have to
+reimplement InnerTube's history/lookahead semantics in Dart.
+
+```jsonc
+// mix.start {playlistId: "RD…", videoId?: "…"} — videoId is the seed, not the identity
+{"playlistId": "RDdQw4w9WgXcQ", "title": "My Mix", "items": [ /* FeedItem[] */ ]}
+
+// mix.extend {playlistId, afterVideoId} — afterVideoId is the last item the client holds
+{"items": [ /* FeedItem[] */ ], "exhausted": false}
+```
+
+**`exhausted` is a field rather than an empty `items[]`, because a mix ends two
+different ways** and a client cannot tell them apart from the item count alone:
+the anchor is the last item the server has (how a curated `RDCLAK…` list
+finishes, at ~51 items), or the server no longer places the anchor in this
+sequence and answers with a re-seeded window (an auto radio, after ~169). Both
+mean stop asking; the sidecar logs which fired.
+
+**Nothing branches on `isInfinite`, which every mix sets to `true`** — including
+the curated ones that demonstrably run out.
+
+**Mixes need no auth, but they are heavily personalised.** Anonymous always
+returns a full panel. The same list ids opened anonymously and signed-in at the
+same moment shared 2 items of 25 (`RD`/`RDAMVM`), 1 of 25 (`RDMM`) and 7 of 25
+(`RDEM`) — while a curated `RDCLAK…` was identical both ways. That is why §4 of
+the task forbids caching mix contents, and why nothing here does.
+
+**A plain watch page does not carry its own mix.** `/next {videoId}` with no
+`playlistId` has no panel at all, and the video's own `RD<id>` appears nowhere
+in it. `mix.start` is not redundant for the watch-page entry path.
+
+#### A mix opens on the song it advertises — decided 2026-09-14
+
+**Decision: starting a mix from a tile always plays the video that tile
+advertises first**, whatever YouTube's response puts first. The tile is titled
+"Mix - <song>" and thumbnailed with that song, so opening it on anything else is
+a user clicking one thing and hearing another. It is also a consistency rule:
+the same tile opens the same way every time. youtube.com does not hold this —
+signed in, it regularly opens such a mix on a different song, sometimes one that
+is not in the mix at all — and this app deliberately does better than it here.
+
+**`MixItem` carries what that needs, read off the tile itself** — `seedVideoId`
+and `startParams`, the `videoId` and `params` of the tile's own click target
+(`watchEndpoint`). They are read from the click target rather than derived: an
+auto-radio's `RD<id>` suffix happens to equal the seed, but `RDMM…` and
+`RDGMEM…` mixes have no suffix while their tiles still name the video. Every
+mix tile sampled carried a click target; where one does not, both fields are
+`null` and the mix opens on YouTube's choice. `mix.start`'s `videoId` and
+`params` are these two, passed back verbatim; `params` is opaque to the client
+like a `continuation`.
+
+**Measured, signed in, 2026-09-14** — first item is the advertised video:
+
+| Request | Result |
+| --- | --- |
+| `{playlistId}` only (what a tile sent before) | 1 / 3 |
+| `{playlistId, videoId}` | 86 / 90 — the misses clustered in one session |
+| `{playlistId, videoId, params}` | **114 / 114**, including on a fresh session |
+| `{playlistId, videoId}`, signed out | 9 / 9 |
+
+So personalisation is what overrides the seed, and the click target's `params`
+is what makes the server honour it. `params` was the same constant on every tile
+sampled (`OALAAQE%3D`); it is carried from the tile rather than hardcoded so
+that a change to it arrives with the response.
+
+**The sidecar enforces the rule rather than trusting those numbers**, because a
+miss appeared in roughly one session in four and 114 clean runs is evidence, not
+proof. When the seed is in the returned window but not first it is moved to the
+front — everything after it keeps the radio's order, and the tail `mix.extend`
+anchors on is untouched. When it is absent, the same `/next` response is also
+the watch page for whatever it opened on: if that page is the seed's, the seed is
+prepended from it at no extra cost; otherwise the request is retried once. Only
+if the seed is still absent after that does the mix open on YouTube's choice,
+logged as the one case the rule cannot keep.
 
 **`search.query`'s `filters` — decided in Task 20 §3, not chips.** A chip is a
 token the server hands back in a response; a filter (upload date, type,
@@ -502,6 +602,40 @@ is carried across. `/next` stays on the authenticated `WEB` session, because a
 personalised sidebar, the like count and subscription state are what the cookie
 is for.
 
+**`VideoDetail.viewCount` — the exact number, measured 2026-09-13.** Derived
+from `viewCountText`, the same string a client shows on hover, so a short form
+("1.8B views") and the exact one cannot disagree.
+
+**`videoViewCountRenderer.originalViewCount` looks like the answer and mostly
+is not.** It is a bare integer string, but across 24 watch pages it was `"0"`
+on 18 of them — each with a real count in `viewCountText` beside it — and the
+actual number on the other 6. `"0"` there means "not filled in". This note first
+said the watch page "ships it outright", from a measurement of one video that
+happened to be one of the six, and reading the field first put "0 views" on
+most videos (`0 ?? fallback` never falls back). It is kept as a fallback for
+when the text cannot be parsed, and only when positive.
+
+**Where it is `null`, the exact number is genuinely not recoverable, and that
+is the field's whole point.** The three surfaces differ, and this was measured
+rather than assumed:
+
+| Surface | Exact string | Rounded string | Raw integer |
+| --- | --- | --- | --- |
+| Watch page (`videoViewCountRenderer`) | `"1,815,347,797 views"` | — | `originalViewCount` — `"0"` on 18 of 24 |
+| Search (`videoRenderer`) | `"57,253,345 views"` | `"57M views"` | — |
+| Home feed (`lockupViewModel`) | — | `"1.8M views"` only | — |
+
+A view-based feed tile carries *only* a rounded string, so no amount of
+parsing recovers the exact figure there — which is why `viewCount` is on
+`VideoDetail` and not on `VideoItem`. Where a layout omits `originalViewCount`
+the sidecar falls back to reading `viewCountText`, and that fallback
+**refuses anything already rounded rather than guessing**: `"1.8M views"`
+yields `null`, never 18. `parser/text.ts`'s `exactCountFromText` is
+deliberately not `countFromText`, which strips every non-digit and would
+answer 18 — right for `"1,234 videos"`, wrong for the one metadata string
+YouTube routinely pre-rounds. A wrong number here is worse than none: it
+would be shortened and shown as fact.
+
 **`VideoDetail.myRating` — Task 25 §3, `'like' | 'dislike' | 'none'`.** A like
 button needs to know it is already liked before the first render, or the
 first click toggles the wrong way; a closed set rather than two independent
@@ -658,7 +792,7 @@ this app.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `playback.open` | `{videoId, preload?}` | `PlaybackSource` |
+| `playback.open` | `{videoId, preload?, playlistId?}` | `PlaybackSource` |
 | `playback.report` | `{sessionId, positionMs, state}` | `{}` |
 | `playback.close` | `{sessionId}` | `{}` |
 
@@ -767,6 +901,26 @@ the homepage slowly ceasing to resemble the account.
 opens no session (§3.6), so its `sessionId` is not reportable — a preloaded item
 that is never played must not appear in anyone's history. Reporting against an
 unknown or closed session is `BAD_REQUEST`.
+
+**A watch inside a mix is reported as one — Task 26, measured 2026-09-12.**
+`playback.open`'s optional `playlistId` is recorded on the playback session and
+reaches the watchtime ping as `list=`. It has to travel this way because
+`playback.report` takes a `sessionId` and nothing else, so the session is the
+only thing that still knows which playlist the watch belonged to by the time a
+report goes out. Measured: a `WEB` `/player` asked with a `playlistId` carries
+`list=<id>` in its `videostatsWatchtimeUrl` and one asked without carries no
+such parameter at all — so before this, every mix watch trained the recommender
+as a standalone watch, which is the signal F6 exists to protect.
+
+**The playlist id is part of the `/player` cache key, not a variant of it.**
+`client:videoId` was already wrong — it served one entry for two responses that
+genuinely differ — and the mix work is what made that visible rather than what
+caused it. A call with no playlist keeps exactly the old key, so every existing
+caller still shares one entry and one fetch; `player-response.test.ts` pins
+that, including that an explicit `null` keys the same as an absent one. **The
+resolution ladder deliberately asks without a playlist id**: a mix changes
+nothing about which streams exist, and splitting the resolve cache by playlist
+would buy a second `/player` round trip per open for nothing.
 
 The report itself goes out over the authenticated `WEB` session with a CPN of the
 sidecar's own, one per session (F6, and A5 which rejects bridging a resolution

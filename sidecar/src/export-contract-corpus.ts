@@ -62,6 +62,13 @@ function sanitiseItem(item: FeedItem, index: number): FeedItem {
   // channel id is close to the whole distinguishing part.
   if (sanitised.id) sanitised.id = `${ID_PREFIX[String(sanitised.kind)] ?? 'item'}_${seq}`;
   if (sanitised.channelId) sanitised.channelId = `chan_${seq}`;
+  // MixItem.seedVideoId is a video id like any other — replaced, indexed to
+  // the tile. `startParams` is an opaque click-target token; it is currently a
+  // YouTube-wide constant and identifies nobody, but it is replaced rather than
+  // kept for the same reason continuations are: the corpus is a shape
+  // reference, and a token copied verbatim is a token nobody reviewed.
+  if (sanitised.seedVideoId) sanitised.seedVideoId = `vid_${seq}`;
+  if (sanitised.startParams) sanitised.startParams = 'START_PARAMS';
 
   if (sanitised.title) sanitised.title = `Sanitised Title ${n}`;
   // Free text from an arbitrary uploader — the same reasoning as `title`, and

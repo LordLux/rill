@@ -60,20 +60,19 @@ WatchLayoutGeometry computeWatchGeometry({
     if (effectiveWidth >= 1042.0) {
       railWidth = 483.0;
     } else {
-      railWidth = math.max(300.0, effectiveWidth - 589.0);
+      railWidth = math.max(300.0, effectiveWidth - 559.0);
     }
     mainContainerWidth = effectiveWidth - railWidth;
   }
 
   final maxPlayerHeight = math.max(480.0, viewportHeight - 169.0);
-  final normalPlayerWidth = mainContainerWidth - 32;
+  final normalPlayerWidth = mainContainerWidth - 16;
   final heightBound = aspectRatio < referenceAspect;
 
   final double playerWidth;
   final double playerHeight;
   if (heightBound) {
-    final tallest =
-        math.min(maxPlayerHeight, math.max(480.0, viewportHeight - 169.0));
+    final tallest = math.min(maxPlayerHeight, math.max(480.0, viewportHeight - 169.0));
     final widest = tallest * aspectRatio;
     if (widest <= normalPlayerWidth) {
       playerHeight = tallest;
@@ -173,10 +172,14 @@ class WatchLayout extends StatelessWidget {
       children: [
         if (!g.theatre)
           Padding(
-            padding: const EdgeInsets.fromLTRB(0, 2, 0, 0),
+            padding: const EdgeInsets.fromLTRB(16, 2, 4, 0),
             child: playerWidget,
           ),
-        metadataSlot,
+        // Keyed because the player above it comes and goes with theatre mode,
+        // which moves this from index 1 to 0. Unkeyed, the element cannot be
+        // matched across that move and every `State` below it — the like
+        // button, the description, open menus — is discarded on each toggle.
+        KeyedSubtree(key: const ValueKey('watch-layout/metadata'), child: metadataSlot),
       ],
     );
 
@@ -209,7 +212,13 @@ class WatchLayout extends StatelessWidget {
 
     final children = <Widget>[
       ?theatrePlayer,
-      mainContent,
+      // Keyed for the same reason one level up: the theatre player is prepended
+      // here, shifting the whole content — the rail and its queue panel
+      // included — from index 0 to 1. Keys survive a change of *position*, not
+      // a change of *parent*: resizing across the two-column breakpoint still
+      // rebuilds the metadata, which is why account state (likes, Watch Later,
+      // subscriptions) lives in `account_actions.dart` rather than in a `State`.
+      KeyedSubtree(key: const ValueKey('watch-layout/main'), child: mainContent),
     ];
 
     if (!scrollable) {

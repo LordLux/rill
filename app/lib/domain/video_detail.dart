@@ -39,6 +39,15 @@ abstract class VideoDetail with _$VideoDetail {
     int? durationSeconds,
     required bool isLive,
     String? viewCountText,
+
+    /// The exact view count as a number, when the exact number is knowable.
+    ///
+    /// Derived from [viewCountText] — the string the tooltip shows — so the
+    /// short form and the exact one always agree. `null` means it is genuinely
+    /// not recoverable, such as a layout that only gave a rounded string like
+    /// "1.8M views", and the caller should show [viewCountText] unchanged
+    /// rather than shortening something already short.
+    int? viewCount,
     String? publishedText,
 
     /// The exact upload date ("Dec 6, 2009"), for a tooltip on

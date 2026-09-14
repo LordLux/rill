@@ -100,6 +100,33 @@ export interface MixItem {
   subtitle: string | null;
   thumbnailUrl: string;
   videoCount: number | null;
+  /**
+   * The video this tile advertises — the song in its title ("Mix - <song>")
+   * and thumbnail — read off the tile's own click target
+   * (`watchEndpoint.videoId`). Null when the tile carries no click target.
+   *
+   * **Carried so a mix always opens on the song it advertised.** Without it
+   * YouTube picks the opener, and signed in it often picks a different song,
+   * sometimes one not in the mix at all; youtube.com does the same. That is a
+   * user clicking one song and hearing another, and the same tile opening
+   * differently on different days. `mix.start` sends this as the seed and the
+   * sidecar enforces that it plays first — see `protocol.md` §3.3.
+   *
+   * Read from the click target, not derived from the `RD<id>` suffix: an
+   * auto-radio's suffix happens to equal it, but `RDMM…` and `RDGMEM…` mixes
+   * have no suffix while their tiles still name the video.
+   */
+  seedVideoId: string | null;
+  /**
+   * The tile's click-target `params`, handed back verbatim to `mix.start`.
+   * Opaque — nothing outside the sidecar reads it, like a `continuation`.
+   *
+   * It is what makes a signed-in `/next` honour the seed: measured 2026-09-14,
+   * the advertised video opened first 114/114 with it and 86/90 without. It is
+   * currently one constant on every tile, and is carried from the tile rather
+   * than hardcoded so a change to it arrives with the response.
+   */
+  startParams: string | null;
 }
 
 export interface PlaylistItem {
@@ -254,6 +281,23 @@ export interface VideoDetail {
   durationSeconds: number | null;
   isLive: boolean;
   viewCountText: string | null;
+  /**
+   * The exact view count as a number, for a client that shows its own short
+   * form ("4.6M views") with the exact one on hover.
+   *
+   * **Derived from {@link viewCountText}, the same string the tooltip shows**,
+   * so the short form and the exact one cannot disagree. The parse refuses
+   * anything already rounded rather than guessing: `"1.8M views"` yields
+   * `null`, never 18. See `parser/text.ts`'s `exactCountFromText`.
+   *
+   * `videoViewCountRenderer.originalViewCount` is a fallback only, and **its
+   * `"0"` means "not filled in"** — measured 2026-09-13, it was `"0"` on 18 of
+   * 24 watch pages that had real counts, and the number on the other 6.
+   *
+   * `null` means the exact number is not recoverable, and the client should
+   * show {@link viewCountText} unchanged.
+   */
+  viewCount: number | null;
   publishedText: string | null;
   /**
    * The exact upload date ("Dec 6, 2009"), for a tooltip on {@link
@@ -617,6 +661,40 @@ export interface PlayerResult {
 export interface ItemListResult {
   items: FeedItem[];
   continuation: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Mixes (Task 26)
+// ---------------------------------------------------------------------------
+
+/**
+ * `mix.start` — a mix opened, with the window YouTube leads with.
+ *
+ * **No `continuation`, and that is measured rather than omitted** (2026-09-12):
+ * a mix `/next` response carries no continuation token anywhere. Extension goes
+ * through `mix.extend`, which re-anchors. `mix/service.ts` has the full shape.
+ */
+export interface MixStartResult {
+  playlistId: string;
+  /** "My Mix", "Mix - <video title>", "Chroma: Today's Dance Hits". Null if absent. */
+  title: string | null;
+  items: FeedItem[];
+}
+
+/**
+ * `mix.extend` — the radio's next stretch, or the end of it.
+ *
+ * **`exhausted` is a field rather than an empty `items[]`** because the two
+ * ends a mix can reach are genuinely different upstream behaviours — the
+ * anchor being the last item the server has, versus the server no longer
+ * placing the anchor in this sequence at all and answering with a re-seeded
+ * window. Both mean "stop asking", and a client that had to infer that from
+ * `items.length === 0` could not tell either of them from a transient empty
+ * answer. The sidecar logs which of the two fired.
+ */
+export interface MixExtendResult {
+  items: FeedItem[];
+  exhausted: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
+import 'playback_controller.dart';
 import 'player_shell.dart';
 import 'queue_controller.dart';
 
@@ -13,9 +16,127 @@ import 'queue_controller.dart';
 /// same. Anything that cannot be watched is inert: no navigation, no error, no
 /// dead route.
 void openFromTile(WidgetRef ref, FeedItem item) {
+  // A mix is not a video and does not go through `watchTargetFor` — it needs a
+  // round trip before anything can play. `startMixFromTile` owns that, and the
+  // surfaces that can show a snackbar call it directly so a failure and the
+  // replaced-queue undo have somewhere to appear.
+  if (item is MixItem) return;
   final video = watchTargetFor(item);
   if (video == null) return;
   openWatch(ref, video);
+}
+
+/// Start a mix from a tile — the feed and search entry point (§5).
+///
+/// **Both entry points land here**, this one and the watch page's own mix
+/// offer, so "playing, with the queue filled and extensible" is one code path
+/// rather than two that have to be kept agreeing.
+///
+/// Replaces the queue, with an undo (§3) — [QueueController.startMix] holds the
+/// snapshot and this shows the snackbar for it. The undo restores the queue
+/// *and* the playhead: a queue put back with its video restarted from zero is
+/// not the queue the user had.
+Future<void> startMixFromTile(
+  BuildContext context,
+  WidgetRef ref,
+  String playlistId, {
+  String? videoId,
+  String? params,
+  String? title,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  // The container, not `ref`: the tile that was tapped can be gone by the time
+  // the undo is pressed or the listener below fires, and a disposed `ref`
+  // throws. The container is the app's and outlives every tile.
+  final container = ProviderScope.containerOf(context, listen: false);
+  final queue = container.read(queueProvider.notifier);
+  // Read before the call, because starting the mix is what destroys it.
+  final resumeAt = container.read(playbackProvider).item == null
+      ? null
+      : container.read(playbackProvider.notifier).currentPosition;
+
+  // **Before the await, not after it.** `mix.start` is a ~0.5-1 s round trip,
+  // and pushing the route only once it returned meant a click on a mix tile did
+  // nothing visible for about a second — which reads as a dead click and gets
+  // repeated. `startMix` empties the queue straight away, which stops the old
+  // video, and the page draws a skeleton while `startingMixId` is set.
+  showWatchPage(ref);
+
+  try {
+    await queue.startMix(playlistId, videoId: videoId, params: params);
+  } on Object catch (e) {
+    // `startMix` has already put the old queue back; this re-seeks it, so a
+    // failed mix costs the user nothing but the message.
+    if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+    // Nothing was playing before, so nothing came back — and the watch page was
+    // pushed on the tap. Leaving it up would strand the user on "Nothing
+    // playing." with an error snackbar over it; take them back where they were.
+    if (container.read(queueProvider).isEmpty) toMiniPlayerIn(container);
+    final message = switch (e) {
+      RpcException(code: 'AUTH_REQUIRED') => 'Sign in to play mixes',
+      RpcException(:final message) => message,
+      _ => 'Could not start this mix — $e',
+    };
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+    return;
+  }
+
+  if (!queue.canUndoStartMix) return;
+  final snackBar = messenger.showSnackBar(
+    SnackBar(
+      duration: const Duration(seconds: 5),
+      // **Required, not redundant.** A snack bar with an action defaults to
+      // `persist: true` (`persist ?? action != null` in the SDK), which ignores
+      // `duration` entirely — so this one sat on screen until dismissed by hand.
+      persist: false,
+      content: Text(title == null ? 'Queue replaced by the mix' : 'Queue replaced by $title'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          queue.undoStartMix();
+          if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+        },
+      ),
+    ),
+  );
+
+  // Editing the mix commits to it, so the offer to undo it goes the moment the
+  // user does — `QueueController._edit` drops the snapshot, and this notices.
+  // Autoplay and the mix extending itself leave the snapshot alone, so they do
+  // not dismiss it.
+  final watch = container.listen(queueProvider, (_, _) {
+    if (!queue.canUndoStartMix) snackBar.close();
+  });
+  unawaited(snackBar.closed.then((reason) {
+    watch.close();
+    // Gone without being pressed — timed out, or pushed off by another
+    // message. The undo went with it; do not leave a snapshot nothing can use.
+    if (reason != SnackBarClosedReason.action) queue.discardStartMixUndo();
+  }));
+}
+
+/// What tapping a tile should do, or null when nothing can happen.
+///
+/// **One handler for every surface**, for the reason `openFromTile` already
+/// gives: the feed, search, the related rail and the artist panel all draw the
+/// same tiles and must behave the same. A mix needs a `BuildContext` the other
+/// kinds do not — its round trip can fail, and its queue replacement offers an
+/// undo — which is the whole reason this exists alongside `openFromTile`
+/// rather than inside it.
+VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) {
+  if (item is MixItem) {
+    // The tile's own seed and params, so the mix opens on the song the tile
+    // advertises rather than wherever YouTube chooses (protocol.md §3.3).
+    return () => unawaited(startMixFromTile(
+          context,
+          ref,
+          item.id,
+          videoId: item.seedVideoId,
+          params: item.startParams,
+          title: item.title,
+        ));
+  }
+  return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);
 }
 
 /// Add to the queue from a tile, for the kinds that can be queued.
@@ -50,57 +171,34 @@ Future<void> addToWatchLater(BuildContext context, FeedItem item) async {
 /// The video a tile opens, or null if the tile is not watchable.
 ///
 /// - `video` is itself.
-/// - `mix` opens its **seed** video, which is as far as this task goes:
-///   `mix.start` is a later task, and §6 says opening the first video is enough.
+/// - `mix` is **null here, deliberately** — a mix is a playlist, not a video,
+///   and opening one needs a `mix.start` round trip. `startMixFromTile` is its
+///   path. Until Task 26 this synthesised a `VideoItem` from a *derived* seed
+///   id and played that one video, which is the half-built behaviour the task
+///   existed to replace.
 /// - `playlist` is explicitly out of scope and stays inert.
 /// - `channel` and anything unknown have nothing to play.
 VideoItem? watchTargetFor(FeedItem item) {
   return item.map(
     video: (v) => v,
-    mix: (m) {
-      final seed = mixSeedVideoId(m);
-      if (seed == null) return null;
-      return VideoItem(
-        kind: 'video',
-        id: seed,
-        title: m.title,
-        channelName: m.subtitle ?? '',
-        thumbnailUrl: m.thumbnailUrl,
-        isLive: false,
-        canWatchLater: false,
-        canAddToQueue: false,
-      );
-    },
+    mix: (_) => null,
     playlist: (_) => null,
     channel: (_) => null,
     unknown: (_) => null,
   );
 }
 
-/// The video a mix starts from, derived rather than carried.
+/// `mixSeedVideoId` lived here, and is gone (Task 26).
 ///
-/// **`MixItem` cannot represent this.** The DTO holds the `RD…` playlist id, a
-/// title, a subtitle, a thumbnail and a count — nothing that is a video id. That
-/// is a genuine gap in the shared contract, and widening it unilaterally is
-/// exactly what this task's stop conditions forbid, so this derives what it can
-/// instead and gives up honestly when it cannot:
+/// It derived a video id for a mix tile — from the `…/vi/<videoId>/…` in the
+/// thumbnail URL, falling back to the 11 characters after `RD` — because
+/// `MixItem` carries the `RD…` playlist id and no video id, and Task 21 needed
+/// *something* to open. `mix.start` takes the playlist id directly, so nothing
+/// needs the derivation any more and the DTO gap it worked around is no longer
+/// a gap.
 ///
-///  1. **The thumbnail.** A mix tile's artwork is one of its videos, and the URL
-///     is `…/vi/<videoId>/…`. This is the general case — it holds for curated
-///     `RDCLAK…` and `RDMM…` mixes too, where the id is not in the playlist id
-///     at all.
-///  2. **The playlist id.** An auto-generated radio is literally `RD` + the seed
-///     video id, so an 11-character remainder is that id.
-///
-/// Returns null when neither applies, and the tile stays inert rather than
-/// navigating to a video that does not exist.
-String? mixSeedVideoId(MixItem mix) {
-  final fromThumbnail = RegExp(r'/vi(?:_webp)?/([A-Za-z0-9_-]{11})/').firstMatch(mix.thumbnailUrl);
-  if (fromThumbnail != null) return fromThumbnail.group(1);
-
-  if (mix.id.startsWith('RD')) {
-    final remainder = mix.id.substring(2);
-    if (RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(remainder)) return remainder;
-  }
-  return null;
-}
+/// The one thing that went with it: a mix tile's hover preview, which used the
+/// derived id as the video to play. A mix tile now shows its static thumbnail
+/// on hover. That is the honest state of the contract — `MixItem` names no
+/// video — and inventing one for a preview is the same workaround under a
+/// different name.

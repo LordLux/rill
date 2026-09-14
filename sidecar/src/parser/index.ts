@@ -7,6 +7,10 @@
 export { parseFeed } from './feed.ts';
 export { parseVideoDetail } from './video.ts';
 export { parsePlayer, sheetUrl } from './player.ts';
+// The fourth entry point (Task 26). Separate from `parseFeed` because the
+// panel it reads is not a renderer and the walker cannot see it — see
+// `parser/mix.ts`.
+export { parseMixPanel, mixItemIds, type MixPanel } from './mix.ts';
 
 export { normaliseRendererName, roleOf } from './vocabulary.ts';
 export {

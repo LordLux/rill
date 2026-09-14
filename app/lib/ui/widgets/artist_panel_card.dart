@@ -1,5 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
@@ -11,6 +13,7 @@ import '../../theme/screen_values.dart';
 import '../open_video.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart';
+import '../account_actions.dart';
 import 'subscribe_button.dart';
 
 /// The "official artist channel" panel `search.query` carries above the
@@ -26,10 +29,11 @@ import 'subscribe_button.dart';
 /// while a sampler runs. [ArtistPanelTint] only picks which half of the pair
 /// applies and what stays legible on top of it.
 ///
-/// "View Channel" and "Mix" are still inert: this app has no channel page and
-/// no `mix.start` RPC wired yet (both pre-existing gaps), so they fall back to
-/// the same "Not implemented" snackbar `search_results.dart`'s own filter
-/// pills use. **Subscribe and unsubscribe are both real** (Task 25) —
+/// **"Mix" is real as of Task 26** — `mixPlaylistId` was an `RD…` id the panel
+/// carried and nothing could use, and it now starts the artist's radio through
+/// the same `startMixFromTile` path a mix tile uses. "View Channel" is still
+/// inert: this app has no channel page, so it falls back to the same "Not
+/// implemented" snackbar `search_results.dart`'s own filter pills use. **Subscribe and unsubscribe are both real** (Task 25) —
 /// `action.subscribe`/`action.unsubscribe`, via [SubscribeButton]'s
 /// `onSubscribe`/`onUnsubscribe` hooks. The dropdown's notification-level
 /// picker is still a local-only stub: `protocol.md` has no notification-
@@ -54,8 +58,12 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
 
   Future<bool> _subscribe(String channelId) async {
     final messenger = ScaffoldMessenger.of(context);
+    final actions = ref.read(subscriptionActionsProvider.notifier);
     try {
       await RpcClient.instance.call('action.subscribe', {'channelId': channelId});
+      // Recorded for the session, so the watch page agrees — see
+      // `account_actions.dart`.
+      actions.set(channelId, true);
       return true;
     } on RpcException catch (e) {
       messenger.showSnackBar(
@@ -70,8 +78,10 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
 
   Future<bool> _unsubscribe(String channelId) async {
     final messenger = ScaffoldMessenger.of(context);
+    final actions = ref.read(subscriptionActionsProvider.notifier);
     try {
       await RpcClient.instance.call('action.unsubscribe', {'channelId': channelId});
+      actions.set(channelId, false);
       return true;
     } on RpcException catch (e) {
       messenger.showSnackBar(
@@ -82,6 +92,17 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
       return false;
     }
+  }
+
+  /// The panel's own "Mix" action — real as of Task 26.
+  ///
+  /// `mixPlaylistId` is an `RD…` the panel already carried and nothing could
+  /// use; it goes straight to `mix.start` with no seed video, which is exactly
+  /// what an artist radio wants (YouTube picks the opener).
+  void _startMix() {
+    final playlistId = widget.artist.mixPlaylistId;
+    if (playlistId == null) return;
+    unawaited(startMixFromTile(context, ref, playlistId, title: 'Mix - ${widget.artist.name}'));
   }
 
   void _notImplemented() {
@@ -139,6 +160,7 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
                       tint: tint,
                       onSubscribe: _subscribe,
                       onUnsubscribe: _unsubscribe,
+                      onStartMix: _startMix,
                       onNotImplemented: _notImplemented,
                     ),
                   ),
@@ -350,6 +372,7 @@ class _Header extends StatelessWidget {
     required this.tint,
     required this.onSubscribe,
     required this.onUnsubscribe,
+    required this.onStartMix,
     required this.onNotImplemented,
   });
 
@@ -357,6 +380,7 @@ class _Header extends StatelessWidget {
   final ArtistPanelTint tint;
   final Future<bool> Function(String channelId) onSubscribe;
   final Future<bool> Function(String channelId) onUnsubscribe;
+  final VoidCallback onStartMix;
   final VoidCallback onNotImplemented;
 
   @override
@@ -449,7 +473,7 @@ class _Header extends StatelessWidget {
                 tint: tint,
                 label: 'Mix',
                 icon: Icons.podcasts,
-                onPressed: onNotImplemented,
+                onPressed: onStartMix,
               ),
             _TintedAction(
               tint: tint,
@@ -666,7 +690,7 @@ class _Shelf extends ConsumerWidget {
                         width: itemWidth,
                         child: MediaTile(
                           spec: spec,
-                          onTap: watchTargetFor(item) == null ? null : () => openFromTile(ref, item),
+                          onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                         ),

@@ -436,11 +436,15 @@ async function handleRequest(request: RpcRequest) {
       // error — as evidence the wiring was *broken* and restored the wrapper.
       // Dropping the argument, not restoring the wrapper, was the fix.
       const videoId = requireString(params, 'videoId', 'playback.open');
+      // Task 26: recorded on the playback session so `playback.report` can put
+      // `list=` on the watchtime ping. It is deliberately *not* passed to the
+      // resolution ladder — see `OpenParams.playlistId`.
+      const playlistId = optionalString(params, 'playlistId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
       const result = await openPlayback(
         { session },
-        { videoId, preload: params?.preload === true },
+        { videoId, preload: params?.preload === true, playlistId },
       );
       emitResponse(id, result);
     } else if (method === 'video.info') {
@@ -498,6 +502,30 @@ async function handleRequest(request: RpcRequest) {
       const continuation = optionalString(params, 'continuation', 'video.related');
       const { getRelated } = await import('../video/info.ts');
       const result = await getRelated(await videoDeps(), { videoId, continuation });
+      emitResponse(id, result);
+    } else if (method === 'mix.start') {
+      // `playlistId`, not `videoId` — §3.3's old signature could not name
+      // which of a video's several mixes was meant. `videoId` is the optional
+      // seed. Task 26.
+      const playlistId = requireString(params, 'playlistId', 'mix.start');
+      const videoId = optionalString(params, 'videoId', 'mix.start');
+      // `MixItem.startParams`, passed back verbatim. Opaque to both ends of the
+      // wire except here.
+      const startParams = optionalString(params, 'params', 'mix.start');
+      const { startMix } = await import('../mix/service.ts');
+      const result = await startMix(
+        { browse: await getBrowseSession() },
+        { playlistId, videoId, params: startParams },
+      );
+      emitResponse(id, result);
+    } else if (method === 'mix.extend') {
+      const playlistId = requireString(params, 'playlistId', 'mix.extend');
+      const afterVideoId = requireString(params, 'afterVideoId', 'mix.extend');
+      const { extendMix } = await import('../mix/service.ts');
+      const result = await extendMix(
+        { browse: await getBrowseSession() },
+        { playlistId, afterVideoId },
+      );
       emitResponse(id, result);
     } else if (method === 'action.addToWatchLater') {
       const videoId = requireString(params, 'videoId', 'action.addToWatchLater');
