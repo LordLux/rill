@@ -167,10 +167,21 @@ export function exactCountFromText(value: unknown): number | null {
   // Thousands separators vary by locale: comma, dot, apostrophe, and several
   // flavours of space (French uses a narrow no-break one).
   const SEP = '[.,\u00A0\u202F\u2009\u0027 ]';
-  const token = new RegExp(`^\\d{1,3}(?:${SEP}\\d{3})*`).exec(raw.slice(start));
+  // Grouped thousands ("4,642,098") *or* a bare run of digits ("10625"). The
+  // grouped form needs at least one group: without the `+`, a bare "10625"
+  // matched as "106" and left "25 views", which neither guard below catches —
+  // it starts with a digit, not a letter or a separator — so it answered 106.
+  // Some locales do not group four- or five-digit numbers at all, so a bare
+  // run is a real shape, not only an edge case.
+  const token = new RegExp(`^(?:\\d{1,3}(?:${SEP}\\d{3})+|\\d+)`).exec(raw.slice(start));
   if (!token?.[0]) return null;
 
   const rest = raw.slice(start + token[0].length);
+
+  // Belt and braces for the case above: a number that continues past the token
+  // was not read whole, and a truncated number is the one outcome that must not
+  // escape this function.
+  if (/^\d/.test(rest)) return null;
 
   // A magnitude marker in any script — "1.8M", "182万".
   if (/^\p{L}/u.test(rest)) return null;
