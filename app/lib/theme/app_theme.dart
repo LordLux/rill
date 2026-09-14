@@ -3,6 +3,30 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'tokens.dart';
 
+/// The tooltip bubble, app-wide — installed as `ThemeData.tooltipTheme` below.
+///
+/// **A theme rather than per-widget arguments** so that tooltips this app does
+/// not construct itself get it too: `IconButton(tooltip:)` and every other
+/// Material component that builds its own `Tooltip` read the theme and cannot
+/// be handed a `decoration`. `Tooltip` resolves `widget.decoration ??
+/// tooltipTheme.decoration ?? default` (and the same for `textStyle`), so a
+/// widget that passes nothing gets this, and one that passes its own still
+/// wins.
+///
+/// Fixed dark, rather than derived from the scheme: Material 3's default
+/// bubble follows `colorScheme.onSurface`, which on this app's theme is a pale
+/// bubble with dark text — it read as a bug, and it made `ShortcutTooltip`'s
+/// white key badge white-on-white. An instruction bubble should look the same
+/// whatever the accent.
+///
+/// Kept public for the rare widget that styles a bubble-like surface by hand
+/// and wants to match; an ordinary `Tooltip` needs neither.
+const BoxDecoration tooltipBubbleDecoration = BoxDecoration(
+  color: Color(0xE6212121),
+  borderRadius: BorderRadius.all(Radius.circular(6)),
+);
+const TextStyle tooltipBubbleTextStyle = TextStyle(color: Colors.white, fontSize: 12, height: 1.3);
+
 /// The whole theme, derived from one seed.
 ///
 /// The accent is a seed, never a value a widget paints with. `fromSeed` is what
@@ -38,6 +62,10 @@ ThemeData buildRillTheme(Color accent) {
       builders: {
         for (final platform in TargetPlatform.values) platform: const _NoTransitionsBuilder(),
       },
+    ),
+    tooltipTheme: base.tooltipTheme.copyWith(
+      decoration: tooltipBubbleDecoration,
+      textStyle: tooltipBubbleTextStyle,
     ),
     chipTheme: base.chipTheme.copyWith(
       // The selected filter chip is one of the few places the accent belongs.

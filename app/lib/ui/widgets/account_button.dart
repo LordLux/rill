@@ -28,9 +28,7 @@ class AccountButton extends ConsumerWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: Tooltip(
-        message: auth.status == AuthStatus.degraded
-            ? 'Your session expired. Please sign in again'
-            : 'Log in',
+        message: auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in',
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: auth.isBusy ? null : () => _signIn(context, ref),
@@ -142,9 +140,7 @@ class _Avatar extends StatelessWidget {
       radius: radius,
       backgroundColor: scheme.surfaceContainerHighest,
       foregroundImage: url == null ? null : NetworkImage(url!),
-      child: url != null
-          ? null
-          : Icon(Icons.person, color: scheme.onSurfaceVariant, size: radius * 1.25),
+      child: url != null ? null : Icon(Icons.person, color: scheme.onSurfaceVariant, size: radius * 1.25),
     );
   }
 }
@@ -159,4 +155,3 @@ Future<void> _signIn(BuildContext context, WidgetRef ref) => showLoginFlow(conte
 
 /// The public entry point. Same body; named so other surfaces can call it.
 Future<void> openLoginFlow(BuildContext context, WidgetRef ref) => _signIn(context, ref);
-
