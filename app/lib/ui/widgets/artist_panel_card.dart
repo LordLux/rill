@@ -13,6 +13,7 @@ import '../../theme/screen_values.dart';
 import '../open_video.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart';
+import '../account_actions.dart';
 import 'subscribe_button.dart';
 
 /// The "official artist channel" panel `search.query` carries above the
@@ -57,8 +58,12 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
 
   Future<bool> _subscribe(String channelId) async {
     final messenger = ScaffoldMessenger.of(context);
+    final actions = ref.read(subscriptionActionsProvider.notifier);
     try {
       await RpcClient.instance.call('action.subscribe', {'channelId': channelId});
+      // Recorded for the session, so the watch page agrees — see
+      // `account_actions.dart`.
+      actions.set(channelId, true);
       return true;
     } on RpcException catch (e) {
       messenger.showSnackBar(
@@ -73,8 +78,10 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
 
   Future<bool> _unsubscribe(String channelId) async {
     final messenger = ScaffoldMessenger.of(context);
+    final actions = ref.read(subscriptionActionsProvider.notifier);
     try {
       await RpcClient.instance.call('action.unsubscribe', {'channelId': channelId});
+      actions.set(channelId, false);
       return true;
     } on RpcException catch (e) {
       messenger.showSnackBar(
