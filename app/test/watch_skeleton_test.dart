@@ -115,4 +115,13 @@ void main() {
       reason: 'a screen reader must not announce a page of empty boxes',
     );
   });
+
+  testWidgets('says it is loading rather than leaving the page silent', (tester) async {
+    // Excluding the placeholder boxes alone left a screen reader on a dead page
+    // for the second a mix takes to arrive.
+    final handle = tester.ensureSemantics();
+    await pumpSkeleton(tester, size: const Size(1920, 1080));
+    expect(find.bySemanticsLabel('Loading'), findsOneWidget);
+    handle.dispose();
+  });
 }

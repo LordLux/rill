@@ -344,7 +344,7 @@ void main() {
       ('removing an entry', (q) => q.remove(q.entries.last)),
       ('removing by index', (q) => q.removeAt(3)),
       ('reordering', (q) => q.reorder(4, 1)),
-      ('clearing upcoming', (q) => q.clearUpcoming()),
+      ('clearing all but the current video', (q) => q.clearAllButCurrent()),
       ('clearing', (q) => q.clear()),
     ]) {
       test('goes when the user edits: $label', () async {
@@ -487,6 +487,106 @@ void main() {
 
       expect(stateOf(c).items.length, greaterThan(60));
       expect(queue.advance(), isTrue, reason: 'still something to advance to');
+    });
+
+    test('a batch too small to clear the threshold fetches again straight away', () async {
+      // A tapering list returns a couple of items at a time. One small batch can
+      // leave the queue still under the threshold; it must top up again rather
+      // than wait for the next unrelated queue change.
+      final service = FakeMixService(pageSize: 2);
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+      await queue.startMix('RDxyz');
+
+      queue.jumpTo(23); // one item left after the current one
+      for (var i = 0; i < 10; i++) {
+        await pumpMicrotasks();
+      }
+
+      expect(stateOf(c).remainingAfterCurrent, greaterThan(QueueController.extendThreshold));
+      expect(service.extendCalls, 3, reason: '1 → 3 → 5 → 7 remaining: three fetches, then enough');
+    });
+
+    group('reaching the end while a top-up is still out', () {
+      // Reviewer-found: the last video ended, `advance` found nothing after it,
+      // and when the extension landed it appended without moving the playhead —
+      // so the radio stopped for good, silently.
+
+      Future<(ProviderContainer, QueueController, FakeMixService)> atTheEndWithTopUpOut() async {
+        final service = FakeMixService();
+        final c = containerWith(service);
+        final queue = controllerOf(c);
+        await queue.startMix('RDxyz');
+        service.pending = Completer<MixExtension>();
+        queue.jumpTo(24); // the last item: starts a top-up, which stays out
+        expect(service.extendCalls, 1);
+        return (c, queue, service);
+      }
+
+      test('the queue advances itself once the videos land', () async {
+        final (c, queue, service) = await atTheEndWithTopUpOut();
+        final versionAtEnd = stateOf(c).version;
+
+        expect(queue.advance(), isFalse, reason: 'nothing to advance to yet');
+
+        service.pending!.complete(MixExtension(items: videos(24, from: 500), exhausted: false));
+        await pumpMicrotasks();
+
+        expect(stateOf(c).currentIndex, 25, reason: 'moved onto the first video that arrived');
+        expect(stateOf(c).current!.id, 'v500');
+        expect(stateOf(c).version, greaterThan(versionAtEnd), reason: 'what makes playback open it');
+      });
+
+      test('but not if the user did something else in the meantime', () async {
+        final (c, queue, service) = await atTheEndWithTopUpOut();
+        queue.advance(); // stalls
+        queue.jumpTo(3); // the user picks an earlier video
+
+        service.pending!.complete(MixExtension(items: videos(24, from: 500), exhausted: false));
+        await pumpMicrotasks();
+
+        expect(stateOf(c).currentIndex, 3, reason: 'arriving videos must not yank the user forward');
+      });
+
+      test('and not when the mix turns out to be over', () async {
+        final (c, queue, service) = await atTheEndWithTopUpOut();
+        queue.advance();
+
+        service.pending!.complete(const MixExtension(items: [], exhausted: true));
+        await pumpMicrotasks();
+
+        expect(stateOf(c).currentIndex, 24);
+        expect(stateOf(c).mix!.exhausted, isTrue);
+      });
+
+      test('and not when the top-up fails — it stops, and says so', () async {
+        final (c, queue, service) = await atTheEndWithTopUpOut();
+        queue.advance();
+
+        service.pending!.completeError(StateError('network is down'));
+        await pumpMicrotasks();
+
+        expect(stateOf(c).currentIndex, 24);
+        expect(queue.mixError, isNotNull);
+      });
+
+      test('an advance that does move never arms it', () async {
+        // The ordinary path: a top-up landing mid-queue must not advance.
+        final service = FakeMixService();
+        service.pending = Completer<MixExtension>();
+        final c = containerWith(service);
+        final queue = controllerOf(c);
+        await queue.startMix('RDxyz');
+        for (var i = 0; i < 19; i++) {
+          queue.advance();
+        }
+        final at = stateOf(c).currentIndex;
+
+        service.pending!.complete(MixExtension(items: videos(24, from: 500), exhausted: false));
+        await pumpMicrotasks();
+
+        expect(stateOf(c).currentIndex, at);
+      });
     });
 
     test('an exhausted mix stops asking', () async {

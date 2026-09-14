@@ -188,7 +188,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
 
       // Figure out which items are visible inside the list viewport.
       final entries = controller.entries;
-      // The row that survives the sweep is the one `clearUpcoming` keeps, which
+      // The row that survives the sweep is the one `clearAllButCurrent` keeps, which
       // is the *current* one — not row 0. They are the same only until autoplay
       // has advanced once.
       final keptEntry = ref.read(queueProvider).currentEntry;
@@ -255,7 +255,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
           if (!present.contains(entry)) entry,
       };
 
-      controller.clearUpcoming(keep: arrived);
+      controller.clearAllButCurrent(keep: arrived);
 
       if (mounted) {
         _resetClearState();
@@ -469,19 +469,29 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                               const SizedBox(height: 2),
                               Builder(
                                 builder: (context) {
-                                  final (text, icon) = _headerSubtitle(queue, controller, _expanded);
-                                  final textWidget = Text(
-                                    text,
-                                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  );
+                                  // Both states built every time. Passing the *current*
+                                  // subtitle to both slots meant the text swapped
+                                  // instantly and the crossfade faded between two
+                                  // copies of the same thing.
+                                  Widget subtitleFor(bool expanded) {
+                                    final (text, icon) = _headerSubtitle(queue, controller, expanded);
+                                    return _mixSubtitle(
+                                      icon,
+                                      Text(
+                                        text,
+                                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    );
+                                  }
+
                                   return AnimatedCrossFade(
                                     duration: const Duration(milliseconds: 200),
                                     crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
                                     // subtitle slides upwards when appearing
-                                    firstChild: _mixSubtitle(icon, textWidget),
-                                    secondChild: _mixSubtitle(icon, textWidget),
+                                    firstChild: subtitleFor(false),
+                                    secondChild: subtitleFor(true),
                                   );
                                 },
                               ),

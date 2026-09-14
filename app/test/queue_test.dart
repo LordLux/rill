@@ -173,7 +173,7 @@ void main() {
       final kept = state.entries.first;
 
       expect(
-        state.clearUpcoming().entries.first,
+        state.clearAllButCurrent().entries.first,
         same(kept),
         reason: 'a re-minted entry reads to the panel as an arrival, and the row '
             'that never moved would play its slide-in entrance',
@@ -257,23 +257,23 @@ void main() {
     });
   });
 
-  group('clearUpcoming', () {
-    test('clears other queued items but keeps currently playing video', () {
-      final state = queueOf(['a', 'b', 'c'], current: 1).clearUpcoming();
+  group('clearAllButCurrent', () {
+    test('clears other queued items — history included — but keeps currently playing video', () {
+      final state = queueOf(['a', 'b', 'c'], current: 1).clearAllButCurrent();
       expect(describe(state), '[b]');
       expect(state.currentIndex, 0);
     });
 
     test('keeps the entries it is given — what arrived during the sweep', () {
       final base = queueOf(['a', 'b', 'c', 'd', 'e'], current: 0);
-      final state = base.clearUpcoming(keep: {base.entries[3], base.entries[4]});
+      final state = base.clearAllButCurrent(keep: {base.entries[3], base.entries[4]});
       expect(describe(state), '[a] d e');
       expect(state.currentIndex, 0);
     });
 
     test('naming the current entry does not duplicate it', () {
       final base = queueOf(['a', 'b'], current: 1);
-      final state = base.clearUpcoming(keep: {base.entries[0], base.entries[1]});
+      final state = base.clearAllButCurrent(keep: {base.entries[0], base.entries[1]});
       expect(describe(state), 'a [b]', reason: 'kept in place, not moved to the front');
     });
 
@@ -282,7 +282,7 @@ void main() {
       // a survivor is not always at the end — the count-based version kept the
       // wrong ones here.
       final base = queueOf(['a', 'b', 'c'], current: 0);
-      final state = base.clearUpcoming(keep: {base.entries[1]});
+      final state = base.clearAllButCurrent(keep: {base.entries[1]});
       expect(describe(state), '[a] b');
       expect(state.current?.id, 'a');
     });
@@ -294,12 +294,12 @@ void main() {
       final shrunk = grown.removedEntry(grown.entries[1]);
       expect(shrunk.entries, hasLength(3), reason: 'same size as it started');
 
-      final state = shrunk.clearUpcoming(keep: {shrunk.entries.last});
+      final state = shrunk.clearAllButCurrent(keep: {shrunk.entries.last});
       expect(describe(state), '[a] d');
     });
 
     test('on empty queue returns empty QueueState', () {
-      final state = QueueState().clearUpcoming();
+      final state = QueueState().clearAllButCurrent();
       expect(state.items, isEmpty);
       expect(state.currentIndex, isNull);
     });

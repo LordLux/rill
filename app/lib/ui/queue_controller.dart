@@ -363,8 +363,15 @@ class QueueState {
     );
   }
 
-  /// Clears queued upcoming items, keeping the current one and anything in
-  /// [keep].
+  /// Clears the queue except the current entry and anything in [keep] — the
+  /// queue panel's "Clear".
+  ///
+  /// **Everything, not only what is upcoming**: videos already played go too,
+  /// so the previous button has nowhere to go afterwards. That is deliberate —
+  /// it is what "Clear" on a queue means — and it is why this is not called
+  /// `clearUpcoming` any more: that name described a different operation (keep
+  /// the history, drop what is ahead), and a reviewer reasonably read the
+  /// behaviour as a bug against it. Renamed 2026-09-14 rather than changed.
   ///
   /// **[keep] is a set of entries, not a count of them.** A count has to assume
   /// the queue only grew and that the growth is at the end, and neither holds:
@@ -374,7 +381,7 @@ class QueueState {
   ///
   /// Survivors keep their own entries — re-minting would read to the panel as an
   /// arrival, and rows that never moved would play their entrance.
-  QueueState clearUpcoming({Set<QueueEntry> keep = const {}}) {
+  QueueState clearAllButCurrent({Set<QueueEntry> keep = const {}}) {
     final current = currentEntry;
     if (current == null) return QueueState._(const []);
 
@@ -489,6 +496,21 @@ class QueueController extends Notifier<QueueState> {
   /// and a queue with everything in it twice.
   bool _extending = false;
 
+  /// Autoplay reached the end of the mix while a top-up was on the wire.
+  ///
+  /// Without this the radio could stop for good: the last video ended,
+  /// `advance` found nothing after it and did nothing, and when the extension
+  /// landed a moment later it appended the new videos without moving the
+  /// playhead — so nothing started them, and nothing said anything had gone
+  /// wrong. Narrow (the top-up has to still be out at the exact moment the last
+  /// video ends — usually after earlier attempts failed and were retrying) but
+  /// silent. Reviewer-found, 2026-09-14.
+  ///
+  /// Cleared by any other change to the queue: if the user picked something
+  /// else, went back, or started another mix in the meantime, arriving videos
+  /// must not yank them forward.
+  bool _advanceWhenExtended = false;
+
   /// The queue a mix replaced, for undo (§3). Null once there is nothing to
   /// put back.
   QueueState? _replaced;
@@ -522,6 +544,7 @@ class QueueController extends Notifier<QueueState> {
   /// place to live. A mutation that assigns `state` directly is how the top-up
   /// silently stops happening for that one path.
   void _set(QueueState next) {
+    _advanceWhenExtended = false;
     state = next;
     _maybeExtend();
   }
@@ -566,7 +589,17 @@ class QueueController extends Notifier<QueueState> {
   bool advance() {
     final before = state.currentIndex;
     _set(state.advanced());
-    return state.currentIndex != before;
+    final moved = state.currentIndex != before;
+
+    // At the end of a mix with more on the way — either a top-up that was
+    // already out, or the retry `_set` just started — wait for it rather than
+    // stopping. Checked *after* `_set`, which clears the flag and may be what
+    // kicked the request off.
+    final mix = state.mix;
+    if (!moved && mix != null && !mix.exhausted && _extending) {
+      _advanceWhenExtended = true;
+    }
+    return moved;
   }
 
   /// Step back one. Returns false at the front of the queue, where the button
@@ -583,8 +616,8 @@ class QueueController extends Notifier<QueueState> {
     _set(state.cleared());
   }
 
-  void clearUpcoming({Set<QueueEntry> keep = const {}}) =>
-      _edit(state.clearUpcoming(keep: keep));
+  void clearAllButCurrent({Set<QueueEntry> keep = const {}}) =>
+      _edit(state.clearAllButCurrent(keep: keep));
 
   // -------------------------------------------------------------------------
   // Mixes (Task 26)
@@ -620,6 +653,7 @@ class QueueController extends Notifier<QueueState> {
     _replaced = null;
     _mixError = null;
     _extending = false;
+    _advanceWhenExtended = false;
     state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
 
     final MixStart result;
@@ -689,6 +723,7 @@ class QueueController extends Notifier<QueueState> {
   }
 
   Future<void> _extend(String playlistId, String anchor) async {
+    var landed = false;
     try {
       final result = await ref.read(mixServiceProvider).extend(playlistId, anchor);
       // The mix may have been replaced or cleared while this was in flight.
@@ -698,6 +733,7 @@ class QueueController extends Notifier<QueueState> {
       _mixError = null;
       if (result.items.isNotEmpty) state = state.extendedWith(result.items);
       if (result.exhausted) state = state.mixExhausted();
+      landed = result.items.isNotEmpty && !result.exhausted;
     } on Object catch (e) {
       // Not fatal (§4): the queue plays what it has. Not marked exhausted
       // either, so the next advance retries — a natural backoff of one attempt
@@ -706,6 +742,24 @@ class QueueController extends Notifier<QueueState> {
     } finally {
       _extending = false;
     }
+
+    // Playback stalled at the end waiting for exactly this. `advance` goes
+    // through `_set`, so it also re-checks the threshold. A failure or an
+    // exhausted mix leaves playback stopped — the panel says which.
+    if (_advanceWhenExtended) {
+      _advanceWhenExtended = false;
+      if (landed) {
+        advance();
+        return;
+      }
+    }
+    // A batch smaller than the threshold — a curated list tapering off — can
+    // leave the queue still under it. The append above writes `state` directly
+    // rather than through `_set`, so check again here, or the next top-up waits
+    // for an unrelated mutation. Bounded: every pass added items, and it stops at
+    // the threshold or at exhaustion. Not after a failure, which retries on the
+    // next playhead move instead of in a loop.
+    if (landed) _maybeExtend();
   }
 }
 

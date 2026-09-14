@@ -1201,6 +1201,7 @@ class _ActionsState extends ConsumerState<_Actions> {
   Future<bool> _saveToWatchLater() async {
     final videoId = widget.item.id;
     final generation = _videoGeneration;
+    final messenger = ScaffoldMessenger.of(context);
     final actions = ref.read(watchLaterActionsProvider.notifier);
     final had = ref.read(watchLaterActionsProvider).containsKey(videoId);
     final previous = ref.read(watchLaterActionsProvider)[videoId];
@@ -1226,12 +1227,17 @@ class _ActionsState extends ConsumerState<_Actions> {
       container.invalidate(playlistMembershipProvider(videoId));
     }
 
+    // A failure is reported even if the user has moved on — it is about their
+    // account, and swallowing it leaves them believing the save worked. Success
+    // confirmations are only for the video still on screen.
+    if (failure != null) messenger.showSnackBar(SnackBar(content: Text(failure)));
+
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId) {
       return failure == null;
     }
 
     setState(() => _savingWatchLater = false);
-    _say(failure ?? 'Saved to Watch Later');
+    if (failure == null) _say('Saved to Watch Later');
 
     // Timed from the answer, not from the tap. On a slow call the tap-to-answer
     // gap is already most of the two seconds, and a pill that settles the
@@ -1253,6 +1259,7 @@ class _ActionsState extends ConsumerState<_Actions> {
   Future<void> _removeFromWatchLater() async {
     final videoId = widget.item.id;
     final generation = _videoGeneration;
+    final messenger = ScaffoldMessenger.of(context);
     final actions = ref.read(watchLaterActionsProvider.notifier);
     final had = ref.read(watchLaterActionsProvider).containsKey(videoId);
     final previous = ref.read(watchLaterActionsProvider)[videoId];
@@ -1296,10 +1303,12 @@ class _ActionsState extends ConsumerState<_Actions> {
       container.invalidate(playlistMembershipProvider(videoId));
     }
 
+    if (failure != null) messenger.showSnackBar(SnackBar(content: Text(failure)));
+
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
 
     setState(() => _savingWatchLater = false);
-    _say(failure ?? 'Removed from Watch Later');
+    if (failure == null) _say('Removed from Watch Later');
   }
 
   /// Like, dislike and un-rate, all through one path: tapping the currently
@@ -1310,6 +1319,7 @@ class _ActionsState extends ConsumerState<_Actions> {
     if (_ratingBusy) return;
     final videoId = widget.item.id;
     final generation = _videoGeneration;
+    final messenger = ScaffoldMessenger.of(context);
     final actions = ref.read(ratingActionsProvider.notifier);
     final had = ref.read(ratingActionsProvider).containsKey(videoId);
     final previous = ref.read(ratingActionsProvider)[videoId];
@@ -1336,12 +1346,14 @@ class _ActionsState extends ConsumerState<_Actions> {
 
     // Undone in the store whatever became of this widget — a rating that failed
     // while the layout was switching must not stay drawn as set.
-    if (failure != null) actions.restore(videoId, had: had, previous: previous);
+    if (failure != null) {
+      actions.restore(videoId, had: had, previous: previous);
+      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    }
 
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
 
     setState(() => _ratingBusy = false);
-    if (failure != null) _say(failure);
   }
 
   void _say(String message) {

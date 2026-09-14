@@ -79,6 +79,30 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 150));
   });
 
+  group('resumeAt — the queue-replacement undo', () {
+    test('seeks the video it was set for once that video opens', () async {
+      container.read(queueProvider.notifier).addToQueue(video('aaa'));
+      container.read(playbackProvider.notifier).resumeAt(const Duration(seconds: 30));
+      await settle();
+
+      expect(engine.seeks, contains(const Duration(seconds: 30)));
+    });
+
+    test('does not leak into a different video when its own open is superseded', () async {
+      // Reviewer-found: the undo's open of `aaa` is overtaken by a tap on `bbb`
+      // before it resolves. `aaa` returns at its generation check without
+      // consuming the resume, and `bbb` used to open 30 s in.
+      final queue = container.read(queueProvider.notifier);
+      queue.addToQueue(video('aaa'));
+      container.read(playbackProvider.notifier).resumeAt(const Duration(seconds: 30));
+      queue.play(video('bbb')); // supersedes before `aaa` has resolved
+      await settle();
+
+      expect(container.read(playbackProvider).item?.id, 'bbb');
+      expect(engine.seeks, isNot(contains(const Duration(seconds: 30))));
+    });
+  });
+
   test('adding to an empty queue while nothing plays starts playback', () async {
     container.read(queueProvider.notifier).addToQueue(video('aaa'));
     await settle();

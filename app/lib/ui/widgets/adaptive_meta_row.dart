@@ -52,8 +52,16 @@ class RenderAdaptiveMetaRow extends RenderBox with ContainerRenderObjectMixin<Re
     left.layout(innerConstraints, parentUsesSize: true);
     right.layout(innerConstraints, parentUsesSize: true);
 
+    // An unbounded parent (inside a horizontal `Row`, say) has an infinite
+    // `maxWidth`, and every offset below that is measured from it would be
+    // `Offset(Infinity, 0)` — a layout-phase crash. There, the row is exactly as
+    // wide as its two children and the gap between them.
+    final maxWidth = constraints.hasBoundedWidth
+        ? constraints.maxWidth
+        : left.size.width + right.size.width + _spacing;
+
     // Check if both children can fit in a single row
-    final bool isWide = (left.size.width + right.size.width + _spacing) <= constraints.maxWidth;
+    final bool isWide = (left.size.width + right.size.width + _spacing) <= maxWidth;
 
     final leftData = left.parentData as _AdaptiveMetaRowParentData;
     final rightData = right.parentData as _AdaptiveMetaRowParentData;
@@ -61,22 +69,22 @@ class RenderAdaptiveMetaRow extends RenderBox with ContainerRenderObjectMixin<Re
     if (isWide) {
       // ROW LAYOUT
       leftData.offset = Offset.zero;
-      rightData.offset = Offset(constraints.maxWidth - right.size.width, 0);
+      rightData.offset = Offset(maxWidth - right.size.width, 0);
 
       size = constraints.constrain(
         Size(
-          constraints.maxWidth,
+          maxWidth,
           math.max(left.size.height, right.size.height),
         ),
       );
     } else {
       // COLUMN LAYOUT
       leftData.offset = Offset.zero;
-      rightData.offset = Offset(constraints.maxWidth - right.size.width, left.size.height + 12);
+      rightData.offset = Offset(maxWidth - right.size.width, left.size.height + 12);
 
       size = constraints.constrain(
         Size(
-          constraints.maxWidth,
+          maxWidth,
           left.size.height + 12 + right.size.height, // 12 is vertical runSpacing
         ),
       );
