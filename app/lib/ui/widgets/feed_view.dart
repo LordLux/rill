@@ -538,12 +538,12 @@ class _FeedViewState extends ConsumerState<FeedView> {
     ColorScheme scheme,
   ) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0, top: 8.0),
+      padding: const EdgeInsets.only(top: 8.0, bottom: 16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: 4.0, bottom: 8.0),
+            padding: const EdgeInsets.only(left: 9.0),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -568,7 +568,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
               final columns = FeedGridMetrics.columnCount(constraints.maxWidth, false) + 0.4;
               final itemWidth = (constraints.maxWidth / columns).clamp(180.0, 340.0);
               // 16:9 thumbnail plus the same caption block the grid tile uses.
-              final itemHeight = itemWidth / ScreenValues.normalAspectRatio + 104.0;
+              final itemHeight = itemWidth / ScreenValues.normalAspectRatio + 104.0 + 32;
 
               return SizedBox(
                 height: itemHeight,
@@ -580,7 +580,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                     final spec = specFor(item);
                     if (spec == null) return const SizedBox.shrink();
                     return Padding(
-                      padding: const EdgeInsets.only(right: 16.0),
+                      padding: EdgeInsets.only(right: 16.0, bottom: 8.0, top: 9.0, left: index == 0 ? 10.5 : 0),
                       child: SizedBox(
                         width: itemWidth,
                         child: MediaTile(
