@@ -76,7 +76,9 @@
       "title": "Sanitised Title 3",
       "subtitle": "Sanitised Subtitle 3",
       "thumbnailUrl": "https://fake.url/img3.jpg",
-      "videoCount": null
+      "videoCount": null,
+      "seedVideoId": "vid_003",
+      "startParams": "START_PARAMS"
     },
     {
       "kind": "playlist",

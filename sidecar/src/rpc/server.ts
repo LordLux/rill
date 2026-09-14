@@ -509,8 +509,14 @@ async function handleRequest(request: RpcRequest) {
       // seed. Task 26.
       const playlistId = requireString(params, 'playlistId', 'mix.start');
       const videoId = optionalString(params, 'videoId', 'mix.start');
+      // `MixItem.startParams`, passed back verbatim. Opaque to both ends of the
+      // wire except here.
+      const startParams = optionalString(params, 'params', 'mix.start');
       const { startMix } = await import('../mix/service.ts');
-      const result = await startMix({ browse: await getBrowseSession() }, { playlistId, videoId });
+      const result = await startMix(
+        { browse: await getBrowseSession() },
+        { playlistId, videoId, params: startParams },
+      );
       emitResponse(id, result);
     } else if (method === 'mix.extend') {
       const playlistId = requireString(params, 'playlistId', 'mix.extend');

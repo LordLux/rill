@@ -57,7 +57,7 @@ class FakeMixService implements MixService {
   Completer<void>? pendingStart;
 
   @override
-  Future<MixStart> start(String playlistId, {String? videoId}) async {
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) async {
     startCalls++;
     if (pendingStart != null) await pendingStart!.future;
     final items = videos(25, from: _issued);
@@ -619,7 +619,7 @@ class FailingStartService implements MixService {
   bool fail = true;
 
   @override
-  Future<MixStart> start(String playlistId, {String? videoId}) async {
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) async {
     if (fail) throw StateError('mix.start blew up');
     return MixStart(playlistId: playlistId, title: 'My Mix', items: videos(25));
   }

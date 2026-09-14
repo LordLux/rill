@@ -102,6 +102,9 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   backdropUrl: /^https:\/\/fake\.url\/backdrop\d+\.jpg$/,
   videoCountText: /^Sanitised Videos \d+$/,
   mixPlaylistId: /^mix_\d{3,}$/,
+  // MixItem's start target (2026-09-14) — the exporter replaces both.
+  seedVideoId: /^vid_\d{3,}$/,
+  startParams: /^START_PARAMS$/,
 
   // "All" survives verbatim: the app keys its unfiltered state off that label,
   // and an empty token is the contract's "no filter" rather than session data.

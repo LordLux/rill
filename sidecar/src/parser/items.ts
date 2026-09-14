@@ -35,6 +35,31 @@ import {
 } from './text.ts';
 import { isRendererKey, normaliseRendererName } from './vocabulary.ts';
 
+/**
+ * The video a mix tile advertises and the `params` its own click target
+ * carries — `MixItem.seedVideoId` / `startParams`.
+ *
+ * Found structurally (the first `watchEndpoint` under the tile) rather than by
+ * a fixed path: a view-based tile keeps it under
+ * `rendererContext.commandContext.onTap.innertubeCommand`, a classic radio tile
+ * under `navigationEndpoint`, and the parser's rule is not to bet on either.
+ * A `watchEndpoint` naming a *different* playlist is skipped, so a nested
+ * button cannot lend the tile somebody else's seed.
+ */
+function mixStart(node: JsonObject, playlistId: string): { seedVideoId: string | null; startParams: string | null } {
+  const holder = deepFind(node, (candidate) => {
+    const endpoint = candidate['watchEndpoint'];
+    if (!isObject(endpoint) || str(endpoint['videoId']) === null) return false;
+    const list = str(endpoint['playlistId']);
+    return list === null || list === playlistId;
+  });
+  const endpoint = holder ? (holder['watchEndpoint'] as JsonObject) : null;
+  return {
+    seedVideoId: endpoint ? str(endpoint['videoId']) : null,
+    startParams: endpoint ? str(endpoint['params']) : null,
+  };
+}
+
 /** A Mix is a radio playlist. Its id always starts `RD`. */
 function isMixId(id: string): boolean {
   return /^RD/.test(id);
@@ -79,6 +104,7 @@ export function mapLockup(node: JsonObject): FeedItem | null {
         subtitle,
         thumbnailUrl: thumbnailUrl ?? '',
         videoCount,
+        ...mixStart(node, id),
       } satisfies MixItem;
     }
 
@@ -241,6 +267,7 @@ export function mapClassicPlaylist(node: JsonObject): MixItem | PlaylistItem | n
       subtitle: text(node['secondaryTitle']) ?? text(node['longBylineText']) ?? null,
       thumbnailUrl,
       videoCount,
+      ...mixStart(node, id),
     } satisfies MixItem;
   }
 

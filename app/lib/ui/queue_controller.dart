@@ -416,7 +416,7 @@ class MixExtension {
 /// through a real sidecar process would make counting fetches slow and flaky.
 /// `queue_test.dart` overrides this with a counter.
 abstract class MixService {
-  Future<MixStart> start(String playlistId, {String? videoId});
+  Future<MixStart> start(String playlistId, {String? videoId, String? params});
   Future<MixExtension> extend(String playlistId, String afterVideoId);
 }
 
@@ -424,10 +424,11 @@ class RpcMixService implements MixService {
   const RpcMixService();
 
   @override
-  Future<MixStart> start(String playlistId, {String? videoId}) async {
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) async {
     final response = await RpcClient.instance.call('mix.start', {
       'playlistId': playlistId,
       'videoId': ?videoId,
+      'params': ?params,
     }) as Map<String, dynamic>;
     return MixStart(
       playlistId: response['playlistId'] as String? ?? playlistId,
@@ -601,7 +602,7 @@ class QueueController extends Notifier<QueueState> {
   /// Throws whatever `mix.start` throws, for the caller to report. Nothing is
   /// replaced when the call fails, so a failed mix leaves the existing queue
   /// playing rather than emptying it.
-  Future<void> startMix(String playlistId, {String? videoId}) async {
+  Future<void> startMix(String playlistId, {String? videoId, String? params}) async {
     // A second tap while the first is still in flight is the same tap. See
     // [isStartingMix] for what it used to cost.
     if (isStartingMix) return;
@@ -623,7 +624,7 @@ class QueueController extends Notifier<QueueState> {
 
     final MixStart result;
     try {
-      result = await ref.read(mixServiceProvider).start(playlistId, videoId: videoId);
+      result = await ref.read(mixServiceProvider).start(playlistId, videoId: videoId, params: params);
     } catch (_) {
       _rollBack(previous);
       rethrow;

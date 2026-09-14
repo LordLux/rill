@@ -29,7 +29,9 @@
       "title": "Sanitised Title 2",
       "subtitle": "Sanitised Subtitle 2",
       "thumbnailUrl": "https://fake.url/img2.jpg",
-      "videoCount": 3
+      "videoCount": 3,
+      "seedVideoId": "vid_002",
+      "startParams": "START_PARAMS"
     },
     {
       "kind": "video",

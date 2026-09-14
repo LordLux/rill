@@ -176,10 +176,10 @@ TileSpec? specFor(FeedItem item) {
     mix: (m) => TileSpec(
       title: m.title,
       thumbnailUrl: m.thumbnailUrl,
-      // No hover preview: `MixItem` names no video, and `mixSeedVideoId` —
-      // which used to derive one from the thumbnail URL — is gone with Task 26.
-      // The static thumbnail is what a mix tile shows on hover.
-      previewVideoId: null,
+      // The song the tile advertises, carried rather than derived — the
+      // thumbnail-URL guess (`mixSeedVideoId`) that used to fill this is gone.
+      // Null only for a tile with no click target, which keeps its still.
+      previewVideoId: m.seedVideoId,
       isStackedCards: true,
       isShort: false,
       // A mix tile usually carries no count at all — YouTube ships the literal

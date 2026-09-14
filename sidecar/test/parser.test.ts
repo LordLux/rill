@@ -94,6 +94,8 @@ const SHAPES = {
     subtitle: 'string?',
     thumbnailUrl: 'string',
     videoCount: 'number?',
+    seedVideoId: 'string?',
+    startParams: 'string?',
   },
   playlist: {
     id: 'string',

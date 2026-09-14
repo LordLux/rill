@@ -743,7 +743,9 @@
         "title": "Sanitised Title 1",
         "subtitle": "Sanitised Subtitle 1",
         "thumbnailUrl": "https://fake.url/img1.jpg",
-        "videoCount": null
+        "videoCount": null,
+        "seedVideoId": "vid_001",
+        "startParams": "START_PARAMS"
       },
       {
         "kind": "video",
