@@ -44,42 +44,70 @@ Future<void> startMixFromTile(
   String? title,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
-  final queue = ref.read(queueProvider.notifier);
+  // The container, not `ref`: the tile that was tapped can be gone by the time
+  // the undo is pressed or the listener below fires, and a disposed `ref`
+  // throws. The container is the app's and outlives every tile.
+  final container = ProviderScope.containerOf(context, listen: false);
+  final queue = container.read(queueProvider.notifier);
   // Read before the call, because starting the mix is what destroys it.
-  final resumeAt = ref.read(playbackProvider).item == null
+  final resumeAt = container.read(playbackProvider).item == null
       ? null
-      : ref.read(playbackProvider.notifier).currentPosition;
+      : container.read(playbackProvider.notifier).currentPosition;
+
+  // **Before the await, not after it.** `mix.start` is a ~0.5-1 s round trip,
+  // and pushing the route only once it returned meant a click on a mix tile did
+  // nothing visible for about a second — which reads as a dead click and gets
+  // repeated. `startMix` empties the queue straight away, which stops the old
+  // video, and the page draws a skeleton while `startingMixId` is set.
+  showWatchPage(ref);
 
   try {
     await queue.startMix(playlistId, videoId: videoId);
-  } on RpcException catch (e) {
-    messenger.showSnackBar(
-      SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to play mixes' : e.message)),
-    );
-    return;
   } on Object catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text("Could not start this mix — $e")));
+    // `startMix` has already put the old queue back; this re-seeks it, so a
+    // failed mix costs the user nothing but the message.
+    if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+    final message = switch (e) {
+      RpcException(code: 'AUTH_REQUIRED') => 'Sign in to play mixes',
+      RpcException(:final message) => message,
+      _ => 'Could not start this mix — $e',
+    };
+    messenger.showSnackBar(SnackBar(content: Text(message)));
     return;
   }
 
-  showWatchPage(ref);
-
   if (!queue.canUndoStartMix) return;
-  messenger.showSnackBar(
+  final snackBar = messenger.showSnackBar(
     SnackBar(
-      // Explicit: the undo is a convenience, not a decision the user has to
-      // make, so it should not sit on screen waiting for one.
       duration: const Duration(seconds: 5),
+      // **Required, not redundant.** A snack bar with an action defaults to
+      // `persist: true` (`persist ?? action != null` in the SDK), which ignores
+      // `duration` entirely — so this one sat on screen until dismissed by hand.
+      persist: false,
       content: Text(title == null ? 'Queue replaced by the mix' : 'Queue replaced by $title'),
       action: SnackBarAction(
         label: 'Undo',
         onPressed: () {
           queue.undoStartMix();
-          if (resumeAt != null) ref.read(playbackProvider.notifier).resumeAt(resumeAt);
+          if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
         },
       ),
     ),
   );
+
+  // Editing the mix commits to it, so the offer to undo it goes the moment the
+  // user does — `QueueController._edit` drops the snapshot, and this notices.
+  // Autoplay and the mix extending itself leave the snapshot alone, so they do
+  // not dismiss it.
+  final watch = container.listen(queueProvider, (_, _) {
+    if (!queue.canUndoStartMix) snackBar.close();
+  });
+  unawaited(snackBar.closed.then((reason) {
+    watch.close();
+    // Gone without being pressed — timed out, or pushed off by another
+    // message. The undo went with it; do not leave a snapshot nothing can use.
+    if (reason != SnackBarClosedReason.action) queue.discardStartMixUndo();
+  }));
 }
 
 /// What tapping a tile should do, or null when nothing can happen.

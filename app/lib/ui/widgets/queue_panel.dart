@@ -542,7 +542,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
               secondChild: const SizedBox(width: double.infinity, height: 0),
               firstChild: ConstrainedBox(
                 key: _listBoxKey,
-                constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 64.0)),
+                constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
                 child: SilkyScroll(
                   controller: _listScroll,
                   builder: (context, scrollController, physics, pointerDeviceKind) {
@@ -579,7 +579,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     );
 
     panel = Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 20),
       child: panel,
     );
 
@@ -767,7 +767,7 @@ String _headerTitle(QueueState queue, VideoItem? nextItem) {
 
   if (expanded) return ('Mixes are playlists YouTube makes for you', null);
   if (mix == null) return (position, null);
-  if (controller.mixError != null) return ('Paused — could not load more', null);
+  if (controller.mixError != null) return ('Paused. Couldn\'t load more', null);
   if (mix.exhausted) return ('End of mix', null);
 
   final nextItem = queue.next;
@@ -854,91 +854,105 @@ class _QueueItemTileState extends State<_QueueItemTile> {
     Widget tile = MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: ListTile(
-        selected: widget.isCurrent,
-        selectedTileColor: widget.scheme.surfaceContainerHigh,
-        mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
-        leading: SizedBox(
-          width: 72 + 10,
-          height: 40 + 20,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  widget.item.thumbnailUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+      child: Stack(
+        children: [
+          ListTile(
+            selected: widget.isCurrent,
+            selectedTileColor: widget.scheme.surfaceContainerHigh,
+            mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
+            leading: SizedBox(
+              width: 82,
+              height: 60,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      widget.item.thumbnailUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+                    ),
+                    Positioned(
+                      bottom: 2,
+                      right: 2,
+                      child: _durationBadge(context),
+                    ),
+                  ],
                 ),
-                Positioned(
-                  bottom: 2,
-                  right: 2,
-                  child: _durationBadge(context),
+              ),
+            ),
+            title: Text(
+              widget.item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
+              ),
+            ),
+            subtitle: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.item.channelName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+                  ),
+                ),
+                ChannelBadge(
+                  channelId: widget.item.channelId,
+                  isArtistChannel: widget.item.isArtistChannel,
+                  isVerified: widget.item.isVerified,
+                  size: 12,
+                  paddingLeft: 4,
                 ),
               ],
             ),
-          ),
-        ),
-        title: Text(
-          widget.item.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 14,
-            color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
-          ),
-        ),
-        subtitle: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                widget.item.channelName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
-              ),
-            ),
-            ChannelBadge(
-              channelId: widget.item.channelId,
-              isArtistChannel: widget.item.isArtistChannel,
-              isVerified: widget.item.isVerified,
-              size: 12,
-              paddingLeft: 4,
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Visibility(
-              visible: !inert && _isHovered,
-              maintainSize: true,
-              maintainAnimation: true,
-              maintainState: true,
-              child: Tooltip(
-                message: 'Remove',
-                waitDuration: const Duration(milliseconds: 300),
-                child: IconButton(
-                  mouseCursor: SystemMouseCursors.click,
-                  icon: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant),
-                  onPressed: widget.onRemove,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedCrossFade(
+                  duration: const Duration(milliseconds: 50),
+                  crossFadeState: !inert && _isHovered ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                  firstChild: Tooltip(
+                    message: 'Remove',
+                    waitDuration: const Duration(milliseconds: 300),
+                    preferBelow: false,
+                    showDuration: const Duration(milliseconds: 800),
+                    exitDuration: const Duration(milliseconds: 0),
+                    child: IconButton(
+                      mouseCursor: SystemMouseCursors.click,
+                      icon: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant),
+                      onPressed: widget.onRemove,
+                    ),
+                  ),
+                  secondChild: const SizedBox.shrink(),
                 ),
-              ),
+                if (!inert)
+                  ReorderableDragStartListener(
+                    index: widget.index,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.grab,
+                      child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                    ),
+                  ),
+              ],
             ),
-            if (!inert)
-              ReorderableDragStartListener(
-                index: widget.index,
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.grab,
-                  child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
-                ),
-              ),
-          ],
-        ),
-        onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+            onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+          ),
+          // Current indicator
+          if (widget.isCurrent)
+            Positioned(
+              left: -0.5,
+              top: 0,
+              bottom: 0,
+              child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
+            ),
+        ],
       ),
     );
 

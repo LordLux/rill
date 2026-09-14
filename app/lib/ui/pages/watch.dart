@@ -25,11 +25,15 @@ import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
+import '../widgets/adaptive_meta_row.dart';
 import '../widgets/tile_badges.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
+import '../account_actions.dart';
+import '../format.dart';
 import '../widgets/save_dialog.dart';
+import '../widgets/watch_skeleton.dart';
 import '../widgets/shortcut_tooltip.dart';
 import '../widgets/subscribe_button.dart';
 import 'watch_layout.dart';
@@ -122,31 +126,46 @@ class _WatchPageState extends ConsumerState<WatchPage> {
 
     final playback = ref.watch(playbackProvider);
     final item = ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
+    final startingMix = ref.watch(queueProvider.select((q) => q.startingMixId));
 
-    if (item == null)
-      return const PageWrapper(
-        title: Text('Watch'),
+    final watchVideoWidget = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        BackButton(onPressed: () => Navigator.of(context).maybePop()),
+        Text(
+          'Watch',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 20,
+          ),
+        ),
+      ],
+    );
+
+    // return PageWrapper(title: watchVideoWidget, body: WatchSkeleton());
+    if (item == null) {
+      // A mix is on its way. The route was pushed before the round trip
+      // finished on purpose (see `startMixFromTile`), so this is the ordinary
+      // first second of opening a mix, not an error state.
+      //
+      // Only when there is nothing playing. When a video *is* already on
+      // screen it keeps playing and simply swaps when the mix lands — better
+      // than replacing real content with a placeholder, and it avoids
+      // unmounting the video texture for a second (architecture §2.8).
+      if (startingMix != null) return PageWrapper(title: watchVideoWidget, body: WatchSkeleton());
+
+      return PageWrapper(
+        title: watchVideoWidget,
         body: Center(child: Text('Nothing playing.')),
       );
+    }
 
     _loadedRelatedFor ??= item.id;
     final info = ref.watch(videoInfoProvider(item.id));
 
     return PageWrapper(
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          BackButton(onPressed: () => Navigator.of(context).maybePop()),
-          Text(
-            'Watch',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 20,
-            ),
-          ),
-        ],
-      ),
+      title: watchVideoWidget,
       actions: const [],
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -180,7 +199,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                 ),
                 theatreBackground: theatre ? Theme.of(context).tokens.scrim : null,
                 metadataSlot: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -201,7 +220,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                   ),
                 ),
                 railSlot: Padding(
-                  padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
+                  padding: EdgeInsets.fromLTRB(8, theatre ? 20 : 2, 16, 32),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -231,7 +250,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     final continuation = _relatedContinuation ?? detail.relatedContinuation;
 
     final header = Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 2),
       child: Text(
         'Related',
         style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: scheme.onSurface),
@@ -401,12 +420,11 @@ class _PlayerSurface extends ConsumerWidget {
           // Neither of the first two is a failure, so neither gets the failure
           // screen — a members-only video is working exactly as its channel
           // intends, the same way a premiere is.
-          if (playback.isUpcoming)
-            _PremiereSlate(playback: playback)
-          else if (isMembersOnlyFailure(playback, detail))
-            _MembersOnlySlate(playback: playback)
-          else if (playback.error != null)
-            _Unavailable(playback: playback),
+          if (playback.isUpcoming) _PremiereSlate(playback: playback)
+          
+          else if (isMembersOnlyFailure(playback, detail)) _MembersOnlySlate(playback: playback)
+          
+          else if (playback.error != null) _Unavailable(playback: playback),
 
           if (playback.error == null && !playback.isLoading && !fullscreen && isTopWatchPage) PlayerControls(engine: engine, actualAspectRatio: ratio),
         ],
@@ -578,8 +596,7 @@ class _MembersOnlySlate extends ConsumerWidget {
       key: membersOnlySlateKey,
       fit: StackFit.expand,
       children: [
-        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
-          Image.network(thumbnailUrl, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty) Image.network(thumbnailUrl, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -618,9 +635,7 @@ class _MembersOnlySlate extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  channel.isEmpty
-                      ? 'This video is for channel members.'
-                      : 'This video is for members of $channel.',
+                  channel.isEmpty ? 'This video is for channel members.' : 'This video is for members of $channel.',
                   style: TextStyle(
                     color: tokens.onScrim,
                     fontSize: 20,
@@ -732,8 +747,69 @@ class _Meta extends ConsumerWidget {
     final channel = detail?.channelName ?? item.channelName;
     final avatar = detail?.channelAvatarUrl ?? item.channelAvatarUrl;
 
+    final metaWidget = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          radius: 18,
+          backgroundImage: avatar == null ? null : NetworkImage(avatar),
+          onBackgroundImageError: avatar == null ? null : (_, _) {},
+          child: avatar == null ? const Icon(Icons.person, size: 20) : null,
+        ),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SelectionArea(
+              child: Row(
+                children: [
+                  Text(
+                    channel,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  ChannelBadge(
+                    channelId: detail?.channelId ?? item.channelId,
+                    isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
+                    isVerified: detail?.isVerified ?? item.isVerified,
+                    size: 14,
+                    paddingLeft: 4,
+                  ),
+                ],
+              ),
+            ),
+            if (detail?.subscriberText != null)
+              Text(
+                detail!.subscriberText!,
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
+          ],
+        ),
+        const SizedBox(width: 16),
+        SubscribeButton(
+          key: ValueKey(detail?.channelId ?? item.channelId),
+          channelId: detail?.channelId ?? item.channelId,
+          // What the user last did wins over the `/next` snapshot, which is as
+          // old as the page — see `account_actions.dart`.
+          initiallySubscribed: ref.watch(
+                subscriptionActionsProvider.select((actions) => actions[detail?.channelId ?? item.channelId]),
+              ) ??
+              detail?.isSubscribed ??
+              false,
+          minHeight: 45,
+          onSubscribe: (channelId) => _setSubscribed(context, ref, channelId, subscribe: true),
+          onUnsubscribe: (channelId) => _setSubscribed(context, ref, channelId, subscribe: false),
+        ),
+      ],
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.max,
+      mainAxisAlignment: MainAxisAlignment.start,
       children: [
         SelectionArea(
           child: Text(
@@ -742,69 +818,10 @@ class _Meta extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 16,
-            runSpacing: 12,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundImage: avatar == null ? null : NetworkImage(avatar),
-                    onBackgroundImageError: avatar == null ? null : (_, _) {},
-                    child: avatar == null ? const Icon(Icons.person, size: 20) : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SelectionArea(
-                        child: Row(
-                          children: [
-                            Text(
-                              channel,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSurface,
-                              ),
-                            ),
-                            ChannelBadge(
-                              channelId: detail?.channelId ?? item.channelId,
-                              isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
-                              isVerified: detail?.isVerified ?? item.isVerified,
-                              size: 14,
-                              paddingLeft: 4,
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (detail?.subscriberText != null)
-                        Text(
-                          detail!.subscriberText!,
-                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(width: 16),
-                  SubscribeButton(
-                    key: ValueKey(detail?.channelId ?? item.channelId),
-                    channelId: detail?.channelId ?? item.channelId,
-                    initiallySubscribed: detail?.isSubscribed ?? false,
-                    minHeight: 45,
-                    onSubscribe: (channelId) => _subscribeChannel(context, channelId),
-                    onUnsubscribe: (channelId) => _unsubscribeChannel(context, channelId),
-                  ),
-                ],
-              ),
-              _Actions(item: item, info: info),
-            ],
-          ),
+        AdaptiveMetaRow(
+          spacing: 16,
+          meta: metaWidget,
+          actions: _Actions(item: item, info: info),
         ),
         if (info.hasError)
           Padding(
@@ -816,36 +833,32 @@ class _Meta extends ConsumerWidget {
   }
 }
 
-/// [SubscribeButton.onSubscribe] for the watch page's channel row — the same
-/// pattern `ArtistPanelCard._subscribe` uses, duplicated rather than shared
-/// because the two live in different widgets with different `context`s and a
-/// shared helper would need to take both as parameters anyway.
-Future<bool> _subscribeChannel(BuildContext context, String channelId) async {
+/// [SubscribeButton.onSubscribe] / `onUnsubscribe` for the watch page's
+/// channel row.
+///
+/// The outcome is written to `subscriptionActionsProvider` rather than left in
+/// the button's own `State`, so it survives the rebuilds that used to reset the
+/// button to the page-load snapshot. The container is captured before the call:
+/// the button may well be rebuilt while the request is out, and the result
+/// still belongs in the store.
+Future<bool> _setSubscribed(
+  BuildContext context,
+  WidgetRef ref,
+  String channelId, {
+  required bool subscribe,
+}) async {
   final messenger = ScaffoldMessenger.of(context);
+  final actions = ref.read(subscriptionActionsProvider.notifier);
   try {
-    await RpcClient.instance.call('action.subscribe', {'channelId': channelId});
+    await RpcClient.instance.call(
+      subscribe ? 'action.subscribe' : 'action.unsubscribe',
+      {'channelId': channelId},
+    );
+    actions.set(channelId, subscribe);
     return true;
   } on RpcException catch (e) {
-    messenger.showSnackBar(
-      SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to subscribe' : e.message)),
-    );
-    return false;
-  } on Object catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('$e')));
-    return false;
-  }
-}
-
-/// [SubscribeButton.onUnsubscribe] for the watch page's channel row.
-Future<bool> _unsubscribeChannel(BuildContext context, String channelId) async {
-  final messenger = ScaffoldMessenger.of(context);
-  try {
-    await RpcClient.instance.call('action.unsubscribe', {'channelId': channelId});
-    return true;
-  } on RpcException catch (e) {
-    messenger.showSnackBar(
-      SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? 'Sign in to unsubscribe' : e.message)),
-    );
+    final signIn = subscribe ? 'Sign in to subscribe' : 'Sign in to unsubscribe';
+    messenger.showSnackBar(SnackBar(content: Text(e.code == 'AUTH_REQUIRED' ? signIn : e.message)));
     return false;
   } on Object catch (e) {
     messenger.showSnackBar(SnackBar(content: Text('$e')));
@@ -914,16 +927,13 @@ class _ActionsState extends ConsumerState<_Actions> {
   int _videoGeneration = 0;
 
   // ---- Watch Later (Task 25 §7) ----
-
-  /// Overrides `playlistMembershipProvider`'s answer once the user has acted
-  /// on this pill for this video. Null defers to the provider's real
-  /// membership — the seed the pill lacked entirely before this task, when
-  /// the surface was write-only and "you saved it just now" was the most it
-  /// could honestly say. Not cleared back to null after a successful
-  /// mutation: this page keeps trusting what it was just told rather than
-  /// re-reading the provider and risking a one-frame flicker back to
-  /// "unsaved" while the invalidated fetch is still in flight.
-  bool? _watchLaterOverride;
+  //
+  // What the user last did lives in `watchLaterActionsProvider`, not here — a
+  // field on this `State` was discarded by every theatre toggle, resize and
+  // mini-player round trip (`account_actions.dart`). An entry overrides
+  // `playlistMembershipProvider`; absence defers to it. Not cleared after a
+  // successful mutation, so the pill never flickers back to "unsaved" while the
+  // invalidated membership fetch is still in flight.
 
   /// A save or remove in flight, so a second tap cannot land on a pill that
   /// only looks settled while the first is still in the air.
@@ -939,9 +949,11 @@ class _ActionsState extends ConsumerState<_Actions> {
   Timer? _settleTimer;
 
   // ---- Like / dislike (Task 25 §3–§4) ----
-
-  /// Same override pattern as Watch Later, over `VideoDetail.myRating`.
-  VideoRating? _ratingOverride;
+  //
+  // Same arrangement over `VideoDetail.myRating`: `ratingActionsProvider` holds
+  // the outcome, keyed by video, so no rebuild can reset it to the page-load
+  // snapshot. Only the in-flight flag is local — it describes this widget's
+  // pending tap, not the account.
   bool _ratingBusy = false;
 
   @override
@@ -950,12 +962,10 @@ class _ActionsState extends ConsumerState<_Actions> {
     if (oldWidget.item.id == widget.item.id) return;
     _videoGeneration++;
     _sheet = null;
-    _watchLaterOverride = null;
     _savingWatchLater = false;
     _watchLaterSettled = false;
     _settleTimer?.cancel();
     _settleTimer = null;
-    _ratingOverride = null;
     _ratingBusy = false;
   }
 
@@ -978,19 +988,24 @@ class _ActionsState extends ConsumerState<_Actions> {
     final membership = ref.watch(playlistMembershipProvider(item.id));
 
     final views = detail?.viewCountText ?? item.viewCountText ?? '';
+    // Shortened for the row, exact on hover — but only when the exact number
+    // is actually known. A feed tile carries "1.8M views" and nothing more, and
+    // re-shortening that would be inventing precision the response never had;
+    // there the row shows YouTube's own string with no tooltip.
+    final exactViews = detail?.viewCount;
+    final shortViews = exactViews == null ? null : formatCompactViews(exactViews);
     final date = detail?.publishedText ?? '';
     // Null whenever it would just repeat `date` — a layout with no relative
     // date at all falls back to the exact one for both fields (§ sidecar
     // `parser/video.ts`), and a tooltip that says exactly what is already on
     // screen is not a tooltip worth having.
-    final exactDate = detail?.publishedDateText != null && detail!.publishedDateText != date
-        ? detail.publishedDateText
-        : null;
+    final exactDate = detail?.publishedDateText != null && detail!.publishedDateText != date ? detail.publishedDateText : null;
     final likes = detail?.likeText ?? 'Like';
 
-    final rating = _ratingOverride ?? detail?.myRating ?? VideoRating.none;
-    final inWatchLater =
-        _watchLaterOverride ?? (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ?? false);
+    final rating =
+        ref.watch(ratingActionsProvider.select((actions) => actions[item.id])) ?? detail?.myRating ?? VideoRating.none;
+    final inWatchLater = ref.watch(watchLaterActionsProvider.select((actions) => actions[item.id])) ??
+        (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ?? false);
 
     return Wrap(
       spacing: 8,
@@ -998,7 +1013,13 @@ class _ActionsState extends ConsumerState<_Actions> {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         // The read-outs, one `Wrap` child each — see [_MetaStat].
-        if (views.isNotEmpty) _MetaStat(icon: Icons.visibility_outlined, text: views),
+        if (views.isNotEmpty)
+          shortViews == null
+              ? _MetaStat(icon: Icons.visibility_outlined, text: views)
+              : ShortcutTooltip(
+                  label: views,
+                  child: _MetaStat(icon: Icons.visibility_outlined, text: shortViews),
+                ),
         if (date.isNotEmpty)
           exactDate == null
               ? _MetaStat(icon: Icons.calendar_today_outlined, text: date)
@@ -1134,18 +1155,22 @@ class _ActionsState extends ConsumerState<_Actions> {
   }
 
   Future<void> _openSave() async {
+    // Captured before the await. This widget can be rebuilt — or gone — by the
+    // time the dialog closes, and `ref` on a disposed state throws; the
+    // container outlives it. The id is captured for the same reason: re-reading
+    // `widget.item` afterwards would refresh whichever video is current *now*.
+    final videoId = widget.item.id;
+    final container = ProviderScope.containerOf(context, listen: false);
+
     setState(() => _sheet = _OpenSheet.save);
-    await showSaveDialog(context, widget.item.id);
+    await showSaveDialog(context, videoId);
+
     // The dialog is the more thorough source of truth once it has been
     // opened — whatever it left checked or unchecked, this pill should agree
     // rather than keep showing whatever it thought before the dialog ran.
-    ref.invalidate(playlistMembershipProvider(widget.item.id));
-    if (mounted) {
-      setState(() {
-        _sheet = null;
-        _watchLaterOverride = null;
-      });
-    }
+    container.invalidate(playlistMembershipProvider(videoId));
+    container.read(watchLaterActionsProvider.notifier).clear(videoId);
+    if (mounted) setState(() => _sheet = null);
   }
 
   /// Where the video is right now, for the share dialog's "Start at".
@@ -1176,10 +1201,13 @@ class _ActionsState extends ConsumerState<_Actions> {
   Future<bool> _saveToWatchLater() async {
     final videoId = widget.item.id;
     final generation = _videoGeneration;
-    setState(() {
-      _watchLaterOverride = true;
-      _savingWatchLater = true;
-    });
+    final actions = ref.read(watchLaterActionsProvider.notifier);
+    final had = ref.read(watchLaterActionsProvider).containsKey(videoId);
+    final previous = ref.read(watchLaterActionsProvider)[videoId];
+    final container = ProviderScope.containerOf(context, listen: false);
+
+    actions.set(videoId, true);
+    setState(() => _savingWatchLater = true);
 
     String? failure;
     try {
@@ -1190,21 +1218,25 @@ class _ActionsState extends ConsumerState<_Actions> {
       failure = '$e';
     }
 
+    // The account outcome is recorded whatever happened to this widget in the
+    // meantime — it is keyed by video, so it cannot land on the wrong one.
+    if (failure != null) {
+      actions.restore(videoId, had: had, previous: previous);
+    } else {
+      container.invalidate(playlistMembershipProvider(videoId));
+    }
+
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId) {
       return failure == null;
     }
 
-    setState(() {
-      _savingWatchLater = false;
-      if (failure != null) _watchLaterOverride = false;
-    });
+    setState(() => _savingWatchLater = false);
     _say(failure ?? 'Saved to Watch Later');
 
     // Timed from the answer, not from the tap. On a slow call the tap-to-answer
     // gap is already most of the two seconds, and a pill that settles the
     // instant the save lands never reads as a confirmation of it.
     if (failure == null) {
-      ref.invalidate(playlistMembershipProvider(videoId));
       _settleTimer?.cancel();
       _settleTimer = Timer(_watchLaterSettleDelay, () {
         if (mounted) setState(() => _watchLaterSettled = true);
@@ -1221,8 +1253,13 @@ class _ActionsState extends ConsumerState<_Actions> {
   Future<void> _removeFromWatchLater() async {
     final videoId = widget.item.id;
     final generation = _videoGeneration;
+    final actions = ref.read(watchLaterActionsProvider.notifier);
+    final had = ref.read(watchLaterActionsProvider).containsKey(videoId);
+    final previous = ref.read(watchLaterActionsProvider)[videoId];
+    final container = ProviderScope.containerOf(context, listen: false);
+
+    actions.set(videoId, false);
     setState(() {
-      _watchLaterOverride = false;
       _savingWatchLater = true;
       _watchLaterSettled = false;
     });
@@ -1230,8 +1267,7 @@ class _ActionsState extends ConsumerState<_Actions> {
 
     String? failure;
     try {
-      final response =
-          await RpcClient.instance.call('playlist.forVideo', {'videoId': videoId}) as Map<String, dynamic>;
+      final response = await RpcClient.instance.call('playlist.forVideo', {'videoId': videoId}) as Map<String, dynamic>;
       String? token;
       for (final raw in (response['playlists'] as List<dynamic>? ?? [])) {
         final row = raw as Map<String, dynamic>;
@@ -1254,13 +1290,15 @@ class _ActionsState extends ConsumerState<_Actions> {
       failure = '$e';
     }
 
+    if (failure != null) {
+      actions.restore(videoId, had: had, previous: previous);
+    } else {
+      container.invalidate(playlistMembershipProvider(videoId));
+    }
+
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
 
-    setState(() {
-      _savingWatchLater = false;
-      if (failure != null) _watchLaterOverride = true;
-    });
-    if (failure == null) ref.invalidate(playlistMembershipProvider(videoId));
+    setState(() => _savingWatchLater = false);
     _say(failure ?? 'Removed from Watch Later');
   }
 
@@ -1272,13 +1310,14 @@ class _ActionsState extends ConsumerState<_Actions> {
     if (_ratingBusy) return;
     final videoId = widget.item.id;
     final generation = _videoGeneration;
-    final current = _ratingOverride ?? widget.info.value?.myRating ?? VideoRating.none;
+    final actions = ref.read(ratingActionsProvider.notifier);
+    final had = ref.read(ratingActionsProvider).containsKey(videoId);
+    final previous = ref.read(ratingActionsProvider)[videoId];
+    final current = previous ?? widget.info.value?.myRating ?? VideoRating.none;
     final next = current == target ? VideoRating.none : target;
 
-    setState(() {
-      _ratingBusy = true;
-      _ratingOverride = next;
-    });
+    actions.set(videoId, next);
+    setState(() => _ratingBusy = true);
 
     final method = switch (next) {
       VideoRating.like => 'action.like',
@@ -1295,12 +1334,13 @@ class _ActionsState extends ConsumerState<_Actions> {
       failure = '$e';
     }
 
+    // Undone in the store whatever became of this widget — a rating that failed
+    // while the layout was switching must not stay drawn as set.
+    if (failure != null) actions.restore(videoId, had: had, previous: previous);
+
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
 
-    setState(() {
-      _ratingBusy = false;
-      if (failure != null) _ratingOverride = current;
-    });
+    setState(() => _ratingBusy = false);
     if (failure != null) _say(failure);
   }
 
@@ -1899,7 +1939,6 @@ class _ShareTargetState extends State<_ShareTarget> {
     );
   }
 }
-
 
 /// The last description measured, kept because these two `TextPainter.layout()`
 /// calls are the most expensive thing on the page and they are not asked for
