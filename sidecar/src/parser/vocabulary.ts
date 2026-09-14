@@ -195,6 +195,11 @@ const IGNORED = [
   // seen 2026-08-28 on an artist channel's search results. Not a tile itself;
   // same reasoning as the post renderers above it.
   'buttoncard',
+  // A home shelf of YouTube Playables (mini-games, `/playables/…`,
+  // `WEB_PAGE_TYPE_MINI_APP`), first seen 2026-09-14 — 48 cards across the
+  // home fixtures. Not an ad, so not stripped; content this app does not play,
+  // so ignored like the post renderers above.
+  'minigamecard',
   'menu',
   'multipagemenu',
   'multipagemenusection',

@@ -6,7 +6,7 @@
       "id": "list_001",
       "title": "Sanitised Title 1",
       "thumbnailUrl": "https://fake.url/img1.jpg",
-      "videoCount": 24,
+      "videoCount": 2,
       "channelName": "Sanitised Channel 1"
     },
     {
@@ -14,7 +14,7 @@
       "id": "list_002",
       "title": "Sanitised Title 2",
       "thumbnailUrl": "https://fake.url/img2.jpg",
-      "videoCount": 24,
+      "videoCount": 40,
       "channelName": "Sanitised Channel 2"
     },
     {
@@ -22,7 +22,7 @@
       "id": "list_003",
       "title": "Sanitised Title 3",
       "thumbnailUrl": "https://fake.url/img3.jpg",
-      "videoCount": 47,
+      "videoCount": 2,
       "channelName": "Sanitised Channel 3"
     },
     {
@@ -30,7 +30,7 @@
       "id": "list_004",
       "title": "Sanitised Title 4",
       "thumbnailUrl": "https://fake.url/img4.jpg",
-      "videoCount": 2,
+      "videoCount": 24,
       "channelName": "Sanitised Channel 4"
     },
     {
@@ -38,7 +38,7 @@
       "id": "list_005",
       "title": "Sanitised Title 5",
       "thumbnailUrl": "https://fake.url/img5.jpg",
-      "videoCount": 24,
+      "videoCount": 2024,
       "channelName": "Sanitised Channel 5"
     },
     {
@@ -46,7 +46,7 @@
       "id": "list_006",
       "title": "Sanitised Title 6",
       "thumbnailUrl": "https://fake.url/img6.jpg",
-      "videoCount": 48,
+      "videoCount": 3,
       "channelName": "Sanitised Channel 6"
     },
     {
@@ -54,7 +54,7 @@
       "id": "list_007",
       "title": "Sanitised Title 7",
       "thumbnailUrl": "https://fake.url/img7.jpg",
-      "videoCount": 3,
+      "videoCount": 2,
       "channelName": "Sanitised Channel 7"
     },
     {
@@ -62,7 +62,7 @@
       "id": "list_008",
       "title": "Sanitised Title 8",
       "thumbnailUrl": "https://fake.url/img8.jpg",
-      "videoCount": 3,
+      "videoCount": 5,
       "channelName": "Sanitised Channel 8"
     },
     {
@@ -70,7 +70,7 @@
       "id": "list_009",
       "title": "Sanitised Title 9",
       "thumbnailUrl": "https://fake.url/img9.jpg",
-      "videoCount": 1,
+      "videoCount": 19,
       "channelName": "Sanitised Channel 9"
     },
     {
@@ -78,7 +78,7 @@
       "id": "list_010",
       "title": "Sanitised Title 10",
       "thumbnailUrl": "https://fake.url/img10.jpg",
-      "videoCount": 3,
+      "videoCount": 24,
       "channelName": "Sanitised Channel 10"
     },
     {
@@ -86,7 +86,7 @@
       "id": "list_011",
       "title": "Sanitised Title 11",
       "thumbnailUrl": "https://fake.url/img11.jpg",
-      "videoCount": 34,
+      "videoCount": 2,
       "channelName": "Sanitised Channel 11"
     },
     {
@@ -94,7 +94,7 @@
       "id": "list_012",
       "title": "Sanitised Title 12",
       "thumbnailUrl": "https://fake.url/img12.jpg",
-      "videoCount": 2,
+      "videoCount": 40,
       "channelName": "Sanitised Channel 12"
     },
     {
@@ -102,7 +102,7 @@
       "id": "list_013",
       "title": "Sanitised Title 13",
       "thumbnailUrl": "https://fake.url/img13.jpg",
-      "videoCount": 19,
+      "videoCount": 24,
       "channelName": "Sanitised Channel 13"
     },
     {
@@ -110,7 +110,7 @@
       "id": "list_014",
       "title": "Sanitised Title 14",
       "thumbnailUrl": "https://fake.url/img14.jpg",
-      "videoCount": 3,
+      "videoCount": 48,
       "channelName": "Sanitised Channel 14"
     },
     {
@@ -118,7 +118,7 @@
       "id": "list_015",
       "title": "Sanitised Title 15",
       "thumbnailUrl": "https://fake.url/img15.jpg",
-      "videoCount": 24,
+      "videoCount": 11,
       "channelName": "Sanitised Channel 15"
     },
     {
@@ -126,7 +126,7 @@
       "id": "list_016",
       "title": "Sanitised Title 16",
       "thumbnailUrl": "https://fake.url/img16.jpg",
-      "videoCount": 35,
+      "videoCount": 3,
       "channelName": "Sanitised Channel 16"
     },
     {
@@ -134,7 +134,7 @@
       "id": "list_017",
       "title": "Sanitised Title 17",
       "thumbnailUrl": "https://fake.url/img17.jpg",
-      "videoCount": 1,
+      "videoCount": 58,
       "channelName": "Sanitised Channel 17"
     },
     {
@@ -142,7 +142,7 @@
       "id": "list_018",
       "title": "Sanitised Title 18",
       "thumbnailUrl": "https://fake.url/img18.jpg",
-      "videoCount": 40,
+      "videoCount": 1,
       "channelName": "Sanitised Channel 18"
     },
     {
@@ -150,7 +150,7 @@
       "id": "list_019",
       "title": "Sanitised Title 19",
       "thumbnailUrl": "https://fake.url/img19.jpg",
-      "videoCount": 40,
+      "videoCount": 21,
       "channelName": "Sanitised Channel 19"
     },
     {
@@ -158,7 +158,7 @@
       "id": "list_020",
       "title": "Sanitised Title 20",
       "thumbnailUrl": "https://fake.url/img20.jpg",
-      "videoCount": 33,
+      "videoCount": 1,
       "channelName": "Sanitised Channel 20"
     }
   ],
