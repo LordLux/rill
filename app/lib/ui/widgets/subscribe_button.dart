@@ -119,6 +119,28 @@ class _SubscribeButtonState extends State<SubscribeButton> {
   late SubscriptionNotificationLevel _level = widget.initialNotificationLevel;
   bool _subscribing = false;
 
+  /// Follow a *changed* `initiallySubscribed` from the parent.
+  ///
+  /// Without this the button was frozen at whatever it was first built with.
+  /// The watch page builds it before `video.info` has answered — so with
+  /// `false` — and when the real answer arrived a moment later the button never
+  /// heard, and a subscribed channel read "Subscribe" for the whole visit (the
+  /// `ValueKey` did not change either, since a feed tile already carries the
+  /// channel id). Callers now also feed it the session's own record of what the
+  /// user did (`subscriptionActionsProvider`), which only works if a new value
+  /// is actually listened to.
+  ///
+  /// Ignored while a request of this button's own is out: its optimistic value
+  /// is newer than anything the parent can know yet, and the parent is updated
+  /// the moment that request answers.
+  @override
+  void didUpdateWidget(SubscribeButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initiallySubscribed == widget.initiallySubscribed) return;
+    if (_subscribing || _unsubscribing) return;
+    _subscribed = widget.initiallySubscribed;
+  }
+
   Future<void> _subscribe() async {
     final channelId = widget.channelId;
     if (channelId == null) return;
