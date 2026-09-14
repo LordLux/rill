@@ -203,6 +203,53 @@ void main() {
       expect(stateOf(c).isMix, isFalse);
     });
 
+    test('the loading flag is up while the round trip is out', () async {
+      // The watch route is pushed before `mix.start` returns, so this flag is
+      // what tells the page to draw a skeleton rather than "Nothing playing."
+      final service = FakeMixService();
+      service.pendingStart = Completer<void>();
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      expect(stateOf(c).startingMixId, isNull);
+      final started = queue.startMix('RDxyz');
+      expect(stateOf(c).startingMixId, 'RDxyz');
+
+      service.pendingStart!.complete();
+      await started;
+      expect(stateOf(c).startingMixId, isNull);
+    });
+
+    test('the flag never clears a frame before the items land', () async {
+      // Both halves in one state write. Two writes would put a frame of
+      // "not loading, nothing playing" between them — the empty watch page
+      // flashing up just as the video arrives.
+      final service = FakeMixService();
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      final seen = <(String?, int)>[];
+      c.listen(queueProvider, (_, next) => seen.add((next.startingMixId, next.items.length)));
+
+      await queue.startMix('RDxyz');
+
+      // No observed state may be "not loading" with an empty queue.
+      expect(
+        seen.where((s) => s.$1 == null && s.$2 == 0),
+        isEmpty,
+        reason: 'that combination is the empty watch page flashing up',
+      );
+    });
+
+    test('a failed start clears the flag, so the page stops waiting', () async {
+      final service = FailingStartService();
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      await expectLater(queue.startMix('RDxyz'), throwsA(isA<StateError>()));
+      expect(stateOf(c).startingMixId, isNull);
+    });
+
     test('a failed start does not wedge later attempts', () async {
       // The guard is cleared in a `finally`, or one network blip would make
       // every mix tile inert for the rest of the session.
@@ -224,16 +271,120 @@ void main() {
       expect(controllerOf(c).canUndoStartMix, isFalse);
     });
 
-    test('a failed start leaves the existing queue playing', () async {
+    test('the old queue is gone the moment the tap lands, not when the mix does', () async {
+      // Reported: the watch page opened at once but kept showing — and
+      // playing — the old video for the second `mix.start` took. Emptying the
+      // queue moves the playhead, which is what stops playback.
       final service = FakeMixService();
+      service.pendingStart = Completer<void>();
       final c = containerWith(service);
       final queue = controllerOf(c);
       queue.addToQueue(video('mine1'));
+      queue.addToQueue(video('mine2'));
+      final before = stateOf(c);
 
-      await expectLater(queue.startMix('RDempty', videoId: null), completes);
-      // The fake always returns items; the real failure mode is an exception,
-      // and the guard is that nothing is replaced before the await returns.
-      expect(stateOf(c).isMix, isTrue);
+      final started = queue.startMix('RDxyz');
+
+      final loading = stateOf(c);
+      expect(loading.items, isEmpty);
+      expect(loading.current, isNull, reason: 'nothing current is what stops playback');
+      expect(loading.version, greaterThan(before.version), reason: 'the playback controller acts on a version change');
+      expect(loading.startingMixId, 'RDxyz', reason: 'what puts the skeleton up');
+      expect(loading.isMix, isFalse);
+
+      service.pendingStart!.complete();
+      await started;
+      expect(stateOf(c).items, hasLength(25));
+    });
+
+    test('a failed start puts the old queue back, cursor included', () async {
+      // The queue is emptied up front now, so without a rollback a network
+      // blip would cost the user their queue.
+      final c = containerWith(FailingStartService());
+      final queue = controllerOf(c);
+      queue.addToQueue(video('mine1'));
+      queue.addToQueue(video('mine2'));
+      queue.advance(); // on mine2
+      final versionBefore = stateOf(c).version;
+
+      await expectLater(queue.startMix('RDxyz'), throwsA(isA<StateError>()));
+
+      final after = stateOf(c);
+      expect(after.items.map((v) => v.id), ['mine1', 'mine2']);
+      expect(after.current?.id, 'mine2');
+      expect(after.startingMixId, isNull);
+      expect(after.version, greaterThan(versionBefore), reason: 'it has to reopen the restored video');
+      expect(queue.canUndoStartMix, isFalse, reason: 'nothing was replaced');
+    });
+
+    test('a failed start from an empty queue ends empty, not stuck loading', () async {
+      final c = containerWith(FailingStartService());
+      await expectLater(controllerOf(c).startMix('RDxyz'), throwsA(isA<StateError>()));
+      expect(stateOf(c).items, isEmpty);
+      expect(stateOf(c).startingMixId, isNull);
+    });
+  });
+
+  group('the undo offer', () {
+    Future<(ProviderContainer, QueueController)> replaced() async {
+      final c = containerWith(FakeMixService());
+      final queue = controllerOf(c);
+      queue.addToQueue(video('mine1'));
+      await queue.startMix('RDxyz');
+      expect(queue.canUndoStartMix, isTrue);
+      return (c, queue);
+    }
+
+    // Editing the mix commits to it: an undo that silently threw away the video
+    // just added is not one anyone wants.
+    for (final (label, edit) in <(String, void Function(QueueController))>[
+      ('adding to the queue', (q) => q.addToQueue(video('added'))),
+      ('play next', (q) => q.playNext(video('next'))),
+      ('play now', (q) => q.play(video('now'))),
+      ('removing an entry', (q) => q.remove(q.entries.last)),
+      ('removing by index', (q) => q.removeAt(3)),
+      ('reordering', (q) => q.reorder(4, 1)),
+      ('clearing upcoming', (q) => q.clearUpcoming()),
+      ('clearing', (q) => q.clear()),
+    ]) {
+      test('goes when the user edits: $label', () async {
+        final (_, queue) = await replaced();
+        edit(queue);
+        expect(queue.canUndoStartMix, isFalse);
+      });
+    }
+
+    // Not edits — the user has not committed to anything by these.
+    for (final (label, move) in <(String, void Function(QueueController))>[
+      ('autoplay advancing', (q) => q.advance()),
+      ('the previous button', (q) {
+        q.advance();
+        q.back();
+      }),
+      ('jumping to a row', (q) => q.jumpTo(5)),
+    ]) {
+      test('stays for: $label', () async {
+        final (_, queue) = await replaced();
+        move(queue);
+        expect(queue.canUndoStartMix, isTrue);
+      });
+    }
+
+    test('stays while the mix extends itself', () async {
+      final (c, queue) = await replaced();
+      for (var i = 0; i < 19; i++) {
+        queue.advance();
+      }
+      await pumpMicrotasks();
+      expect(stateOf(c).items.length, greaterThan(25), reason: 'the extension landed');
+      expect(queue.canUndoStartMix, isTrue);
+    });
+
+    test('can be discarded without restoring, when its snackbar goes away', () async {
+      final (c, queue) = await replaced();
+      queue.discardStartMixUndo();
+      expect(queue.canUndoStartMix, isFalse);
+      expect(stateOf(c).isMix, isTrue, reason: 'discarding is not undoing');
     });
   });
 

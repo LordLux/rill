@@ -87,14 +87,22 @@ class QueueState {
     int? currentIndex,
     int version = 0,
     MixQueue? mix,
+    String? startingMixId,
   }) => QueueState._(
     [for (final item in items) QueueEntry(item)],
     currentIndex: currentIndex,
     version: version,
     mix: mix,
+    startingMixId: startingMixId,
   );
 
-  QueueState._(this.entries, {this.currentIndex, this.version = 0, this.mix});
+  QueueState._(
+    this.entries, {
+    this.currentIndex,
+    this.version = 0,
+    this.mix,
+    this.startingMixId,
+  });
 
   /// The queue itself. Order is position; each element is an identity
   final List<QueueEntry> entries;
@@ -114,6 +122,15 @@ class QueueState {
   final MixQueue? mix;
 
   bool get isMix => mix != null;
+
+  /// The `RD…` id of a mix whose `mix.start` is on the wire, or null.
+  ///
+  /// **On the state rather than on the controller, because the watch page has
+  /// to rebuild when it changes.** The route is pushed before the round trip
+  /// finishes (a click that does nothing for a second reads as a dead click),
+  /// so something has to tell the page to draw a skeleton instead of "Nothing
+  /// playing." — and a plain field on the `Notifier` would never notify.
+  final String? startingMixId;
 
   /// How many items sit after the current one. What the extension threshold
   /// reads, and `null` when nothing is playing.
@@ -166,6 +183,7 @@ class QueueState {
     currentIndex: currentIndex,
     version: playheadMoved ? version + 1 : version,
     mix: mix,
+    startingMixId: startingMixId,
   );
 
   /// Append. Starts playback only if nothing was playing.
@@ -485,8 +503,7 @@ class QueueController extends Notifier<QueueState> {
   /// starts a second mix, and the two land in sequence: the queue fills, then
   /// is immediately replaced again, and the undo snapshot taken by the second
   /// call is *the first mix* rather than what the user actually had.
-  bool get isStartingMix => _starting;
-  bool _starting = false;
+  bool get isStartingMix => state.startingMixId != null;
 
   /// The last extension failure, or null.
   ///
@@ -509,20 +526,39 @@ class QueueController extends Notifier<QueueState> {
   }
 
   /// Open a video now. The one the feed and the related rail both call.
-  void play(VideoItem item) => _set(state.playingNow(item));
+  void play(VideoItem item) => _edit(state.playingNow(item));
 
-  void addToQueue(VideoItem item) => _set(state.appended(item));
+  void addToQueue(VideoItem item) => _edit(state.appended(item));
 
-  void playNext(VideoItem item) => _set(state.insertedNext(item));
+  void playNext(VideoItem item) => _edit(state.insertedNext(item));
 
+  /// Not an edit: moving through the mix is not committing to it or away from
+  /// it, so the undo survives.
   void jumpTo(int index) => _set(state.jumpedTo(index));
 
-  void removeAt(int index) => _set(state.removedAt(index));
+  void removeAt(int index) => _edit(state.removedAt(index));
 
   /// Remove by identity. Idempotent
-  void remove(QueueEntry entry) => _set(state.removedEntry(entry));
+  void remove(QueueEntry entry) => _edit(state.removedEntry(entry));
 
-  void reorder(int oldIndex, int newIndex) => _set(state.reordered(oldIndex, newIndex));
+  void reorder(int oldIndex, int newIndex) => _edit(state.reordered(oldIndex, newIndex));
+
+  /// A change the user made to the queue.
+  ///
+  /// **Editing the queue a mix installed commits to it**, so the offer to put
+  /// the old one back goes away: an undo that would silently throw away the
+  /// video they just added is not an undo anyone wants. Only real edits come
+  /// through here — autoplay advancing, the previous button, jumping to a row
+  /// and the mix topping itself up all go straight to [_set] and leave the
+  /// offer standing.
+  void _edit(QueueState next) {
+    _replaced = null;
+    _set(next);
+  }
+
+  /// Forget the replaced queue without restoring it — the undo was offered and
+  /// the offer went away (its snackbar timed out or was replaced).
+  void discardStartMixUndo() => _replaced = null;
 
   /// Advance to the next item. Returns false when there was none, which is what
   /// tells the playback controller to stop rather than loop.
@@ -547,7 +583,7 @@ class QueueController extends Notifier<QueueState> {
   }
 
   void clearUpcoming({Set<QueueEntry> keep = const {}}) =>
-      _set(state.clearUpcoming(keep: keep));
+      _edit(state.clearUpcoming(keep: keep));
 
   // -------------------------------------------------------------------------
   // Mixes (Task 26)
@@ -568,30 +604,56 @@ class QueueController extends Notifier<QueueState> {
   Future<void> startMix(String playlistId, {String? videoId}) async {
     // A second tap while the first is still in flight is the same tap. See
     // [isStartingMix] for what it used to cost.
-    if (_starting) return;
-    _starting = true;
+    if (isStartingMix) return;
+
+    // **The old queue goes the moment the tap lands, not when the mix does.**
+    // Keeping it until the items arrived left the old video playing, and the
+    // old queue on screen, for the second `mix.start` takes — on a page that
+    // was supposed to be opening something else. Emptying it moves the
+    // playhead, which is what makes the playback controller stop the video,
+    // and `startingMixId` is what puts the skeleton up in its place.
+    //
+    // It is held rather than dropped: the snapshot is the undo on success and
+    // the rollback on failure.
+    final previous = state.isEmpty ? null : state;
+    _replaced = null;
+    _mixError = null;
+    _extending = false;
+    state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
 
     final MixStart result;
     try {
       result = await ref.read(mixServiceProvider).start(playlistId, videoId: videoId);
-    } finally {
-      // Cleared before the state below is touched, and in a `finally` so a
-      // failed start does not wedge every later attempt.
-      _starting = false;
+    } catch (_) {
+      _rollBack(previous);
+      rethrow;
     }
 
     if (result.items.isEmpty) {
+      _rollBack(previous);
       throw StateError('mix.start returned no items for $playlistId');
     }
-    // Captured only once the call has succeeded, and only when there is
-    // something worth putting back.
-    _replaced = state.isEmpty ? null : state;
-    _mixError = null;
-    _extending = false;
+
+    _replaced = previous;
+    // One write that clears the loading flag *and* installs the mix —
+    // `startedMix` builds a fresh state with no `startingMixId`. Two writes
+    // would put a frame of "not loading, nothing playing" between them: the
+    // empty watch page flashing up just before the video arrives.
     _set(state.startedMix(
       result.items,
       MixQueue(playlistId: result.playlistId, title: result.title),
     ));
+  }
+
+  /// A start that failed puts back what it cleared.
+  ///
+  /// The queue was emptied when the tap landed, so leaving it empty here would
+  /// turn a network hiccup into losing the user's queue. The caller shows the
+  /// error and re-seeks the restored video.
+  void _rollBack(QueueState? previous) {
+    state = previous == null
+        ? QueueState._(const [], version: state.version)
+        : previous.restoredAfter(state.version);
   }
 
   /// Put back the queue a mix replaced. Idempotent — a second Undo does
