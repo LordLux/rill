@@ -254,6 +254,23 @@ export interface VideoDetail {
   durationSeconds: number | null;
   isLive: boolean;
   viewCountText: string | null;
+  /**
+   * The exact view count as a number, for a client that shows its own short
+   * form ("4.6M views") with the exact one on hover.
+   *
+   * **Derived from {@link viewCountText}, the same string the tooltip shows**,
+   * so the short form and the exact one cannot disagree. The parse refuses
+   * anything already rounded rather than guessing: `"1.8M views"` yields
+   * `null`, never 18. See `parser/text.ts`'s `exactCountFromText`.
+   *
+   * `videoViewCountRenderer.originalViewCount` is a fallback only, and **its
+   * `"0"` means "not filled in"** — measured 2026-09-13, it was `"0"` on 18 of
+   * 24 watch pages that had real counts, and the number on the other 6.
+   *
+   * `null` means the exact number is not recoverable, and the client should
+   * show {@link viewCountText} unchanged.
+   */
+  viewCount: number | null;
   publishedText: string | null;
   /**
    * The exact upload date ("Dec 6, 2009"), for a tooltip on {@link
