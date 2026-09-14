@@ -129,6 +129,60 @@ export function countFromText(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * The exact number behind a view-count string — or `null` when the string is
+ * already rounded and the exact number is therefore *not recoverable*.
+ *
+ * **This is deliberately not [countFromText], and must not become it.** That
+ * one strips every non-digit, which is right for "1,234 videos" and actively
+ * wrong here: it turns `"1.8M views"` into **18**. A view count is the one
+ * metadata string YouTube routinely ships pre-rounded, so a parser for it has
+ * to be able to answer "I cannot tell you".
+ *
+ * What it accepts is a **plain grouped integer**: at most three leading digits,
+ * then groups of exactly three, separated consistently. Two guards do the
+ * refusing, and each exists because of a real string shape:
+ *
+ *   - **A letter immediately after the number** means a magnitude marker, in
+ *     any script: `"1.8M views"`, and `"182万回視聴"` (Japanese, where 万 is
+ *     10,000 — stripping non-digits would answer 182 for 1.82 million).
+ *   - **A separator followed by a digit, left over after grouping**, means the
+ *     groups were not thousands: German `"1,8 Mio. Aufrufe"` matches only `"1"`
+ *     and leaves `",8 …"`, which would otherwise be read as 1.
+ *
+ * The point of both is that a *wrong* number here is worse than no number: it
+ * would be shortened and displayed as fact. `null` simply means the caller
+ * shows YouTube's own string, which is what it did before this existed.
+ *
+ * Never used where a raw integer is available — `videoViewCountRenderer`
+ * carries `originalViewCount`, and that is preferred wherever it exists.
+ */
+export function exactCountFromText(value: unknown): number | null {
+  const raw = text(value);
+  if (!raw) return null;
+
+  const start = raw.search(/\d/);
+  if (start < 0) return null;
+
+  // Thousands separators vary by locale: comma, dot, apostrophe, and several
+  // flavours of space (French uses a narrow no-break one).
+  const SEP = '[.,\u00A0\u202F\u2009\u0027 ]';
+  const token = new RegExp(`^\\d{1,3}(?:${SEP}\\d{3})*`).exec(raw.slice(start));
+  if (!token?.[0]) return null;
+
+  const rest = raw.slice(start + token[0].length);
+
+  // A magnitude marker in any script — "1.8M", "182万".
+  if (/^\p{L}/u.test(rest)) return null;
+  // Grouping that did not come out in threes — "1,8 Mio.".
+  if (new RegExp(`^${SEP}\\d`).test(rest)) return null;
+
+  const digits = token[0].replace(/\D/g, '');
+  if (digits === '') return null;
+  const parsed = Number(digits);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /** Classifies a metadata string as a view count. "22K views", "1.2M watching". */
 export function isViewCountText(value: string): boolean {
   return /\b(view|views|watching|waiting)\b/i.test(value);

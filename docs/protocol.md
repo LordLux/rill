@@ -558,6 +558,40 @@ is carried across. `/next` stays on the authenticated `WEB` session, because a
 personalised sidebar, the like count and subscription state are what the cookie
 is for.
 
+**`VideoDetail.viewCount` — the exact number, measured 2026-09-13.** Derived
+from `viewCountText`, the same string a client shows on hover, so a short form
+("1.8B views") and the exact one cannot disagree.
+
+**`videoViewCountRenderer.originalViewCount` looks like the answer and mostly
+is not.** It is a bare integer string, but across 24 watch pages it was `"0"`
+on 18 of them — each with a real count in `viewCountText` beside it — and the
+actual number on the other 6. `"0"` there means "not filled in". This note first
+said the watch page "ships it outright", from a measurement of one video that
+happened to be one of the six, and reading the field first put "0 views" on
+most videos (`0 ?? fallback` never falls back). It is kept as a fallback for
+when the text cannot be parsed, and only when positive.
+
+**Where it is `null`, the exact number is genuinely not recoverable, and that
+is the field's whole point.** The three surfaces differ, and this was measured
+rather than assumed:
+
+| Surface | Exact string | Rounded string | Raw integer |
+| --- | --- | --- | --- |
+| Watch page (`videoViewCountRenderer`) | `"1,815,347,797 views"` | — | `originalViewCount` — `"0"` on 18 of 24 |
+| Search (`videoRenderer`) | `"57,253,345 views"` | `"57M views"` | — |
+| Home feed (`lockupViewModel`) | — | `"1.8M views"` only | — |
+
+A view-based feed tile carries *only* a rounded string, so no amount of
+parsing recovers the exact figure there — which is why `viewCount` is on
+`VideoDetail` and not on `VideoItem`. Where a layout omits `originalViewCount`
+the sidecar falls back to reading `viewCountText`, and that fallback
+**refuses anything already rounded rather than guessing**: `"1.8M views"`
+yields `null`, never 18. `parser/text.ts`'s `exactCountFromText` is
+deliberately not `countFromText`, which strips every non-digit and would
+answer 18 — right for `"1,234 videos"`, wrong for the one metadata string
+YouTube routinely pre-rounds. A wrong number here is worse than none: it
+would be shortened and shown as fact.
+
 **`VideoDetail.myRating` — Task 25 §3, `'like' | 'dislike' | 'none'`.** A like
 button needs to know it is already liked before the first render, or the
 first click toggles the wrong way; a closed set rather than two independent
