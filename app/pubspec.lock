@@ -106,7 +106,7 @@ packages:
     source: hosted
     version: "2.1.2"
   build:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
       name: build
       sha256: "45d14a0fb23e018d8287c32fc98d726ce466b231928ed9b9200f29bd3ccd39ae"
@@ -950,7 +950,7 @@ packages:
     source: sdk
     version: "0.0.0"
   source_gen:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
       name: source_gen
       sha256: a603f1fb984a7391ae5978d1b92bfaaa08b350dca5c825256f925818f7943bf5
