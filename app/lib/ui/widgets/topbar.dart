@@ -195,22 +195,37 @@ class _CenteredSearch extends StatelessWidget {
 // Notification button
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The notifications entry point — **disabled until something is behind it.**
+///
+/// There is no notifications source: `protocol.md` has no method for YouTube's
+/// notification menu. This used to be a live button that did nothing, under a
+/// hard-coded "9+" — a count of nothing, which is the "live control that lies"
+/// `architecture.md` §2.7 argues against. So it is drawn disabled, with a
+/// tooltip saying so, and the badge draws only when there is a count to show.
+/// Today that is never; wiring a source means replacing [unreadCount] and
+/// giving the button an `onTap`.
 class _NotificationButton extends StatelessWidget {
   const _NotificationButton({required this.scheme});
   final ColorScheme scheme;
 
+  /// Unread notifications. Zero until a source exists (see above).
+  final int unreadCount = 0;
+
   @override
   Widget build(BuildContext context) {
+    final button = TitleBarIconButton(
+      icon: Icons.notifications_none,
+      tooltip: 'Notifications — not available yet',
+      onTap: null,
+      scheme: scheme,
+      overrideRadius: ScreenValues.railItemBorderRadius,
+    );
+    if (unreadCount <= 0) return button;
+
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        TitleBarIconButton(
-          icon: Icons.notifications_none,
-          tooltip: 'Notifications',
-          onTap: () {}, // TODO: open notifications
-          scheme: scheme,
-          overrideRadius: ScreenValues.railItemBorderRadius,
-        ),
+        button,
         Positioned(
           right: 8,
           top: 11,
@@ -228,7 +243,7 @@ class _NotificationButton extends StatelessWidget {
               child: Transform.translate(
                 offset: const Offset(0.5, -0.51),
                 child: Text(
-                  '9+',
+                  unreadCount > 9 ? '9+' : '$unreadCount',
                   style: TextStyle(
                     color: scheme.onError,
                     fontSize: 9,
