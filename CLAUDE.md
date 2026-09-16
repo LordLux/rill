@@ -454,6 +454,11 @@ the answer.
   sequential, and this note's "removing it fixes all codegen" was too broad** —
   it fixed the bootstrap, not the builders. If codegen breaks again, check
   which phase fails before assuming either cause.
+
+  `16b70c7` also overrode `source_gen` and `build`, and those two survived the
+  2026-09-09 fix undocumented. Tested out and removed 2026-09-16: without them
+  the solver picked identical versions, and codegen and both app gates passed.
+  `dependency_overrides` is now empty on purpose.
 - **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
   draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
   `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:

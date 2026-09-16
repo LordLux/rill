@@ -66,8 +66,16 @@ dev_dependencies:
   # `@ShapeshifterAsset` exists in the tree. Re-adding it disables ALL codegen.
 
 dependency_overrides:
-  source_gen: ^4.1.2
-  build: ^4.0.4
+  # **Empty on purpose. Do not add an override to make the tree resolve.**
+  #
+  # `source_gen: ^4.1.2` and `build: ^4.0.4` sat here from `16b70c7` — the same
+  # commit that added `animated_vector_gen` and the analyzer/dart_style pair
+  # below — until 2026-09-16, when they were tested out. Without them pub
+  # resolves the identical versions (source_gen 4.2.4, build 4.0.7), listed as
+  # transitive instead of "direct overridden", and build_runner,
+  # test_suite_guard and lint_gate all pass. So all they did was switch off
+  # constraint checking for two packages at the centre of codegen.
+  #
   # **`analyzer` and `dart_style` are deliberately NOT overridden here.**
   #
   # They used to be (`analyzer: ">=10.0.0 <15.0.0"`, `dart_style: ^3.1.4`), and
