@@ -389,8 +389,10 @@ the answer.
   to nothing, as the scrubber's input: at ~6 s between frames they are good for
   showing one frame at a pointer position and nothing else.
 - **Browse and resolve are different clients.** Browse and report as `WEB` with
-  cookies; resolve streams anonymously, asking as `VISIONOS` (ladder tier 1)
-  and falling back to `MWEB` (tier 2). **Tier 1 was `ANDROID_VR` until
+  cookies; resolve streams anonymously, asking as `VISIONOS` (ladder tier 1),
+  then yt-dlp, then `ANDROID`'s 360p itag 18. **`MWEB` is not a playback tier**
+  — it left the ladder on 2026-08-19 (`architecture.md` §2.4), and nothing in
+  the ladder deciphers since. **Tier 1 was `ANDROID_VR` until
   2026-08-18** — it now requires a PO token and is no longer viable
   (`architecture.md` F11), so any note here still naming it is stale. Do not attempt to bridge CPNs between
   them — issue two independent calls.
@@ -546,7 +548,8 @@ the answer.
 
 ## Current state
 
-Phase 1: plain `MWEB` URLs, no SABR, no media proxy. Phase 2 (SABR → local DASH
+Phase 1: plain URLs — `VISIONOS`, with yt-dlp and a 360p `ANDROID` floor behind
+it — no SABR, no media proxy. Phase 2 (SABR → local DASH
 bridge) is specified but **not** to be built speculatively.
 
 Findings in `architecture.md` are dated where they were measured. They are

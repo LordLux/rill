@@ -1,27 +1,35 @@
 /**
  * `playback.open` — the resolution ladder from `protocol.md` §3.5.
  *
- * Five tiers, tried in order, each of which either returns a `PlaybackSource` or
- * throws to decline:
+ * Three tiers, tried in order, each of which either returns a `PlaybackSource` or
+ * throws to decline. They keep the numbers of the original five, because tests,
+ * logs and docs name them that way:
  *
  *   1. `VISIONOS` plain adaptive — the primary path (F5, F11, F13)
- *   2. `MWEB` plain adaptive       — the only proven decipher path (F3/F4)
- *   3. SABR → local DASH           — Phase 2, deliberately unbuilt; throws
  *   4. `yt-dlp` subprocess         — age-restricted, Vevo, whatever else refuses
- *   5. itag 18 progressive         — 360p, nearly always there, `qualityDegraded`
+ *   5. itag 18 progressive         — 360p from the `ANDROID` response (F9),
+ *                                    nearly always there, `qualityDegraded`
+ *
+ * Tier 2 (`MWEB` plain adaptive) was retired on 2026-08-19 in `c53fb54`, and
+ * tier 3 (SABR → local DASH) is Phase 2: `tierSabrDash` below is its unbuilt
+ * placeholder and nothing calls it. `architecture.md` §2.4 has the retirement.
  *
  * `VISIONOS` leads because it is the only client measured that satisfies every
  * constraint at once: plain URLs, no `n` to decipher, open-ended ranges accepted
  * (F10 is an `MWEB` property, not a YouTube one), bare GETs accepted, throughput
  * above the bar, hardware decode, and seeks on the libmpv media_kit ships with no
  * options set (F13). Its one condition is a server-issued visitor id — see
- * `tierAndroidVr`.
+ * `tierVisionOs`.
  *
- * `MWEB` stays a tier rather than being deleted. It is the only client with a
- * proven decipher path, and F10 constrains how its URLs can be *consumed*, not
- * whether they resolve — so as a fallback that reaches a lower tier's floor it
- * still earns its place, and deleting it would throw away the decipher coverage
- * the network suite depends on.
+ * **Nothing in this ladder deciphers.** `VISIONOS` and `ANDROID` URLs carry no
+ * `n`, and yt-dlp runs its own transform. Every address still crosses `sign()`
+ * or `adoptExternallyDeciphered()`, so the `SignedUrl` boundary (hard
+ * invariant 2) holds — but the signature/`n` transform behind `sign()` only
+ * runs in the network suite, which still calls `tierPlainAdaptive` with
+ * `MWEB`. Keep it: it is the only proven decipher path, and Phase 2 may need
+ * it. Do not restore `MWEB` as a playback tier either — its URLs refuse the
+ * open-ended range ffmpeg always sends (F10). `MWEB` is still asked for one
+ * thing here: a live stream's start time, when tier 1's response lacks it.
  *
  * The ladder is the error-handling strategy, not a fallback bolted onto one. A
  * tier that cannot serve a video throws; the ladder logs it and moves down. Only
@@ -526,7 +534,7 @@ export async function fetchWithVisitorRetry(
  * `createSession` fetches one by default; this only has to handle the case where
  * the one in hand stopped convincing YouTube.
  */
-export async function tierAndroidVr(
+export async function tierVisionOs(
   deps: PlaybackDeps,
   videoId: string,
   poToken: string | null,
@@ -614,7 +622,7 @@ export function sourceFromYtDlpDump(
   const variant: PlaybackVariant = {
     videoUrl: adoptExternallyDeciphered(videoAddress, tool),
     audioUrl: audio?.url ? adoptExternallyDeciphered(audio.url, tool) : null,
-    // yt-dlp does not give us an itag reliably; 0 signals "unknown".
+    // yt-dlp does not give us an itag reliably; null signals "unknown".
     itag: null,
     height: height ?? 0,
     fps: 0,
@@ -737,7 +745,7 @@ export async function tierProgressive(
   response: PlayerResult | null,
 ): Promise<PlaybackSource> {
   if (!response) {
-    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the MWEB /player call did not return`);
+    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the ANDROID /player call did not return`);
   }
   assertPlayable(response, videoId);
 
