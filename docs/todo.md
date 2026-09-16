@@ -9,6 +9,9 @@ item leaves it when the work lands.
 
 **Ordering is by section, not by line.** Within a section nothing is ranked.
 
+**Numbers are permanent.** Other files cite items by number, so a finished item
+is deleted and its number is not reused; gaps are expected.
+
 ---
 
 ## Now
@@ -49,8 +52,7 @@ Shape:
     and why — the app prefers the copy beside its own executable, and
     `flutter build windows` does not refresh an already-populated bundle. This
     is CLAUDE.md's longest hazard and this script is what prevents it;
-  - that it uses `fvm flutter` and silently falls back to bare `flutter`, and
-    that the fallback costs an unpinned SDK;
+  - that it uses `fvm flutter`, and what happens without it (below);
   - that it loads `YT_COOKIE` from `.env`, which is why a checkout can come up
     signed in with the variable unset in the environment;
   - one line pointing at `setup.bat` as what a fresh machine runs first.
@@ -59,6 +61,23 @@ Shape:
   `-ExecutionPolicy Bypass` is not optional — without it the `.ps1` refuses to
   run on a default-configured machine, which is how a repo script works for its
   author and nobody else.
+
+**Use the pinned SDK every time, and refuse rather than fall back.** The
+current scripts drop to bare `flutter` when `fvm` is missing. That is worse
+than "an unpinned SDK": measured 2026-09-16, the global SDK re-resolves
+`app/pubspec.lock` against its own pins, and it cannot read the
+`.dart_tool/hooks_runner` cache an `fvm` run leaves behind, so the next command
+dies before doing anything (*"Invalid kernel binary format version"*). Launch
+Dart the way `tool/lint_gate.dart` does — the SDK behind `app/.fvm/flutter_sdk`
+— or through `fvm`, and stop with a clear message if neither is there.
+
+**Add a `check` subcommand** that runs `tool/test_suite_guard.dart` and
+`tool/lint_gate.dart`, both through the pinned SDK. The lint gate exists
+because `flutter analyze` / `dart analyze` report "No issues found!" on code
+with real `rill_lints` violations (`app/tool/rill_lints/README.md`), so
+**`setup.bat`'s step 4 `flutter analyze` says nothing about the plugin rule**:
+swap that step for the gate. That is the one edit `setup.bat` should get —
+leaving it alone below means not converting it.
 
 **Fix the exit-code bug while you are in there.** `build.bat` runs
 `call bun run build` and `call %FLUTTER_CMD% build windows --release` with no
@@ -71,8 +90,9 @@ after every stage and abort.
 **Carry through unchanged:** the sidecar-bundling step and its comment. A merge
 is exactly when a step that looks redundant gets dropped.
 
-**Done when:** one `rill.ps1` + one `rill.bat`, `setup.bat` untouched, every
-stage checks its exit code, `rill --help` is self-sufficient, and CLAUDE.md's
+**Done when:** one `rill.ps1` + one `rill.bat`, `setup.bat` still batch (with
+its analyze step running the lint gate), every stage checks its exit code, a
+missing `fvm` stops the script instead of falling back, `rill --help` is self-sufficient, and CLAUDE.md's
 Commands block is a short subcommand table ending with "run `rill --help` for
 the full surface". One summary, one detail — CLAUDE.md already restates the
 contract in five places and two went stale silently; do not create a sixth.
@@ -94,7 +114,11 @@ version"*. Two un-justified overrides are a known trap left armed in a project
 already bitten by it twice.
 
 **How:** comment both out, `fvm flutter pub get`,
-`fvm dart run build_runner build --delete-conflicting-outputs`.
+`fvm dart run build_runner build --delete-conflicting-outputs`, then
+`fvm dart run tool/test_suite_guard.dart` and `fvm dart run tool/lint_gate.dart`.
+Every step through `fvm`: a bare `flutter`/`dart` re-resolves the lockfile
+against the global SDK, and this test would then be measuring that SDK's
+solve, not the project's.
 
 **Done when:** either they are deleted and `pubspec.yaml` records that they were
 vestigial from `16b70c7`, or the exact failure is recorded next to the paragraph
@@ -432,6 +456,14 @@ overrides from item 2 in one move.
    as such — it was that analyzer 13.1 needs `meta ^1.18.3` while `flutter_test`
    from SDK 3.44.9 pins `meta 1.18.0`. Only `pub get` on a branch answers this.
 
+**The analyzer plugin is not a reason to do this.** The 2026-09-16 lint
+investigation first suspected the pinned SDK's Dart 3.12.2 (dart.dev dates
+analyzer plugins to 3.13) and considered moving the pin, which would have
+fired this item's second trigger. It was not the cause — the plugin loads on
+3.12.2, and the missing diagnostics were a timing race that happens on 3.13.2
+too (`app/tool/rill_lints/README.md`). So the pin has no pressure on it from
+that side; only the triggers above apply.
+
 **Do item 2 first, separately.** Folding the override test into a freezed
 migration means a failure cannot tell you which change caused it — the exact
 diagnostic trap the `animated_vector_gen` note exists to prevent.
@@ -493,28 +525,6 @@ options, from a file named `debug_constants` — applied at `engine.dart:308`.
 
 Harmless in effect (F15 measured `short_seek_size` as present-but-irrelevant in
 the bundled artefact), but the doc names the wrong file and the wrong option set.
-
-### 22. Document the build and setup path
-
-None of the four root `.bat` scripts appear in any doc, and each carries
-something load-bearing:
-
-- `setup.bat` runs `build_runner build --delete-conflicting-outputs`. `*.g.dart`
-  and `*.freezed.dart` are gitignored, so a fresh clone does not compile until
-  codegen runs — and CLAUDE.md's Commands block has no codegen step, despite
-  devoting ~40 lines to the build_runner failure history.
-- Flutter is pinned via FVM to **3.44.9** (`app/.fvmrc`). CLAUDE.md's
-  `cd app && flutter run -d windows` bypasses the pin. **Document `fvm flutter`
-  as the correct form** — this project has been bitten twice by toolchain
-  version drift, and a documented command that silently uses the wrong SDK is
-  the same shape of trap.
-- `setup.bat` also runs `flutter analyze` and `dart analyze` on
-  `app/tool/rill_lints`, a real custom analyzer plugin shipping a
-  `no_color_literals` rule scoped to `lib/ui/`. Eight task specs require
-  "`flutter analyze` clean"; CLAUDE.md lists no app analyze step at all.
-
-Fold the script surface itself into item 1's output rather than documenting the
-`.bat` files that are about to be replaced.
 
 ### 23. Document the vendored libass DLLs
 
