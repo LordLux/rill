@@ -21,10 +21,11 @@ import {
 
 /** `protocol.md` §4, first table — the codes an envelope can carry. */
 const ENVELOPE_CODES: EnvelopeErrorCode[] = [
-  'AUTH_DEGRADED',
   'AUTH_REQUIRED',
   'BAD_REQUEST',
   'STREAM_UNAVAILABLE',
+  'VIDEO_UPCOMING',
+  'VIDEO_MEMBERS_ONLY',
   'RATE_LIMITED',
   'UPSTREAM_ERROR',
 ];
@@ -53,7 +54,7 @@ describe('the error envelope', () => {
   test('survives JSON round-tripping with no field lost', () => {
     // `undefined` is the failure that matters: it vanishes through stringify and
     // arrives at Flutter as a missing key.
-    const envelope = new RpcError('AUTH_DEGRADED', 'cookies went stale').toEnvelope();
+    const envelope = new RpcError('AUTH_REQUIRED', 'sign in first').toEnvelope();
     expect(JSON.parse(JSON.stringify(envelope))).toEqual(envelope);
   });
 });
@@ -74,11 +75,12 @@ describe('retry modes', () => {
     // here too — this table is the contract, and a drifting one is worse than
     // none.
     expect(ENVELOPE_CODES.map((code) => [code, retryModeFor(code)])).toEqual([
-      ['AUTH_DEGRADED', 'no'],
       ['AUTH_REQUIRED', 'no'],
       ['BAD_REQUEST', 'no'],
       ['STREAM_UNAVAILABLE', 'user'],
-      ['RATE_LIMITED', 'auto'],
+      ['VIDEO_UPCOMING', 'no'],
+      ['VIDEO_MEMBERS_ONLY', 'no'],
+      ['RATE_LIMITED', 'user'],
       ['UPSTREAM_ERROR', 'auto'],
     ]);
   });
@@ -111,7 +113,7 @@ describe('retry modes', () => {
     // Not `no`. `no` is an instruction to the app — "retrying changes nothing
     // until something external does" — and these never reach the app, so any
     // value here would be a claim about a situation that cannot arise. Marking
-    // them `no` would also file them alongside AUTH_DEGRADED, which is how an
+    // them `no` would also file them alongside AUTH_REQUIRED, which is how an
     // inert value gets read as meaningful by whoever writes the RPC layer.
     for (const code of INTERNAL_CODES) {
       expect({ code, retry: new RpcError(code, 'x').retry }).toEqual({ code, retry: null });

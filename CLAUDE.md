@@ -420,7 +420,10 @@ the answer.
   mints a fresh id and retries **once** on any response that is not `OK` with a
   non-empty adaptive ladder — not just on `LOGIN_REQUIRED`, because no one has
   ever seen a server-issued id expire and so nobody knows what shape that
-  failure takes. A SABR-only response is not an identity refusal.
+  failure takes. A SABR-only response is not an identity refusal. A "not a
+  bot" refusal that survives the fresh id is YouTube throttling the
+  connection: `playback.open` answers `RATE_LIMITED` for it (`retry: user`)
+  if no lower tier gets through — never "would not open".
 - **When `app/pubspec.yaml` is first created**, pin
   `media_kit_libs_windows_video: 1.0.11` exactly (not caret). A bump lands
   modern FFmpeg and reintroduces the F13 seek freeze. See §2.4.

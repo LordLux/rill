@@ -36,10 +36,10 @@ JSON-RPC 2.0 in shape, without batching.
 {"id": 42, "result": {"chips": [], "items": [], "continuation": "..."}}
 
 // failure
-{"id": 42, "error": {"code": "AUTH_DEGRADED", "message": "...", "retry": "no"}}
+{"id": 42, "error": {"code": "STREAM_UNAVAILABLE", "message": "...", "retry": "user"}}
 
 // unsolicited
-{"method": "event.authChanged", "params": {"state": "degraded"}}
+{"method": "event.ready", "params": {"protocolVersion": 1, "capabilities": {"ytDlp": true}}}
 ```
 
 `id` correlation is mandatory — feed loads, previews and search race constantly.
@@ -114,8 +114,8 @@ by path, preferring `isSelected`, because every layer above it is menu chrome.
 
 **A failed account fetch is not a failed status.** `state` is what drives a
 re-authentication prompt and it is measured independently; the name and picture
-are decoration. Answering `AUTH_DEGRADED` because a menu endpoint hiccuped
-would send a perfectly good session to a login page.
+are decoration. Reporting `degraded` because a menu endpoint hiccuped would
+send a perfectly good session to a login page.
 
 **`auth.setCookie`'s `{state}` is measured before it answers.** It replaces the
 browse session, **drops the base-browse cache**, then fetches home and counts
@@ -1326,13 +1326,12 @@ them has a `retry` value:
 
 | Code | `retry` | UI response |
 | --- | --- | --- |
-| `AUTH_DEGRADED` | `no` | Re-authentication prompt |
 | `AUTH_REQUIRED` | `no` | Login flow |
 | `BAD_REQUEST` | `no` | This is a client bug. Surface it — never retry, never swallow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
 | `VIDEO_UPCOMING` | `no` | The premiere slate: thumbnail, scheduled time, reminder. **Not** an error state |
 | `VIDEO_MEMBERS_ONLY` | `no` | The members slate: thumbnail, the channel, a Join affordance. **Not** an error state |
-| `RATE_LIMITED` | `auto` | App backs off and retries silently |
+| `RATE_LIMITED` | `user` | "YouTube is limiting requests from this connection", with a retry — never "would not open" |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
 
 **`BAD_REQUEST` is for an unknown method or params that fail validation** — the
@@ -1391,6 +1390,31 @@ point rather than a wording one. Stream resolution is anonymous (§2.3), so a
 members-only video refuses even for a paying member; YouTube's own "Join this
 channel" prose describes the anonymous session that asked, not the person
 reading it.
+
+**`RATE_LIMITED` is YouTube throttling this connection — decided 2026-09-17.**
+Anonymous resolution is limited per connection: F20 hit "Sign in to confirm
+you're not a bot" after ~180 resolutions in an hour. `playback.open` answers
+`RATE_LIMITED` when a tier gets that refusal (`LOGIN_REQUIRED` with YouTube's
+"not a bot" wording) and no tier gets through:
+
+- **Not `LOGIN_REQUIRED` alone.** An age gate answers with the same status
+  ("Sign in to confirm your age") and is a different problem. Like
+  `VIDEO_MEMBERS_ONLY`, this reads prose on a response that has already
+  failed, so a locale the pattern misses falls back to `STREAM_UNAVAILABLE`.
+- **Not a bad visitor id.** Tier 1 has already retried once with a fresh id by
+  the time the refusal is believed (§3.5).
+- **Not terminal.** yt-dlp or the 360p floor may still get through, so the
+  ladder keeps going, and only a ladder that ends with nothing — having seen a
+  throttle on the way — answers `RATE_LIMITED` instead of `STREAM_UNAVAILABLE`.
+- **`user`, not `auto`.** A throttle lasts minutes to an hour, so a silent
+  automatic retry would be a spinner that never ends. The watch page names the
+  cause and leaves the retry to the user.
+
+**There is no `AUTH_DEGRADED` — removed 2026-09-17.** A degraded session is not
+a failure the sidecar can see: it answers HTTP 200 with an empty feed (F7). So
+it is a *state*, reported by `auth.verify` / `auth.status`, which the app
+checks after an empty base feed (§3.1, `checkAuthOnEmpty`). The code sat in this
+table with a UI response for months while nothing ever sent it.
 
 `STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
 very good bet and not a promise (§3.5, F9): every rung can decline for a video

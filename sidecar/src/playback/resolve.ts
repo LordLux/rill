@@ -289,6 +289,19 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
     throw new RpcError('VIDEO_MEMBERS_ONLY', reason);
   }
 
+  // Throttled — YouTube limiting this connection's anonymous resolution (F20
+  // saw it after ~180 resolutions in an hour). `LOGIN_REQUIRED` alone is not
+  // the signal: an age gate answers with the same status ("Sign in to confirm
+  // your age"). So this reads YouTube's own wording, the same trade
+  // `VIDEO_MEMBERS_ONLY` makes: it refines a response that has already failed,
+  // and a locale the pattern misses falls back to `STREAM_UNAVAILABLE`, which
+  // is what it was before. By the time tier 1 gets here it has already retried
+  // with a fresh visitor id, so a bad id is ruled out. Not terminal — a lower
+  // tier may still get through; `descendLadder` reports it if none does.
+  if (status === 'LOGIN_REQUIRED' && /not a bot/i.test(reason)) {
+    throw new RpcError('RATE_LIMITED', `${videoId}: ${status} — ${reason}`);
+  }
+
   if (status === 'UNPLAYABLE' && /page needs to be reloaded/i.test(reason)) {
     // Hard invariant 7. If this ever fires, the `/player` payload lost its
     // signatureTimestamp or it no longer matches the deciphering player.
@@ -951,6 +964,7 @@ export async function descendLadder(
   preload = false,
 ): Promise<PlaybackSource> {
   const declined: string[] = [];
+  let throttled = false;
 
   for (const [index, tier] of tiers.entries()) {
     try {
@@ -983,6 +997,7 @@ export async function descendLadder(
 
       const message = error instanceof Error ? error.message : String(error);
       declined.push(`${tier.name}: ${message}`);
+      if (hasCode(error, 'RATE_LIMITED')) throttled = true;
       if (hasCode(error, 'STREAM_REQUIRES_SABR')) {
         log.debug(`${videoId}: tier ${index + 1} (${tier.name}) declined — ${message}`);
       } else {
@@ -1001,6 +1016,16 @@ export async function descendLadder(
   // `VIDEO_MEMBERS_ONLY` did until 2026-09-09: it was thrown, documented as
   // ending the ladder, and then collected as an ordinary decline because this
   // check named one code instead of a list.
+  //
+  // A throttle is the one decline that changes the answer without ending the
+  // ladder: if any tier was throttled and none got through, the video is not
+  // the problem, the connection is — and "would not open" would say otherwise.
+  if (throttled) {
+    throw new RpcError(
+      'RATE_LIMITED',
+      `${videoId}: YouTube is throttling this connection —\n  ${declined.join('\n  ')}`,
+    );
+  }
   throw new RpcError(
     'STREAM_UNAVAILABLE',
     `${videoId}: every resolution tier declined —\n  ${declined.join('\n  ')}`,
