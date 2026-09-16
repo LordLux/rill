@@ -59,9 +59,9 @@ Mismatched versions fail fast rather than misbehaving.
 ```
 
 `capabilities` reports optional pieces of the machine the app cannot discover on
-its own. `ytDlp: false` means ladder tier 4 is gone: the ladder is four rungs,
-and age-restricted or Vevo videos fail with `STREAM_UNAVAILABLE` and no way for
-the UI to say why. The sidecar also warns about it at startup — a missing
+its own. `ytDlp: false` means ladder tier 4 is gone, leaving only `VISIONOS`
+and the 360p floor (§3.5), so age-restricted or Vevo videos fail with
+`STREAM_UNAVAILABLE` and no way for the UI to say why. The sidecar also warns about it at startup — a missing
 fallback that removes a capability without removing anything visible is exactly
 the kind of degradation this protocol makes explicit rather than leaving to be
 inferred from a video that will not play.
@@ -846,15 +846,24 @@ the sidecar would be wrong differently on every machine.
 Flutter never learns which tier served the request. `transport` is telemetry;
 `qualityDegraded` drives a badge, never a dead end.
 
-**Resolution ladder**, tried in order inside `playback.open`:
+**Resolution ladder**, tried in order inside `playback.open`. The numbers are
+names rather than positions — code, tests and logs use them — so tiers 2 and 3
+keep theirs while not being in the ladder:
 
 1. `VISIONOS` plain adaptive URLs — the primary path; no `n`, and libmpv can
    consume them directly (F5, F11, F13)
-2. `MWEB` plain adaptive URLs — the decipher path, kept as a fallback
-3. SABR → local DASH bridge — Phase 2
+2. *Not in the ladder.* `MWEB` plain adaptive URLs, retired 2026-08-19: they
+   refuse the open-ended range ffmpeg always sends (F10), so this tier could
+   resolve a video but never play it. `architecture.md` §2.4
+3. *Not in the ladder.* SABR → local DASH bridge — Phase 2, unbuilt
 4. `yt-dlp` subprocess with PO token provider — age-restricted, Vevo, edge cases
-5. itag 18 progressive, 360p — the floor: usually present, **not guaranteed**
-   (F9); sets `qualityDegraded`
+5. itag 18 progressive, 360p, from an `ANDROID` `/player` response — the floor:
+   usually present, **not guaranteed** (F9); sets `qualityDegraded`
+
+**Nothing in this ladder deciphers.** `VISIONOS` and `ANDROID` URLs carry no
+`n`, and yt-dlp runs its own transform. Every address still passes through the
+`SignedUrl` door below, so the boundary holds; what no longer runs in
+production is the signature and `n` transform behind it.
 
 The floor is a very good bet, not a promise. On 2026-08-02 an `MWEB` response
 came back carrying no progressive format at all, so every rung can decline and

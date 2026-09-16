@@ -202,7 +202,8 @@ on a single field name.
 | --- | --- | --- |
 | Browse — feed, chips, search, playlists, history | `WEB` | cookies |
 | Stream resolution — ladder tier 1 | `VISIONOS` | anonymous, server-issued visitor id |
-| Stream resolution — ladder tier 2 | `MWEB` | anonymous |
+| Stream resolution — tiers 4 and 5 (yt-dlp's metadata, the itag 18 floor) | `ANDROID` | anonymous |
+| Caption-track fallback, a live stream's start time — not playback | `MWEB` | anonymous |
 | Watch reporting | `WEB` | cookies |
 
 Per **F6**, playback reporting works from the authenticated `WEB` session using
@@ -211,7 +212,7 @@ clients — issue two independent calls. This removes the cross-client CPN probl
 entirely.
 
 The resolution client is chosen per `/player` call, not per session: one
-anonymous session serves both tiers, and youtubei.js rewrites `context.client`
+anonymous session serves every resolution client, and youtubei.js rewrites `context.client`
 to the named client before sending. What that session must carry is a
 server-issued visitor id — **F5** puts tier 1 at 13/13 with one and 2/28
 with a fabricated one, so `createSession` fetches one by default
@@ -244,9 +245,9 @@ answer needs none of the three options that were on the table.
 - **`VISIONOS` is ladder tier 1.** F10 is a property of `c=MWEB` URLs, not of
   YouTube: tier-1 URLs answer ffmpeg's open-ended `Range: bytes=0-` with
   206 at every offset, answer a bare GET with 200, sustain well above the bar,
-  and carry no `n` to decipher (**F11**). `MWEB` stays tier 2 — F10 constrains
-  how its URLs can be *consumed*, not whether they resolve, and it is the only
-  client with a proven decipher path.
+  and carry no `n` to decipher (**F11**). `MWEB` stayed tier 2 at the time,
+  on the reading that F10 constrains how its URLs can be *consumed*, not whether
+  they resolve — until that reading ran out (below).
 - **No proxy.** The chunking proxy F10 floated is adjacent to rejected
   alternative **A6** and is not needed: nothing has to reshape these requests.
 - **media_kit's default DLL is retained.** The shipped build — mpv v0.36.0-403 /
@@ -267,6 +268,32 @@ answer needs none of the three options that were on the table.
   `pubspec.lock` committed and the resolved artefact verified against F12 from
   the built app (**F15**). See **F12** for what 1.0.11 actually ships; the
   package has not published since March 2025, so nothing is being forgone.
+
+**`MWEB` left the ladder on 2026-08-19 (`c53fb54`), and nothing in the ladder
+deciphers since.** Resolving is not the goal; playing is. F10 means an `MWEB`
+URL refuses `Range: bytes=0-`, which ffmpeg sends by construction, so an `MWEB`
+rung could resolve a video and still never play it — it was never a playback
+path. The same commit replaced `ANDROID_VR` with `VISIONOS` at tier 1 (F11) and
+moved the floor to `ANDROID`'s itag 18 (F9). The ladder is now `VISIONOS` →
+yt-dlp → itag 18, keeping the original tier numbers because code, tests and logs
+name them.
+
+- **What it means for hard invariant 2.** `VISIONOS` and `ANDROID` URLs carry no
+  `n`, and yt-dlp runs its own transform. Every URL still crosses `sign()` or
+  `adoptExternallyDeciphered()`, so the `SignedUrl` boundary holds — but the
+  signature and `n` transform behind `sign()` runs nowhere in production. Only
+  the network suite exercises it, by calling `tierPlainAdaptive` with `MWEB`.
+- **What stays, on purpose.** The decipher path: it is the only proven one,
+  `WEB` is already SABR-only, and Phase 2 may need it. F3's tripwire, which now
+  watches the SABR rollout rather than a live tier. And `MWEB` itself, for two
+  jobs that are not playback: the caption-track fallback (`protocol.md` §3.8)
+  and a live stream's start time when tier 1's response lacks one.
+- **What not to do.** Do not delete the decipher path, and do not put `MWEB`
+  back as a playback tier; F10 settles the second.
+- **A side effect worth knowing.** Task 04 §1 — the `/player` response and the
+  deciphering script coming from different player revisions — has no
+  production exposure while nothing deciphers. That is not the same as fixed
+  (`docs/todo.md` item 6).
 
 Report watch events on a real cadence, not once at completion. A single
 end-of-video ping is a weak training signal, and homepage fidelity is the
@@ -1260,12 +1287,13 @@ thread:**
 
 ## 3. Phasing
 
-**Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with `MWEB`
-behind it, hand mpv two URLs. No SABR, no manifest generation, no media proxy.
+**Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with yt-dlp
+and `ANDROID`'s 360p floor behind it, hand mpv two URLs. No SABR, no manifest generation, no media proxy.
 This is the current build target.
 
-**Phase 2 — SABR → local DASH bridge.** Required when `MWEB` goes SABR-only, as
-`WEB` already has. The sidecar manages the SABR session via `googlevideo`'s
+**Phase 2 — SABR → local DASH bridge.** Required when tier 1 stops serving
+plain URLs — as `WEB` already has, and as `ANDROID_VR` effectively did (F5). This
+read "when `MWEB` goes SABR-only" while `MWEB` was tier 2 (§2.4). The sidecar manages the SABR session via `googlevideo`'s
 `SabrStreamingAdapter` and exposes a generated `.mpd` plus segment endpoints on
 loopback, so mpv sees standard DASH. Segment-granular, never byte-range.
 
@@ -1279,13 +1307,13 @@ identical across both so the swap touches only the transport.
 | Trigger | Symptom | Response |
 | --- | --- | --- |
 | Cookie rotation | Empty feed, `logged_in: true` | `auth.verify` fails → re-auth prompt |
-| `MWEB` goes SABR-only | `adaptive_formats` all lack `url` | Phase 2, or yt-dlp fallback |
+| `VISIONOS` goes SABR-only, or starts requiring a PO token as `ANDROID_VR` did (F5) | Tier 1 declines on every video; opens fall to yt-dlp or the 360p floor | Phase 2 |
 | New renderer type | Items silently missing | Tolerant parser skips; log unknown types |
 | Undeciphered `n` | ~50 KB/s, constant buffering | Never let a raw URL cross the RPC boundary |
 | Age-restricted / Vevo | `playback.open` fails | Fall through to yt-dlp with PO token provider |
-| `yt-dlp` not installed | Ladder is four rungs; the videos tier 4 exists for fail as "Unavailable" with nothing naming the cause | Probed and warned at startup, and reported in the `event.ready` handshake as `capabilities.ytDlp` (`protocol.md` §2) |
-| ffmpeg opens with `Range: bytes=0-` | HTTP 403 on an `MWEB` URL that fetches fine under a bounded range | Resolve as `VISIONOS` — ladder tier 1, whose URLs answer 206 at every offset (F11). `MWEB` remains tier 2; F10 constrains consumption, not resolution |
-| The visitor id stops convincing YouTube | `LOGIN_REQUIRED`, or some other status, or `OK` with an empty adaptive ladder — nobody has observed an expired id, so the shape is unknown (F14) | Mint a fresh server-issued id and retry once on **any** non-`OK` or empty-ladder tier-1 response, then decline to tier 2. Gating on `LOGIN_REQUIRED` alone would let an unknown expiry shape stop resolution silently |
+| `yt-dlp` not installed | The ladder is `VISIONOS` then the 360p floor; the videos tier 4 exists for (age-restricted, Vevo) fail as "Unavailable" with nothing naming the cause | Probed and warned at startup, and reported in the `event.ready` handshake as `capabilities.ytDlp` (`protocol.md` §2) |
+| ffmpeg opens with `Range: bytes=0-` | HTTP 403 on an `MWEB` URL that fetches fine under a bounded range | Resolve as `VISIONOS` — ladder tier 1, whose URLs answer 206 at every offset (F11). F10 is also why `MWEB` left the ladder (§2.4) |
+| The visitor id stops convincing YouTube | `LOGIN_REQUIRED`, or some other status, or `OK` with an empty adaptive ladder — nobody has observed an expired id, so the shape is unknown (F14) | Mint a fresh server-issued id and retry once on **any** non-`OK` or empty-ladder tier-1 response, then decline to the next tier. Gating on `LOGIN_REQUIRED` alone would let an unknown expiry shape stop resolution silently |
 | A libmpv pin bump lands modern FFmpeg | Playback looks perfect until the first seek, then freezes at the target with nothing logged | `stream-lavf-o=request_size=1048576` is set unconditionally (F11, F13); the exact pin that would keep the bump from arriving unnoticed is specified in §2.4 and waits on `app/` existing |
 | Audio attach race condition | Video buffers forever, progress bar spins | Await `stream.duration.firstWhere((d) => d > 0)` only if `state.duration <= 0` because if the load was fast, the stream already fired the event. On a timeout failure, surface the error and explicitly hide the `Video` widget so the spinner doesn't run forever. (Observed failure rate before fix: 1 in 3 launches; after fix: 0 in 10). **Applied 2026-08-03** |
 
