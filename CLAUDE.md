@@ -511,13 +511,17 @@ the answer.
   silence — `ChannelItem.descriptionSnippet`, and `ANDROID_VR` surviving as
   "ladder tier 1" in thirteen places after `VISIONOS` replaced it (F11). Since
   CLAUDE.md is loaded into every session, that one taught the wrong client for
-  months. `sidecar/test/contract-docs.test.ts` compares the DTO block here
-  against `types.ts` field by field, and fails on any doc sentence naming an
-  InnerTube client that appears nowhere in `sidecar/src`. **A sentence carrying
-  an `F<n>` reference or an ISO date is exempt** — that is how this repo writes
-  history, and history about a retired client has to survive. The cost is real
-  and worth knowing: adding a dated note to a sentence also stops it being
-  checked.
+  months. `sidecar/test/contract-docs.test.ts` compares every shape in a
+  fenced `ts` block — the DTO block here, and `VideoDetail`,
+  `PlaylistMembership` and `SearchFilters` in `protocol.md` — against its one
+  declaration in `sidecar/src`: field names, optionality and types, `| null`
+  included. A new block is picked up without touching the test, so a shape
+  that should be checked only has to be written down. It also fails on any doc
+  sentence naming an InnerTube client that appears nowhere in `sidecar/src`.
+  **A sentence carrying an `F<n>` reference or an ISO date is exempt** — that is
+  how this repo writes history, and history about a retired client has to
+  survive. The cost is real and worth knowing: adding a dated note to a
+  sentence also stops it being checked.
 - **A mix is a sliding window, and the watch page's playlist panel is not a
   renderer at all — Task 26, measured 2026-09-12.** The panel sits at
   `contents.twoColumnWatchNextResults.playlist.playlist` as a **bare object**
