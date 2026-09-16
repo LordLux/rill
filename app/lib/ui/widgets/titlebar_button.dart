@@ -83,11 +83,22 @@ class TitleBarIconButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = onTap != null;
+    // A null [onTap] means disabled here, and has to look it: Material's 38%
+    // for the glyph. [TitleBarWidgetButton] reads a null `onTap` as "the child
+    // handles its own taps" and drops the tooltip, so a disabled button adds
+    // its own — a disabled control is exactly the one that needs to say why.
+    Widget child = Icon(
+      icon,
+      color: enabled ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.38),
+      size: 22,
+    );
+    if (!enabled) child = Tooltip(message: tooltip, child: child);
     return TitleBarWidgetButton(
       onTap: onTap,
       tooltip: tooltip,
       overrideRadius: overrideRadius,
-      child: Icon(icon, color: scheme.onSurface, size: 22),
+      child: child,
     );
   }
 }

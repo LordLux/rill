@@ -75,8 +75,8 @@
 /// clean app-wide analyze is the actual end state this gate exists to prove),
 /// except `type: "TODO"` comment markers, which are the analyzer's built-in
 /// comment scanner rather than a lint and would otherwise make the gate
-/// permanently red over tracked, deliberately-deferred work (docs/todo.md
-/// items 11 and 17). Everything under `app/tool/` — `rill_lints` itself and
+/// permanently red over tracked, deliberately-deferred work (`docs/todo.md`).
+/// Everything under `app/tool/` — `rill_lints` itself and
 /// the canary — is excluded from the app check by path, so the canary's own
 /// deliberate violation never counts against it.
 ///
@@ -280,10 +280,10 @@ class _Diagnostic {
   final String file;
   final String code;
   // TODO/FIXME/HACK comment markers come back as `type: "TODO"` — the
-  // analyzer's built-in comment scanner, not a lint. The app has three of
-  // these (docs/todo.md items 11 and 17, tracked and deliberately deferred),
-  // so counting them here would make the gate permanently red for reasons
-  // that have nothing to do with the plugin or with color literals.
+  // analyzer's built-in comment scanner, not a lint. The app carries a few,
+  // each tracked in `docs/todo.md` and deliberately deferred, so counting them
+  // here would make the gate permanently red for reasons that have nothing to
+  // do with the plugin or with color literals.
   final String type;
   final String message;
   final int line;
