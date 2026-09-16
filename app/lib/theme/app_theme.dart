@@ -25,7 +25,15 @@ const BoxDecoration tooltipBubbleDecoration = BoxDecoration(
   color: Color(0xE6212121),
   borderRadius: BorderRadius.all(Radius.circular(6)),
 );
-const TextStyle tooltipBubbleTextStyle = TextStyle(color: Colors.white, fontSize: 12, height: 1.3);
+const TextStyle tooltipBubbleTextStyle = TextStyle(color: tooltipBubbleForeground, fontSize: 12, height: 1.3);
+
+/// What is legible on [tooltipBubbleDecoration] — which never follows the
+/// app theme, so neither may anything drawn inside it. `ShortcutTooltip`'s key
+/// badge applies alpha to these at the call site.
+const Color tooltipBubbleForeground = Color(0xFFFFFFFF);
+
+/// Darkens an inset drawn on the bubble. See [tooltipBubbleForeground].
+const Color tooltipBubbleShade = Color(0xFF000000);
 
 /// The whole theme, derived from one seed.
 ///

@@ -10,6 +10,7 @@ import '../../data/rpc/client.dart';
 import '../../domain/artist_panel.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
+import '../../theme/tokens.dart';
 import '../open_video.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart';
@@ -219,11 +220,17 @@ class ArtistPanelTint {
     // Task 23.
     final surface = themed == null
         ? theme.colorScheme.surfaceContainerHigh
+        // The artist's own palette, an ARGB int from the payload
+        // (`protocol.md` §3.3) — data, not a literal the app chose.
+        // ignore: rill_lints/no_color_literals
         : Color(isDark ? themed.dark : themed.light);
 
+    // Legible on a tint nobody here chose, which is exactly the scrim /
+    // onScrim problem (`tokens.dart`): fixed, and not allowed to follow the
+    // accent.
     final onSurface = ThemeData.estimateBrightnessForColor(surface) == Brightness.dark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF0B0B0B);
+        ? theme.tokens.onScrim
+        : theme.tokens.onPaleTint;
 
     return ArtistPanelTint(
       surface: surface,
@@ -299,11 +306,17 @@ class _ArtworkBleed extends StatelessWidget {
           // Two nested masks, because a `ShaderMask` takes one shader and this
           // corner needs two axes: fade out downward into the tint, and fade
           // out leftward before it reaches the artist's name.
+          //
+          // The gradients below are alpha masks under `BlendMode.dstIn`: only
+          // their alpha is read, and their RGB never reaches the screen. They
+          // are opacity stops that happen to be spelled as colours, so there
+          // is no role or token for them to use.
           child: ShaderMask(
             blendMode: BlendMode.dstIn,
             shaderCallback: (bounds) => const LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
+              // ignore: rill_lints/no_color_literals
               colors: [Color(0xFF000000), Color(0x00000000)],
               stops: [0.45, 1.0],
             ).createShader(bounds),
@@ -312,6 +325,8 @@ class _ArtworkBleed extends StatelessWidget {
               shaderCallback: (bounds) => const LinearGradient(
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
+                // Alpha mask — see above.
+                // ignore: rill_lints/no_color_literals
                 colors: [Color(0x00000000), Color(0xB0000000)],
                 stops: [0.0, 0.75],
               ).createShader(bounds),
@@ -335,6 +350,8 @@ class _ArtworkBleed extends StatelessWidget {
                     shaderCallback: (bounds) => const RadialGradient(
                       center: Alignment.center,
                       radius: 0.75, // Controls how far out the gradient reaches
+                      // Alpha mask — see above.
+                      // ignore: rill_lints/no_color_literals
                       colors: [Color(0xFF000000), Color(0x00000000)],
                       // Solid clear until 20%, then ramps to 100% blurred at the edge
                       stops: [0.2, 1.0], 

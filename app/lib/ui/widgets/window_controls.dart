@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/screen_values.dart';
+import '../../theme/tokens.dart';
 
 /// The two native pieces of the title bar — the drag region and the
 /// minimise/maximise/close cluster — behind one seam.
@@ -50,7 +51,7 @@ abstract class WindowControls {
   Widget dragRegion();
 
   /// The minimise / maximise / close cluster, at the bar's trailing edge.
-  Widget buttons(ColorScheme scheme);
+  Widget buttons(ThemeData theme);
 }
 
 /// The real thing: `bitsdojo_window`'s own widgets.
@@ -64,8 +65,8 @@ class NativeWindowControls implements WindowControls {
   Widget dragRegion() => MoveWindow();
 
   @override
-  Widget buttons(ColorScheme scheme) {
-    final normal = _normalColors(scheme);
+  Widget buttons(ThemeData theme) {
+    final normal = _normalColors(theme.colorScheme);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -83,7 +84,7 @@ class NativeWindowControls implements WindowControls {
         SizedBox(
           height: ScreenValues.titlebarWindowButtonsHeight,
           width: ScreenValues.titlebarWindowButtonsWidth,
-          child: CloseWindowButton(colors: _closeColors(scheme), animate: true),
+          child: CloseWindowButton(colors: _closeColors(theme), animate: true),
         ),
       ],
     );
@@ -98,14 +99,20 @@ class NativeWindowControls implements WindowControls {
     mouseDown: scheme.onSurface.withAlpha(50),
   );
 
-  WindowButtonColors _closeColors(ColorScheme scheme) => WindowButtonColors(
-    iconNormal: scheme.onSurface,
-    iconMouseOver: scheme.onError,
-    iconMouseDown: scheme.onError,
-    normal: Colors.transparent,
-    mouseOver: scheme.error,
-    mouseDown: Colors.red,
-  );
+  WindowButtonColors _closeColors(ThemeData theme) {
+    final red = theme.tokens.windowClose;
+    return WindowButtonColors(
+      iconNormal: theme.colorScheme.onSurface,
+      // White on the red in both themes; the red does not follow the theme.
+      iconMouseOver: theme.tokens.onScrim,
+      iconMouseDown: theme.tokens.onScrim,
+      normal: Colors.transparent,
+      mouseOver: red,
+      // A softer version of the same red, so pressing reads as a response
+      // rather than a second, unrelated colour.
+      mouseDown: red.withValues(alpha: 0.8),
+    );
+  }
 }
 
 /// Draws nothing and touches no native API. The answer under `flutter test`,
@@ -121,7 +128,7 @@ class NoWindowControls implements WindowControls {
   Widget dragRegion() => const SizedBox.shrink();
 
   @override
-  Widget buttons(ColorScheme scheme) => const SizedBox(
+  Widget buttons(ThemeData theme) => const SizedBox(
     height: ScreenValues.titlebarWindowButtonsHeight,
     width: ScreenValues.titlebarWindowButtonsWidth * 3,
   );

@@ -124,7 +124,7 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
                   const SizedBox(width: 8),
                   // Window control buttons — drawn right at the edge so they
                   // line up with where Windows expects them.
-                  windowControls.buttons(scheme),
+                  windowControls.buttons(Theme.of(context)),
                 ],
               ),
             ],

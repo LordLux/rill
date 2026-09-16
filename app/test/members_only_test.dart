@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/theme/tokens.dart';
 import 'package:rill/ui/members_only_preference.dart';
 import 'package:rill/ui/widgets/tile_badges.dart';
 
@@ -63,12 +64,24 @@ void main() {
           .map((c) => (c.decoration as BoxDecoration?)?.color)
           .whereType<Color>()
           .toSet();
+      final tokens = Theme.of(tester.element(find.byType(TileBadges))).tokens;
       expect(
-        decorations.contains(membersGreenSurfaceDark) ||
-            decorations.contains(membersGreenSurfaceLight),
+        decorations.contains(tokens.membersBadge),
         isTrue,
         reason: 'the members pill must use the membership green',
       );
+    });
+
+    test('the membership green does not follow the accent', () {
+      // Brand signal, not a role (tokens.dart). Two very different seeds must
+      // resolve to the same green at the same brightness.
+      for (final brightness in Brightness.values) {
+        final a = RillTokens.from(ColorScheme.fromSeed(seedColor: const Color(0xFFE91E63), brightness: brightness));
+        final b = RillTokens.from(ColorScheme.fromSeed(seedColor: const Color(0xFF2196F3), brightness: brightness));
+        expect(a.membersBadge, b.membersBadge, reason: '$brightness');
+        expect(a.onMembersBadge, b.onMembersBadge, reason: '$brightness');
+        expect(a.membersOnScrim, b.membersOnScrim, reason: '$brightness');
+      }
     });
 
     testWidgets('renders nothing at all when there is nothing to say', (tester) async {

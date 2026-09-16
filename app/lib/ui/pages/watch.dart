@@ -26,7 +26,6 @@ import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
 import '../widgets/adaptive_meta_row.dart';
-import '../widgets/tile_badges.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
 import '../widgets/queue_panel.dart';
@@ -620,12 +619,12 @@ class _MembersOnlySlate extends ConsumerWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.star_rounded, size: 14, color: membersGreenOnScrim),
+                    Icon(Icons.star_rounded, size: 14, color: tokens.membersOnScrim),
                     const SizedBox(width: 5),
                     Text(
                       'MEMBERS ONLY',
                       style: TextStyle(
-                        color: membersGreenOnScrim,
+                        color: tokens.membersOnScrim,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.8,
