@@ -16,87 +16,6 @@ is deleted and its number is not reused; gaps are expected.
 
 ## Now
 
-### 1. Merge the build scripts into one `rill.ps1`
-
-`setup.bat`, `build.bat`, `package.bat` and `run.bat` share three copies of the
-`.env` `YT_COOKIE` parse and two copies of the sidecar-bundling step. Merge the
-last three; leave `setup.bat` alone (it is the bootstrap, and converting the one
-script a fresh machine runs before anything is configured is the change you
-cannot debug with the tooling it installs).
-
-Shape:
-
-- Bare invocation prints help. **Not** a build — a bare `rill` currently means
-  minutes of `bun run build` + `flutter build windows --release` plus
-  overwriting the release folder, which is the wrong thing to reach by typing a
-  name and pressing enter.
-- Subcommands (mutually exclusive): `build`, `run`, `flutter`, `zip`.
-  - `run` = build, then launch the exe **attached to this terminal**.
-    `probe_task19.dart`'s own header records why: *"`flutter run --release -t …`
-    also works but does not always relay the app's stdout back; building and
-    launching the exe from the shell does."* This project diagnoses through
-    stdout — the `rill: sidecar <path> (built <mtime>)` startup line and
-    nineteen `RILL_*` probe variables — so attached is the useful default.
-  - `--detach` restores today's `start ""` behaviour.
-  - `flutter` = `fvm flutter run --release -d windows`, for when you want the
-    Flutter tool driving.
-  - `zip` = build, bundle, `Compress-Archive`, open explorer.
-- `--target <dart file>` applies to `build`, `run` and `flutter`. This is the
-  flag most likely to earn its keep: `rill run --target lib/probe_task19.dart`
-  turns an incantation that currently lives only in a source-file header into
-  something discoverable.
-- `-h` / `--help` prints the detailed version. It must stand alone without
-  CLAUDE.md, which means carrying the **hazards**, not just the flag list:
-  - that `run`/`zip` imply a build, so nobody ships or measures stale code;
-  - that the script copies `sidecar/dist/sidecar.exe` into the release folder
-    and why — the app prefers the copy beside its own executable, and
-    `flutter build windows` does not refresh an already-populated bundle. This
-    is CLAUDE.md's longest hazard and this script is what prevents it;
-  - that it uses `fvm flutter`, and what happens without it (below);
-  - that it loads `YT_COOKIE` from `.env`, which is why a checkout can come up
-    signed in with the variable unset in the environment;
-  - one line pointing at `setup.bat` as what a fresh machine runs first.
-- One `rill.bat` forwarding `%*`, so cmd works:
-  `powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0rill.ps1" %*`.
-  `-ExecutionPolicy Bypass` is not optional — without it the `.ps1` refuses to
-  run on a default-configured machine, which is how a repo script works for its
-  author and nobody else.
-
-**Use the pinned SDK every time, and refuse rather than fall back.** The
-current scripts drop to bare `flutter` when `fvm` is missing. That is worse
-than "an unpinned SDK": measured 2026-09-16, the global SDK re-resolves
-`app/pubspec.lock` against its own pins, and it cannot read the
-`.dart_tool/hooks_runner` cache an `fvm` run leaves behind, so the next command
-dies before doing anything (*"Invalid kernel binary format version"*). Launch
-Dart the way `tool/lint_gate.dart` does — the SDK behind `app/.fvm/flutter_sdk`
-— or through `fvm`, and stop with a clear message if neither is there.
-
-**Add a `check` subcommand** that runs `tool/test_suite_guard.dart` and
-`tool/lint_gate.dart`, both through the pinned SDK. The lint gate exists
-because `flutter analyze` / `dart analyze` report "No issues found!" on code
-with real `rill_lints` violations (`app/tool/rill_lints/README.md`), so
-**`setup.bat`'s step 4 `flutter analyze` says nothing about the plugin rule**:
-swap that step for the gate. That is the one edit `setup.bat` should get —
-leaving it alone below means not converting it.
-
-**Fix the exit-code bug while you are in there.** `build.bat` runs
-`call bun run build` and `call %FLUTTER_CMD% build windows --release` with no
-`errorlevel` test and only checks the copy. So a failed Flutter build proceeds to
-bundle the sidecar and launch the *previous* release binary — the app comes up,
-looks fine, and is old code. That is CLAUDE.md's "a fix verified this way appears
-not to work, with no error and no clue" trap, mechanised. Check `$LASTEXITCODE`
-after every stage and abort.
-
-**Carry through unchanged:** the sidecar-bundling step and its comment. A merge
-is exactly when a step that looks redundant gets dropped.
-
-**Done when:** one `rill.ps1` + one `rill.bat`, `setup.bat` still batch (with
-its analyze step running the lint gate), every stage checks its exit code, a
-missing `fvm` stops the script instead of falling back, `rill --help` is self-sufficient, and CLAUDE.md's
-Commands block is a short subcommand table ending with "run `rill --help` for
-the full surface". One summary, one detail — CLAUDE.md already restates the
-contract in five places and two went stale silently; do not create a sixth.
-
 ### 3. Re-measure the fullscreen round trip (F19) now that bitsdojo owns the frame
 
 `Win32WindowChrome.setFullscreen` does borderless fullscreen via
@@ -146,29 +65,7 @@ cannot arrive.
 
 ## Soon
 
-### 10. Reconcile `architecture.md` §2.2's renderer vocabulary table
-
-§2.2's table is the 2026-08-01 version. CLAUDE.md's is materially wider —
-`playlistVideoRenderer`, `shortsLockupViewModel`, the mix panel, `ChipsShelfView`,
-station badges. It is dated, so it is exempt from the doc guard, but it is the
-table someone reading `architecture.md` in order finds first.
-
-Not a typo fix: read `sidecar/src/parser/vocabulary.ts` and CLAUDE.md's table
-together and merge, keeping the dated original as history where it says something
-the current one does not.
-
-### 11. Wire the notifications button, or remove it
-
-`app/lib/ui/widgets/topbar.dart` renders a notifications button with a "9+" badge
-and `onTap: () {}, // TODO: open notifications`. A rendered control that does
-nothing is exactly what `architecture.md` §2.7 argued against when it chose a
-disabled captions button over a live dead one:
-
-> A disabled button says "later"; a live one that did nothing would lie.
-
-The badge makes it worse — it asserts there are nine things to see.
-
-**Done when:** it opens something, or it is disabled, or it is gone.
+Nothing here right now.
 
 ---
 
