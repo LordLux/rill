@@ -97,34 +97,6 @@ Commands block is a short subcommand table ending with "run `rill --help` for
 the full surface". One summary, one detail — CLAUDE.md already restates the
 contract in five places and two went stale silently; do not create a sixth.
 
-### 2. Test whether `source_gen` and `build` overrides are still needed
-
-`app/pubspec.yaml`'s `dependency_overrides` block carries `source_gen: ^4.1.2`
-and `build: ^4.0.4`. Both came from `16b70c7` alongside `animated_vector_gen` and
-the `analyzer`/`dart_style` pair; the 2026-09-09 fix removed two of the four and
-documented the removal at length, and these two survived with no justification of
-their own. `pubspec.lock` confirms both are still `dependency: "direct
-overridden"`, and the resolved versions (`source_gen 4.2.4`, `build 4.0.7`) sit
-well above the override floors — which hints they are vestigial without proving
-it, since an override also removes a package from normal constraint solving.
-
-This matters because CLAUDE.md's own history says this class of failure *"lands
-at compile time with messages about someone else's AST"* and *"neither names a
-version"*. Two un-justified overrides are a known trap left armed in a project
-already bitten by it twice.
-
-**How:** comment both out, `fvm flutter pub get`,
-`fvm dart run build_runner build --delete-conflicting-outputs`, then
-`fvm dart run tool/test_suite_guard.dart` and `fvm dart run tool/lint_gate.dart`.
-Every step through `fvm`: a bare `flutter`/`dart` re-resolves the lockfile
-against the global SDK, and this test would then be measuring that SDK's
-solve, not the project's.
-
-**Done when:** either they are deleted and `pubspec.yaml` records that they were
-vestigial from `16b70c7`, or the exact failure is recorded next to the paragraph
-explaining why `analyzer` and `dart_style` deliberately are *not* overridden.
-Either outcome closes the loop; only one is a doc edit.
-
 ### 3. Re-measure the fullscreen round trip (F19) now that bitsdojo owns the frame
 
 `Win32WindowChrome.setFullscreen` does borderless fullscreen via
@@ -170,24 +142,6 @@ one.
 `sidecar/src` or gone from the table, and no client branch tests for a code that
 cannot arrive.
 
-### 5. Close the `no-console` gap in the sidecar lint
-
-`sidecar/eslint.config.js` sets `'no-console': ['error', { allow: ['error',
-'warn'] }]`. `sidecar/src/log.ts:5` claims *"The eslint config bans the
-alternatives so this cannot regress quietly."* That is false for
-`console.error` / `console.warn`, and both bypass `redact.ts` — the chokepoint
-CLAUDE.md credits with making cookie leaks structurally impossible rather than a
-rule per call site. No live call exists today, so this is a gap in the guard
-rather than a leak.
-
-**Two halves, and an agent will do the first and stop unless told otherwise:**
-
-1. Drop the `allow` list and route any resulting call sites through `log.ts`.
-2. Fix `log.ts:5`'s comment, which currently asserts a ban that is not in force.
-
-**Done when:** `bun run check` is green with no `allow` list, and the comment
-describes what the config actually does.
-
 ---
 
 ## Soon
@@ -212,56 +166,8 @@ buffering and reaches us as a bug report about their internet."*
 
 **Record this when you write it up, or the next person closes it as
 unreproducible:** live exposure today is **zero**, because nothing in the
-production ladder deciphers (see item 7). That is two undocumented facts
-cancelling out, not a fixed bug.
-
-### 7. Write down that `MWEB` was retired from the resolution ladder
-
-The production ladder in `openPlayback()` (`sidecar/src/playback/resolve.ts:887`)
-has **three** rungs: `VISIONOS plain adaptive` → `yt-dlp` → `itag 18
-progressive`. There is no `MWEB` tier. `'MWEB'` survives in that file only as a
-post-resolution fallback that fetches a second `/player` to recover
-`startTimestamp` for a live stream with a null duration (`:922`, and its log
-string at `:927`).
-
-This was deliberate — commit `c53fb54`: *"MWEB adaptive retired: F10 has refused
-open-ended ranges since the spike, so it was never a playback path. Nothing in
-the ladder deciphers now."* It was never written down, and **six** places assert
-the opposite:
-
-| Where | Text |
-|---|---|
-| `protocol.md` §3.5 | "2. `MWEB` plain adaptive URLs — the decipher path, kept as a fallback" |
-| `CLAUDE.md` (Notes) | "asking as `VISIONOS` (ladder tier 1) and falling back to `MWEB` (tier 2)" |
-| `CLAUDE.md` (Current state) | "Phase 1: plain `MWEB` URLs, no SABR, no media proxy." |
-| `architecture.md` §2.3 | client table: "Stream resolution — ladder tier 2 \| `MWEB`" |
-| `architecture.md` §2.4 | "`MWEB` stays tier 2 … the only client with a proven decipher path" |
-| `architecture.md` §4 | "`MWEB` remains tier 2; F10 constrains consumption, not resolution" |
-
-Plus `resolve.ts`'s own module header (`:4-11`), which still opens *"Five tiers,
-tried in order"*.
-
-**The consequence is bigger than a stale row.** `CLIENTS_WITH_N_PARAM`
-(`signed-url.ts:55`) is `{WEB, MWEB, WEB_REMIX, WEB_EMBEDDED_PLAYER}`. Neither
-`VISIONOS` nor `ANDROID` is in it, so **nothing in the production ladder
-deciphers anything.** Hard invariant 2 and Task 02's whole decipher path now
-guard a code path no production request reaches. It is still exercised by the
-network tests, so it is not rotting silently — but CLAUDE.md reads as though it
-constrains the shipping path, and it does not.
-
-**This is not a code task.** Do not delete the decipher path: it is the only
-proven decipher implementation, `WEB` is already SABR-only, Phase 2 may need it,
-and F3's tripwire still samples `MWEB` for exactly that reason. Do not restore
-`MWEB` as a tier either: F10 settled that its URLs refuse the open-ended
-`Range: bytes=0-` ffmpeg emits by construction.
-
-**Done when:** `architecture.md` §2.4 carries a dated paragraph saying MWEB was
-retired on 2026-08-19, why (F10), what is retained and why, and that nothing in
-the production ladder deciphers today; §2.3's table, §4's row, `protocol.md`
-§3.5, CLAUDE.md and `resolve.ts`'s header all agree with it.
-
-Note that `contract-docs.test.ts` cannot catch this class: `MWEB` *does* still
-appear in `sidecar/src`, so every stale sentence passes the client-token guard.
+production ladder deciphers (`architecture.md` §2.4, "`MWEB` left the ladder").
+That is one decision hiding a defect, not a fixed bug.
 
 ### 8. Widen `contract-docs.test.ts`
 
@@ -285,29 +191,6 @@ It is doing its job on what it checks, but its reach is narrower than CLAUDE.md'
 checked, and the union's members are verified. Keep the existing "the check can
 actually fail" control and add one per new assertion — an auditor that cannot
 fail is worse than no auditor.
-
-### 9. Rename `tierAndroidVr`
-
-`sidecar/src/playback/resolve.ts:529` exports `tierAndroidVr()`, a function that
-resolves **`VISIONOS`**. `:18` references it by that name too.
-
-`ANDROID_VR` was replaced at ladder tier 1 on 2026-08-18 (F11), and CLAUDE.md
-spends a paragraph on how that rename went stale in thirteen places. The literal
-token `ANDROID_VR` appears nowhere in `sidecar/src`, so `contract-docs.test.ts`'s
-client guard is intact and still fires — but a camelCase identifier is invisible
-to it, and this one teaches the retired client to anyone reading the ladder.
-
-Rename to something that says what it does (`tierVisionOs`, or fold it into
-`tierPlainAdaptive`'s call site, since all it does is supply `'VISIONOS'` and a
-visitor-id retry). While in the file: `:740`, inside `tierProgressive`, throws
-`` `${videoId}: the MWEB /player call did not return` `` — that function is only
-ever called with the `ANDROID` response, a leftover from when `c53fb54` renamed
-`mwebResponse` to `androidResponse`. And `:617` carries
-`// yt-dlp does not give us an itag reliably; 0 signals "unknown".` directly
-above `itag: null`.
-
-**Done when:** no identifier or message in `resolve.ts` names a client it does
-not use.
 
 ### 10. Reconcile `architecture.md` §2.2's renderer vocabulary table
 
@@ -444,8 +327,10 @@ the one freezed declares."*
 
 **freezed 4.0.1 inverts it:** `analyzer >=13.0.0 <15.0.0`, `source_gen >=3.0.0
 <5.0.0`, `build >=3.0.0 <5.0.0`, and `freezed_annotation 3.1.0` — the version
-already in use. So the optimistic case retires the prerelease pin *and* both
-overrides from item 2 in one move.
+already in use. So the optimistic case retires the prerelease pin in one move.
+(The `source_gen`/`build` overrides it would also have made unnecessary are
+already gone — tested out 2026-09-16, when the solver picked identical versions
+without them.)
 
 **Two things that decide it, neither settled:**
 
@@ -464,9 +349,10 @@ fired this item's second trigger. It was not the cause — the plugin loads on
 too (`app/tool/rill_lints/README.md`). So the pin has no pressure on it from
 that side; only the triggers above apply.
 
-**Do item 2 first, separately.** Folding the override test into a freezed
-migration means a failure cannot tell you which change caused it — the exact
-diagnostic trap the `animated_vector_gen` note exists to prevent.
+**Change one thing at a time.** Try freezed 4 on its own, not together with a
+Flutter pin move or any other dependency change: a failure has to be able to
+tell you which change caused it — the exact diagnostic trap the
+`animated_vector_gen` note exists to prevent.
 
 **Whichever way it goes, rewrite that comment block rather than renumbering it.**
 Its central claim becomes false the moment freezed 4 lands. A stale version
@@ -606,7 +492,6 @@ Trivial, batch them:
 |---|---|
 | `protocol.md:723` | §3.9 "Playlists — the save dialog" sits between §3.4 and §3.5 |
 | `protocol.md:1059`, `architecture.md:1082` | "Eight numbers per *track*" — `CaptionLayout` has **eleven** fields (`captions/style.ts:150-168`); protocol.md's own example two lines below shows all eleven |
-| `architecture.md:1286` | The `yt-dlp not installed` row's Symptom cell is scrambled: *"Ladder is four rungs; the videos tier 4 exists for fail as \"Unavailable\" with nothing naming the cause"* |
 | `architecture.md:890` | Cites "§2.10's sample" for the 0/23-styled-tracks measurement; that sample is in the unnumbered "Who draws a caption" section, while §2.10 is "Drag Lock" |
 | `protocol.md:201` | `search.query`'s summary row omits `artist`, which §3.3 and `types.ts` both carry |
 | `architecture.md:239` | §2.4 says the two URLs merge "via `--audio-file`"; F15 measured `audio-add … select` |
