@@ -155,12 +155,26 @@ view-based surface.
 
 | Concern | Classic | View-based |
 |---|---|---|
-| Video tile | `videoRenderer`, `richItemRenderer`, `playlistVideoRenderer` | `lockupViewModel` |
-| Filter bar | `chipCloudChipRenderer` (top level) | `ChipsShelfView` → `ChipView` (shelf) |
-| Mix tile | — | `CollectionThumbnailView` + `"Mix"` badge |
+| Video tile | `videoRenderer`, `playlistVideoRenderer`, and their `grid`/`compact` variants | `lockupViewModel` |
+| Filter bar | `chipCloudChipRenderer` (top level) | `chipViewModel`, inside `chipsShelfViewModel` / `chipBarViewModel` (shelf) |
+| Mix tile | `radioRenderer` family (supported; absent from current captures) | a playlist-type `lockupViewModel` whose id starts `RD` |
 | Mix/playlist panel | — | *(none — a bare object, see below)* |
-| Hover actions | — | `ThumbnailHoverOverlayToggleActionsView` |
-| Continuation | `continuationItemRenderer` | `ContinuationItem` |
+| Hover actions | — | `thumbnailHoverOverlayToggleActionsViewModel`, read by what it holds |
+| Continuation | `continuationItemRenderer` | `continuationItemViewModel` |
+| Artist panel | — | `officialCardViewModel` (search only) |
+
+**These are the raw `parse: false` keys, and `sidecar/src/parser/vocabulary.ts` is
+the authority.** Four corrections to how this table used to read — the first
+version (2026-08-01, in `architecture.md` §2.2) printed youtubei.js's *typed*
+spellings (`ChipView`, `ContinuationItem`, `ThumbnailHoverOverlayToggleActionsView`),
+which never appear in a response this app reads; `normaliseRendererName`
+accepts both, but only the raw key is ever there. `richItemRenderer` is not a
+tile: it is a wrapper the walker descends through to reach one. A mix is
+recognised by its `RD…` id — `collectionThumbnailViewModel` is the thumbnail of
+*every* playlist lockup, and a `"Mix"` badge label is only a fallback, since the
+label is localised. And the Watch Later / queue actions are found by what the
+tile contains (`playlistEditEndpoint` on `WL`, `addToPlaylistCommand`, icon
+names; `scanTileActions` in `parser/text.ts`), not by the overlay's key.
 
 **Shorts are split, not simply stripped** (revised by Task 21 §1; this line
 used to read "stripped, never rendered" and both halves of that are now
