@@ -45,7 +45,7 @@ import {
   tierProgressive,
   tierYtDlp,
 } from '../src/playback/resolve.ts';
-import { forgetPlayerResponse, getPlayerResponse } from '../src/innertube/player-response.ts';
+import { forgetPlayerResponse, getPlayerEntry } from '../src/innertube/player-response.ts';
 import { isSabrOnly } from '../src/playback/sabr-detect.ts';
 import { playbackSessionCount, resetPlaybackSessions } from '../src/playback/sessions.ts';
 import { forgetStoryboards, getStoryboard } from '../src/video/storyboard.ts';
@@ -497,17 +497,17 @@ describe.if(ONLINE)('tier 2 — MWEB, and the decipher path', () => {
       // the progressive format rather than skipping — the transform under test
       // is the same one, and a wrong `n` throttles it identically.
       forgetPlayerResponse(VIDEO);
-      const response = await getPlayerResponse(session, VIDEO, 'MWEB');
+      const entry = await getPlayerEntry(session, VIDEO, 'MWEB');
 
       let source;
-      if (isSabrOnly(response)) {
+      if (isSabrOnly(entry.result)) {
         log.warn(
           'MWEB came back SABR-only; proving the decipher path on the itag 18 ' +
             'progressive URL instead (F9). The tripwire test is the one to read.',
         );
-        source = await tierProgressive({ session }, VIDEO, null, response);
+        source = await tierProgressive({ session }, VIDEO, 'MWEB', null, entry);
       } else {
-        source = await tierPlainAdaptive({ session }, VIDEO, 'MWEB', null, response);
+        source = await tierPlainAdaptive({ session }, VIDEO, 'MWEB', null, entry);
       }
 
       const url = new URL(source.variants[0]!.videoUrl);
@@ -622,17 +622,17 @@ describe.if(ONLINE)('ladder tier 5 — itag 18 progressive', () => {
       // third shape of intermittently-degraded MWEB response seen that day — see
       // F3 and F9 — and the floor genuinely being gone is what this test has to
       // keep catching, so a second empty response still fails.
-      let response = await getPlayerResponse(session, VIDEO, 'MWEB');
-      if (!response.formats.some((format) => !format.isAdaptive)) {
+      let entry = await getPlayerEntry(session, VIDEO, 'MWEB');
+      if (!entry.result.formats.some((format) => !format.isAdaptive)) {
         log.warn(
           'the MWEB response carried no progressive format — F9 says itag 18 survives ' +
             'even a SABR-only response. Re-fetching once before calling the floor gone.',
         );
         forgetPlayerResponse(VIDEO);
-        response = await getPlayerResponse(session, VIDEO, 'MWEB');
+        entry = await getPlayerEntry(session, VIDEO, 'MWEB');
       }
 
-      const source = await tierProgressive({ session }, VIDEO, null, response);
+      const source = await tierProgressive({ session }, VIDEO, 'MWEB', null, entry);
       const best = source.variants[0]!;
 
       expect(best.height).toBe(360);
