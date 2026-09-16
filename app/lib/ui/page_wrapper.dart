@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../theme/screen_values.dart';
 import 'pages/all_subscriptions.dart' show allSubscriptionsRouteName;
 import 'pages/subscriptions.dart';
 import 'player_shell.dart'
-    show currentRouteProvider, homeRouteName, rootNavigatorKey, sectionRouteProvider;
+    show currentRouteProvider, homeRouteName, rootNavigatorKey, sectionRouteProvider, transientRouteOpenProvider;
 import 'widgets/topbar.dart';
 
 const String drawerPrefsKey = 'left_drawer_open';
@@ -60,6 +61,20 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
     );
   }
 
+  /// Pop the topmost page route — the watch page, Subscriptions, a search,
+  /// wherever the back arrow is showing from.
+  ///
+  /// Guarded the same way `toMiniPlayerIn` is: a `PopupRoute` (a dialog, say —
+  /// not the account menu, which is an `OverlayEntry` and pushes no route) can
+  /// be on top of the same Navigator without changing
+  /// `currentRouteProvider`, and `maybePop` would close *that* rather than
+  /// leave the page — though in practice a modal one already blocks this
+  /// button's tap from landing at all.
+  void _goBack() {
+    if (ref.read(transientRouteOpenProvider)) return;
+    rootNavigatorKey.currentState?.maybePop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDrawerOpen = ref.watch(drawerStateProvider);
@@ -75,8 +90,7 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
     // than falling through to `!isOnSubscriptions` and lighting up Home,
     // which is wrong for *any* non-subscriptions, non-home page (watch,
     // search — this just happened to be the one someone noticed first).
-    final isOnSubscriptions =
-        section == subscriptionsRouteName || section == allSubscriptionsRouteName;
+    final isOnSubscriptions = section == subscriptionsRouteName || section == allSubscriptionsRouteName;
     // **`'/'`, not `null`.** This used to read `currentRoute == null` on the
     // belief that the root route carries no name. It carries `'/'` —
     // `MaterialApp(home:)` routes it through `Navigator.defaultRouteName` —
@@ -87,11 +101,17 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
     // has reported anything at all, and the first frame is on Home.
     final isOnHome = section == null || section == homeRouteName;
 
+    // The back arrow tracks the actual page route, not the section: a search
+    // or the watch page both warrant one even though the watch page leaves
+    // `section` untouched (see `sectionRouteProvider`).
+    final currentRoute = ref.watch(currentRouteProvider);
+    final showBack = currentRoute != null && currentRoute != homeRouteName;
+
     return Scaffold(
       appBar: TopBar(
-        title: widget.title,
-        actions: widget.actions ?? [],
         toggleDrawer: _toggleDrawer,
+        showBackButton: showBack,
+        onBack: _goBack,
       ),
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -102,7 +122,7 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
             curve: Curves.easeInOut,
             // 240px wide when open, 72px wide (mini drawer) when closed.
             // Change 72 to 0 if you want it completely hidden when closed!
-            width: isDrawerOpen ? 240 : 72,
+            width: isDrawerOpen ? ScreenValues.openRailWidth : ScreenValues.closedRailWidth,
             child: Material(
               color: Theme.of(context).scaffoldBackgroundColor,
               child: ListView(
@@ -156,7 +176,12 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
           ),
 
           // The actual page content
-          Expanded(child: widget.body),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadiusGeometry.only(topLeft: Radius.circular(10)),
+              child: widget.body,
+            ),
+          ),
         ],
       ),
     );
@@ -181,10 +206,9 @@ class _DrawerItem extends StatelessWidget {
 
   static const Duration _animDuration = Duration(milliseconds: 300);
   static const Curve _animCurve = Curves.fastOutSlowIn;
-  static const double _closedHeight = 70.0;
-  static const double _openHeight = 48.0;
-  static const double _width = 64.0;
-  static const double _borderRadius = 10.0;
+  static const double _closedHeight = ScreenValues.closedRailWidth - 2.0;
+  static const double _openHeight = ScreenValues.railButtonHeight;
+  static const double _width = ScreenValues.railButtonWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -194,16 +218,17 @@ class _DrawerItem extends StatelessWidget {
     // Active state colors
     final activeColor = isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant;
     final backgroundColor = isSelected ? colorScheme.primaryContainer.withAlpha(128) : Colors.transparent;
+    final borderRadius = isSelected ? ScreenValues.railItemBorderRadiusSelected : ScreenValues.railItemBorderRadius;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
       child: Material(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(_borderRadius),
+        borderRadius: BorderRadius.circular(borderRadius),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(_borderRadius),
+          borderRadius: BorderRadius.circular(borderRadius),
           child: AnimatedContainer(
             duration: _animDuration,
             curve: _animCurve,
@@ -244,6 +269,7 @@ class _DrawerItem extends StatelessWidget {
                                 overflow: TextOverflow.visible,
                                 style: theme.textTheme.labelSmall?.copyWith(
                                   color: activeColor,
+                                  fontSize: key == const ValueKey('subscriptions') ? 9 : 11.0,
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                 ),
                               ),

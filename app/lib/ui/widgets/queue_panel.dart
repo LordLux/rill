@@ -173,6 +173,29 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     }
   }
 
+  /// Scroll the list so the now-current row lands at the top of the viewport.
+  ///
+  /// Called a frame after the playhead moves, so the row's key is measuring
+  /// the layout the new `isCurrent` flags produced rather than the stale one.
+  /// A silent no-op when the row is not built at all — off-screen far enough
+  /// that `ReorderableListView`'s cache extent never reached it — rather than
+  /// jumping there first: every real trigger (autoplay, next/previous, or a
+  /// tap on the row itself) starts from a row that is already on screen or
+  /// adjacent to one that is.
+  void _scrollToCurrent() {
+    if (!mounted) return;
+    final entry = ref.read(queueProvider).currentEntry;
+    if (entry == null) return;
+    final ctx = _itemKeys[entry]?.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   Future<void> _animateClear(QueueController controller) async {
     if (_clearing) return;
     setState(() => _clearing = true);
@@ -404,6 +427,18 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     ref.listen<List<QueueEntry>>(
       queueProvider.select((q) => q.entries),
       (previous, next) => _syncEntries(next),
+    );
+
+    // `version` bumps exactly when the playhead moves to a different track —
+    // autoplay advancing, the next/previous shortcuts, and jumping to a row —
+    // and deliberately not on a reorder or a Clear (which keeps the same
+    // track playing). That is exactly "any change in the video being played",
+    // so it is the one signal this needs rather than three separate ones.
+    ref.listen<int>(
+      queueProvider.select((q) => q.version),
+      (previous, next) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
+      },
     );
 
     if (queue.entries.length <= 1 && !_clearing && !_popping) {
