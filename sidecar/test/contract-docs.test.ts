@@ -15,9 +15,10 @@
  *     assertion did not. CLAUDE.md is loaded into every session, so it went on
  *     teaching the wrong client for months.
  *
- * This is deliberately **one file with two assertions**, not a documentation
- * framework. Each one compares a doc against the code that is the actual
- * authority, and neither needs a list anyone has to maintain.
+ * This is deliberately **one file with two checks**, not a documentation
+ * framework. Each compares a doc against the code that is the actual
+ * authority, and neither needs a list anyone has to maintain: the first reads
+ * whatever shapes the docs declare, the second whatever clients they name.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -46,59 +47,247 @@ const SOURCE = sourceFiles(SRC)
   .join('\n');
 
 // ---------------------------------------------------------------------------
-// 1. CLAUDE.md's DTO contract block vs. the real types
+// 1. The shapes the docs declare vs. the real types
 // ---------------------------------------------------------------------------
+//
+// Every `interface` and `type` inside a fenced ```ts block of CLAUDE.md or
+// protocol.md is compared, **field names, optionality and types**, against the
+// one declaration of that name in `sidecar/src`. Names alone used to be all this
+// compared, so `channelId: string` against `string | null` passed — and that is
+// exactly the distinction the DTO rule ("a value or `null`, never omitted")
+// exists for.
+//
+// A small scanner rather than a TypeScript parser, and deliberately so: it has
+// to read two things written differently on purpose (`types.ts` puts one field
+// per line under a doc comment; CLAUDE.md packs the small DTOs onto two lines),
+// and it must never quietly read *less* than is there. Anything it cannot parse
+// is reported as a field of its own rather than skipped.
+
+/** The docs whose ```ts blocks are contract, not illustration. */
+const SHAPE_DOCS = ['CLAUDE.md', 'docs/protocol.md'] as const;
+
+function tsBlocks(markdown: string): string {
+  return [...markdown.matchAll(/^```ts[^\n]*\n([\s\S]*?)^```/gm)].map((m) => m[1]).join('\n');
+}
 
 /**
- * Field names per interface, from a TypeScript-ish source.
+ * Source with comments removed and string literals kept whole.
  *
- * A regex, not a parser. It must be insensitive to layout, because the two
- * sides are laid out differently on purpose: `types.ts` puts one field per
- * line with a doc comment above it, and CLAUDE.md packs the small DTOs onto
- * two lines to keep the contract readable at a glance. An earlier, line-
- * anchored version of this read only the first field on each line and reported
- * three interfaces as mismatched when every one of them agreed.
+ * Both halves were learned the hard way. A doc comment can hold braces —
+ * `{@link isArtistChannel}` in `types.ts` once closed an interface body early and
+ * hid its last five fields — and a naive `//` strip cuts `'https://…'` in half,
+ * which unbalances every brace after it. So this walks the text.
  */
-function interfaceFields(source: string): Map<string, Set<string>> {
-  // Comments go first, and not for tidiness: `types.ts` documents
-  // `VideoItem.isVerified` with a `{@link isArtistChannel}`, whose closing
-  // brace ends the interface body as far as the match below is concerned. The
-  // effect was that the last five fields of the largest DTO in the app simply
-  // did not exist to this check.
-  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-
-  const out = new Map<string, Set<string>>();
-  const blocks = stripped.matchAll(/interface\s+(\w+)\s*\{([^}]*)\}/g);
-  for (const [, name, body] of blocks) {
-    const fields = new Set<string>();
-    for (const [, field] of (body ?? '').matchAll(/(?:^|[{;\n])\s*(\w+)\s*\??\s*:/g)) {
-      fields.add(field!);
+function stripComments(src: string): string {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i]!;
+    const next = src[i + 1];
+    if (c === '/' && next === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+    } else if (c === '/' && next === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end === -1 ? src.length : end + 2;
+      out += ' ';
+    } else if (c === "'" || c === '"' || c === '`') {
+      const start = i++;
+      while (i < src.length && src[i] !== c) i += src[i] === '\\' ? 2 : 1;
+      out += src.slice(start, ++i);
+    } else {
+      out += c;
+      i++;
     }
-    out.set(name!, fields);
   }
   return out;
 }
 
-describe('CLAUDE.md documents the DTOs the code actually ships', () => {
-  const documented = interfaceFields(doc('CLAUDE.md'));
-  const actual = interfaceFields(readFileSync(join(SRC, 'types.ts'), 'utf8'));
+const OPEN = '({[';
+const CLOSE = ')}]';
 
-  test('the contract block was found at all', () => {
-    // Guards against the check silently passing because the block moved,
-    // was renamed, or stopped being a fenced `ts` block.
-    expect([...documented.keys()]).toContain('VideoItem');
-    expect(documented.size).toBeGreaterThanOrEqual(4);
+/** Split at `separator` wherever no bracket is open. `=>` is not a bracket. */
+function splitTopLevel(text: string, separator: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (OPEN.includes(c)) depth++;
+    else if (CLOSE.includes(c)) depth--;
+    else if (c === separator && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/**
+ * A type, spelled one canonical way: no whitespace, one quote style, and the
+ * members of a top-level union in sorted order — `null | string` and
+ * `string | null` are the same type, `string` is not.
+ */
+function normaliseType(type: string): string {
+  const flat = type.replace(/\s+/g, '').replace(/"/g, "'");
+  return splitTopLevel(flat, '|')
+    .filter((member) => member.length > 0)
+    .sort()
+    .join('|');
+}
+
+/** `name` or `name?` → canonical type. Unparseable members are kept, keyed as such. */
+function members(body: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of splitTopLevel(body, ';')) {
+    const member = raw.trim();
+    if (!member) continue;
+    const m = /^(?:readonly\s+)?(\w+)(\?)?\s*:\s*([\s\S]+)$/.exec(member);
+    if (m) out[`${m[1]}${m[2] ?? ''}`] = normaliseType(m[3]!);
+    else out[`(unparsed) ${member.replace(/\s+/g, ' ')}`] = '';
+  }
+  return out;
+}
+
+interface Declarations {
+  interfaces: Map<string, Record<string, string>>;
+  aliases: Map<string, string>;
+}
+
+function declarations(src: string): Declarations {
+  const text = stripComments(src);
+  const interfaces = new Map<string, Record<string, string>>();
+  // `extends` is matched so the declaration is found at all. Inherited fields
+  // are not merged in; a documented shape that extends another would show up
+  // here as missing fields, which is loud, not silent.
+  const head = /\binterface\s+(\w+)\s*(?:<[^{]*?>)?\s*(?:extends\s+[^{]+)?\{/g;
+  for (const m of text.matchAll(head)) {
+    const open = m.index! + m[0].length - 1;
+    let depth = 0;
+    let close = open;
+    for (; close < text.length; close++) {
+      if (text[close] === '{') depth++;
+      else if (text[close] === '}' && --depth === 0) break;
+    }
+    interfaces.set(m[1]!, members(text.slice(open + 1, close)));
+  }
+  const aliases = new Map<string, string>();
+  for (const m of text.matchAll(/\btype\s+(\w+)\s*=\s*([^;]+);/g)) {
+    aliases.set(m[1]!, normaliseType(m[2]!));
+  }
+  return { interfaces, aliases };
+}
+
+/**
+ * The single `sidecar/src` declaration of `name`. More than one is an error in
+ * its own right: the docs would be describing whichever one this happened to
+ * read.
+ */
+type DeclOf<K extends keyof Declarations> = Declarations[K] extends Map<string, infer V> ? V : never;
+
+function codeDeclaration<K extends keyof Declarations>(
+  kind: K,
+  name: string,
+): Array<{ path: string; decl: DeclOf<K> }> {
+  const token = new RegExp(`\\b${kind === 'interfaces' ? 'interface' : 'type'}\\s+${name}\\b`);
+  return sourceFiles(SRC)
+    .filter((path) => path.endsWith('.ts'))
+    .map((path) => ({ path, text: readFileSync(path, 'utf8') }))
+    .filter(({ text }) => token.test(text))
+    .flatMap(({ path, text }) => {
+      const decl = (declarations(text)[kind] as Map<string, DeclOf<K>>).get(name);
+      return decl === undefined ? [] : [{ path, decl }];
+    });
+}
+
+const DOCUMENTED = SHAPE_DOCS.map((path) => ({ path, ...declarations(tsBlocks(doc(path))) }));
+
+describe('the shapes the docs declare are the shapes the code ships', () => {
+  test('the shape blocks were found at all', () => {
+    // Guards against every assertion below passing because a block moved, was
+    // renamed, or stopped being a fenced `ts` block.
+    const byDoc = Object.fromEntries(
+      DOCUMENTED.map(({ path, interfaces, aliases }) => [
+        path,
+        [...interfaces.keys(), ...aliases.keys()].sort(),
+      ]),
+    );
+    expect(byDoc['CLAUDE.md']).toEqual(
+      expect.arrayContaining(['FeedItem', 'VideoItem', 'MixItem', 'PlaylistItem', 'ChannelItem', 'Chip']),
+    );
+    // `VideoDetail` is the whole of `video.info` and had no written shape
+    // anywhere until 2026-09-16 — which is where live drift landed.
+    expect(byDoc['docs/protocol.md']).toEqual(
+      expect.arrayContaining(['VideoDetail', 'PlaylistMembership', 'PlaylistPrivacy', 'SearchFilters']),
+    );
   });
 
-  for (const [name, fields] of documented) {
-    test(`${name}`, () => {
-      const real = actual.get(name);
-      expect(real, `CLAUDE.md documents \`${name}\`, which types.ts does not define`).toBeDefined();
-      expect([...fields].sort(), `\`${name}\` in CLAUDE.md and in types.ts`).toEqual(
-        [...real!].sort(),
-      );
-    });
+  for (const { path, interfaces, aliases } of DOCUMENTED) {
+    for (const [name, documented] of interfaces) {
+      test(`${path}: interface ${name}`, () => {
+        const found = codeDeclaration('interfaces', name);
+        expect(
+          found.map((f) => f.path),
+          `\`${name}\` must be declared exactly once in sidecar/src`,
+        ).toHaveLength(1);
+        expect(documented, `\`${name}\` in ${path} and in ${found[0]!.path}`).toEqual(found[0]!.decl);
+      });
+    }
+    for (const [name, documented] of aliases) {
+      test(`${path}: type ${name}`, () => {
+        const found = codeDeclaration('aliases', name);
+        expect(
+          found.map((f) => f.path),
+          `\`${name}\` must be declared exactly once in sidecar/src`,
+        ).toHaveLength(1);
+        expect(documented, `\`${name}\` in ${path} and in ${found[0]!.path}`).toBe(found[0]!.decl);
+      });
+    }
   }
+});
+
+describe('the shape check can actually fail', () => {
+  // An auditor that cannot fail converts an unchecked property into a
+  // checked-looking one, which is worse than no auditor. One control per
+  // property the check claims to see.
+  const shape = (src: string, name = 'X') => declarations(src).interfaces.get(name);
+
+  test('nullability is compared, not just names', () => {
+    expect(shape('interface X { a: string | null; }')).not.toEqual(shape('interface X { a: string; }'));
+  });
+
+  test('an optional field is not a required one', () => {
+    expect(shape('interface X { a?: string; }')).not.toEqual(shape('interface X { a: string; }'));
+  });
+
+  test('union order does not matter; union membership does', () => {
+    expect(shape("interface X { a: 'x' | 'y'; }")).toEqual(shape("interface X { a: 'y' | 'x'; }"));
+    expect(shape("interface X { a: 'x' | 'y'; }")).not.toEqual(shape("interface X { a: 'x' | 'z'; }"));
+    expect(declarations('type U = A | B;').aliases.get('U')).not.toBe(
+      declarations('type U = A | B | C;').aliases.get('U'),
+    );
+  });
+
+  test('braces in comments and slashes in strings do not cut a body short', () => {
+    const src = [
+      'interface X {',
+      '  /** see {@link b} */',
+      "  a: 'https://example.com/{x}';",
+      '  // a } in a line comment',
+      '  b: { inner: number; };',
+      '  c: boolean;',
+      '}',
+    ].join('\n');
+    expect(Object.keys(shape(src)!)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('a declaration with `extends` or type parameters is still found', () => {
+    expect(shape('export interface X<T> extends Y<T> { a: T; }')).toEqual({ a: 'T' });
+  });
+
+  test('a member the scanner cannot read is reported, not dropped', () => {
+    expect(Object.keys(shape('interface X { a: string; [key: string]: number; }')!)).toHaveLength(2);
+  });
 });
 
 // ---------------------------------------------------------------------------

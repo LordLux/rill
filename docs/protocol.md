@@ -592,6 +592,40 @@ collation *within* a letter is YouTube's business, and only `M` landing after
 `export-contract-corpus` rewrites every channel name to
 `Sanitised Channel <n>`, which is sorted by construction.
 
+**`VideoDetail` — the whole of `video.info`'s result.** The same DTO rules as
+CLAUDE.md's list shapes: every field a value or `null`, never omitted. The
+paragraphs below explain the fields that are not obvious;
+`sidecar/test/contract-docs.test.ts` checks this block against `types.ts`,
+types and nullability included.
+
+```ts
+interface VideoDetail {
+  id: string;
+  title: string;
+  description: string | null;
+  channelName: string;
+  channelId: string | null;
+  channelAvatarUrl: string | null;
+  subscriberText: string | null;
+  durationSeconds: number | null;     // null when live
+  isLive: boolean;
+  viewCountText: string | null;       // display string
+  viewCount: number | null;           // exact, or null when only a rounded string exists
+  publishedText: string | null;       // relative ("14 years ago")
+  publishedDateText: string | null;   // exact ("Dec 6, 2009")
+  likeText: string | null;
+  myRating: 'like' | 'dislike' | 'none';
+  isSubscribed: boolean;
+  isVerified: boolean;
+  isArtistChannel: boolean;
+  badges: string[];
+  isMembersOnly: boolean;             // structural; the members slate reads this
+  premiereAtMs: number | null;        // unix ms; null unless it is a premiere
+  related: FeedItem[];                // the watch page's rail
+  relatedContinuation: string | null; // → video.related
+}
+```
+
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The
 `/player` half asks as **`VISIONOS` over the anonymous resolve session**, which
