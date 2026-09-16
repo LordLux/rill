@@ -31,6 +31,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { logger } from '../src/log.ts';
+
+/** stderr, like everything else — hard invariant 3 applies to the suite too. */
+const log = logger('corpus-test');
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CORPUS = join(ROOT, 'corpus');
 const FIXTURES = join(ROOT, 'sidecar', 'fixtures');
@@ -271,7 +276,7 @@ const hasFixtures = existsSync(FIXTURES) && readdirSync(FIXTURES).some((f) => f.
 if (!hasFixtures) {
   // Skipping is correct here: fixtures are gitignored, so a clean clone has no
   // captures to compare against. Failing would make every fresh checkout red.
-  console.warn(
+  log.warn(
     '[corpus] sidecar/fixtures/ is absent — skipping the capture cross-check. ' +
       'Shape checks still run. Run `bun run capture` (needs YT_COOKIE) to enable it.',
   );

@@ -88,19 +88,19 @@ async function youtubeReachable(): Promise<boolean> {
 const REQUESTED = process.env['RUN_NETWORK_TESTS'] === '1';
 const ONLINE = REQUESTED && (await youtubeReachable());
 
+/** stderr, like everything else — hard invariant 3 applies to the suite too. */
+const log = logger('network-test');
+
 if (!ONLINE) {
-  console.warn(
-    REQUESTED
+  log.warn(
+    (REQUESTED
       ? '[network] youtube.com is unreachable — skipping the live tests.'
-      : '[network] skipped (opt-in) — run `bun run test:network` to include them.',
-    'These are the only tests that prove the decipher path: a wrongly-deciphered' +
+      : '[network] skipped (opt-in) — run `bun run test:network` to include them.') +
+      ' These are the only tests that prove the decipher path: a wrongly-deciphered' +
       ' n is well-formed and throttles to ~50 KB/s, which no offline assertion can' +
       ' detect. With them skipped, a completely broken decipher path is a green suite.',
   );
 }
-
-/** stderr, like everything else — hard invariant 3 applies to the suite too. */
-const log = logger('network-test');
 
 /**
  * Where the Phase 2 tripwire writes what it saw.
