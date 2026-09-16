@@ -1,0 +1,5 @@
+plugins:
+  rill_lints:
+    path: ..
+    diagnostics:
+      no_color_literals: true
