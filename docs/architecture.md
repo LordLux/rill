@@ -290,10 +290,13 @@ name them.
   and a live stream's start time when tier 1's response lacks one.
 - **What not to do.** Do not delete the decipher path, and do not put `MWEB`
   back as a playback tier; F10 settles the second.
-- **A side effect worth knowing.** Task 04 §1 — the `/player` response and the
-  deciphering script coming from different player revisions — has no
-  production exposure while nothing deciphers. That is not the same as fixed
-  (`docs/todo.md` item 6).
+- **A side effect worth knowing, since closed.** Task 04 §1 — the `/player`
+  response and the deciphering script coming from different player revisions —
+  had no production exposure while nothing deciphers, which is not the same as
+  fixed. Fixed 2026-09-17: each response records the revision it was minted
+  under, and the tiers compare it with the deciphering player before signing,
+  refetching once or declining on a mismatch. `protocol.md` §3.5 has the
+  mechanism.
 
 Report watch events on a real cadence, not once at completion. A single
 end-of-video ping is a weak training signal, and homepage fidelity is the

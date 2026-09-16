@@ -965,6 +965,23 @@ resolution ladder deliberately asks without a playlist id**: a mix changes
 nothing about which streams exist, and splitting the resolve cache by playlist
 would buy a second `/player` round trip per open for nothing.
 
+**Each cached response also records the player revision its
+`signatureTimestamp` was sent for — Task 04 §1.** The script that deciphers a
+response's `s`/`n` comes from a separate, TTL-bounded lookup that can move to a
+newer revision in between: a cache entry minted minutes earlier, or a rebuild
+landing between one call's fetch and its decipher. Deciphering that pair is the
+failure hard invariant 2 exists to prevent — a wrong `n` is not rejected, it
+streams at ~50 KB/s. So the tiers check at the point of use: once playability is
+settled, and before anything is signed, the response's recorded revision is
+compared with the player about to decipher it. On a mismatch the response is
+refetched once under the current revision; if the revision has moved again by
+then, the tier declines rather than decipher a mismatched pair. The revision is
+not part of the cache key, because the point-of-use check already covers a stale
+entry and a second mechanism would add nothing. The check is skipped when nothing
+in the response would reach a player script — no `signatureCipher`, no `n` on
+any URL — which is true of `VISIONOS` and `ANDROID` today, so a player rollout
+costs the production ladder nothing.
+
 The report itself goes out over the authenticated `WEB` session with a CPN of the
 sidecar's own, one per session (F6, and A5 which rejects bridging a resolution
 client's CPN). That needs a `WEB` `/player` response for its playback-tracking
