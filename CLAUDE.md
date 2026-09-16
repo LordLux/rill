@@ -250,9 +250,32 @@ cd sidecar && bun run check     # typecheck + lint + tests — run before callin
 cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
 cd sidecar && bun run build     # compile to dist/sidecar.exe — see below
-cd app && flutter run -d windows
-cd app && dart run tool/test_suite_guard.dart   # flutter test + the guard below
+setup.bat                                           # fresh machine: FVM SDK, pub get, codegen, analysis
+cd app && fvm dart run build_runner build --delete-conflicting-outputs   # codegen — see below
+cd app && fvm flutter run -d windows
+cd app && fvm dart run tool/test_suite_guard.dart   # flutter test + the guard below
+cd app && fvm dart run tool/lint_gate.dart          # analyzer + rill_lints: plugin loaded, 0 diagnostics
 ```
+
+**Generated code is not committed.** `*.g.dart` and `*.freezed.dart` are
+gitignored, so a fresh clone does not compile until `build_runner` has run —
+`setup.bat` does it once, and it has to be re-run after changing any `freezed`
+or `json_serializable` model. If it fails, the `build_runner` note under
+"Notes that will bite otherwise" is where to start.
+
+**App commands go through `fvm`, never the global SDK.** `app/.fvmrc` pins
+Flutter 3.44.9, and a bare `flutter`/`dart` in `app/` is a different SDK that
+breaks things in ways that point nowhere near it — measured 2026-09-16: it
+re-resolves `pubspec.lock` against its own pins (`meta`, `matcher`, `test_api`,
+`vector_math` move), and after an `fvm` run it cannot read
+`.dart_tool/hooks_runner`, so the test guard dies before running a test with
+*"Invalid kernel binary format version"*.
+
+**`flutter analyze` and `dart analyze` are not a check for `rill_lints`.** They
+stop listening before the plugin's diagnostics arrive, and report
+"No issues found!" on code with real violations — the plugin loading fine the
+whole time. `tool/lint_gate.dart` is the check; `app/tool/rill_lints/README.md`
+has why.
 
 **Run the app's tests through `tool/test_suite_guard.dart`, not `flutter test`
 alone.** A test file that does not compile fails to *load*, and `flutter test`
@@ -280,16 +303,15 @@ directory beside the executable *first* — so a release app runs that copy, not
 the one in the repo. Rebuilding the sidecar alone leaves the app on whatever was
 current when Flutter last built. This is silent and it wastes whole measurement
 runs: a fix verified this way appears not to work, with no error and no clue,
-because the code being exercised is the old code. Either re-run
-`flutter build windows --release` after `bun run build`, or copy
-`sidecar/dist/sidecar.exe` over the bundled one. **Re-running
-`flutter build windows --release` is *not* enough** — measured 2026-08-13: the
-copy step does not re-run for an already-populated bundle, so the app kept a
-sidecar nine hours older than the one just built, with no warning. Copy the
-binary over the bundled one **explicitly**, and check it took — `grep` a string
-from the new build inside the bundled `.exe` — before trusting any device
-measurement. Otherwise the run measures the previous sidecar and says so
-nowhere.
+because the code being exercised is the old code. **Re-running
+`fvm flutter build windows --release` after `bun run build` is *not* enough** —
+measured 2026-08-13: the copy step does not re-run for an already-populated
+bundle, so the app kept a sidecar nine hours older than the one just built, with
+no warning. Copy `sidecar/dist/sidecar.exe` over the bundled one **explicitly**
+(`build.bat` and `package.bat` do this after building), and check it took —
+`grep` a string from the new build inside the bundled `.exe` — before trusting
+any device measurement. Otherwise the run measures the previous sidecar and says
+so nowhere.
 
 **It bit again on 2026-08-19, and it does not look like a stale binary.** It
 looks like a half-finished feature: captions rendered position and outline but no
