@@ -222,11 +222,18 @@ that do not exist yet.
   /src/rpc        NDJSON transport
   /fixtures       raw captured responses (parse:false) — the test corpus
 /app              Flutter
+  /lib            main.dart + probe_task19.dart — the only two entrypoints
   /lib/domain     freezed models mirroring the DTOs above
   /lib/data       RPC client
   /lib/ui         screens, tiles, player
-/docs             architecture.md, protocol.md, tasks/
+  /test/README.md the Task 19 measurement probes, and why they are not tests
+/docs             architecture.md, protocol.md, todo.md, tasks/
 ```
+
+**`docs/todo.md` is the live backlog** — work that is agreed but not done, each
+entry carrying enough context to be picked up cold. `docs/tasks/` is the
+archive: what was asked for at a moment in time. An item leaves `todo.md` when
+the work lands; a task file is never rewritten to match today's code.
 
 ## Reports
 
