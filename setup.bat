@@ -52,7 +52,7 @@ if errorlevel 1 (
 
 echo [4/4] Running project analysis...
 cd /d "%~dp0app"
-call %FLUTTER_CMD% analyze
+call %DART_CMD% run tool\lint_gate.dart
 if errorlevel 1 (
   echo Project analysis failed.
   exit /b %errorlevel%

@@ -249,12 +249,15 @@ cd sidecar && bun test          # parser tests, offline, no network
 cd sidecar && bun run check     # typecheck + lint + tests — run before calling it done
 cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
-cd sidecar && bun run build     # compile to dist/sidecar.exe — see below
-setup.bat                                           # fresh machine: FVM SDK, pub get, codegen, analysis
+cd sidecar && bun run build     # the sidecar alone — a release app needs `rill build`, see below
+setup.bat                       # fresh machine: FVM SDK, pub get, codegen, lint gate
 cd app && fvm dart run build_runner build --delete-conflicting-outputs   # codegen — see below
-cd app && fvm flutter run -d windows
-cd app && fvm dart run tool/test_suite_guard.dart   # flutter test + the guard below
-cd app && fvm dart run tool/lint_gate.dart          # analyzer + rill_lints: plugin loaded, 0 diagnostics
+cd app && fvm flutter run -d windows   # debug build with hot reload
+rill build                      # compile sidecar and app, bundle, and stop
+rill run                        # build, bundle, then launch the exe in this terminal
+rill open                       # launch the last release build as-is, no build
+rill check                      # flutter test guard + lint gate
+# run `rill --help` for the full surface; `rill` works from any directory
 ```
 
 **Generated code is not committed.** `*.g.dart` and `*.freezed.dart` are
@@ -308,7 +311,7 @@ because the code being exercised is the old code. **Re-running
 measured 2026-08-13: the copy step does not re-run for an already-populated
 bundle, so the app kept a sidecar nine hours older than the one just built, with
 no warning. Copy `sidecar/dist/sidecar.exe` over the bundled one **explicitly**
-(`build.bat` and `package.bat` do this after building), and check it took —
+(`rill build`, `run` and `zip` do this after building), and check it took —
 `grep` a string from the new build inside the bundled `.exe` — before trusting
 any device measurement. Otherwise the run measures the previous sidecar and says
 so nowhere.
