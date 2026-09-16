@@ -675,7 +675,8 @@ String premiereText(int? premiereAtMs, String? fallback) {
   return 'Premieres ${at.day}/${at.month}/${at.year} at ${time.hour}:$minute';
 }
 
-/// `STREAM_UNAVAILABLE` and friends (§4).
+/// `STREAM_UNAVAILABLE` and friends (§4), including `RATE_LIMITED`, which gets
+/// its own wording: the connection is being limited, the video is fine.
 ///
 /// A retry affordance rather than a verdict: every rung of the ladder can
 /// decline for a video that is perfectly fine (F9, observed 2026-08-02), which
@@ -703,12 +704,15 @@ class _Unavailable extends ConsumerWidget {
               Icon(Icons.error_outline, color: scheme.error, size: 40),
               const SizedBox(height: 12),
               Text(
-                'This video would not open.',
+                playback.isRateLimited
+                    ? 'YouTube is limiting requests from this connection.'
+                    : 'This video would not open.',
+                textAlign: TextAlign.center,
                 style: TextStyle(color: theme.tokens.onScrim, fontSize: 16),
               ),
               const SizedBox(height: 4),
               Text(
-                playback.error!,
+                playback.isRateLimited ? 'Wait a few minutes, then try again.' : playback.error!,
                 textAlign: TextAlign.center,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,

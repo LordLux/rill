@@ -621,6 +621,76 @@ describe('the ladder as openPlayback wires it', () => {
 // LOGIN_REQUIRED and the visitor id
 // ---------------------------------------------------------------------------
 
+describe('a throttle is RATE_LIMITED, not "would not open" — decided 2026-09-17', () => {
+  beforeEach(() => {
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
+  const botCheck = { status: 'LOGIN_REQUIRED', reason: "Sign in to confirm you're not a bot" };
+
+  const failureOf = (promise: Promise<unknown>): Promise<unknown> =>
+    promise.then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+  test('the ladder reports RATE_LIMITED when a throttled tier is followed only by declines', async () => {
+    const tiers: Tier[] = [
+      { name: 'one', run: async () => Promise.reject(new RpcError('RATE_LIMITED', 'bot check')) },
+      { name: 'two', run: async () => Promise.reject(new RpcError('UPSTREAM_ERROR', 'down')) },
+    ];
+    const failure = await failureOf(descendLadder('aqz-KE-bpKQ', tiers));
+    expect(hasCode(failure, 'RATE_LIMITED')).toBe(true);
+    // `user`, not `auto`: a throttle lasts minutes to an hour, and a silent
+    // retry would be a spinner that never ends.
+    expect((failure as RpcError).retry).toBe('user');
+  });
+
+  test('a throttled tier does not end the ladder: a lower tier can still serve', async () => {
+    const tiers: Tier[] = [
+      { name: 'one', run: async () => Promise.reject(new RpcError('RATE_LIMITED', 'bot check')) },
+      { name: 'two', run: async () => stubSource('plain', 360) },
+    ];
+    const source = await descendLadder('aqz-KE-bpKQ', tiers);
+    expect(source.variants[0]!.height).toBe(360);
+  });
+
+  test('throttled on every client: openPlayback answers RATE_LIMITED after trying them all', async () => {
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', ...botCheck }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', ...botCheck }),
+    });
+    const failure = await failureOf(openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' }));
+
+    expect(hasCode(failure, 'RATE_LIMITED')).toBe(true);
+    // Tier 1 retried once with a fresh visitor id before being believed, and
+    // the ladder still reached tier 5's ANDROID response.
+    expect(session.calls).toEqual(['VISIONOS', 'VISIONOS', 'ANDROID']);
+  });
+
+  test('a throttled tier 1 is rescued by the 360p floor when ANDROID still answers', async () => {
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', ...botCheck }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false, sabrOnly: true }),
+    });
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    expect(source.variants[0]!.height).toBe(360);
+    expect(source.qualityDegraded).toBe(true);
+  });
+
+  test('an age gate is not a throttle, although it is also LOGIN_REQUIRED', async () => {
+    const ageGate = { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm your age' };
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', ...ageGate }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', ...ageGate }),
+    });
+    const failure = await failureOf(openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' }));
+    expect(hasCode(failure, 'STREAM_UNAVAILABLE')).toBe(true);
+  });
+});
+
 describe('fetchWithVisitorRetry', () => {
   const ok = parsePlayer(rawPlayerBody({ client: 'VISIONOS' }));
   const refused = parsePlayer(
