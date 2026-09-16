@@ -263,6 +263,21 @@ class Win32WindowChrome implements WindowChrome {
     }
   }
 
+  /// The window's `GWL_STYLE`. Diagnostics only, like [debugBounds].
+  ///
+  /// `bitsdojo_window` owns the frame too (`BDW_CUSTOM_FRAME`), so leaving
+  /// fullscreen has to hand back exactly the style it found — a restored
+  /// rectangle with a changed style is a native title bar reappearing, which
+  /// [debugBounds] alone cannot see.
+  int? debugStyle() {
+    try {
+      final api = _resolve();
+      return api.getWindowLongPtr(_hwnd!, _gwlStyle);
+    } on Object {
+      return null;
+    }
+  }
+
   _Win32 _resolve() {
     final api = _api ??= _Win32();
     _hwnd ??= _findOwnWindow(api);
