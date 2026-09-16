@@ -2,8 +2,10 @@
  * Logging — stderr only.
  *
  * Hard invariant 3: stdout is protocol. Everything here writes to stderr through
- * `process.stderr.write`, never `console.log`. The eslint config bans the
- * alternatives so this cannot regress quietly.
+ * `process.stderr.write`, never `console.*`. The eslint config's `no-console`
+ * rule has no `allow` list, so every console method — not just `console.log` —
+ * is banned, and a stray call (including one that would bypass `redact.ts` by
+ * going through `console.error`/`console.warn`) cannot regress quietly.
  *
  * Also home to the unknown-renderer registry. When YouTube ships a renderer we
  * do not recognise, the parser skips the node and records the type here — once
