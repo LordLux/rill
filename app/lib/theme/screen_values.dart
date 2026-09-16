@@ -50,4 +50,29 @@ class ScreenValues {
   /// with `canvasAspectRatio` = 720 / 404 and `contentWidthFraction` =
   /// 225 / 720, both the measured values above.
   static const double shortThumbnailZoom = 1.197;
+
+  /// The height of the custom titlebar that replaces the default Windows
+  /// chrome. Kept in [ScreenValues] so the caption-clip in `player_shell.dart`
+  /// and any future overlay can read it without importing `topbar.dart`.
+  static const double titlebarsHeight = 50.0;
+  
+  /// The height of the window buttons in the custom titlebar
+  static const double titlebarWindowButtonsHeight = 38.0;
+  /// The width of the window buttons in the custom titlebar
+  static const double titlebarWindowButtonsWidth = 45.5;
+  
+  /// The width of the left rail when it is closed
+  static const double closedRailWidth = 72.0;
+  /// The width of the left rail when it is open
+  static const double openRailWidth = 240.0;
+  
+  /// The height of a button in the left rail
+  static const double railButtonHeight = 48.0;
+  /// The width of a button in the left rail when the rail is closed
+  static const double railButtonWidth = 64.0;
+  
+  /// The border radius of a button in the left rail when it is selected
+  static const double railItemBorderRadiusSelected = 10.0;
+  /// The border radius of a button in the left rail when it is not selected
+  static const double railItemBorderRadius = 6.0;
 }

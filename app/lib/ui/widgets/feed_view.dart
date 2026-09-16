@@ -148,8 +148,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
 
   Widget _buildBody(BuildContext context, FeedState state, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final filtered =
-        widget.itemFilter == null ? state.items : state.items.where(widget.itemFilter!).toList();
+    final filtered = widget.itemFilter == null ? state.items : state.items.where(widget.itemFilter!).toList();
 
     // **Members-only content: hidden, hoisted, or left alone.**
     //
@@ -163,14 +162,10 @@ class _FeedViewState extends ConsumerState<FeedView> {
     // sidecar lifts the artist panel's shelf out rather than letting the walker
     // descend into it (`protocol.md` §3.3).
     final showMembersOnly = ref.watch(membersOnlyVisibleProvider);
-    final visible =
-        showMembersOnly ? filtered : filtered.where((i) => !isMembersOnlyItem(i)).toList();
+    final visible = showMembersOnly ? filtered : filtered.where((i) => !isMembersOnlyItem(i)).toList();
 
-    final membersOnly =
-        widget.groupMembersOnly ? visible.where(isMembersOnlyItem).toList() : const <FeedItem>[];
-    final items = widget.groupMembersOnly
-        ? visible.where((i) => !isMembersOnlyItem(i)).toList()
-        : visible;
+    final membersOnly = widget.groupMembersOnly ? visible.where(isMembersOnlyItem).toList() : const <FeedItem>[];
+    final items = widget.groupMembersOnly ? visible.where((i) => !isMembersOnlyItem(i)).toList() : visible;
 
     // **The emptiness checks below count the shelf too.**
     //
@@ -295,8 +290,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
           // from this one and make tiles jump when real content lands.
           final double spacing = FeedGridMetrics.verticalSpacing(widget.isWideLayout);
           const double hSpacing = FeedGridMetrics.horizontalSpacing;
-          final int crossAxisCount =
-              FeedGridMetrics.columnCount(constraints.maxWidth, widget.isWideLayout);
+          final int crossAxisCount = FeedGridMetrics.columnCount(constraints.maxWidth, widget.isWideLayout);
 
           final bool hasFooter = items.isNotEmpty && (state.isLoading || state.error != null);
 
@@ -432,9 +426,9 @@ class _FeedViewState extends ConsumerState<FeedView> {
                                   onWatchLater: () => addToWatchLater(context, feedItem),
                                 ))
                         : feedItem.maybeMap(
-                            channel: (c) => widget.isWideLayout
-                                ? ChannelTile(channel: c, assumeSubscribed: widget.assumeChannelsSubscribed)
-                                : ChannelTile.small(channel: c, assumeSubscribed: widget.assumeChannelsSubscribed),
+                            channel: (c) => widget.isWideLayout //
+                            ? ChannelTile(channel: c, assumeSubscribed: widget.assumeChannelsSubscribed)
+                            : ChannelTile.small(channel: c, assumeSubscribed: widget.assumeChannelsSubscribed),
                             orElse: () => const SizedBox.shrink(),
                           );
 
@@ -489,29 +483,38 @@ class _FeedViewState extends ConsumerState<FeedView> {
           }
 
           return Padding(
-            padding: const EdgeInsets.only(right: 13.0),
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(10),
-                topRight: Radius.circular(10),
-              ),
-              child: SilkyListView.builder(
-                controller: _scroll,
-                padding: const EdgeInsets.only(
-                  bottom: 16.0,
-                  top: 10.0,
-                  left: 10.0,
-                  right: 10.0,
+            padding: EdgeInsets.only(right: 2), // just for a more comfortable look
+            child: RawScrollbar(
+              controller: _scroll,
+              thumbVisibility: false,
+              thickness: 7,
+              radius: const Radius.circular(10),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(10),
+                  topRight: Radius.circular(10),
                 ),
-                itemCount: rows.length,
-                itemBuilder: (context, index) {
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      bottom: index < rows.length - 1 ? spacing : 0,
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                  child: SilkyListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.only(
+                      bottom: 16.0,
+                      top: 10.0,
+                      left: 10.0,
+                      right: 10.0,
                     ),
-                    child: rows[index],
-                  );
-                },
+                    itemCount: rows.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index < rows.length - 1 ? spacing : 0,
+                        ),
+                        child: rows[index],
+                      );
+                    },
+                  ),
+                ),
               ),
             ),
           );
@@ -942,9 +945,9 @@ class ChannelTile extends StatelessWidget {
               ),
             ),
           ],
-          
+
           const SizedBox(height: 16.0),
-          
+
           const Spacer(flex: 2),
 
           SizedBox(
