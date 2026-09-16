@@ -16,56 +16,40 @@ is deleted and its number is not reused; gaps are expected.
 
 ## Now
 
-### 3. Re-measure the fullscreen round trip (F19) now that bitsdojo owns the frame
-
-`Win32WindowChrome.setFullscreen` does borderless fullscreen via
-`GetWindowPlacement` / `SetWindowPos` (`app/lib/ui/player/window_chrome.dart`).
-`main.cpp` now also declares `BDW_CUSTOM_FRAME`, so `bitsdojo_window` owns the
-window frame too. **Two things own the frame.**
-
-F19's measurement — a fullscreen round trip restoring `rcNormalPosition`
-`[10, 10, 1290, 730]` → whole monitor → `[10, 10, 1290, 730]` — predates
-bitsdojo entirely, so it no longer describes the shipping configuration.
-
-**How:** `RILL_CONTROLS_PROBE=1` against a release build. Sequence this *after*
-the window-controls seam landed (it has), or you measure a build whose tests do
-not run.
-
-**Done when:** F19 carries a dated amendment saying whether the round trip still
-restores exactly, under the custom frame.
-
-### 4. Decide what `AUTH_DEGRADED` and `RATE_LIMITED` are
-
-`protocol.md` §4 assigns both a `retry` value and a UI contract. Neither is ever
-constructed: across all of `sidecar/src`, `new RpcError(...)` is only ever called
-with `UPSTREAM_ERROR` (12), `BAD_REQUEST` (12), `STREAM_UNAVAILABLE` (4),
-`VIDEO_UPCOMING` (1), `VIDEO_MEMBERS_ONLY` (1), `AUTH_REQUIRED` (1).
-
-Two live consequences:
-
-- `app/lib/ui/feed_controller.dart:529`'s `if (e.code == 'AUTH_DEGRADED')` branch
-  is unreachable. Degraded state only ever arrives as a *successful*
-  `auth.verify` / `auth.status` result.
-- YouTube's throttle — `LOGIN_REQUIRED — Sign in to confirm you're not a bot`,
-  which `architecture.md` F20 documents as real and observed — surfaces as
-  `STREAM_UNAVAILABLE` / `UPSTREAM_ERROR`, never `RATE_LIMITED`. The documented
-  `auto` backoff path is reached only by way of `UPSTREAM_ERROR`.
-
-**Decide, per code:** emit it (and make the app's branch live), or delete it from
-the table and remove the dead branch. `RATE_LIMITED` is the more interesting of
-the two — F20 already knows how to recognise a throttle, so emitting it is
-cheap and would give the app a correct backoff path instead of an accidental
-one.
-
-**Done when:** every code in §4's envelope table is either emitted somewhere in
-`sidecar/src` or gone from the table, and no client branch tests for a code that
-cannot arrive.
+Nothing here right now.
 
 ---
 
 ## Soon
 
-Nothing here right now.
+### 30. The release app sometimes dies with `0xC0000602` in `coremessaging.dll`
+
+`0xC0000602` is a fail-fast — Windows ending the process deliberately, not an
+access violation. The Application event log holds four for the release build,
+all with faulting module `coremessaging.dll`: 2026-09-09 at 04:01, 04:17 and
+17:41, and 2026-09-10 at 18:40. All four predate `bitsdojo_window`. On
+2026-09-17 the controls probe's own `exit(0)` ended with the same code, after
+every measurement had finished — but that was a profile build and it left no
+event, so it is not confirmed to be the same crash.
+
+`coremessaging.dll` is Windows' CoreMessaging infrastructure, the message
+dispatch that modern input and composition components run on. The likely story
+is teardown order: something native — WebView2 through `flutter_inappwebview`,
+mpv, or the libass render isolate — still dispatching while the process exits.
+That is a hypothesis, nothing more.
+
+Find out, in this order:
+
+1. Whether an ordinary window close triggers it, or only an abrupt `exit()`.
+   The four logged crashes were ordinary use, not necessarily ordinary closes.
+2. Take a dump. `HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\rill.exe`
+   with `DumpType = 2` writes full dumps to `%LOCALAPPDATA%\CrashDumps`. **A dump
+   holds the session cookie** (`architecture.md` §2.5): read it, then delete it,
+   and never attach it anywhere.
+3. Read the faulting stack for the last module to call into CoreMessaging.
+
+**Done when:** the cause is known, and it is either fixed or recorded in
+`architecture.md` as a known limit.
 
 ---
 
