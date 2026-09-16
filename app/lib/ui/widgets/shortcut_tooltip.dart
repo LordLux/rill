@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart'
+    show tooltipBubbleDecoration, tooltipBubbleForeground, tooltipBubbleShade, tooltipBubbleTextStyle;
 import '../player/shortcuts.dart' show PlayerAction, playerActionKeyLabel;
 
 /// A tooltip reading [label], with the current keybinding for [action]
@@ -26,8 +28,8 @@ class ShortcutTooltip extends StatelessWidget {
       return Tooltip(
         message: label,
         preferBelow: false,
-        decoration: _bubbleDecoration,
-        textStyle: _textStyle,
+        decoration: tooltipBubbleDecoration,
+        textStyle: tooltipBubbleTextStyle,
         child: child,
       );
     }
@@ -36,10 +38,10 @@ class ShortcutTooltip extends StatelessWidget {
     if (keys.length < 2) {
       return Tooltip(
         preferBelow: false,
-        decoration: _bubbleDecoration,
+        decoration: tooltipBubbleDecoration,
         waitDuration: const Duration(milliseconds: 300),
         richMessage: TextSpan(
-          style: _textStyle,
+          style: tooltipBubbleTextStyle,
           children: [
             TextSpan(text: '$label  '),
             WidgetSpan(alignment: PlaceholderAlignment.middle, child: _KeyBadge(keys.first)),
@@ -57,7 +59,7 @@ class ShortcutTooltip extends StatelessWidget {
             const SizedBox(width: 2),
             Transform.translate(
               offset: const Offset(0, -2),
-              child: Text('+', style: _textStyle),
+              child: Text('+', style: tooltipBubbleTextStyle),
             ),
             const SizedBox(width: 2),
           ],
@@ -68,10 +70,10 @@ class ShortcutTooltip extends StatelessWidget {
 
     return Tooltip(
       preferBelow: false,
-      decoration: _bubbleDecoration,
+      decoration: tooltipBubbleDecoration,
       waitDuration: const Duration(milliseconds: 300),
       richMessage: TextSpan(
-        style: _textStyle,
+        style: tooltipBubbleTextStyle,
         children: [
           TextSpan(text: '$label  '),
           WidgetSpan(alignment: PlaceholderAlignment.middle, child: shortcut),
@@ -82,29 +84,16 @@ class ShortcutTooltip extends StatelessWidget {
   }
 }
 
-/// Fixed dark-on-light-text rather than left to `TooltipThemeData` — this
-/// app's Material 3 theme resolves the *default* tooltip to a pale bubble
-/// with dark text (the platform default follows `colorScheme.onSurface` at
-/// low opacity in M3, not the flat dark-grey Material 2 always used), which
-/// looked like a bug in two different ways: the plain-text tooltips read as
-/// black-on-white where a dark bubble was expected, and the badge — built
-/// assuming a dark bubble, white text on a white-ish translucent box — was
-/// white-on-white and unreadable. Setting both explicitly makes the tooltip
-/// look the same regardless of which theme or brightness the app is in,
-/// which is the property an instruction badge actually needs.
-const BoxDecoration _bubbleDecoration = BoxDecoration(
-  color: Color(0xE6212121),
-  borderRadius: BorderRadius.all(Radius.circular(6)),
-);
-const TextStyle _textStyle = TextStyle(color: Colors.white, fontSize: 12, height: 1.3);
-
 /// The small rounded-corner box a keybinding sits in.
 ///
-/// Fixed white-on-translucent rather than a `ColorScheme` role: the tooltip
-/// bubble it lives inside is Flutter's stock `TooltipThemeData`, which is
-/// always a dark bubble regardless of the app's own light/dark theme — a
-/// role-driven colour here would risk going invisible against a bubble that
-/// never follows it.
+/// Painted from [tooltipBubbleForeground] / [tooltipBubbleShade] rather than a
+/// `ColorScheme` role: the bubble it lives inside is fixed dark whatever the
+/// app theme (`app_theme.dart` has why), and a role-driven colour here would
+/// risk going invisible against a bubble that never follows it.
+///
+/// The bubble and text style are passed explicitly above even though the app
+/// theme installs the same ones, so this widget looks right under any theme —
+/// including a bare `MaterialApp` in a test.
 class _KeyBadge extends StatelessWidget {
   const _KeyBadge(this.label);
 
@@ -114,9 +103,9 @@ class _KeyBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.2),
+        color: tooltipBubbleShade.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.5),
+        border: Border.all(color: tooltipBubbleForeground.withValues(alpha: 0.35), width: 0.5),
       ),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 3.5),
@@ -124,9 +113,9 @@ class _KeyBadge extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 14),
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.2),
+            color: tooltipBubbleForeground.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.5),
+            border: Border.all(color: tooltipBubbleForeground.withValues(alpha: 0.35), width: 0.5),
           ),
           // Removed the Center widget and added textAlign here:
           child: Text(
@@ -135,7 +124,7 @@ class _KeyBadge extends StatelessWidget {
             style: const TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w600,
-              color: Colors.white,
+              color: tooltipBubbleForeground,
               height: 1.2,
             ),
           ),

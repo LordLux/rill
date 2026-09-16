@@ -412,8 +412,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         decoration: BoxDecoration(
                           color: tokens.scrim.withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(52),
-                          // ignore: rill_lints/no_color_literals
-                          border: Border.all(color: const Color(0x1FFFFFFF)),
+                          border: Border.all(color: tokens.onScrim.withValues(alpha: 0x1F / 0xFF)),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
@@ -1253,7 +1252,7 @@ class _Clock extends StatelessWidget {
             children: [
               timeWidget,
               const SizedBox(width: 6),
-              const Icon(Icons.circle, size: 6, color: Colors.red),
+              Icon(Icons.circle, size: 6, color: Theme.of(context).tokens.liveBadge),
               const SizedBox(width: 4),
               const Text(
                 'LIVE',
