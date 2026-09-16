@@ -1,5 +1,7 @@
 /**
- * Renderer vocabulary, as of the 2026-08-01 capture.
+ * Renderer vocabulary — first captured 2026-08-01, extended since (the newer
+ * entries carry their own dates). CLAUDE.md's "Renderer vocabulary" table
+ * summarises which of these carries what; this file is the authority.
  *
  * Both generations ship simultaneously, so every entry is stored in a normalised
  * form that collapses the two spellings of the same node:
@@ -60,8 +62,9 @@ const ITEMS = [
 /**
  * Recognised, deliberately dropped.
  *
- * Shorts are stripped, never rendered. Ads are stripped for the same reason the
- * app exists at all — and an in-feed ad nests a real `lockupViewModel` inside
+ * Shorts *shelves* are stripped. A Short that arrives as an ordinary video
+ * tile is not — it is classified instead (`VideoItem.isShort`, Task 21). Ads
+ * are stripped for the same reason the app exists at all — and an in-feed ad nests a real `lockupViewModel` inside
  * `adSlotRenderer`, so the whole subtree has to go, not just the wrapper.
  */
 const STRIPPED = [

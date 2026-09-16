@@ -183,15 +183,16 @@ The parser walks the raw tree, recognises known renderers, and **silently skips
 unknown ones**. It never throws on an unrecognised type. This is not defensive
 polish — F2 shows strict parsing loses real content on the live feed today.
 
-Known-good vocabulary as of 2026-08-01, both generations present simultaneously:
-
-| Concern | Classic | View-based |
-| --- | --- | --- |
-| Video tile | `videoRenderer`, `richItemRenderer` | `lockupViewModel` (id on `content_id`) |
-| Filter bar | `chipCloudChipRenderer` (top level) | `ChipsShelfView` → `ChipView` (shelf-scoped) |
-| Mix tile | — | `CollectionThumbnailView` + `"Mix"` badge |
-| Hover actions | — | `ThumbnailHoverOverlayToggleActionsView` |
-| Continuation | `continuationItemRenderer` | `ContinuationItem` |
+Both generations are present simultaneously — measured 2026-08-01, and still
+true: they interleave within a single response, split by item type. The
+vocabulary itself lives in one place, `sidecar/src/parser/vocabulary.ts`, and
+the table of which renderer carries what is in CLAUDE.md's "Renderer
+vocabulary" section rather than repeated here, where a second copy drifted: the
+2026-08-01 version of this table printed youtubei.js's typed spellings
+(`ChipView`, `ContinuationItem`) where a `parse: false` response carries the raw
+keys, listed `richItemRenderer` — a wrapper — as a tile, and keyed mixes on
+their thumbnail view model, which every playlist tile shares. A view-based tile
+carries its id on `content_id`.
 
 Extract IDs by trying `content_id`, `video_id`, `videoId` in order. Never key
 on a single field name.
