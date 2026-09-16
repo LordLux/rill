@@ -146,52 +146,6 @@ cannot arrive.
 
 ## Soon
 
-### 6. Bind the `/player` response cache to the player revision (Task 04 §1)
-
-`docs/tasks/04-player-revision-safety.md` §1 — never implemented, never recorded
-as deferred. Task 06 said it would be "scoped separately after this lands"; no
-later task took it up.
-
-The defect: `openPlayback` fetches a `/player` response whose
-`signatureTimestamp` was built against player revision **P_old**, then each tier
-independently calls `getPlayer()` (`resolve.ts:337`, `:757`), which past
-`PLAYER_TTL_MS` may install **P_new**. P_old's `n` then gets deciphered with
-P_new's script. The task is explicit about the cost: *"a wrong `n` produces a
-plausible-looking string that throttles to ~50 KB/s, which reaches the user as
-buffering and reaches us as a bug report about their internet."*
-
-**The fix is one line of intent:** include `playerId` in `keyFor`
-(`sidecar/src/innertube/player-response.ts:57`), which is currently
-`` `${client}:${videoId}` `` plus the playlist id.
-
-**Record this when you write it up, or the next person closes it as
-unreproducible:** live exposure today is **zero**, because nothing in the
-production ladder deciphers (`architecture.md` §2.4, "`MWEB` left the ladder").
-That is one decision hiding a defect, not a fixed bug.
-
-### 8. Widen `contract-docs.test.ts`
-
-It is doing its job on what it checks, but its reach is narrower than CLAUDE.md's
-"one test checks they agree" implies:
-
-- It compares **field names only** — not types, not nullability. `channelId:
-  string` versus `string | null` passes, which is the distinction the DTO rule
-  cares about most.
-- It parses shapes out of **CLAUDE.md only**. `protocol.md`'s own
-  `interface SearchFilters` and `interface PlaylistMembership` are never
-  compared against code.
-- It covers the **five interfaces in CLAUDE.md's block**. `VideoDetail` — 22
-  fields, the entire `video.info` result — has **no full shape written down
-  anywhere** and is checked by neither the TS nor the Dart auditor. That is
-  exactly where the live drift landed that item 0b just fixed.
-- `type FeedItem = …` is a type alias, so the regex never matches it and the
-  union's membership is never verified.
-
-**Done when:** nullability is compared, `VideoDetail` has a written shape that is
-checked, and the union's members are verified. Keep the existing "the check can
-actually fail" control and add one per new assertion — an auditor that cannot
-fail is worse than no auditor.
-
 ### 10. Reconcile `architecture.md` §2.2's renderer vocabulary table
 
 §2.2's table is the 2026-08-01 version. CLAUDE.md's is materially wider —
