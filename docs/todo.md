@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 31.** A new item takes it, and the same edit bumps this line.
+**Next number: 34.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -26,7 +26,61 @@ Nothing here right now.
 
 ## Soon
 
-Nothing here right now.
+### 31. A persistent log file for release builds
+
+A release app keeps no log. Everything it says goes to stderr, and launched
+from Explorer that is nowhere. On 2026-09-17 the release build died with
+`0xC0000409` in `flutter_windows.dll` — the engine's own `abort()` (resolved
+against `flutter_windows.dll.pdb`; `P9 = 7`, `FAST_FAIL_FATAL_APP_EXIT`) —
+while the user hovered live tiles on the home page. WER deleted its dump once
+the report was filed, and there was no other record. The engine normally
+prints the failed check's message to stderr just before aborting, so a file
+would most likely have held the cause.
+
+What to build:
+
+- Redirect the process's stderr to a rotating file under the app's data
+  directory, early in `app/windows/runner/main.cpp` or at the top of `main()`
+  — early enough to catch the engine's own output, not only Dart's.
+- Route `FlutterError.onError` and `PlatformDispatcher.instance.onError` there.
+- **Redact.** The sidecar's stderr is already redacted (`redact.ts`); anything
+  the app itself writes is not, and a cookie must never reach the file.
+- Keep a few runs, so the run that crashed survives the relaunch after it.
+
+`RILL_MPV_LOG` (`app/lib/data/playback/mpv_log.dart`) is a diagnostic switch,
+not this: it is off by default and writes mpv's verbose log.
+
+**Done when:** a release build launched from Explorer leaves a file with its
+startup lines, and a forced `abort()` leaves its message in it.
+
+### 33. Playback opens paused while media_kit says it is playing
+
+Seen 2026-09-17 in a release build that had been running for a while, and
+once under a debugger; not reproduced in a fresh launch. A video opened from a
+tile shows its first frame with the clock at 0:00 while the controls show
+*pause* — media_kit's `playing` is `true` — and hover previews do not start
+(they are suppressed while the shell reports playing). One play/pause press
+starts the video and flips the button to *play*; a second pair resyncs them,
+until the next video. Previews that do start show one frame and stop.
+
+The inversion is mechanical once mpv is really paused: `Player.playOrPause()`
+flips media_kit's own `state.playing` and sends `cycle pause` to mpv, so if
+the two already disagree, each press keeps them disagreeing. So the question is
+what leaves mpv paused (or stalled) after `open()` set `pause=no` — media_kit
+ignores mpv's `pause` events while `isPlayingStateChangeAllowed` is false,
+which is one way a change can go unseen.
+
+A lead, not a cause: this machine's audio devices hotplug every ~15 minutes
+(WASAPI `OnDeviceStateChanged`, seen in both engines' logs), and a freshly
+launched app, which has not been through any, behaved. A stalled audio output
+would hold an external-audio stream at 0:00, but would not by itself explain
+the inverted button.
+
+Next time: run with `RILL_MPV_LOG=<path>` and note the time it happens. The log
+has the app's calls, media_kit's belief and mpv's real `pause` side by side.
+
+**Done when:** the cause is known and fixed, or recorded if it is outside the
+app.
 
 ---
 
@@ -148,6 +202,33 @@ attach it.
 
 **Done when:** one of the two is done and a stretch of closes leaves no
 `0xC0000602` event, or the crash is accepted and F27 says so.
+
+### 32. Local crash capture with Crashpad
+
+Nothing inside the process can catch the crashes seen so far. A fast fail
+(`0xC0000409`, `0xC0000602`) skips every in-process handler, and the engine's
+`abort()` is its own statically linked copy, so neither
+`SetUnhandledExceptionFilter` nor a `SIGABRT` handler in the runner sees it.
+And WER keeps a dump only until its report is filed (item 31).
+
+Crashpad — directly, or through `sentry-native` with uploading disabled — runs
+an out-of-process handler and registers a WER runtime exception module
+(`WerRegisterRuntimeExceptionModule`), which *is* called for fast fails. It
+writes a minidump to a folder the app chooses.
+
+**The dump is the problem to design around.** A minidump can carry the session
+cookie (see item 30). So: symbolise it into a text stack as soon as it exists —
+`flutter_windows.dll.pdb` ships in the FVM engine artefacts, and the runner's
+PDB comes from the build — then delete the dump, and keep only the text. The
+symbolising step needs those PDBs at hand, which a user's machine does not
+have; decide whether that happens on the next launch against bundled PDBs, or
+the dump is kept briefly and handed over deliberately.
+
+Also decide the native build: Crashpad's handler is a separate executable that
+ships beside `rill.exe`.
+
+**Done when:** a forced fast fail in a release build leaves a symbolised stack
+in the app's data directory and no dump on disk.
 
 ---
 
@@ -273,7 +354,7 @@ recipe — the compliance work was done properly and is referenced from nowhere)
 
 ### 24. Document the configuration surface
 
-26 environment variables are read across the two processes; CLAUDE.md documents
+27 environment variables are read across the two processes; CLAUDE.md documents
 one (`YT_COOKIE`).
 
 Sidecar: `SIDECAR_PLAYER_RESPONSE_TTL_MS`, `SIDECAR_PLAYER_TTL_MS`,
@@ -281,8 +362,10 @@ Sidecar: `SIDECAR_PLAYER_RESPONSE_TTL_MS`, `SIDECAR_PLAYER_TTL_MS`,
 `SIDECAR_LOG_LEVEL`, `YT_DLP_PATH`, `YT_DUMP_ASS`, `YT_VIDEO_STANDARD`, plus
 `YT_SEARCH_QUERY` / `YT_ARTIST_QUERY` in `capture.ts`.
 
-App: 19 `RILL_*` probe and override variables, including `RILL_STREAM_LAVF_O`,
-which replaces the mpv option string for a run.
+App: 20 `RILL_*` probe and override variables, including `RILL_STREAM_LAVF_O`,
+which replaces the mpv option string for a run, and `RILL_MPV_LOG=<path>`
+(added 2026-09-17, `data/playback/mpv_log.dart`), which writes both players'
+calls, media_kit's state, mpv's real state and mpv's `v` log to one file.
 
 Four are cache TTL overrides whose caches are themselves partly undocumented —
 the `/player` response cache (5 min, 64 entries,
