@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 36.** A new item takes it, and the same edit bumps this line.
+**Next number: 37.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -58,6 +58,24 @@ app.
 ---
 
 ## Low priority
+
+### 36. Report the F28 race to media-kit, and drop the vendored copy when fixed
+
+`third_party/media_kit_video` exists only because upstream has the race
+(`architecture.md` F28), and nobody upstream knows. The issue is written:
+`third_party/media_kit_video.upstream-issue.md` holds the title and body —
+summary, stack, root cause, the sleep-based reproduction and a clean diff
+without this repo's comments. Before posting, re-check that `main`'s
+`windows/video_output.cc` still has the race and that the diff still applies
+(`git apply --check`). A PR with the same diff is offered in the text.
+
+Once posted, put the issue URL in F28 and in `app/pubspec.yaml`'s override
+comment. When a release fixes it, remove the `dependency_overrides` entry and
+`third_party/media_kit_video`, keeping `media_kit_libs_windows_video` pinned
+at 1.0.11.
+
+**Done when:** the issue is filed; the vendored copy is gone once a fixed
+release is out.
 
 ### 35. Check the other `media_kit_video` bugs a blind review reported
 
