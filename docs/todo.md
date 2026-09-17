@@ -12,6 +12,10 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
+**Next number: 31.** A new item takes it, and the same edit bumps this line.
+The highest number still in the file is not a substitute — once that item is
+finished and deleted, it would hand the same number out twice.
+
 ---
 
 ## Now
