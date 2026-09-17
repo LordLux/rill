@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'data/playback/engine.dart';
+import 'data/playback/mpv_log.dart';
 import 'domain/feed_item.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
@@ -65,7 +66,9 @@ Future<void> main() async {
   // surviving a route change is not a feature, it is the absence of a bug.
   // `RILL_LAUNCH_PROBE` needs mpv's own log to tell a dead URL from one mpv
   // never opened. Off otherwise: `v` is thousands of lines a run.
-  final engine = MediaKitEngine(
+  // `RILL_MPV_LOG=<path>` writes both players' log to a file (`mpv_log.dart`).
+  final engine = createEngine(
+    'shell',
     logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
   );
 
@@ -235,7 +238,7 @@ class RillApp extends ConsumerWidget {
         // Lazy and called at most once, so a user who never hovers pays for no second mpv. A
         // *second* engine rather than the shell's: previewing on that one would open media over
         // whatever is paused there and take its position with it.
-        engineFactory: MediaKitEngine.new,
+        engineFactory: () => createEngine('preview'),
         child: PlayerShell(child: child ?? const SizedBox.shrink()),
       ),
       home: const FeedPage(),
