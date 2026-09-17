@@ -242,6 +242,7 @@ that do not exist yet.
   /lib/ui         screens, tiles, player
   /test/README.md the Task 19 measurement probes, and why they are not tests
 /docs             architecture.md, protocol.md, todo.md, tasks/
+/third_party      vendored packages carrying a local fix — media_kit_video (F28)
 ```
 
 **`docs/todo.md` is the live backlog** — work that is agreed but not done, each

@@ -66,7 +66,19 @@ dev_dependencies:
   # `@ShapeshifterAsset` exists in the tree. Re-adding it disables ALL codegen.
 
 dependency_overrides:
-  # **Empty on purpose. Do not add an override to make the tree resolve.**
+  # **One entry, and it is a patched copy, not a way to make the tree resolve.**
+  # `media_kit_video` is vendored at 1.3.1 — the version `^1.3.0` resolved to —
+  # with one fix: its Windows texture resize published a texture id before the
+  # texture existed, and a paint in that window threw through the engine and
+  # aborted the app (architecture.md F28). 2.0.1 still has the race. The patch
+  # is marked `rill patch (F28)` in `windows/video_output.cc`; drop this entry
+  # once upstream fixes it. `media_kit_libs_windows_video` stays pinned at
+  # 1.0.11 above and is not touched by this (F13).
+  media_kit_video:
+    path: ../third_party/media_kit_video
+
+  # **Otherwise empty on purpose. Do not add an override to make the tree
+  # resolve.**
   #
   # `source_gen: ^4.1.2` and `build: ^4.0.4` sat here from `16b70c7` — the same
   # commit that added `animated_vector_gen` and the analyzer/dart_style pair
