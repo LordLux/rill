@@ -5,6 +5,7 @@ import 'package:meta/meta.dart';
 
 import '../data/auth/credential_store.dart';
 import '../data/auth/web_session_cookies.dart';
+import '../data/log_capture.dart';
 import '../data/rpc/client.dart';
 
 /// The app's idea of who is signed in.
@@ -120,6 +121,7 @@ class AuthController extends Notifier<AuthState> {
   /// cookie at all.
   Future<void> restore() async {
     final cookie = await _store.read();
+    if (cookie != null) registerLogSecret(cookie);
     if (cookie == null) {
       // No stored cookie is not automatically anonymous: `YT_COOKIE` may have
       // seeded the sidecar (the development path, which Task 22 §8 keeps
@@ -174,6 +176,7 @@ class AuthController extends Notifier<AuthState> {
   /// answer and the UI shows it, but a cookie the server has already refused is
   /// not worth keeping.
   Future<AuthStatus> signIn(String cookie) async {
+    registerLogSecret(cookie);
     state = state.copyWith(isBusy: true);
     try {
       final response = await RpcClient.instance.call('auth.setCookie', {'cookie': cookie});

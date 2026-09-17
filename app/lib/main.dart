@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'data/log_capture.dart';
 import 'data/playback/engine.dart';
 import 'data/playback/mpv_log.dart';
 import 'domain/feed_item.dart';
@@ -27,6 +28,11 @@ import 'ui/queue_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // First, so nothing below can print a cookie or an error the log misses.
+  // `YT_COOKIE` is the development path's cookie (the sidecar reads it too).
+  installErrorLogging();
+  registerLogSecret(Platform.environment['YT_COOKIE'] ?? '');
+  await runLogTest(Platform.environment['RILL_LOG_TEST']);
   MediaKit.ensureInitialized();
 
   // If the harness environment variables are set, boot directly into the debug player harness

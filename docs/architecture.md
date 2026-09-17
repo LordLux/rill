@@ -1288,6 +1288,65 @@ thread:**
   use, run it through `probe-task19.ts` (add its video id alongside `PLAIN`/
   `STYLED`) and confirm.
 
+### 2.11 The release log: a launcher process, because the engine's stdio is its own (decided 2026-09-17)
+
+A release build launched from Explorer had nowhere to write: stdout and stderr
+were not connected to anything, and when the engine aborted (F28) Windows kept
+the only record — a dump — until its report was filed. `rill.exe` in a
+**Release** build therefore starts as a launcher (`windows/runner/log_capture.cpp`):
+it opens `%LOCALAPPDATA%\rill\logs\rill-<local time>-<launcher pid>.log`,
+starts a second `rill.exe` with stdout and stderr on a pipe, and writes every
+line it reads, timestamped. When the app exits it writes the exit code, and an
+NTSTATUS error code as `CRASHED` — so a crash leaves `0xC0000409` or
+`0xC0000602` in the log with no dump at all.
+
+**Why a second process, and not a redirect inside the first.**
+`flutter_windows.dll` links its own C runtime (the abort in F28 is
+`flutter_windows!abort`), and a CRT binds file descriptors 1 and 2 to the
+process's standard handles when its DLL loads — before `wWinMain` runs. A
+`SetStdHandle` or `freopen` in the runner changes the runner's CRT and not the
+engine's, so the engine's own messages — the ones that matter before an abort
+— would never arrive. `FlutterDesktopResyncOutputStreams` does not help: it
+reopens `CONOUT$`, a console, not an arbitrary handle. Only handles set at
+process creation reach every CRT in the process: the runner's, the engine's,
+libmpv's and the Dart VM's. The second process also fixes crash timing for
+free: bytes already written to a pipe survive the writer's death, so the last
+line before a fast fail is read after it.
+
+**Redaction** is the sidecar's two rules (`redact.ts`), applied by the
+launcher to every line whatever wrote it: registered exact values, and
+auth-cookie-shaped `NAME=VALUE` pairs. The app registers values over the same
+pipe — `\x01rill-secret <value>` lines, consumed by the launcher and written
+nowhere — from `log_capture.dart`'s `registerLogSecret`, which does nothing
+unless `RILL_LOG_FILE` says the process is the launcher's child (anywhere else
+that line would print a cookie to a terminal). The app calls it for the stored
+cookie, a newly signed-in one and `YT_COOKIE`. The name list is duplicated in
+C++ and must be kept in step with `COOKIE_NAME`.
+
+**Retention:** one file per launch, the newest 10 kept; a file past 10 MB is
+renamed to `<name>.old` and a new one started, so the tail — where a crash's
+last lines are — is always in the current file.
+
+**What else changes, and why each is acceptable.**
+
+- Two `rill.exe` processes. The launcher does no Flutter work and holds a job
+  object with `KILL_ON_JOB_CLOSE`, so ending it ends the app (and whatever the
+  app started).
+- A debugger started on `rill.exe` attaches to the launcher. `RILL_LOG_CAPTURE=0`
+  runs the app in one process, with no log, as before.
+- The launcher copies each line to its own stderr or its parent's console, so
+  `rill run` / `rill open` still show the output live.
+- Not in Debug or Profile (`RILL_LOG_CAPTURE` is defined for the Release
+  configuration only): `flutter run` finds the Dart VM service by reading the
+  app's stdout, which a launcher would own.
+- The launcher waits 3 s for the pipe after the app exits, then cancels the
+  read: a grandchild that inherited the pipe must not hold it open.
+
+`RILL_LOG_TEST=lines|flood|abort` checks all of this end to end (redaction,
+rotation, a crash's last line); measured 2026-09-17 on a scratch Release build,
+with pruning checked against seeded old files. `installErrorLogging` adds
+Flutter's and the zone's uncaught errors, with stacks, when there is a log.
+
 ---
 
 ## 3. Phasing

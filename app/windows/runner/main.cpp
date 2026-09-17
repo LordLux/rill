@@ -5,13 +5,22 @@ auto bdw = bitsdojo_window_configure(BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP);
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "log_capture.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // A release build's first process only launches the app and keeps its log.
+  int launcher_exit_code = 0;
+  if (RunAsLogLauncher(&launcher_exit_code)) {
+    return launcher_exit_code;
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
-  // new console when running with a debugger.
-  if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
+  // new console when running with a debugger. Not in the launcher's child:
+  // its output already goes to the launcher, which copies it to the console.
+  if (::GetEnvironmentVariableW(L"RILL_LOG_FILE", nullptr, 0) == 0 &&
+      !::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
   }
 
