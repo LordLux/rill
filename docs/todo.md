@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 35.** A new item takes it, and the same edit bumps this line.
+**Next number: 36.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -25,34 +25,6 @@ Nothing here right now.
 ---
 
 ## Soon
-
-### 34. Fix the texture race in `media_kit_video`'s resize
-
-`architecture.md` F28: the 2026-09-17 engine abort was `media_kit_video` 1.3.1
-(`windows/video_output.cc`, `VideoOutput::Resize`) assigning the new texture's
-id to `texture_id_` before inserting it into `textures_`, both outside
-`textures_mutex_`, while the raster thread's populate callback for the *old*
-texture looks up `textures_.at(texture_id_)` — the member, not its own id. A
-paint between the two steps throws `out_of_range` through a `noexcept`
-boundary, and the process aborts. It needs a resize, which a live stream's
-adaptive switch provides without anyone touching anything.
-
-The fix is small and local — capture the id in the callback, look it up with
-`find` and return `nullptr` when absent, and publish `texture_id_` only after
-the insert, under the lock — but it is in a dependency. In order:
-
-1. Check media_kit's repository for a newer `media_kit_video` with this fixed,
-   and for an existing issue. A version bump is the cheapest fix, **but read
-   `architecture.md` §2.4 first**: `media_kit_libs_windows_video` is pinned at
-   exactly 1.0.11 for F13, and whatever moves must not move that.
-2. Otherwise vendor the plugin (a path `dependency_overrides` entry, which
-   `app/pubspec.yaml` keeps empty on purpose today — say why in the comment
-   there), patch `Resize`, and report the race upstream.
-3. Until then, hover previews on live tiles are the likeliest trigger; not
-   previewing them is a mitigation, not a fix — the shell resizes too.
-
-**Done when:** the populate callback cannot throw, and a stretch of hovering
-live tiles leaves no `CRASHED with code 0xC0000409` in the release log.
 
 ### 33. Playback opens paused while media_kit says it is playing
 
@@ -86,6 +58,34 @@ app.
 ---
 
 ## Low priority
+
+### 35. Check the other `media_kit_video` bugs a blind review reported
+
+While confirming F28, a Gemini 3.1 Pro agent reviewed the unmodified 1.3.1
+Windows code with no context and did not find F28 — it reported these four
+instead. None is verified; the plugin is vendored now
+(`third_party/media_kit_video`), so any that hold can be fixed in place.
+
+1. `video_output_manager.cc` — `Create`/`SetSize`/`Dispose` run on detached
+   threads capturing `this`; a plugin destroyed first (hot restart, shutdown)
+   is used after free.
+2. `video_output.cc`, `~VideoOutput` — the promise it waits on is only
+   fulfilled inside `if (texture_id_)`, so a `VideoOutput` disposed while
+   `texture_id_` is 0 waits forever. **Read and looks real.** `Resize` leaves
+   `texture_id_` at 0 from the unregister until the new texture is published —
+   upstream's window, which the F28 patch extends only by the insert.
+3. `~VideoOutput` posts `mpv_render_context_free` and returns; an update
+   callback firing in between calls `NotifyRender` on a freed object.
+4. `Resize`'s unregister callback captures `this` by reference and may run
+   after the object is gone (it checks `destroyed_` only after locking a member
+   mutex).
+
+Each touches disposal, which the app does on every preview hover-out, so the
+cheap test is the same one F28 used: a delay that widens the window, and a
+probe that exercises it.
+
+**Done when:** each is confirmed and fixed in the vendored copy, or ruled out
+with the reason written here.
 
 ### 12. Caption legibility at small render surfaces
 
@@ -203,8 +203,10 @@ attach it.
 
 The release log now records it: the launcher's last line reads
 `CRASHED with code 0xC0000602`. On 2026-09-17 two of two ordinary window
-closes of a scratch release build ended that way — more often than the
-Application log's four events suggested, so "some exits" may be most.
+closes of a scratch release build ended that way, as did the user's own close
+of a long-running release app and 5 of 5 `RILL_CONTROLS_PROBE` exits
+(`exit(0)`) — more often than the Application log's four events suggested,
+so "some exits" is closer to "most".
 
 **Done when:** one of the two is done and a stretch of closes leaves no
 `0xC0000602` event, or the crash is accepted and F27 says so.

@@ -292,6 +292,9 @@ void VideoOutput::Resize(int64_t required_width, int64_t required_height) {
             }
           }
         });
+    // rill patch (F28): written under the lock the raster-thread callbacks
+    // read it under.
+    std::lock_guard<std::mutex> lock(textures_mutex_);
     texture_id_ = 0;
   }
   // H/W
@@ -308,26 +311,34 @@ void VideoOutput::Resize(int64_t required_width, int64_t required_height) {
     texture->release_context = nullptr;
     texture->release_callback = [](void*) {};
     texture->format = kFlutterDesktopPixelFormatBGRA8888;
+    // rill patch (F28): `find`, not `at`. This runs on Flutter's raster thread
+    // inside a noexcept frame, so a throw here aborts the process.
     auto texture_variant =
         std::make_unique<flutter::TextureVariant>(flutter::GpuSurfaceTexture(
             kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle, [&](auto, auto) {
               std::lock_guard<std::mutex> lock(textures_mutex_);
               if (texture_id_) {
+                auto it = textures_.find(texture_id_);
+                if (it == textures_.end()) {
+                  return (FlutterDesktopGpuSurfaceDescriptor*)nullptr;
+                }
                 surface_manager_->Read();
-                return textures_.at(texture_id_).get();
+                return it->second.get();
               } else {
                 return (FlutterDesktopGpuSurfaceDescriptor*)nullptr;
               }
             }));
     // Register new texture.
-    texture_id_ =
+    // rill patch (F28): publish `texture_id_` only once its descriptor is in
+    // `textures_`, under the lock the callback above takes. Upstream assigned
+    // it first, so a paint in between looked up an id that was not there yet.
+    const int64_t id =
         registrar_->texture_registrar()->RegisterTexture(texture_variant.get());
-    std::cout << "media_kit: VideoOutput: Create Texture: " << texture_id_
-              << std::endl;
+    std::cout << "media_kit: VideoOutput: Create Texture: " << id << std::endl;
     std::lock_guard<std::mutex> lock(textures_mutex_);
-    textures_.emplace(std::make_pair(texture_id_, std::move(texture)));
-    texture_variants_.emplace(
-        std::make_pair(texture_id_, std::move(texture_variant)));
+    textures_.emplace(std::make_pair(id, std::move(texture)));
+    texture_variants_.emplace(std::make_pair(id, std::move(texture_variant)));
+    texture_id_ = id;
     // Notify public texture update callback.
     texture_update_callback_(texture_id_, required_width, required_height);
   }
@@ -341,23 +352,26 @@ void VideoOutput::Resize(int64_t required_width, int64_t required_height) {
     pixel_buffer_texture->release_callback = [](void*) {};
     auto texture_variant = std::make_unique<flutter::TextureVariant>(
         flutter::PixelBufferTexture([&](auto, auto) {
+          // rill patch (F28): the same race as the H/W callback above.
           std::lock_guard<std::mutex> lock(textures_mutex_);
           if (texture_id_) {
-            return pixel_buffer_textures_.at(texture_id_).get();
+            auto it = pixel_buffer_textures_.find(texture_id_);
+            return it == pixel_buffer_textures_.end()
+                       ? (FlutterDesktopPixelBuffer*)nullptr
+                       : it->second.get();
           } else {
             return (FlutterDesktopPixelBuffer*)nullptr;
           }
         }));
     // Register new texture.
-    texture_id_ =
+    const int64_t id =
         registrar_->texture_registrar()->RegisterTexture(texture_variant.get());
-    std::cout << "media_kit: VideoOutput: Create Texture: " << texture_id_
-              << std::endl;
+    std::cout << "media_kit: VideoOutput: Create Texture: " << id << std::endl;
     std::lock_guard<std::mutex> lock(textures_mutex_);
     pixel_buffer_textures_.emplace(
-        std::make_pair(texture_id_, std::move(pixel_buffer_texture)));
-    texture_variants_.emplace(
-        std::make_pair(texture_id_, std::move(texture_variant)));
+        std::make_pair(id, std::move(pixel_buffer_texture)));
+    texture_variants_.emplace(std::make_pair(id, std::move(texture_variant)));
+    texture_id_ = id;
     // Notify public texture update callback.
     texture_update_callback_(texture_id_, required_width, required_height);
   }
