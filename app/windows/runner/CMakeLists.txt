@@ -8,6 +8,7 @@ project(runner LANGUAGES CXX)
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
+  "log_capture.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -29,6 +30,11 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+
+# Release builds run as a launcher plus the app, so the app's output has a log
+# file (log_capture.cpp). Not Debug or Profile: `flutter run` reads the app's
+# stdout to find the Dart VM service.
+target_compile_definitions(${BINARY_NAME} PRIVATE "$<$<CONFIG:Release>:RILL_LOG_CAPTURE>")
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.

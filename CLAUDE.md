@@ -334,7 +334,8 @@ so nowhere.
 looks like a half-finished feature: captions rendered position and outline but no
 colour or font, because the bundled sidecar predated the change that reads
 per-segment pens, while `sidecar/dist/` had it. Two things now make it cheaper to
-spot. The client logs `rill: sidecar <path> (built <mtime>)` at startup — compare
+spot. The client logs `rill: sidecar <path> (built <mtime>)` at startup — in a
+release build that line is also in the newest `%LOCALAPPDATA%\rill\logs\rill-*.log` — compare
 that timestamp against `sidecar/dist/sidecar.exe`. And `grep -a` for a symbol
 only the new code has (`layerAlpha`, `includeStyled`) inside **both** binaries;
 if the bundled one is busy, the app is running and holding it, which is itself
@@ -563,6 +564,16 @@ the answer.
   tail; anchor absent after a server re-seed) that an empty `items[]` would
   conflate. **`isInfinite` is `true` on every mix, including curated ones that
   run out after ~51 items** — never branch on it.
+- **A release `rill.exe` is two processes, and the first one is the log.**
+  In a Release build the process you start is a launcher: it starts a second
+  `rill.exe` with stdout/stderr on a pipe and writes every line, redacted and
+  timestamped, to `%LOCALAPPDATA%\rill\logs` (newest 10 runs), ending with the
+  app's exit code — `CRASHED with code 0x…` for a crash. `architecture.md`
+  §2.11 has why it cannot be a redirect inside one process. So: a debugger
+  started on `rill.exe` lands on the launcher (set `RILL_LOG_CAPTURE=0`), and
+  **a crash is diagnosed from that file first.** A crash dump, if Windows took
+  one (`%LOCALAPPDATA%\CrashDumps`), holds the session cookie: read the stack,
+  then delete it; never attach it.
 - **`bun run export-contract-corpus` runs the auditor itself, and exits 1 if it
   is red.** Not a courtesy — the export is what breaks `corpus.test.ts`, by
   writing a field with no sanitiser, and it breaks it *in a different file from
