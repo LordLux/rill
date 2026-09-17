@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 34.** A new item takes it, and the same edit bumps this line.
+**Next number: 35.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -25,6 +25,34 @@ Nothing here right now.
 ---
 
 ## Soon
+
+### 34. Fix the texture race in `media_kit_video`'s resize
+
+`architecture.md` F28: the 2026-09-17 engine abort was `media_kit_video` 1.3.1
+(`windows/video_output.cc`, `VideoOutput::Resize`) assigning the new texture's
+id to `texture_id_` before inserting it into `textures_`, both outside
+`textures_mutex_`, while the raster thread's populate callback for the *old*
+texture looks up `textures_.at(texture_id_)` — the member, not its own id. A
+paint between the two steps throws `out_of_range` through a `noexcept`
+boundary, and the process aborts. It needs a resize, which a live stream's
+adaptive switch provides without anyone touching anything.
+
+The fix is small and local — capture the id in the callback, look it up with
+`find` and return `nullptr` when absent, and publish `texture_id_` only after
+the insert, under the lock — but it is in a dependency. In order:
+
+1. Check media_kit's repository for a newer `media_kit_video` with this fixed,
+   and for an existing issue. A version bump is the cheapest fix, **but read
+   `architecture.md` §2.4 first**: `media_kit_libs_windows_video` is pinned at
+   exactly 1.0.11 for F13, and whatever moves must not move that.
+2. Otherwise vendor the plugin (a path `dependency_overrides` entry, which
+   `app/pubspec.yaml` keeps empty on purpose today — say why in the comment
+   there), patch `Resize`, and report the race upstream.
+3. Until then, hover previews on live tiles are the likeliest trigger; not
+   previewing them is a mitigation, not a fix — the shell resizes too.
+
+**Done when:** the populate callback cannot throw, and a stretch of hovering
+live tiles leaves no `CRASHED with code 0xC0000409` in the release log.
 
 ### 33. Playback opens paused while media_kit says it is playing
 
@@ -173,6 +201,11 @@ Before choosing, confirm the other three logged crashes (2026-09-09 04:01 and 04
 is taken for that, it holds the session cookie: read it, delete it, never
 attach it.
 
+The release log now records it: the launcher's last line reads
+`CRASHED with code 0xC0000602`. On 2026-09-17 two of two ordinary window
+closes of a scratch release build ended that way — more often than the
+Application log's four events suggested, so "some exits" may be most.
+
 **Done when:** one of the two is done and a stretch of closes leaves no
 `0xC0000602` event, or the crash is accepted and F27 says so.
 
@@ -182,7 +215,17 @@ Nothing inside the process can catch the crashes seen so far. A fast fail
 (`0xC0000409`, `0xC0000602`) skips every in-process handler, and the engine's
 `abort()` is its own statically linked copy, so neither
 `SetUnhandledExceptionFilter` nor a `SIGABRT` handler in the runner sees it.
-And WER keeps a dump only until its report is filed (item 31).
+The release log (`architecture.md` §2.11) now records *that* a crash
+happened and its code, and whatever was printed before it — but not the stack,
+which is what named the cause of F28.
+
+Found 2026-09-17: `HKCU\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\rill.exe`
+exists with `DumpType = 2`, so every rill crash — the exit-time one of item 30
+included — currently writes a **full** dump, with the session cookie, to
+`%LOCALAPPDATA%\CrashDumps`. That dump is how F28 was solved, and it is also a
+cookie on disk after every close. **Kept deliberately (decided 2026-09-17)**
+until this item lands: the stack is worth more than the risk, and the rule
+stands — read a dump, then delete it, never attach it.
 
 Crashpad — directly, or through `sentry-native` with uploading disabled — runs
 an out-of-process handler and registers a WER runtime exception module
