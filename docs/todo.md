@@ -22,34 +22,7 @@ Nothing here right now.
 
 ## Soon
 
-### 30. The release app sometimes dies with `0xC0000602` in `coremessaging.dll`
-
-`0xC0000602` is a fail-fast — Windows ending the process deliberately, not an
-access violation. The Application event log holds four for the release build,
-all with faulting module `coremessaging.dll`: 2026-09-09 at 04:01, 04:17 and
-17:41, and 2026-09-10 at 18:40. All four predate `bitsdojo_window`. On
-2026-09-17 the controls probe's own `exit(0)` ended with the same code, after
-every measurement had finished — but that was a profile build and it left no
-event, so it is not confirmed to be the same crash.
-
-`coremessaging.dll` is Windows' CoreMessaging infrastructure, the message
-dispatch that modern input and composition components run on. The likely story
-is teardown order: something native — WebView2 through `flutter_inappwebview`,
-mpv, or the libass render isolate — still dispatching while the process exits.
-That is a hypothesis, nothing more.
-
-Find out, in this order:
-
-1. Whether an ordinary window close triggers it, or only an abrupt `exit()`.
-   The four logged crashes were ordinary use, not necessarily ordinary closes.
-2. Take a dump. `HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\rill.exe`
-   with `DumpType = 2` writes full dumps to `%LOCALAPPDATA%\CrashDumps`. **A dump
-   holds the session cookie** (`architecture.md` §2.5): read it, then delete it,
-   and never attach it anywhere.
-3. Read the faulting stack for the last module to call into CoreMessaging.
-
-**Done when:** the cause is known, and it is either fixed or recorded in
-`architecture.md` as a known limit.
+Nothing here right now.
 
 ---
 
@@ -144,6 +117,33 @@ nowhere is how Task 04 §1 disappeared for two months.
 - `app/lib/ui/player/settings_menu.dart:749` — `//TODO add fps when it is not 30`
 - `app/lib/ui/player/shortcuts.dart:147` — `// TODO add end and home for seeking
   to the start and end of the video`
+
+### 30. Decide what to do about the exit-time `0xC0000602`
+
+The cause is known and recorded as `architecture.md` F27: at DLL unload,
+`flutter_inappwebview_windows` releases a static `Compositor` that CoreMessaging
+can no longer serve, and the process fails fast. It happens on some exits, not
+all, after the app has finished shutting down, so nothing is lost — the cost is
+an Application-log crash event. Low priority for that reason.
+
+Two ways out, neither tried:
+
+- **Upgrade the plugin.** The app is on `flutter_inappwebview_windows` 0.6.0
+  (via `flutter_inappwebview` 6.1.5). Check whether a later release destroys the
+  compositor at plugin teardown instead of in a static destructor.
+- **End the process without DLL teardown.** After the engine has shut down, the
+  runner (`app/windows/runner/main.cpp`) would call
+  `TerminateProcess(GetCurrentProcess(), exitCode)`. That skips *every* DLL's
+  exit-time cleanup, not just the plugin's — confirm nothing (mpv, the sidecar
+  pipe, settings writes) relies on it first.
+
+Before choosing, confirm the other three logged crashes (2026-09-09 04:01 and 04:17,
+2026-09-10 18:40) are the same one as 17:41 — only one dump was read. If a dump
+is taken for that, it holds the session cookie: read it, delete it, never
+attach it.
+
+**Done when:** one of the two is done and a stretch of closes leaves no
+`0xC0000602` event, or the crash is accepted and F27 says so.
 
 ---
 
