@@ -229,6 +229,9 @@ class MediaKitEngine implements PlaybackEngine {
 
   late final Player _player;
   late final VideoController _video;
+
+  /// Receives one line per call below. Set by `mpv_log.dart`; null otherwise.
+  void Function(String line)? trace;
   final List<StreamSubscription<Object?>> _subscriptions = [];
 
   Duration _position = Duration.zero;
@@ -419,6 +422,7 @@ class MediaKitEngine implements PlaybackEngine {
   @override
   Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false, bool isLive = false}) async {
     lastOpened = variant;
+    trace?.call('open ${variant.height}p play=$play live=$isLive audio=${variant.audioUrl != null}');
     // Read before the open, applied after it. A reopen drops mpv's external
     // subtitle tracks, and this is the only place that knows one was attached.
     final retained = retainSubtitle ? _subtitle : null;
@@ -476,15 +480,34 @@ class MediaKitEngine implements PlaybackEngine {
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() {
+    trace?.call('play');
+    return _player.play();
+  }
+
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() {
+    trace?.call('pause');
+    return _player.pause();
+  }
+
   @override
-  Future<void> playOrPause() => _player.playOrPause();
+  Future<void> playOrPause() {
+    trace?.call('playOrPause (kit playing=${_player.state.playing})');
+    return _player.playOrPause();
+  }
+
   @override
-  Future<void> seek(Duration to) => _player.seek(to);
+  Future<void> seek(Duration to) {
+    trace?.call('seek ${to.inMilliseconds}ms');
+    return _player.seek(to);
+  }
+
   @override
-  Future<void> setVolume(double volume) => _player.setVolume(volume);
+  Future<void> setVolume(double volume) {
+    trace?.call('setVolume $volume');
+    return _player.setVolume(volume);
+  }
 
   /// mpv's own `frame-step` / `frame-back-step`.
   ///
@@ -503,11 +526,16 @@ class MediaKitEngine implements PlaybackEngine {
   /// alternative — refusing to bind the key — is worse than an occasional
   /// two-frame jump.
   @override
-  Future<void> stepFrame(int direction) => (_player.platform as NativePlayer)
-      .command([direction < 0 ? 'frame-back-step' : 'frame-step']);
+  Future<void> stepFrame(int direction) {
+    trace?.call('stepFrame $direction');
+    return (_player.platform as NativePlayer).command([direction < 0 ? 'frame-back-step' : 'frame-step']);
+  }
 
   @override
-  Future<void> stop() => _player.stop();
+  Future<void> stop() {
+    trace?.call('stop');
+    return _player.stop();
+  }
 
   @override
   Future<void> dispose() async {
