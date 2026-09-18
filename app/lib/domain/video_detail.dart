@@ -72,6 +72,7 @@ abstract class VideoDetail with _$VideoDetail {
     int? premiereAtMs,
     @Default(<FeedItem>[]) List<FeedItem> related,
     String? relatedContinuation,
+    String? commentsContinuation,
   }) = _VideoDetail;
 
   factory VideoDetail.fromJson(Map<String, Object?> json) => _$VideoDetailFromJson(json);

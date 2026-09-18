@@ -205,7 +205,35 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     premiereAtMs: premiereStartMs(body),
     related: related.items as FeedItem[],
     relatedContinuation: related.continuation,
+    commentsContinuation: findCommentsContinuation(body),
   };
+}
+
+/**
+ * The continuation token for the first page of comments, read from the watch
+ * page's own `comment-item-section`. Null when comments are disabled.
+ */
+function findCommentsContinuation(body: Json): string | null {
+  const sections = get(body, 'contents', 'twoColumnWatchNextResults', 'results', 'results', 'contents');
+  if (Array.isArray(sections)) {
+    for (const section of sections) {
+      if (
+        isObject(section['itemSectionRenderer']) &&
+        str(get(section, 'itemSectionRenderer', 'sectionIdentifier')) === 'comment-item-section'
+      ) {
+        const contents = get(section, 'itemSectionRenderer', 'contents');
+        if (Array.isArray(contents)) {
+          for (const item of contents) {
+            const token = str(
+              get(item, 'continuationItemRenderer', 'continuationEndpoint', 'continuationCommand', 'token'),
+            );
+            if (token) return token;
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /**

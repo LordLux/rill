@@ -194,7 +194,7 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `captions.list` | `{videoId}` | `{tracks[]}` — §3.8 |
 | `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
-| `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
+| `video.comments` | `{videoId, continuation?}` | `{items[], continuation?, chips?, commentCount}` |
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
 | `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
 | `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
@@ -206,6 +206,12 @@ in `rpc/server.ts` — calling it answers `Unknown method`. The row stays becaus
 the shape is still the intended one, but it is marked so the table cannot be
 read as a list of things that work. Found while implementing Task 26, which hit
 the same thing with `mix.start`.
+
+#### Comments — Task 27
+
+**`video.comments` is not a dedicated endpoint.** It is just a `/next` call with a continuation token, exactly like every other list continuation. The watch page (`video.info`) carries the first token inside its `comment-item-section`; fetching that token returns the first page of threads and the sorting options. The RPC method `video.comments` handles this conceptually, but underneath it executes `/next`.
+
+**Sort options are chips.** "Top" and "Newest" are tokens the server hands back inside the first page of comments, so they are mapped as `chips[]` on the response and treated exactly like feed chips, rather than client-constructed parameters like search filters. Changing the sort clears the list and requests `/next` using the new chip's token.
 
 #### Mixes — Task 26, measured 2026-09-12
 
@@ -623,6 +629,7 @@ interface VideoDetail {
   premiereAtMs: number | null;        // unix ms; null unless it is a premiere
   related: FeedItem[];                // the watch page's rail
   relatedContinuation: string | null; // → video.related
+  commentsContinuation: string | null; // → video.comments
 }
 ```
 

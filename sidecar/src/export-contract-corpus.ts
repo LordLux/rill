@@ -143,6 +143,7 @@ function sanitiseVideoDetail(detail: VideoDetail): VideoDetail {
     likeText: detail.likeText === null ? null : 'Sanitised Likes 1',
     related: detail.related.map(sanitiseItem),
     relatedContinuation: sanitiseContinuation(detail.relatedContinuation, 0),
+    commentsContinuation: sanitiseContinuation(detail.commentsContinuation, 1),
   };
 }
 
@@ -176,6 +177,30 @@ function sanitiseArtistPanel(panel: ArtistPanel): ArtistPanel {
   };
 }
 
+import type { Comment, CommentText, CommentStyleRun, CommentCommandRun } from './types.ts';
+
+function sanitiseCommentText(text: CommentText, index: number): CommentText {
+  return {
+    content: `Sanitised Comment Text ${index + 1}`,
+    styleRuns: text.styleRuns ? [{ startIndex: 0, length: 10, weightLabel: 'FONT_WEIGHT_MEDIUM' }] : undefined,
+    commandRuns: text.commandRuns ? [{ startIndex: 0, length: 10, url: 'https://fake.url', videoId: 'vid_001', startTimeSeconds: 120 }] : undefined,
+  };
+}
+
+function sanitiseComment(comment: Comment, index: number): Comment {
+  const seq = String(index + 1).padStart(3, '0');
+  return {
+    ...comment,
+    id: `cmt_${seq}`,
+    authorName: `Sanitised Author ${index + 1}`,
+    authorAvatarUrl: `https://fake.url/avatar${index + 1}.jpg`,
+    authorChannelId: comment.authorChannelId ? `chan_${seq}` : null,
+    text: sanitiseCommentText(comment.text, index),
+    likeCount: comment.likeCount ? `Sanitised Likes ${index + 1}` : null,
+    repliesContinuation: comment.repliesContinuation ? `CONTINUATION_TOKEN_${seq}` : null,
+  };
+}
+
 async function main() {
   await mkdir(CORPUS, { recursive: true });
   const files = (await readdir(FIXTURES)).filter(
@@ -185,6 +210,21 @@ async function main() {
   for (const [fileIndex, file] of files.entries()) {
     const name = file.replace(/\.json$/, '');
     const raw = JSON.parse(await readFile(join(FIXTURES, file), 'utf8'));
+
+    if (file.startsWith('comments')) {
+      const { parseComments } = await import('./parser/comments.ts');
+      const parsed = parseComments(raw, name);
+      const result = {
+        ...parsed,
+        chips: parsed.chips?.map(sanitiseChip()),
+        items: parsed.items.map(sanitiseComment),
+        continuation: sanitiseContinuation(parsed.continuation, fileIndex),
+      };
+      await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
+      log.info(`exported sanitised ${file}`);
+      continue;
+    }
+
     const parsed = parseFeed(raw, name);
 
     const result = {
@@ -214,6 +254,7 @@ async function main() {
           channelAvatarUrl: 'https://fake.url/avatar1.jpg',
           related: detail.related.map(sanitiseItem),
           relatedContinuation: sanitiseContinuation(detail.relatedContinuation, fileIndex),
+          commentsContinuation: sanitiseContinuation(detail.commentsContinuation, fileIndex + 1),
         };
         await writeFile(join(CORPUS, 'video-detail.json'), JSON.stringify(sanitisedDetail, null, 2), 'utf8');
         log.info(`exported sanitised video-detail.json`);

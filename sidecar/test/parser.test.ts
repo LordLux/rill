@@ -116,43 +116,89 @@ const SHAPES = {
     isVerified: 'boolean',
     isArtistChannel: 'boolean',
   },
+  commentTextRun: {
+    startIndex: 'number',
+    length: 'number',
+  },
+  commentStyleRun: {
+    startIndex: 'number',
+    length: 'number',
+    weightLabel: 'string?',
+  },
+  commentCommandRun: {
+    startIndex: 'number',
+    length: 'number',
+    url: 'string?',
+    videoId: 'string?',
+    startTimeSeconds: 'number?',
+  },
+  commentText: {
+    content: 'string',
+    styleRuns: 'object[]?',
+    commandRuns: 'object[]?',
+  },
+  comment: {
+    id: 'string',
+    authorName: 'string',
+    authorAvatarUrl: 'string',
+    authorChannelId: 'string?',
+    isUploader: 'boolean',
+    isVerified: 'boolean',
+    text: 'object',
+    likeCount: 'string?',
+    publishedText: 'string?',
+    replyCount: 'number',
+    isLiked: 'boolean',
+    creatorHearted: 'boolean',
+    isPinned: 'boolean',
+    repliesContinuation: 'string?',
+  },
 } as const;
 
-function validateItem(item: FeedItem): string[] {
+function validateShape(name: keyof typeof SHAPES, item: any, allowKind = false): string[] {
   const problems: string[] = [];
-  const shape = SHAPES[item.kind];
-  if (!shape) return [`unknown kind '${(item as { kind: string }).kind}'`];
+  const shape = SHAPES[name];
+  const expected = new Set([...Object.keys(shape)]);
+  if (allowKind) expected.add('kind');
 
-  const record = item as unknown as Record<string, unknown>;
-  const expected = new Set(['kind', ...Object.keys(shape)]);
-
-  for (const key of Object.keys(record)) {
-    if (!expected.has(key)) problems.push(`${item.kind}.${key}: not in the DTO`);
+  for (const key of Object.keys(item)) {
+    if (!expected.has(key)) problems.push(`${name}.${key}: not in the DTO`);
   }
 
   for (const [key, spec] of Object.entries(shape)) {
-    const value = record[key];
+    const value = item[key];
     if (value === undefined) {
-      problems.push(`${item.kind}.${key}: undefined (must be a value or null)`);
+      problems.push(`${name}.${key}: undefined (must be a value or null)`);
       continue;
     }
     const optional = spec.endsWith('?');
     const base = optional ? spec.slice(0, -1) : spec;
     if (value === null) {
-      if (!optional) problems.push(`${item.kind}.${key}: null but not nullable`);
+      if (!optional) problems.push(`${name}.${key}: null but not nullable`);
       continue;
     }
     if (base === 'string[]') {
       if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
-        problems.push(`${item.kind}.${key}: expected string[]`);
+        problems.push(`${name}.${key}: expected string[]`);
+      }
+      continue;
+    }
+    if (base === 'object[]') {
+      if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'object' || entry === null)) {
+        problems.push(`${name}.${key}: expected object[]`);
       }
       continue;
     }
     if (typeof value !== base) {
-      problems.push(`${item.kind}.${key}: expected ${base}, got ${typeof value}`);
+      problems.push(`${name}.${key}: expected ${base}, got ${typeof value}`);
     }
   }
   return problems;
+}
+
+function validateItem(item: FeedItem): string[] {
+  if (!SHAPES[item.kind as keyof typeof SHAPES]) return [`unknown kind '${(item as { kind: string }).kind}'`];
+  return validateShape(item.kind as keyof typeof SHAPES, item, true);
 }
 
 /**
@@ -1406,6 +1452,35 @@ describe.if(HAS_CAPTURES)('parseVideoDetail', () => {
     expect(detail.id).toMatch(/^[\w-]{11}$/);
     expect(detail.title.length).toBeGreaterThan(0);
     expect(detail.related.flatMap(validateItem)).toEqual([]);
+  });
+});
+
+import { parseComments } from '../src/parser/comments.ts';
+describe('video.comments (Task 27)', () => {
+  test.if(hasFixture('comments'))('parses comments from a /next response', () => {
+    const raw = fixture('comments');
+    const result = parseComments(raw, 'comments');
+    
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.continuation).toBeString();
+    expect(result.chips?.length).toBeGreaterThan(0);
+    expect(result.commentCount).toBe('86,800 Comments');
+
+    for (const item of result.items) {
+      expect(validateShape('comment', item)).toEqual([]);
+    }
+  });
+
+  test.if(hasFixture('comments-replies'))('parses comment replies', () => {
+    const raw = fixture('comments-replies');
+    const result = parseComments(raw, 'comments-replies');
+    
+    expect(result.items.length).toBeGreaterThan(0);
+    // Replies might not have chips
+    
+    for (const item of result.items) {
+      expect(validateShape('comment', item)).toEqual([]);
+    }
   });
 });
 

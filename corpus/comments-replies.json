@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "id": "cmt_001",
+      "authorName": "Sanitised Author 1",
+      "authorAvatarUrl": "https://fake.url/avatar1.jpg",
+      "authorChannelId": "chan_001",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 1"
+      },
+      "likeCount": "Sanitised Likes 1",
+      "publishedText": "5 years ago (edited)",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_002",
+      "authorName": "Sanitised Author 2",
+      "authorAvatarUrl": "https://fake.url/avatar2.jpg",
+      "authorChannelId": "chan_002",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 2"
+      },
+      "likeCount": "Sanitised Likes 2",
+      "publishedText": "4 years ago",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    }
+  ],
+  "continuation": null
+}

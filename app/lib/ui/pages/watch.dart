@@ -33,6 +33,7 @@ import '../account_actions.dart';
 import '../format.dart';
 import '../widgets/save_dialog.dart';
 import '../widgets/watch_skeleton.dart';
+import '../widgets/comments_section.dart';
 import '../widgets/shortcut_tooltip.dart';
 import '../widgets/subscribe_button.dart';
 import 'watch_layout.dart';
@@ -101,6 +102,11 @@ class WatchPage extends ConsumerStatefulWidget {
 class _WatchPageState extends ConsumerState<WatchPage> {
   bool _descriptionExpanded = false;
 
+  /// Which of the single-column layout's two lower sections is showing — 0
+  /// for Up Next (related), 1 for Comments. A swap of which sliver group is
+  /// present, not a `TabBarView` — architecture §2.8 has why.
+  int _narrowTab = 0;
+
   /// Related pages fetched beyond the one `video.info` already returned.
   final List<FeedItem> _extraRelated = [];
   String? _relatedContinuation;
@@ -123,6 +129,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       });
     });
 
+    final scheme = Theme.of(context).colorScheme;
     final playback = ref.watch(playbackProvider);
     final item = ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
     final startingMix = ref.watch(queueProvider.select((q) => q.startingMixId));
@@ -135,7 +142,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
           'Watch',
           style: TextStyle(
             fontWeight: FontWeight.w700,
-            color: Theme.of(context).colorScheme.onSurface,
+            color: scheme.onSurface,
             fontSize: 20,
           ),
         ),
@@ -172,6 +179,8 @@ class _WatchPageState extends ConsumerState<WatchPage> {
           final detail = info.value;
           final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
           final queueHasItems = ref.watch(queueProvider.select((q) => q.items.length > 1));
+          final theme = Theme.of(context);
+          final scheme = theme.colorScheme;
 
           return TweenAnimationBuilder<double>(
             tween: Tween<double>(end: actualAspectRatio),
@@ -196,47 +205,141 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                   actualAspectRatio: aspectRatio,
                   rounded: !theatre,
                 ),
-                theatreBackground: theatre ? Theme.of(context).tokens.scrim : null,
-                metadataSlot: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _Meta(item: item, info: info),
-                      const SizedBox(height: 10),
-                      if (detail != null)
-                        _Description(
-                          detail: detail,
-                          expanded: _descriptionExpanded,
-                          onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+                theatreBackground: theatre ? theme.tokens.scrim : null,
+                metadataSlivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _Meta(item: item, info: info),
+                          const SizedBox(height: 10),
+                          if (detail != null)
+                            _Description(
+                              detail: detail,
+                              expanded: _descriptionExpanded,
+                              onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (geometry.isTwoColumn) ...[
+                    if (detail != null && detail.commentsContinuation != null)
+                      CommentsSection(
+                        videoId: item.id,
+                        initialContinuation: detail.commentsContinuation!,
+                      ),
+                    if (detail != null && detail.commentsContinuation == null)
+                      _commentsDisabledSliver(scheme),
+                  ] else ...[
+                    // Fixed max height and collapsible on its own (queue_panel.dart),
+                    // so it never creates the kind of scroll wall the tab switch
+                    // below exists to avoid — safe to leave inline.
+                    if (queueHasItems)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 24, 4, 0),
+                          child: embeddedQueue,
                         ),
-                      if (!geometry.isTwoColumn) ...[
-                        const SizedBox(height: 24),
-                        embeddedQueue,
-                        ..._relatedSection(detail, item.id, asGrid: true),
-                      ],
+                      ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 24, 4, 12),
+                        child: Wrap(
+                          spacing: 8,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('Up Next'),
+                              selected: _narrowTab == 0,
+                              onSelected: (_) => setState(() => _narrowTab = 0),
+                            ),
+                            ChoiceChip(
+                              label: const Text('Comments'),
+                              selected: _narrowTab == 1,
+                              onSelected: (_) => setState(() => _narrowTab = 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_narrowTab == 0)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 4, 32),
+                          child: TweenAnimationBuilder<double>(
+                            key: const ValueKey('related'),
+                            tween: Tween(begin: 0, end: 1),
+                            duration: const Duration(milliseconds: 200),
+                            builder: (context, opacity, child) => Opacity(opacity: opacity, child: child),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: _relatedSection(detail, item.id, asGrid: true),
+                            ),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      if (detail != null && detail.commentsContinuation != null)
+                        CommentsSection(
+                          key: const ValueKey('comments'),
+                          videoId: item.id,
+                          initialContinuation: detail.commentsContinuation!,
+                        ),
+                      if (detail != null && detail.commentsContinuation == null)
+                        _commentsDisabledSliver(scheme),
                     ],
+                  ],
+                ],
+                railSlivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(8, theatre ? 20 : 2, 16, 32),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          embeddedQueue,
+                          ..._relatedSection(detail, item.id),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-                railSlot: Padding(
-                  padding: EdgeInsets.fromLTRB(8, theatre ? 20 : 2, 16, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      embeddedQueue,
-                      ..._relatedSection(detail, item.id),
-                    ],
-                  ),
-                ),
-                scrollView: (children) => SilkyListView(
-                  padding: EdgeInsets.zero,
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: children,
-                ),
+                ],
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  /// Shared between the two-column rail and the narrow layout's Comments tab
+  /// — the "turned off" state doesn't depend on which one is showing it.
+  Widget _commentsDisabledSliver(ColorScheme scheme) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 24, left: 16),
+        child: RichText(
+          textAlign: TextAlign.center,
+          text: TextSpan(
+            children: [
+              TextSpan(text: 'Comments are turned off.', style: TextStyle(color: scheme.onSurfaceVariant)),
+              // Clickable link to YouTube's help center for more information about comments being turned off.
+              TextSpan(
+                text: ' Learn more',
+                style: TextStyle(color: scheme.primary),
+                recognizer: TapGestureRecognizer()
+                  ..onTap = () async {
+                    final url = Uri.parse('https://support.google.com/youtube/answer/9706180');
+                    if (await canLaunchUrl(url)) {
+                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                    }
+                  },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -419,11 +522,7 @@ class _PlayerSurface extends ConsumerWidget {
           // Neither of the first two is a failure, so neither gets the failure
           // screen — a members-only video is working exactly as its channel
           // intends, the same way a premiere is.
-          if (playback.isUpcoming) _PremiereSlate(playback: playback)
-          
-          else if (isMembersOnlyFailure(playback, detail)) _MembersOnlySlate(playback: playback)
-          
-          else if (playback.error != null) _Unavailable(playback: playback),
+          if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (isMembersOnlyFailure(playback, detail)) _MembersOnlySlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
 
           if (playback.error == null && !playback.isLoading && !fullscreen && isTopWatchPage) PlayerControls(engine: engine, actualAspectRatio: ratio),
         ],
@@ -704,9 +803,7 @@ class _Unavailable extends ConsumerWidget {
               Icon(Icons.error_outline, color: scheme.error, size: 40),
               const SizedBox(height: 12),
               Text(
-                playback.isRateLimited
-                    ? 'YouTube is limiting requests from this connection.'
-                    : 'This video would not open.',
+                playback.isRateLimited ? 'YouTube is limiting requests from this connection.' : 'This video would not open.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: theme.tokens.onScrim, fontSize: 16),
               ),
@@ -797,7 +894,8 @@ class _Meta extends ConsumerWidget {
           channelId: detail?.channelId ?? item.channelId,
           // What the user last did wins over the `/next` snapshot, which is as
           // old as the page — see `account_actions.dart`.
-          initiallySubscribed: ref.watch(
+          initiallySubscribed:
+              ref.watch(
                 subscriptionActionsProvider.select((actions) => actions[detail?.channelId ?? item.channelId]),
               ) ??
               detail?.isSubscribed ??
@@ -1005,10 +1103,8 @@ class _ActionsState extends ConsumerState<_Actions> {
     final exactDate = detail?.publishedDateText != null && detail!.publishedDateText != date ? detail.publishedDateText : null;
     final likes = detail?.likeText ?? 'Like';
 
-    final rating =
-        ref.watch(ratingActionsProvider.select((actions) => actions[item.id])) ?? detail?.myRating ?? VideoRating.none;
-    final inWatchLater = ref.watch(watchLaterActionsProvider.select((actions) => actions[item.id])) ??
-        (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ?? false);
+    final rating = ref.watch(ratingActionsProvider.select((actions) => actions[item.id])) ?? detail?.myRating ?? VideoRating.none;
+    final inWatchLater = ref.watch(watchLaterActionsProvider.select((actions) => actions[item.id])) ?? (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ?? false);
 
     return Wrap(
       spacing: 8,
@@ -1045,6 +1141,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: _ratingBusy ? SystemMouseCursors.basic : SystemMouseCursors.click,
                     onTap: _ratingBusy ? null : () => _setRating(VideoRating.like),
                     borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
                     child: Padding(
@@ -1073,6 +1170,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: _ratingBusy ? SystemMouseCursors.basic : SystemMouseCursors.click,
                     onTap: _ratingBusy ? null : () => _setRating(VideoRating.dislike),
                     borderRadius: const BorderRadius.horizontal(right: Radius.circular(18)),
                     child: Padding(
@@ -1502,6 +1600,7 @@ class _ActionChip extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: onTap,
             child: SizedBox(
               height: 36,
@@ -2025,7 +2124,7 @@ class _Description extends StatelessWidget {
           final measured = _measureDescription(description, style, constraints.maxWidth);
           final collapsedHeight = measured.collapsed;
           final isOverflowing = measured.overflowing;
-          final fullHeight = measured.full;
+          final fullHeight = measured.full + 8; // padding
 
           final fullTextWidget = SelectionArea(
             child: _LinkifiedText(
@@ -2069,7 +2168,7 @@ class _Description extends StatelessWidget {
                 },
               ),
               if (isOverflowing || expanded) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 1),
                 GestureDetector(
                   onTap: onToggle,
                   child: MouseRegion(
@@ -2079,7 +2178,7 @@ class _Description extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: scheme.onSurfaceVariant,
+                        color: scheme.primary,
                       ),
                     ),
                   ),
