@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 39.** A new item takes it, and the same edit bumps this line.
+**Next number: 41.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -25,6 +25,118 @@ Nothing here right now.
 ---
 
 ## Soon
+
+### 39. Comments: five gaps left after replies, delete and the comment box
+
+Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
+a tree that the UI shows flat"). None is a regression; each is a known hole.
+
+1. **A reply's own "Show more replies" is unreachable.** A reply can carry a
+   load-more button of its own (more replies *to that one reply*). The parser
+   now puts its token on that `Comment.repliesContinuation`, but nothing in the
+   client offers it: a reply's `replyCount` is `""` on the wire, so
+   `comments_section.dart` never shows a toggle for one. Measured: a thread
+   advertising 106 replies pages to 104. **Done when:** a reply whose token is
+   non-null offers a control that loads into the same flat list — and
+   re-measure the 106-reply thread (`dQw4w9WgXcQ`, the second thread on the
+   first page at the time) against its advertised count.
+2. **`action.replyToComment` still answers `{}`,** where `action.postComment`
+   answers the created comment. A fresh reply is therefore a local stand-in with
+   no id and no delete token until the list is refetched. **Capture a live
+   `create_comment_reply` response first** — only its action *name*
+   (`createCommentReplyAction`) has been seen, not where the thread sits in it —
+   then parse it the way `createdComment` in `actions/comments.ts` does.
+3. **`video.comments {videoId}` with no continuation returns nothing.** `/next`
+   with a bare `videoId` answers the watch payload, whose comments live behind
+   an engagement-panel continuation; `parseComments` then finds no thread and
+   returns an empty list that reads exactly like "no comments". The app never
+   takes this path (it always sends `commentsContinuation`), so it bites only a
+   caller that does. Filed as a separate task when found; recorded here so it
+   is not lost if that is dismissed.
+4. **`Comment.isLiked` is never true, and `creatorHearted` is inferred.** The
+   parser reads `entity.toolbar.isLiked`, a key present in **0 of 20** comment
+   entities of a signed-in page; the state lives on a different entity,
+   `engagementToolbarStateEntityPayload` (keyed by the view model's
+   `toolbarStateKey`), which nothing reads. Measured 2026-09-18 on that page:
+   `likeState` was `TOOLBAR_LIKE_STATE_LIKED` for **4** of 20 and `heartState`
+   `TOOLBAR_HEART_STATE_HEARTED` for 1. Task 27 §2 required the viewer's like
+   state and §"Tests" a liked/not-liked render test; neither is met. **Done
+   when:** `isLiked` and `creatorHearted` come from that entity, with a test
+   built from a page where at least one comment is liked, mutation-checked.
+5. **The comments widgets have no test of their own.** `CommentsSection` and
+   `CommentThreadWidget` reach the sidecar through the `RpcClient` singleton,
+   which has no seam, so the rules that live in their state — the reply count
+   trusting a *complete* list, load-once, optimistic reply and delete, a sort
+   change discarding the old list — were verified by running the app, not by a
+   test. Only `CommentComposer` (which takes its post as a callback) is covered.
+   Task 27's own "Tests" section asks for per-thread pagination isolation and
+   the sort-discards-the-list case. Also unmet from it: `$cancel` and a
+   generation guard — a sort change while a page is loading is *dropped*
+   (`_fetch` returns early), not cancelled, so the click is lost.
+   **Done when:** the client is injectable (or the widgets take their fetch as a
+   callback, as the composer does) and those cases are asserted.
+
+**Done when:** each is fixed, or deliberately dropped with the reason written
+next to it.
+
+### 40. Deep links to a comment (`&lc=`)
+
+Agreed 2026-09-18, measured, not built. youtube.com opens
+`watch?v=<id>&lc=<commentId>` on that comment and puts a "Highlighted comment"
+badge above it. rill has no deep linking of any kind. **Wanted:** the same badge;
+scroll to the comment; **pause** the just-opened video (whoever follows this link
+came for the comment); pulse the comment's container two or three times.
+
+**Measured (`architecture.md` F32), anonymous, live:**
+
+- The linked token is the plain `commentsContinuation` plus one protobuf field,
+  `#16 = "<commentId>"`, in the nested message at `#6.#4`. A token built that
+  way (decode, append, re-encode with the enclosing lengths recomputed) put the
+  target **first, exactly once**, in a 20-thread page — **no scraping of the
+  watch page**.
+- The badge text arrives as `commentViewModel.commentViewModel.linkedCommentText`
+  = `"Highlighted comment"` (server-supplied, localised).
+- A link to a **reply** (`lc=<parent>.<reply>`) returns the *parent* thread first,
+  with the reply in `replies.commentRepliesRenderer.teaserContents[0]
+  .commentViewModel` (which carries `linkedCommentText`) and **no** `subThreads`
+  — a shape `parseComments` does not read.
+
+**Stage 1 — links to top-level comments:**
+
+1. **Sidecar.** `video.comments {continuation, linkedCommentId}` builds the token
+   and asks `/next`; `Comment.isLinked: boolean` from `linkedCommentText`
+   (restated in all five places `CLAUDE.md` lists, plus the corpus sanitiser).
+   The token is *constructed*, which is exactly the "community references are
+   hypotheses" case — it is verified against a real response, but guard it: if
+   the first thread is not the requested comment, log it and fall back to the
+   ordinary list with no highlight, never a wrong one.
+2. **Entry.** No OS protocol handler (`rill://`, registry) — that is a separate,
+   larger piece. Instead: a pasted YouTube URL with `lc` in the search box
+   (`topbar.dart`, `_submit`) → `openWatch` (`player_shell.dart`) with a stub
+   `VideoItem` carrying the id (the watch page fills the rest from
+   `video.info`); and a **Copy link** action on every comment producing
+   `https://www.youtube.com/watch?v=<videoId>&lc=<commentId>`.
+3. **Client.** Badge above the highlighted thread; pulse its container; pause via
+   `PlaybackController.setPlaying(false)` — but only once the media is open, or
+   the open resumes it; on the narrow layout select the Comments tab first
+   (`_narrowTab`, `watch.dart`).
+4. **Scroll is the risk.** The watch page is a `SilkyCustomScrollView` with only
+   a `PageStorageKey` (`watch_layout.dart`) — no controller — and the comments
+   build lazily far down it, so the target has no `BuildContext` to
+   `ensureVisible` on when the page opens. Needs a controller plumbed through
+   `WatchLayout`, an approximate jump, then a retry until the target mounts.
+   Read `architecture.md` §2.8 (the watch page's sharp edges) first.
+
+**Stage 2 — links to replies:** read `teaserContents`, open the parent thread
+with the linked reply first and highlighted. Until then a reply link should land
+on the parent thread, without the badge.
+
+**Done when:** pasting the example link opens the video **paused**, the comments
+section scrolled to the highlighted comment with its badge, pulsing; Copy link
+round-trips through the paste; a link whose comment no longer exists degrades to
+the ordinary list. Tests: the token builder (mutation-checked, including "field
+absent → target not first"), the parser's `isLinked`, and a widget test for badge
+and pulse. Run the app and say what you saw — both layouts.
 
 ### 37. The engine cannot build the semantics tree: `AXTree` update fails, repeatedly
 
