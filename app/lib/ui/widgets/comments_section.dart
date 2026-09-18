@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/comment.dart';
 import '../../domain/feed_item.dart' as domain;
+import '../../data/comments_source.dart';
 import '../../data/rpc/client.dart';
 import '../auth_controller.dart';
 import '../playback_controller.dart';
@@ -36,11 +37,64 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   bool _loading = false;
   bool _error = false;
 
+  late final CommentsSource _source;
+
+  /// Bumped by every page request and by anything that supersedes one; a
+  /// response is applied only while its generation is still current.
+  ///
+  /// `$cancel` is best-effort — the sidecar can already have written the answer
+  /// — so a superseded page that lands anyway is dropped here, not merged
+  /// (`FeedController` and `protocol.md` §4 have the same rule). Two things
+  /// supersede a page: a re-sort, whose click is the newest word on what the
+  /// list should be, and a change of video.
+  int _generation = 0;
+  int? _inFlight;
+
   @override
   void initState() {
     super.initState();
+    _source = ref.read(commentsSourceProvider);
     _continuation = widget.initialContinuation;
     _fetch();
+  }
+
+  @override
+  void didUpdateWidget(CommentsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoId != widget.videoId) _resetForNewVideo();
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _cancelInFlight();
+    super.dispose();
+  }
+
+  /// The watch page swaps the video in place (a queue jump), and a video it has
+  /// already loaded hands this widget its cached detail on the very first frame,
+  /// so the section is *updated*, not rebuilt. Everything it holds belongs to the
+  /// video it was showing — its threads, sort, count and, the one that bites, the
+  /// comment box's token, which encodes that video's id: a comment written here
+  /// would have been posted to the previous video.
+  void _resetForNewVideo() {
+    _generation++;
+    _cancelInFlight();
+    _threads.clear();
+    _chips = null;
+    _commentCount = null;
+    _createParams = null;
+    _loading = false;
+    _error = false;
+    _continuation = widget.initialContinuation;
+    _fetch();
+  }
+
+  void _cancelInFlight() {
+    final id = _inFlight;
+    if (id == null) return;
+    _source.cancel(id);
+    _inFlight = null;
   }
 
   /// Posts a top-level comment and puts it at the top of the list, as
@@ -61,12 +115,15 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
 
     final messenger = ScaffoldMessenger.of(context);
     final auth = ref.read(authProvider);
+    final generation = _generation;
     try {
       final response = await RpcClient.instance.call('action.postComment', {
         'createParams': createParams,
         'commentText': text,
       });
-      if (!mounted) return true;
+      // Posted, but to a video this list no longer shows: it must not be put
+      // among another video's comments.
+      if (!mounted || generation != _generation) return true;
 
       final created = response is Map ? response['comment'] : null;
       final posted = created is Map
@@ -92,9 +149,22 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     }
   }
 
+  /// Loads the page [_continuation] names.
+  ///
+  /// A load-more or a retry never pre-empts a load already out — that would be
+  /// the same page asked twice. A [refresh] (a re-sort) does, always: it drops
+  /// the list, cancels whatever was loading, and the page it asks for is the only
+  /// one that may land. Before this the click was *dropped* while a page was
+  /// loading, and the old sort's answer then arrived and was merged in — the
+  /// exact case `docs/tasks/27-comments.md` §3 says must not happen.
   Future<void> _fetch({bool refresh = false}) async {
-    if (_loading) return;
     if (!mounted) return;
+    if (_loading && !refresh) return;
+    final continuation = _continuation;
+    if (continuation == null) return;
+
+    _cancelInFlight();
+    final generation = ++_generation;
     setState(() {
       _loading = true;
       _error = false;
@@ -103,36 +173,35 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
       }
     });
 
+    final request = _source.page(continuation);
+    _inFlight = request.id;
+
     try {
-      final response = await RpcClient.instance.call('video.comments', {
-        'continuation': _continuation,
+      final result = await request.response;
+      if (!mounted || generation != _generation) return;
+      _inFlight = null;
+
+      setState(() {
+        _threads.addAll(result.items);
+        _continuation = result.continuation;
+        if (result.chips != null && result.chips!.isNotEmpty) {
+          _chips = result.chips?.cast<domain.Chip>();
+        }
+        if (result.commentCount != null) {
+          _commentCount = result.commentCount;
+        }
+        if (result.createParams != null) {
+          _createParams = result.createParams;
+        }
+        _loading = false;
       });
-
-      final result = CommentsResult.fromJson(response);
-
-      if (mounted) {
-        setState(() {
-          _threads.addAll(result.items);
-          _continuation = result.continuation;
-          if (result.chips != null && result.chips!.isNotEmpty) {
-            _chips = result.chips?.cast<domain.Chip>();
-          }
-          if (result.commentCount != null) {
-            _commentCount = result.commentCount;
-          }
-          if (result.createParams != null) {
-            _createParams = result.createParams;
-          }
-          _loading = false;
-        });
-      }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = true;
-        });
-      }
+      if (!mounted || generation != _generation) return;
+      _inFlight = null;
+      setState(() {
+        _loading = false;
+        _error = true;
+      });
     }
   }
 
@@ -305,8 +374,25 @@ class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
 
   bool _deleting = false;
 
+  late final CommentsSource _source;
+
+  /// The reply page currently out, so a thread that goes away mid-load — a
+  /// re-sort disposes every one of them — releases the sidecar instead of leaving
+  /// the request running for nobody. No generation guard is needed here: a
+  /// thread has one reply list and no sort, and the `mounted` check already
+  /// drops an answer for a thread that is gone.
+  int? _repliesRequest;
+
+  @override
+  void initState() {
+    super.initState();
+    _source = ref.read(commentsSourceProvider);
+  }
+
   @override
   void dispose() {
+    final request = _repliesRequest;
+    if (request != null) _source.cancel(request);
     _replyController.dispose();
     _replyFocusNode.dispose();
     super.dispose();
@@ -344,11 +430,11 @@ class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
       _errorReplies = false;
     });
 
+    final request = _source.page(_repliesContinuation ?? token);
+    _repliesRequest = request.id;
     try {
-      final response = await RpcClient.instance.call('video.comments', {
-        'continuation': _repliesContinuation ?? token,
-      });
-      final result = CommentsResult.fromJson(response);
+      final result = await request.response;
+      _repliesRequest = null;
       if (mounted) {
         setState(() {
           _replies.addAll(result.items);
@@ -358,6 +444,7 @@ class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
         });
       }
     } catch (e) {
+      _repliesRequest = null;
       if (mounted) {
         setState(() {
           _loadingReplies = false;
@@ -483,7 +570,11 @@ class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              backgroundImage: NetworkImage(widget.thread.authorAvatarUrl),
+              // Empty for a comment just posted that the server has not echoed
+              // back (`_postComment`'s stand-in) — `NetworkImage('')` is an image
+              // error, not a blank, so it is left out instead.
+              backgroundImage: widget.thread.authorAvatarUrl.isEmpty ? null : NetworkImage(widget.thread.authorAvatarUrl),
+              onBackgroundImageError: widget.thread.authorAvatarUrl.isEmpty ? null : (_, _) {},
               radius: 16,
             ),
             const SizedBox(width: 12),
