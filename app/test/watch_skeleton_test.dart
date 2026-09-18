@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:silky_scroll/silky_scroll.dart';
 import 'package:rill/ui/pages/watch_layout.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/view_mode.dart';
@@ -80,7 +81,7 @@ void main() {
     final layout = tester.widget<WatchLayout>(find.byType(WatchLayout));
     expect(layout.geometry.isTwoColumn, isTrue);
     expect(layout.geometry.railWidth, greaterThan(0));
-    expect(layout.railSlot, isNot(isA<SizedBox>()));
+    expect(layout.railSlivers, isNotEmpty);
   });
 
   testWidgets('collapses the rail into one column when the page would', (tester) async {
@@ -93,10 +94,10 @@ void main() {
   testWidgets('is inert: not scrollable, and hidden from screen readers', (tester) async {
     await pumpSkeleton(tester, size: const Size(1920, 1080));
 
-    final scrollable = tester.widget<SingleChildScrollView>(
+    final scrollable = tester.widget<SilkyCustomScrollView>(
       find.descendant(
         of: find.byType(WatchSkeleton),
-        matching: find.byType(SingleChildScrollView),
+        matching: find.byType(SilkyCustomScrollView),
       ).first,
     );
     expect(scrollable.physics, isA<NeverScrollableScrollPhysics>());
@@ -105,7 +106,7 @@ void main() {
     // skeleton has several of its own, and counting them made this brittle.
     final content = find.descendant(
       of: find.byType(WatchSkeleton),
-      matching: find.byType(SingleChildScrollView),
+      matching: find.byType(SilkyCustomScrollView),
     ).first;
     final excluders = find.ancestor(of: content, matching: find.byType(ExcludeSemantics));
     expect(excluders, findsWidgets);

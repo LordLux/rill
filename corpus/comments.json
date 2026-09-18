@@ -1,0 +1,391 @@
+{
+  "items": [
+    {
+      "id": "cmt_001",
+      "authorName": "Sanitised Author 1",
+      "authorAvatarUrl": "https://fake.url/avatar1.jpg",
+      "authorChannelId": "chan_001",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 1"
+      },
+      "likeCount": "Sanitised Likes 1",
+      "publishedText": "2 weeks ago",
+      "replyCount": 10,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_002",
+      "authorName": "Sanitised Author 2",
+      "authorAvatarUrl": "https://fake.url/avatar2.jpg",
+      "authorChannelId": "chan_002",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 2"
+      },
+      "likeCount": "Sanitised Likes 2",
+      "publishedText": "1 year ago",
+      "replyCount": 16,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_003",
+      "authorName": "Sanitised Author 3",
+      "authorAvatarUrl": "https://fake.url/avatar3.jpg",
+      "authorChannelId": "chan_003",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 3"
+      },
+      "likeCount": "Sanitised Likes 3",
+      "publishedText": "1 year ago",
+      "replyCount": 9,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_004",
+      "authorName": "Sanitised Author 4",
+      "authorAvatarUrl": "https://fake.url/avatar4.jpg",
+      "authorChannelId": "chan_004",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 4"
+      },
+      "likeCount": "Sanitised Likes 4",
+      "publishedText": "2 weeks ago",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_005",
+      "authorName": "Sanitised Author 5",
+      "authorAvatarUrl": "https://fake.url/avatar5.jpg",
+      "authorChannelId": "chan_005",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 5",
+        "styleRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "weightLabel": "FONT_WEIGHT_MEDIUM"
+          }
+        ]
+      },
+      "likeCount": "Sanitised Likes 5",
+      "publishedText": "6 years ago",
+      "replyCount": 28,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_006",
+      "authorName": "Sanitised Author 6",
+      "authorAvatarUrl": "https://fake.url/avatar6.jpg",
+      "authorChannelId": "chan_006",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 6"
+      },
+      "likeCount": "Sanitised Likes 6",
+      "publishedText": "2 years ago (edited)",
+      "replyCount": 23,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_007",
+      "authorName": "Sanitised Author 7",
+      "authorAvatarUrl": "https://fake.url/avatar7.jpg",
+      "authorChannelId": "chan_007",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 7"
+      },
+      "likeCount": "Sanitised Likes 7",
+      "publishedText": "5 years ago",
+      "replyCount": 260,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_008",
+      "authorName": "Sanitised Author 8",
+      "authorAvatarUrl": "https://fake.url/avatar8.jpg",
+      "authorChannelId": "chan_008",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 8"
+      },
+      "likeCount": "Sanitised Likes 8",
+      "publishedText": "1 month ago",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_009",
+      "authorName": "Sanitised Author 9",
+      "authorAvatarUrl": "https://fake.url/avatar9.jpg",
+      "authorChannelId": "chan_009",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 9"
+      },
+      "likeCount": "Sanitised Likes 9",
+      "publishedText": "2 years ago",
+      "replyCount": 3,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_010",
+      "authorName": "Sanitised Author 10",
+      "authorAvatarUrl": "https://fake.url/avatar10.jpg",
+      "authorChannelId": "chan_010",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 10",
+        "styleRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "weightLabel": "FONT_WEIGHT_MEDIUM"
+          }
+        ],
+        "commandRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "url": "https://fake.url",
+            "videoId": "vid_001",
+            "startTimeSeconds": 120
+          }
+        ]
+      },
+      "likeCount": "Sanitised Likes 10",
+      "publishedText": "7 years ago",
+      "replyCount": 9,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_011",
+      "authorName": "Sanitised Author 11",
+      "authorAvatarUrl": "https://fake.url/avatar11.jpg",
+      "authorChannelId": "chan_011",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 11"
+      },
+      "likeCount": "Sanitised Likes 11",
+      "publishedText": "10 years ago",
+      "replyCount": 85,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_012",
+      "authorName": "Sanitised Author 12",
+      "authorAvatarUrl": "https://fake.url/avatar12.jpg",
+      "authorChannelId": "chan_012",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 12"
+      },
+      "likeCount": "Sanitised Likes 12",
+      "publishedText": "9 months ago",
+      "replyCount": 3,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_013",
+      "authorName": "Sanitised Author 13",
+      "authorAvatarUrl": "https://fake.url/avatar13.jpg",
+      "authorChannelId": "chan_013",
+      "isUploader": true,
+      "isVerified": true,
+      "text": {
+        "content": "Sanitised Comment Text 13"
+      },
+      "likeCount": "Sanitised Likes 13",
+      "publishedText": "6 years ago",
+      "replyCount": 394,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_014",
+      "authorName": "Sanitised Author 14",
+      "authorAvatarUrl": "https://fake.url/avatar14.jpg",
+      "authorChannelId": "chan_014",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 14",
+        "styleRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "weightLabel": "FONT_WEIGHT_MEDIUM"
+          }
+        ]
+      },
+      "likeCount": "Sanitised Likes 14",
+      "publishedText": "6 years ago",
+      "replyCount": 6,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_015",
+      "authorName": "Sanitised Author 15",
+      "authorAvatarUrl": "https://fake.url/avatar15.jpg",
+      "authorChannelId": "chan_015",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 15"
+      },
+      "likeCount": "Sanitised Likes 15",
+      "publishedText": "7 years ago (edited)",
+      "replyCount": 31,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_016",
+      "authorName": "Sanitised Author 16",
+      "authorAvatarUrl": "https://fake.url/avatar16.jpg",
+      "authorChannelId": "chan_016",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 16",
+        "styleRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "weightLabel": "FONT_WEIGHT_MEDIUM"
+          }
+        ],
+        "commandRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "url": "https://fake.url",
+            "videoId": "vid_001",
+            "startTimeSeconds": 120
+          }
+        ]
+      },
+      "likeCount": "Sanitised Likes 16",
+      "publishedText": "5 months ago",
+      "replyCount": 3,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_017",
+      "authorName": "Sanitised Author 17",
+      "authorAvatarUrl": "https://fake.url/avatar17.jpg",
+      "authorChannelId": "chan_017",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 17"
+      },
+      "likeCount": "Sanitised Likes 17",
+      "publishedText": "5 years ago",
+      "replyCount": 13,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_018",
+      "authorName": "Sanitised Author 18",
+      "authorAvatarUrl": "https://fake.url/avatar18.jpg",
+      "authorChannelId": "chan_018",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 18"
+      },
+      "likeCount": "Sanitised Likes 18",
+      "publishedText": "4 years ago",
+      "replyCount": 35,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_019",
+      "authorName": "Sanitised Author 19",
+      "authorAvatarUrl": "https://fake.url/avatar19.jpg",
+      "authorChannelId": "chan_019",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 19"
+      },
+      "likeCount": "Sanitised Likes 19",
+      "publishedText": "6 years ago",
+      "replyCount": 19,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    },
+    {
+      "id": "cmt_020",
+      "authorName": "Sanitised Author 20",
+      "authorAvatarUrl": "https://fake.url/avatar20.jpg",
+      "authorChannelId": "chan_020",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 20"
+      },
+      "likeCount": "Sanitised Likes 20",
+      "publishedText": "13 days ago",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false
+    }
+  ],
+  "continuation": "CONTINUATION_TOKEN_3"
+}

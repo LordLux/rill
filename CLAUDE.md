@@ -128,6 +128,44 @@ interface ChannelItem { kind: 'channel'; id: string; name: string;
   descriptionSnippet: string | null;
   isVerified: boolean; isArtistChannel: boolean; }
 
+// --- Comments (Task 27) ---
+// Not a FeedItem. Sent over video.comments (which wraps /next with continuation).
+
+interface CommentTextRun { startIndex: number; length: number; }
+interface CommentStyleRun extends CommentTextRun { weightLabel?: string; }
+interface CommentCommandRun extends CommentTextRun {
+  url?: string; videoId?: string; startTimeSeconds?: number;
+}
+interface CommentText {
+  content: string;
+  styleRuns?: CommentStyleRun[];
+  commandRuns?: CommentCommandRun[];
+}
+
+interface Comment {
+  id: string;
+  authorName: string;
+  authorAvatarUrl: string;
+  authorChannelId: string | null;
+  isUploader: boolean;
+  isVerified: boolean;
+  text: CommentText;
+  likeCount: string | null;
+  publishedText: string | null;
+  replyCount: number;
+  isLiked: boolean;
+  creatorHearted: boolean;
+  isPinned: boolean;
+  repliesContinuation: string | null;
+}
+
+interface CommentsResult {
+  items: Comment[];
+  continuation: string | null;
+  chips?: Chip[];
+  commentCount: string | null;
+}
+
 interface Chip {
   label: string;
   token: string;

@@ -119,6 +119,18 @@ class _SubscribeButtonState extends State<SubscribeButton> {
   late SubscriptionNotificationLevel _level = widget.initialNotificationLevel;
   bool _subscribing = false;
 
+  /// Driven only by a `MouseRegion`'s own `onEnter`/`onExit` on each menu
+  /// item, not by `MenuItemButton`'s built-in `WidgetState.hovered`. The
+  /// built-in state stuck once a menu item was hovered and the pointer left
+  /// the menu entirely — `MenuAnchor` moves keyboard focus to whatever item
+  /// the mouse is over, and does not clear it when nothing else takes focus,
+  /// so any style keyed off the button's own states (hovered, focused, or
+  /// both) kept painting. Tracking hover ourselves, from an event source
+  /// that only ever fires on real pointer enter/exit, sidesteps that
+  /// regardless of which combination of button states caused it.
+  SubscriptionNotificationLevel? _hoveredLevel;
+  bool _unsubscribeHovered = false;
+
   /// Follow a *changed* `initiallySubscribed` from the parent.
   ///
   /// Without this the button was frozen at whatever it was first built with.
@@ -167,8 +179,7 @@ class _SubscribeButtonState extends State<SubscribeButton> {
       _unsubscribing = true;
       _subscribed = false;
     });
-    final unsubscribed =
-        widget.onUnsubscribe == null ? true : await widget.onUnsubscribe!(channelId);
+    final unsubscribed = widget.onUnsubscribe == null ? true : await widget.onUnsubscribe!(channelId);
     if (!mounted) return;
     setState(() {
       _unsubscribing = false;
@@ -189,16 +200,19 @@ class _SubscribeButtonState extends State<SubscribeButton> {
     if (!_subscribed) {
       return FilledButton(
         onPressed: widget.channelId == null || _subscribing ? null : _subscribe,
-        style: FilledButton.styleFrom(
-          backgroundColor: widget.unsubscribedBackground ?? scheme.onSurface,
-          foregroundColor: widget.unsubscribedForeground ?? scheme.surface,
-          disabledBackgroundColor: (widget.unsubscribedBackground ?? scheme.onSurface).withValues(alpha: 0.38),
-          shape: const StadiumBorder(),
-          padding: EdgeInsets.symmetric(horizontal: widget.dense ? 18 : 20),
-          minimumSize: Size(0, widget.minHeight),
-          tapTargetSize: widget.dense ? MaterialTapTargetSize.shrinkWrap : null,
-          textStyle: widget.textStyle,
-        ),
+        style:
+            FilledButton.styleFrom(
+              backgroundColor: widget.unsubscribedBackground ?? scheme.onSurface,
+              foregroundColor: widget.unsubscribedForeground ?? scheme.surface,
+              disabledBackgroundColor: (widget.unsubscribedBackground ?? scheme.onSurface).withValues(alpha: 0.38),
+              shape: const StadiumBorder(),
+              padding: EdgeInsets.symmetric(horizontal: widget.dense ? 18 : 20),
+              minimumSize: Size(0, widget.minHeight),
+              tapTargetSize: widget.dense ? MaterialTapTargetSize.shrinkWrap : null,
+              textStyle: widget.textStyle,
+            ).copyWith(
+              mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+            ),
         child: _subscribing
             ? SizedBox(
                 width: 16,
@@ -213,17 +227,26 @@ class _SubscribeButtonState extends State<SubscribeButton> {
     }
 
     return MenuAnchor(
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(widget.background ?? scheme.surfaceContainerHighest),
+        shape: WidgetStatePropertyAll(const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12)))),
+        mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+      ),
+      animated: true,
       builder: (context, controller, child) => FilledButton.tonal(
         onPressed: () => controller.isOpen ? controller.close() : controller.open(),
-        style: FilledButton.styleFrom(
-          backgroundColor: widget.background ?? scheme.surfaceContainerHighest,
-          foregroundColor: widget.foreground ?? scheme.onSurface,
-          shape: const StadiumBorder(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          minimumSize: Size(0, widget.minHeight),
-          tapTargetSize: widget.dense ? MaterialTapTargetSize.shrinkWrap : null,
-          textStyle: widget.textStyle,
-        ),
+        style:
+            FilledButton.styleFrom(
+              backgroundColor: widget.background ?? scheme.surfaceContainerHighest,
+              foregroundColor: widget.foreground ?? scheme.onSurface,
+              shape: const StadiumBorder(),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              minimumSize: Size(0, widget.minHeight),
+              tapTargetSize: widget.dense ? MaterialTapTargetSize.shrinkWrap : null,
+              textStyle: widget.textStyle,
+            ).copyWith(
+              mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+            ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -237,17 +260,45 @@ class _SubscribeButtonState extends State<SubscribeButton> {
       ),
       menuChildren: [
         for (final level in SubscriptionNotificationLevel.values)
-          MenuItemButton(
-            leadingIcon: Icon(level.icon),
-            trailingIcon: level == _level ? const Icon(Icons.check) : null,
-            onPressed: () => _setLevel(level),
-            child: Text(level.label),
+          MouseRegion(
+            onEnter: (_) => setState(() => _hoveredLevel = level),
+            onExit: (_) => setState(() {
+              if (_hoveredLevel == level) _hoveredLevel = null;
+            }),
+            child: MenuItemButton(
+              style: MenuItemButton.styleFrom(
+                overlayColor: Colors.transparent,
+                backgroundColor: level == _level
+                    ? (level == _hoveredLevel ? scheme.primary.withValues(alpha: 0.25) : scheme.primary.withValues(alpha: 0.2)) // selected
+                    : (level == _hoveredLevel ? scheme.onSurface.withValues(alpha: 0.07) : null), // not selected
+              ),
+              leadingIcon: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(level.icon),
+              ),
+              onPressed: () => _setLevel(level),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Text(level.label),
+              ),
+            ),
           ),
         const Divider(height: 1),
-        MenuItemButton(
-          leadingIcon: const Icon(Icons.person_remove_outlined),
-          onPressed: _unsubscribe,
-          child: const Text('Unsubscribe'),
+        MouseRegion(
+          onEnter: (_) => setState(() => _unsubscribeHovered = true),
+          onExit: (_) => setState(() => _unsubscribeHovered = false),
+          child: MenuItemButton(
+            style: MenuItemButton.styleFrom(
+              overlayColor: Colors.transparent,
+              backgroundColor: _unsubscribeHovered ? scheme.onSurface.withValues(alpha: 0.08) : null,
+            ),
+            leadingIcon: Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: const Icon(Icons.person_remove_outlined),
+            ),
+            onPressed: _unsubscribe,
+            child: const Text('Unsubscribe'),
+          ),
         ),
       ],
     );

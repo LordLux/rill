@@ -60,11 +60,21 @@ const FIXTURES = join(ROOT, 'sidecar', 'fixtures');
  * - `badges`         A closed vocabulary from YouTube ("4K", "Members only"),
  *                    not free text and not user-derived. The parser maps these
  *                    to a fixed set, so pinning the real strings is the point.
+ * - `commentCount`   Same reasoning as `viewCountText`: a public, per-video
+ *                    display string ("86,800 Comments"), identical for every
+ *                    viewer, carrying nothing about the captured session.
  *
  * Deliberately NOT here: titles, channel names, mix subtitles, chip labels
  * (taste profile); ids and continuation tokens (identity and session context).
  */
-const KEEP_REAL = new Set(['viewCountText', 'publishedText', 'publishedDateText', 'badges']);
+const KEEP_REAL = new Set([
+  'viewCountText',
+  'publishedText',
+  'publishedDateText',
+  'badges',
+  'weightLabel',
+  'commentCount',
+]);
 
 /**
  * The shape each sanitised field must have, keyed by field name.
@@ -82,7 +92,7 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   myRating: /^(like|dislike|none)$/,
 
   // Ids are replaced outright, never truncated, and indexed to the item.
-  id: /^(vid|mix|list|chan|item)_\d{3,}$/,
+  id: /^(vid|mix|list|chan|item|cmt)_\d{3,}$/,
   channelId: /^chan_\d{3,}$/,
 
   // Indexed so a mapper that gives every item the same value cannot pass.
@@ -127,6 +137,16 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   description: /^Sanitised Description \d+$/,
   likeText: /^Sanitised Likes \d+$/,
   relatedContinuation: /^CONTINUATION_TOKEN_\d+$/,
+  commentsContinuation: /^CONTINUATION_TOKEN_\d+$/,
+
+  // Comment (Task 27)
+  authorName: /^Sanitised Author \d+$/,
+  authorAvatarUrl: /^https:\/\/fake\.url\/avatar\d+\.jpg$/,
+  authorChannelId: /^chan_\d{3,}$/,
+  content: /^Sanitised Comment Text \d+$/,
+  likeCount: /^Sanitised Likes \d+$/,
+  url: /^https:\/\/fake\.url$/,
+  videoId: /^vid_\d{3,}$/,
 
   // Caption tracks. `languageCode` is a BCP-47-ish tag from a closed-ish
   // vocabulary and identifies nobody, so it survives verbatim — but it is

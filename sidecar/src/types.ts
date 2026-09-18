@@ -355,6 +355,16 @@ export interface VideoDetail {
   /** Sidebar / up-next tiles, already flattened to the same DTOs as any feed. */
   related: FeedItem[];
   relatedContinuation: string | null;
+  /**
+   * The continuation token for the first page of comments, read from the watch
+   * page's own `comment-item-section`.
+   *
+   * Null when comments are disabled, unavailable (e.g. made for kids), or when
+   * the video is age-restricted and the session is anonymous. A missing section
+   * in a successfully parsed page is the only signal YouTube sends for "disabled",
+   * so this being null *is* that signal.
+   */
+  commentsContinuation: string | null;
 }
 
 /**
@@ -645,6 +655,55 @@ export interface PlayerResult {
   videostatsPlaybackUrl: string | null;
   /** `playbackTracking.videostatsWatchtimeUrl` — the recurring progress ping. */
   videostatsWatchtimeUrl: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Comments (Task 27)
+// ---------------------------------------------------------------------------
+
+export interface CommentTextRun {
+  startIndex: number;
+  length: number;
+}
+
+export interface CommentStyleRun extends CommentTextRun {
+  weightLabel?: string;
+}
+
+export interface CommentCommandRun extends CommentTextRun {
+  url?: string;
+  videoId?: string;
+  startTimeSeconds?: number;
+}
+
+export interface CommentText {
+  content: string;
+  styleRuns?: CommentStyleRun[];
+  commandRuns?: CommentCommandRun[];
+}
+
+export interface Comment {
+  id: string;
+  authorName: string;
+  authorAvatarUrl: string;
+  authorChannelId: string | null;
+  isUploader: boolean;
+  isVerified: boolean;
+  text: CommentText;
+  likeCount: string | null;
+  publishedText: string | null;
+  replyCount: number;
+  isLiked: boolean;
+  creatorHearted: boolean;
+  isPinned: boolean;
+  repliesContinuation: string | null;
+}
+
+export interface CommentsResult {
+  items: Comment[];
+  continuation: string | null;
+  chips?: Chip[];
+  commentCount: string | null;
 }
 
 // ---------------------------------------------------------------------------

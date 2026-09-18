@@ -49,6 +49,7 @@ const videoDetailKeys = <String>{
   'premiereAtMs',
   'related',
   'relatedContinuation',
+  'commentsContinuation',
 };
 
 /// Every key `CaptionTrack` can consume. Hand-written from

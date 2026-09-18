@@ -503,6 +503,12 @@ async function handleRequest(request: RpcRequest) {
       const { getRelated } = await import('../video/info.ts');
       const result = await getRelated(await videoDeps(), { videoId, continuation });
       emitResponse(id, result);
+    } else if (method === 'video.comments') {
+      const videoId = optionalString(params, 'videoId', 'video.comments');
+      const continuation = optionalString(params, 'continuation', 'video.comments');
+      const { getComments } = await import('../video/info.ts');
+      const result = await getComments(await getBrowseSession(), { videoId, continuation });
+      emitResponse(id, result);
     } else if (method === 'mix.start') {
       // `playlistId`, not `videoId` — §3.3's old signature could not name
       // which of a video's several mixes was meant. `videoId` is the optional
