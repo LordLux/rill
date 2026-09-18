@@ -1,5 +1,8 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
+import '../../theme/accent.dart';
 import '../../theme/screen_values.dart';
 import 'feed_grid_metrics.dart';
 
@@ -23,16 +26,26 @@ import 'feed_grid_metrics.dart';
 /// A single [FadeTransition] over the subtree pulses in one compositor layer
 /// and rebuilds nothing at all — the children below it are built once.
 class FeedSkeleton extends StatefulWidget {
-  const FeedSkeleton({super.key, required this.isWideLayout});
+  const FeedSkeleton({super.key, required this.isWideLayout, this.randomSeed = 9});
 
   final bool isWideLayout;
+
+  /// Seeds which tiles get a one- or two-line title, and how long the second
+  /// line runs — the same seeded-`Random` idiom the watch skeleton's queue uses
+  /// for its row widths.
+  ///
+  /// **Seeded rather than `Random()` so a rebuild draws the same skeleton.**
+  /// The tiles used to roll the dice in their own `build`, and a placeholder
+  /// that reshuffles whenever the window is resized reads as content changing
+  /// under the user's eyes. Pass a different seed to make two surfaces look
+  /// different from each other; the same one gives the same grid every time.
+  final int randomSeed;
 
   @override
   State<FeedSkeleton> createState() => _FeedSkeletonState();
 }
 
-class _FeedSkeletonState extends State<FeedSkeleton>
-    with SingleTickerProviderStateMixin {
+class _FeedSkeletonState extends State<FeedSkeleton> with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 900),
@@ -53,21 +66,20 @@ class _FeedSkeletonState extends State<FeedSkeleton>
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns =
-            FeedGridMetrics.columnCount(constraints.maxWidth, widget.isWideLayout);
+        final columns = FeedGridMetrics.columnCount(constraints.maxWidth, widget.isWideLayout);
         final rowGap = FeedGridMetrics.verticalSpacing(widget.isWideLayout);
 
         // Enough rows to fill the viewport and no more. A fixed count leaves a
         // short skeleton floating on a tall window, which looks like a feed
         // that finished loading with three items in it.
-        final estimatedRowHeight = widget.isWideLayout
-            ? _wideTileHeight
-            : (constraints.maxWidth / columns) / ScreenValues.normalAspectRatio +
-                _captionBlockHeight;
-        final rows = estimatedRowHeight <= 0
-            ? 3
-            : ((constraints.maxHeight / (estimatedRowHeight + rowGap)).ceil() + 1)
-                .clamp(1, 12);
+        final estimatedRowHeight = widget.isWideLayout ? _wideTileHeight : (constraints.maxWidth / columns) / ScreenValues.normalAspectRatio + _captionBlockHeight;
+        final rows = estimatedRowHeight <= 0 ? 3 : ((constraints.maxHeight / (estimatedRowHeight + rowGap)).ceil() + 1).clamp(1, 12);
+
+        // One generator for the whole grid, drawn from in reading order and
+        // re-seeded on every build, so the same layout always gets the same
+        // tiles. Each tile takes the same two draws whatever they turn out to
+        // be, so one tile's line count never shifts its neighbours' widths.
+        final random = Random(widget.randomSeed);
 
         return FadeTransition(
           opacity: _pulse,
@@ -75,36 +87,47 @@ class _FeedSkeletonState extends State<FeedSkeleton>
           // announcing a dozen empty boxes is worse than announcing nothing.
           // The surface's own loading state is what should be read out.
           child: ExcludeSemantics(
-            child: SingleChildScrollView(
-              // Never scrollable. It is a placeholder, and letting it scroll
-              // would let a user drag it around as though it were content.
-              physics: const NeverScrollableScrollPhysics(),
-              child: Column(
-                children: List.generate(rows, (_) {
-                  final row = Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    spacing: FeedGridMetrics.horizontalSpacing,
-                    children: List.generate(
-                      columns,
-                      (_) => Expanded(
-                        child: _SkeletonTile(isWide: widget.isWideLayout),
-                      ),
-                    ),
-                  );
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: rowGap),
-                    child: widget.isWideLayout
-                        ? Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(
-                                maxWidth: ScreenValues.contentMaxWidth,
-                              ),
-                              child: row,
+            child: Padding(
+              padding: EdgeInsets.only(left: 8, right: 12),
+              child: SingleChildScrollView(
+                // Never scrollable. It is a placeholder, and letting it scroll
+                // would let a user drag it around as though it were content.
+                physics: const NeverScrollableScrollPhysics(),
+                child: Column(
+                  children: List.generate(rows, (rowIndex) {
+                    final row = Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      spacing: FeedGridMetrics.horizontalSpacing,
+                      children: List.generate(
+                        columns,
+                        (_) => Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(top: rowIndex == 0 ? 12 : 0),
+                            child: _SkeletonTile(
+                              isWide: widget.isWideLayout,
+                              twoLineTitle: random.nextBool(),
+                              secondLineFactor: 0.25 + random.nextDouble() * 0.6,
+                              isMix: random.nextBool(),
                             ),
-                          )
-                        : row,
-                  );
-                }),
+                          ),
+                        ),
+                      ),
+                    );
+                    return Padding(
+                      padding: EdgeInsets.only(bottom: rowGap + 8),
+                      child: widget.isWideLayout
+                          ? Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: ScreenValues.contentMaxWidth,
+                                ),
+                                child: row,
+                              ),
+                            )
+                          : row,
+                    );
+                  }),
+                ),
               ),
             ),
           ),
@@ -122,10 +145,31 @@ const double _captionBlockHeight = 76.0;
 /// A wide (search-layout) row is a fixed-height horizontal tile.
 const double _wideTileHeight = 128.0;
 
+/// Marks the second title line, so a test can tell a one-line tile from a
+/// two-line one without measuring pixels.
+@visibleForTesting
+const Key feedSkeletonSecondTitleLineKey = Key('feed-skeleton-second-title-line');
+
 class _SkeletonTile extends StatelessWidget {
-  const _SkeletonTile({required this.isWide});
+  const _SkeletonTile({
+    required this.isWide,
+    required this.twoLineTitle,
+    required this.secondLineFactor,
+    required this.isMix,
+  });
 
   final bool isWide;
+
+  /// Whether the title wraps onto a second line. Decided by the grid's seeded
+  /// generator, never here: a tile that rolled its own dice re-rolled them on
+  /// every rebuild.
+  final bool twoLineTitle;
+
+  /// How much of the width the second line fills, when there is one.
+  final double secondLineFactor;
+
+  /// Whether the channel icon is shown. (Video vs Mix)
+  final bool isMix;
 
   @override
   Widget build(BuildContext context) {
@@ -134,18 +178,25 @@ class _SkeletonTile extends StatelessWidget {
     // to read as "surface" in both themes, and `lib/ui` is lint-gated against
     // colour literals for exactly this reason.
     final block = scheme.surfaceContainerHighest;
+    final extra = isWide && twoLineTitle ? 8.0 : 0.0; // Extra space for the second line.
 
-    Widget bar(double widthFactor, double height) => FractionallySizedBox(
-          alignment: Alignment.centerLeft,
-          widthFactor: widthFactor,
-          child: Container(
-            height: height,
-            decoration: BoxDecoration(
-              color: block,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        );
+    Widget rect(double height) => Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: block,
+        borderRadius: BorderRadius.circular(4),
+      ),
+    );
+
+    // A fraction of the column's width. Only for a child of something that
+    // bounds its width — a `Column`, not a `Row`, which hands non-flex children
+    // unbounded width and makes this assert "forces an infinite width".
+    Widget bar(double widthFactor, double height, {Key? key}) => FractionallySizedBox(
+      key: key,
+      alignment: Alignment.centerLeft,
+      widthFactor: widthFactor,
+      child: rect(height),
+    );
 
     final thumbnail = ClipRRect(
       borderRadius: BorderRadius.circular(12),
@@ -157,7 +208,7 @@ class _SkeletonTile extends StatelessWidget {
 
     if (isWide) {
       return SizedBox(
-        height: _wideTileHeight,
+        height: _wideTileHeight + extra,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -168,6 +219,10 @@ class _SkeletonTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   bar(0.9, 16),
+                  if (twoLineTitle) ...[
+                    const SizedBox(height: 6),
+                    bar(secondLineFactor, 16, key: feedSkeletonSecondTitleLineKey),
+                  ],
                   const SizedBox(height: 10),
                   bar(0.5, 12),
                   const SizedBox(height: 8),
@@ -180,29 +235,75 @@ class _SkeletonTile extends StatelessWidget {
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Stack(
+      clipBehavior: Clip.none,
       children: [
-        thumbnail,
-        const SizedBox(height: 12),
-        Row(
+        // Stacked cards for Mixes
+        if (isMix) ...[
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 100),
+            top: -8,
+            left: 24,
+            right: 24,
+            bottom: 108,
+            child: Container(
+              decoration: BoxDecoration(
+                color: block.darken(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 100),
+            top: -4,
+            left: 12,
+            right: 12,
+            bottom: 104,
+            child: Container(
+              decoration: BoxDecoration(
+                color: block.darken(0.05),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ],
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(color: block, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  bar(1.0, 14),
-                  const SizedBox(height: 8),
-                  bar(0.55, 12),
+            thumbnail,
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!isMix) ...[
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(color: block, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 12),
                 ],
-              ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      bar(1.0, 14),
+                      if (twoLineTitle) ...[
+                        const SizedBox(height: 8),
+                        bar(secondLineFactor, 14, key: feedSkeletonSecondTitleLineKey),
+                      ],
+                      const SizedBox(height: 8),
+                      // channel name
+                      bar(0.25, 12),
+                      if (!isMix) ...[const SizedBox(height: 8),
+                      // views • age
+                      bar(0.45, 12),]
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.more_vert, size: 25, color: block),
+              ],
             ),
           ],
         ),
