@@ -15,7 +15,10 @@
       "replyCount": 10,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_001",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_002",
@@ -32,7 +35,10 @@
       "replyCount": 16,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_002",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_003",
@@ -49,7 +55,10 @@
       "replyCount": 9,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_003",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_004",
@@ -66,7 +75,10 @@
       "replyCount": 0,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_005",
@@ -90,7 +102,10 @@
       "replyCount": 28,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_005",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_006",
@@ -107,7 +122,10 @@
       "replyCount": 23,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_006",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_007",
@@ -124,7 +142,10 @@
       "replyCount": 260,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_007",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_008",
@@ -141,7 +162,10 @@
       "replyCount": 0,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_009",
@@ -158,7 +182,10 @@
       "replyCount": 3,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_009",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_010",
@@ -191,7 +218,10 @@
       "replyCount": 9,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_010",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_011",
@@ -208,7 +238,10 @@
       "replyCount": 85,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_011",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_012",
@@ -225,7 +258,10 @@
       "replyCount": 3,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_012",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_013",
@@ -242,7 +278,10 @@
       "replyCount": 394,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_013",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_014",
@@ -266,7 +305,10 @@
       "replyCount": 6,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_014",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_015",
@@ -283,7 +325,10 @@
       "replyCount": 31,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_015",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_016",
@@ -316,7 +361,10 @@
       "replyCount": 3,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_016",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_017",
@@ -333,7 +381,10 @@
       "replyCount": 13,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_017",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_018",
@@ -350,7 +401,10 @@
       "replyCount": 35,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_018",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_019",
@@ -367,7 +421,10 @@
       "replyCount": 19,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_019",
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_020",
@@ -384,8 +441,27 @@
       "replyCount": 0,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
     }
   ],
-  "continuation": "CONTINUATION_TOKEN_3"
+  "continuation": "CONTINUATION_TOKEN_3",
+  "chips": [
+    {
+      "label": "Category 1",
+      "token": "CHIP_TOKEN_1",
+      "selected": true,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 2",
+      "token": "CHIP_TOKEN_2",
+      "selected": false,
+      "scope": "feed"
+    }
+  ],
+  "commentCount": "86,800 Comments",
+  "createParams": null
 }

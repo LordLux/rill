@@ -24,6 +24,7 @@ import {
   playlistsForVideo,
   removeFromPlaylist,
 } from '../src/actions/playlist.ts';
+import { deleteComment, postComment, replyToComment } from '../src/actions/comments.ts';
 import { dislike, like, removeRating, subscribe, unsubscribe } from '../src/actions/interaction.ts';
 import { hasCode, isRpcError, type RpcError } from '../src/errors.ts';
 import { forgetPlayerResponse } from '../src/innertube/player-response.ts';
@@ -775,6 +776,220 @@ describe('action.subscribe / unsubscribe', () => {
       expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
       expect(session.calls).toHaveLength(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// action.postComment / replyToComment / deleteComment
+// ---------------------------------------------------------------------------
+
+describe('action.postComment / replyToComment / deleteComment', () => {
+  /**
+   * A `/comment/create_comment` answer, trimmed to what was measured live on
+   * 2026-09-18: `actionResult` at the top level, the new thread under
+   * `actions[].createCommentAction`, its entities in `frameworkUpdates`, and —
+   * for the author's own comment — a reply token and a Delete menu item on its
+   * toolbar surface.
+   */
+  function createResponse(status = 'STATUS_SUCCEEDED', withThread = true): unknown {
+    return {
+      actionResult: { status },
+      actions: [
+        { runAttestationCommand: { ids: [], engagementType: 'ENGAGEMENT_TYPE_COMMENT_POST' } },
+        ...(withThread
+          ? [
+              {
+                createCommentAction: {
+                  contents: {
+                    commentThreadRenderer: {
+                      commentViewModel: {
+                        commentViewModel: { commentKey: 'new-key', toolbarSurfaceKey: 'new-surface' },
+                      },
+                    },
+                  },
+                },
+              },
+            ]
+          : []),
+      ],
+      frameworkUpdates: {
+        entityBatchUpdate: {
+          mutations: [
+            {
+              payload: {
+                commentEntityPayload: {
+                  key: 'new-key',
+                  properties: {
+                    commentId: 'UgxNewComment',
+                    content: { content: 'hello there' },
+                    publishedTime: '0 seconds ago',
+                    replyLevel: 0,
+                  },
+                  author: { displayName: '@me', avatarThumbnailUrl: 'https://example.com/me.jpg', channelId: 'UCme' },
+                  toolbar: {},
+                },
+              },
+            },
+            {
+              payload: {
+                engagementToolbarSurfaceEntityPayload: {
+                  key: 'new-surface',
+                  replyCommand: {
+                    innertubeCommand: {
+                      createCommentReplyDialogEndpoint: {
+                        dialog: {
+                          commentReplyDialogRenderer: {
+                            replyButton: {
+                              buttonRenderer: {
+                                serviceEndpoint: { createCommentReplyEndpoint: { createReplyParams: 'NEW_REPLY_TOKEN' } },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  menuCommand: {
+                    innertubeCommand: {
+                      menuEndpoint: {
+                        menu: {
+                          menuRenderer: {
+                            items: [
+                              {
+                                menuNavigationItemRenderer: {
+                                  text: { runs: [{ text: 'Delete' }] },
+                                  navigationEndpoint: {
+                                    confirmDialogEndpoint: {
+                                      content: {
+                                        confirmDialogRenderer: {
+                                          confirmButton: {
+                                            buttonRenderer: {
+                                              serviceEndpoint: {
+                                                performCommentActionEndpoint: { action: 'NEW_DELETE_TOKEN' },
+                                              },
+                                            },
+                                          },
+                                        },
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  test('postComment sends createCommentParams and commentText to /comment/create_comment', async () => {
+    const session = stubSession({ '/comment/create_comment': createResponse() });
+    await postComment(session, 'CREATE_TOKEN', 'hello there');
+    expect(session.calls).toEqual([
+      {
+        endpoint: '/comment/create_comment',
+        params: { createCommentParams: 'CREATE_TOKEN', commentText: 'hello there' },
+      },
+    ]);
+  });
+
+  test('postComment answers the created comment — real id, and deletable and repliable at once', async () => {
+    // The reason it answers a `Comment` rather than `{}`: a client that had to
+    // invent a stand-in would have no id and no delete token for it until the
+    // list was refetched.
+    const session = stubSession({ '/comment/create_comment': createResponse() });
+    const { comment } = await postComment(session, 'CREATE_TOKEN', 'hello there');
+    expect(comment?.id).toBe('UgxNewComment');
+    expect(comment?.text.content).toBe('hello there');
+    expect(comment?.authorName).toBe('@me');
+    expect(comment?.deleteParams).toBe('NEW_DELETE_TOKEN');
+    expect(comment?.replyParams).toBe('NEW_REPLY_TOKEN');
+  });
+
+  test('a success that carries no thread is still a success, with no comment to show', async () => {
+    const session = stubSession({ '/comment/create_comment': createResponse('STATUS_SUCCEEDED', false) });
+    await expect(postComment(session, 'CREATE_TOKEN', 'hi')).resolves.toEqual({ comment: null });
+  });
+
+  test('STATUS_FAILED is a failure, not a success', async () => {
+    const session = stubSession({ '/comment/create_comment': createResponse('STATUS_FAILED') });
+    const failure = await postComment(session, 'CREATE_TOKEN', 'hi').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('replyToComment sends createReplyParams and commentText to /comment/create_comment_reply', async () => {
+    const session = stubSession({ '/comment/create_comment_reply': { actionResult: { status: 'STATUS_SUCCEEDED' } } });
+    await replyToComment(session, 'REPLY_TOKEN', 'a reply');
+    expect(session.calls).toEqual([
+      {
+        endpoint: '/comment/create_comment_reply',
+        params: { createReplyParams: 'REPLY_TOKEN', commentText: 'a reply' },
+      },
+    ]);
+  });
+
+  test('replyToComment refuses a STATUS_FAILED', async () => {
+    const session = stubSession({ '/comment/create_comment_reply': { actionResult: { status: 'STATUS_FAILED' } } });
+    const failure = await replyToComment(session, 'REPLY_TOKEN', 'a reply').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('deleteComment sends the action blob to /comment/perform_comment_action', async () => {
+    const session = stubSession({
+      '/comment/perform_comment_action': {
+        actions: [{ removeCommentAction: { commentId: 'x', actionResult: { status: 'STATUS_SUCCEEDED' } } }],
+      },
+    });
+    await deleteComment(session, 'DELETE_TOKEN');
+    expect(session.calls).toEqual([
+      { endpoint: '/comment/perform_comment_action', params: { action: 'DELETE_TOKEN' } },
+    ]);
+  });
+
+  test("deleteComment reads its status from where a delete puts it, and refuses a failure", async () => {
+    // Not `assertSucceeded`'s top-level `status`, and not `actionResult` at the
+    // top level like a create: nested under `removeCommentAction`. A check on
+    // either of the other two places would pass this response.
+    const session = stubSession({
+      '/comment/perform_comment_action': {
+        actions: [{ removeCommentAction: { commentId: 'x', actionResult: { status: 'STATUS_FAILED' } } }],
+      },
+    });
+    const failure = await deleteComment(session, 'DELETE_TOKEN').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('an upstream rejection is UPSTREAM_ERROR for all three', async () => {
+    const session = stubSession({}); // the stub throws for any endpoint it has no answer for
+    for (const run of [
+      () => postComment(session, 'T', 'x'),
+      () => replyToComment(session, 'T', 'x'),
+      () => deleteComment(session, 'T'),
+    ]) {
+      const failure = await run().catch((e: unknown) => e);
+      expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+    }
+  });
+
+  test('no cookie is AUTH_REQUIRED for all three, and never leaves the process', async () => {
+    const session = stubSession({}, false);
+    for (const run of [
+      () => postComment(session, 'T', 'x'),
+      () => replyToComment(session, 'T', 'x'),
+      () => deleteComment(session, 'T'),
+    ]) {
+      const failure = await run().catch((e: unknown) => e);
+      expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+    }
+    expect(session.calls).toHaveLength(0);
   });
 });
 

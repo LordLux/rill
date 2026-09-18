@@ -157,6 +157,8 @@ interface Comment {
   creatorHearted: boolean;
   isPinned: boolean;
   repliesContinuation: string | null;
+  replyParams: string | null;      // opaque; action.replyToComment
+  deleteParams: string | null;     // opaque, own comments only; action.deleteComment
 }
 
 interface CommentsResult {
@@ -164,6 +166,7 @@ interface CommentsResult {
   continuation: string | null;
   chips?: Chip[];
   commentCount: string | null;
+  createParams: string | null;     // opaque; action.postComment. null when the viewer cannot comment
 }
 
 interface Chip {
@@ -603,6 +606,28 @@ the answer.
   tail; anchor absent after a server re-seed) that an empty `items[]` would
   conflate. **`isInfinite` is `true` on every mix, including curated ones that
   run out after ~51 items** — never branch on it.
+- **A reply list is a tree the UI shows flat, and its count is a snapshot —
+  Task 27, measured 2026-09-18.** A reply-to-a-reply (`replyLevel` 2) nests in
+  its parent's `subThreads`; "Show more replies" is a *button*-shaped
+  continuation, not the `continuationEndpoint` a page of threads uses; and
+  `Comment.replyCount` lags removals — a signed-in view kept advertising a reply
+  the anonymous view already said was gone. The parser dropped all three until
+  then: a thread advertising 962 replies listed 5, with no way to continue.
+  `parseComments` now flattens nested replies (only a reply's own children, never
+  a top-level thread's inline ones) and reads both token shapes; the client trusts
+  the list it has *completely* fetched over the count it was told. `protocol.md`
+  §3.3 and `architecture.md` F30 have the shapes. Still open: a reply's own
+  "Show more replies" is unreachable, and `Comment.isLiked` is never true
+  (`todo.md` 39).
+- **A running debug app locks `sidecar/dist/sidecar.exe`.** `bun run build`,
+  `rill build` and `rill run` all fail with `EPERM: failed to move executable to
+  result path` while a `flutter run` session is open, because that session runs
+  the binary — and it runs the *old* one, so a new RPC or DTO field does not
+  exist there until the app is closed and the sidecar rebuilt. To verify without
+  disturbing it, build to another path (`bun build --compile --outfile
+  scratch/verify-sidecar src/main.ts`), copy that over the release bundle's
+  sidecar, and grep the bundle for a name only the new code has. Both apps are
+  titled "Rill": screenshots and clicks go to whichever is in front.
 - **A release `rill.exe` is two processes, and the first one is the log.**
   In a Release build the process you start is a launcher: it starts a second
   `rill.exe` with stdout/stderr on a pipe and writes every line, redacted and

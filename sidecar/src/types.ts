@@ -697,6 +697,23 @@ export interface Comment {
   creatorHearted: boolean;
   isPinned: boolean;
   repliesContinuation: string | null;
+  /**
+   * Opaque token for `action.replyToComment`. `null` when the viewer cannot
+   * reply — not signed in, same rule as the top-level create box carrying a
+   * `prepareAccountCommand` instead of a real endpoint. Verified live
+   * 2026-09-18: the real request is `comment/create_comment_reply`, a
+   * distinct endpoint from top-level posting, not a variant of it.
+   */
+  replyParams: string | null;
+  /**
+   * Opaque token for `action.deleteComment`. `null` unless the viewer is this
+   * comment's own author — the field simply doesn't exist in the response
+   * otherwise, there is no separate "am I the author" flag to read instead.
+   * Verified live 2026-09-18: delete reuses `comment/perform_comment_action`,
+   * the same endpoint a comment like/dislike goes over, differentiated only
+   * by which pre-built opaque `action` blob is sent.
+   */
+  deleteParams: string | null;
 }
 
 export interface CommentsResult {
@@ -704,6 +721,17 @@ export interface CommentsResult {
   continuation: string | null;
   chips?: Chip[];
   commentCount: string | null;
+  /**
+   * Opaque token for `action.postComment` — the "Add a comment…" box's own
+   * submit endpoint, off the same header that carries the sort chips.
+   *
+   * `null` when the viewer cannot comment: an anonymous session is handed a
+   * sign-in prompt in that slot instead of an endpoint. Also `null` on every
+   * page but the first (a continuation carries no header), so a client keeps
+   * the last non-null one rather than overwriting it — the same rule it already
+   * follows for `chips` and `commentCount`.
+   */
+  createParams: string | null;
 }
 
 // ---------------------------------------------------------------------------

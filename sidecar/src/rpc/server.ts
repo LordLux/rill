@@ -581,6 +581,23 @@ async function handleRequest(request: RpcRequest) {
       const { removeRating } = await import('../actions/interaction.ts');
       const result = await removeRating(await getBrowseSession(), videoId);
       emitResponse(id, result);
+    } else if (method === 'action.postComment') {
+      const createParams = requireString(params, 'createParams', 'action.postComment');
+      const commentText = requireString(params, 'commentText', 'action.postComment');
+      const { postComment } = await import('../actions/comments.ts');
+      const result = await postComment(await getBrowseSession(), createParams, commentText);
+      emitResponse(id, result);
+    } else if (method === 'action.replyToComment') {
+      const replyParams = requireString(params, 'replyParams', 'action.replyToComment');
+      const commentText = requireString(params, 'commentText', 'action.replyToComment');
+      const { replyToComment } = await import('../actions/comments.ts');
+      const result = await replyToComment(await getBrowseSession(), replyParams, commentText);
+      emitResponse(id, result);
+    } else if (method === 'action.deleteComment') {
+      const deleteParams = requireString(params, 'deleteParams', 'action.deleteComment');
+      const { deleteComment } = await import('../actions/comments.ts');
+      const result = await deleteComment(await getBrowseSession(), deleteParams);
+      emitResponse(id, result);
     } else if (method === 'action.subscribe') {
       const channelId = requireString(params, 'channelId', 'action.subscribe');
       const { subscribe } = await import('../actions/interaction.ts');
