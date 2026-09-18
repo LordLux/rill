@@ -152,9 +152,12 @@ const SHAPES = {
     creatorHearted: 'boolean',
     isPinned: 'boolean',
     repliesContinuation: 'string?',
+    replyParams: 'string?',
+    deleteParams: 'string?',
   },
 } as const;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic shape validator, deliberately untyped input
 function validateShape(name: keyof typeof SHAPES, item: any, allowKind = false): string[] {
   const problems: string[] = [];
   const shape = SHAPES[name];
@@ -1474,13 +1477,294 @@ describe('video.comments (Task 27)', () => {
   test.if(hasFixture('comments-replies'))('parses comment replies', () => {
     const raw = fixture('comments-replies');
     const result = parseComments(raw, 'comments-replies');
-    
+
     expect(result.items.length).toBeGreaterThan(0);
     // Replies might not have chips
-    
+
     for (const item of result.items) {
       expect(validateShape('comment', item)).toEqual([]);
     }
+  });
+
+  // Synthetic rather than fixture-based: `sidecar/fixtures/comments.json` was
+  // captured anonymously (no session), so every real comment in it carries no
+  // reply/delete commands at all — it cannot exercise the populated case.
+  // Shape verified live 2026-09-18 against an authenticated session.
+  function threadWithSurfaceEntity(surfaceEntityPayload: Record<string, unknown> | null) {
+    const mutations: unknown[] = [
+      {
+        payload: {
+          commentEntityPayload: {
+            key: 'comment-key',
+            properties: { commentId: 'UgxTest', content: { content: 'hi' } },
+            author: { displayName: 'Someone', avatarThumbnailUrl: 'https://example.com/a.jpg' },
+            toolbar: {},
+          },
+        },
+      },
+    ];
+    if (surfaceEntityPayload) {
+      mutations.push({ payload: { engagementToolbarSurfaceEntityPayload: { key: 'surface-key', ...surfaceEntityPayload } } });
+    }
+    return {
+      frameworkUpdates: { entityBatchUpdate: { mutations } },
+      onResponseReceivedEndpoints: [
+        {
+          reloadContinuationItemsCommand: {
+            continuationItems: [
+              {
+                commentThreadRenderer: {
+                  commentViewModel: {
+                    commentViewModel: { commentKey: 'comment-key', toolbarSurfaceKey: 'surface-key' },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+  }
+
+  test('extracts replyParams and deleteParams when the toolbar surface carries them', () => {
+    const raw = threadWithSurfaceEntity({
+      replyCommand: {
+        innertubeCommand: {
+          createCommentReplyDialogEndpoint: {
+            dialog: {
+              commentReplyDialogRenderer: {
+                replyButton: {
+                  buttonRenderer: {
+                    serviceEndpoint: { createCommentReplyEndpoint: { createReplyParams: 'REPLY_TOKEN' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      menuCommand: {
+        innertubeCommand: {
+          menuEndpoint: {
+            menu: {
+              menuRenderer: {
+                items: [
+                  {
+                    menuNavigationItemRenderer: {
+                      text: { runs: [{ text: 'Delete' }] },
+                      navigationEndpoint: {
+                        confirmDialogEndpoint: {
+                          content: {
+                            confirmDialogRenderer: {
+                              confirmButton: {
+                                buttonRenderer: {
+                                  serviceEndpoint: { performCommentActionEndpoint: { action: 'DELETE_TOKEN' } },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = parseComments(raw, 'synthetic');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.replyParams).toBe('REPLY_TOKEN');
+    expect(result.items[0]?.deleteParams).toBe('DELETE_TOKEN');
+  });
+
+  test('leaves replyParams and deleteParams null for an anonymous viewer', () => {
+    // No engagementToolbarSurfaceEntityPayload at all — the anonymous shape,
+    // matching sidecar/fixtures/comments.json's real create-box behaviour
+    // (a prepareAccountCommand instead of a real endpoint).
+    const raw = threadWithSurfaceEntity(null);
+    const result = parseComments(raw, 'synthetic');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.replyParams).toBeNull();
+    expect(result.items[0]?.deleteParams).toBeNull();
+  });
+
+  test('leaves deleteParams null when the menu has no Delete item (not the viewer\'s own comment)', () => {
+    const raw = threadWithSurfaceEntity({
+      replyCommand: {
+        innertubeCommand: {
+          createCommentReplyDialogEndpoint: {
+            dialog: {
+              commentReplyDialogRenderer: {
+                replyButton: {
+                  buttonRenderer: {
+                    serviceEndpoint: { createCommentReplyEndpoint: { createReplyParams: 'REPLY_TOKEN' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      menuCommand: {
+        innertubeCommand: {
+          menuEndpoint: {
+            menu: { menuRenderer: { items: [{ menuNavigationItemRenderer: { text: { runs: [{ text: 'Report' }] } } }] } },
+          },
+        },
+      },
+    });
+
+    const result = parseComments(raw, 'synthetic');
+    expect(result.items[0]?.replyParams).toBe('REPLY_TOKEN');
+    expect(result.items[0]?.deleteParams).toBeNull();
+  });
+});
+
+// The reply tree, the reply list's load-more button, and the comment box's
+// token — all measured live 2026-09-18 (`protocol.md` §3.3, "A reply list is a
+// tree that the UI shows flat"), and all built here from the real shapes rather
+// than from a fixture: the checked-in comment fixtures are anonymous and
+// shallow, so none of them contains a nested reply, a load-more button or a
+// signed-in comment box. Each test below fails against the parser as it stood
+// before that measurement.
+describe('video.comments — reply tree, pagination and the comment box', () => {
+  /** A comment entity plus the (empty) toolbar-surface entity its view model points at. */
+  function commentEntities(key: string, id: string, replyLevel: number): unknown[] {
+    return [
+      {
+        payload: {
+          commentEntityPayload: {
+            key,
+            properties: { commentId: id, content: { content: `text of ${id}` }, replyLevel },
+            author: { displayName: `Author of ${id}`, avatarThumbnailUrl: 'https://example.com/a.jpg' },
+            toolbar: {},
+          },
+        },
+      },
+      { payload: { engagementToolbarSurfaceEntityPayload: { key: `${key}-surface` } } },
+    ];
+  }
+
+  function thread(key: string, subThreads: unknown[] = []): unknown {
+    return {
+      commentThreadRenderer: {
+        commentViewModel: { commentViewModel: { commentKey: key, toolbarSurfaceKey: `${key}-surface` } },
+        ...(subThreads.length ? { replies: { commentRepliesRenderer: { subThreads } } } : {}),
+      },
+    };
+  }
+
+  function page(items: unknown[], mutations: unknown[]): unknown {
+    return {
+      frameworkUpdates: { entityBatchUpdate: { mutations } },
+      onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: items } }],
+    };
+  }
+
+  /** The "Show more replies" control: a button, not a `continuationEndpoint`. */
+  function moreRepliesButton(token: string): unknown {
+    return {
+      continuationItemRenderer: {
+        button: { buttonRenderer: { command: { continuationCommand: { token } } } },
+      },
+    };
+  }
+
+  test('a reply nested inside a reply is listed, after its parent', () => {
+    const raw = page(
+      [thread('r1', [thread('r2')])],
+      [...commentEntities('r1', 'reply-1', 1), ...commentEntities('r2', 'reply-2', 2)],
+    );
+    // The advertised count for such a thread is 2; the parser used to list 1.
+    expect(parseComments(raw, 'synthetic').items.map((c) => c.id)).toEqual(['reply-1', 'reply-2']);
+  });
+
+  test('replies nested more than one level down are all listed, depth-first', () => {
+    const raw = page(
+      [thread('r1', [thread('r2', [thread('r3')]), thread('r4')]), thread('r5')],
+      [
+        ...commentEntities('r1', 'reply-1', 1),
+        ...commentEntities('r2', 'reply-2', 2),
+        ...commentEntities('r3', 'reply-3', 3),
+        ...commentEntities('r4', 'reply-4', 2),
+        ...commentEntities('r5', 'reply-5', 1),
+      ],
+    );
+    expect(parseComments(raw, 'synthetic').items.map((c) => c.id)).toEqual([
+      'reply-1', 'reply-2', 'reply-3', 'reply-4', 'reply-5',
+    ]);
+  });
+
+  test("a top-level comment's inline replies are not spliced into the main list", () => {
+    // The flattening is for a reply's own children only. Done for a level-0
+    // thread it would put replies among the top-level comments.
+    const raw = page(
+      [thread('t1', [thread('r1')])],
+      [...commentEntities('t1', 'top-1', 0), ...commentEntities('r1', 'reply-1', 1)],
+    );
+    expect(parseComments(raw, 'synthetic').items.map((c) => c.id)).toEqual(['top-1']);
+  });
+
+  test("a reply list's load-more token is read from the button shape", () => {
+    // 962 advertised replies, 5 listed, no way to load more — the token was
+    // there the whole time, in a shape nothing read.
+    const raw = page(
+      [thread('r1'), moreRepliesButton('MORE_REPLIES')],
+      commentEntities('r1', 'reply-1', 1),
+    );
+    expect(parseComments(raw, 'synthetic').continuation).toBe('MORE_REPLIES');
+  });
+
+  test('a page of threads still reads its continuationEndpoint token', () => {
+    const raw = page(
+      [
+        thread('t1'),
+        { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'MORE_THREADS' } } } },
+      ],
+      commentEntities('t1', 'top-1', 0),
+    );
+    expect(parseComments(raw, 'synthetic').continuation).toBe('MORE_THREADS');
+  });
+
+  test("a thread's replies token can be the button shape too", () => {
+    const raw = page([thread('t1', [moreRepliesButton('OPEN_REPLIES')])], commentEntities('t1', 'top-1', 0));
+    expect(parseComments(raw, 'synthetic').items[0]?.repliesContinuation).toBe('OPEN_REPLIES');
+  });
+
+  describe('createParams', () => {
+    const header = (createRenderer: unknown): unknown => ({
+      commentsHeaderRenderer: { countText: { runs: [{ text: '4 Comments' }] }, createRenderer },
+    });
+    const signedIn = {
+      commentSimpleboxRenderer: {
+        submitButton: {
+          buttonRenderer: {
+            serviceEndpoint: { createCommentEndpoint: { createCommentParams: 'CREATE_TOKEN' } },
+          },
+        },
+      },
+    };
+    // What the anonymous fixture actually holds: a sign-in prompt, no endpoint.
+    const anonymous = {
+      commentSimpleboxRenderer: { prepareAccountEndpoint: { modalEndpoint: {} } },
+    };
+
+    test('is read off the comment box for a signed-in viewer', () => {
+      expect(parseComments(page([header(signedIn)], []), 'synthetic').createParams).toBe('CREATE_TOKEN');
+    });
+
+    test('is null for an anonymous viewer, whose box is a sign-in prompt', () => {
+      expect(parseComments(page([header(anonymous)], []), 'synthetic').createParams).toBeNull();
+    });
+
+    test('is null on a page with no header — a continuation carries none', () => {
+      const raw = page([thread('t1')], commentEntities('t1', 'top-1', 0));
+      expect(parseComments(raw, 'synthetic').createParams).toBeNull();
+    });
   });
 });
 

@@ -71,6 +71,8 @@ abstract class Comment with _$Comment {
     @Default(false) bool creatorHearted,
     @Default(false) bool isPinned,
     String? repliesContinuation,
+    String? replyParams,
+    String? deleteParams,
   }) = _Comment;
 
   factory Comment.fromJson(Map<String, Object?> json) => _$CommentFromJson(json);
@@ -84,6 +86,7 @@ abstract class CommentsResult with _$CommentsResult {
     String? continuation,
     List<Chip>? chips,
     String? commentCount,
+    String? createParams,
   }) = _CommentsResult;
 
   factory CommentsResult.fromJson(Map<String, Object?> json) => _$CommentsResultFromJson(json);

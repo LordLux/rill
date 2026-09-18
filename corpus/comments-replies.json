@@ -15,7 +15,10 @@
       "replyCount": 0,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
     },
     {
       "id": "cmt_002",
@@ -32,8 +35,13 @@
       "replyCount": 0,
       "isLiked": false,
       "creatorHearted": true,
-      "isPinned": false
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
     }
   ],
-  "continuation": null
+  "continuation": null,
+  "commentCount": null,
+  "createParams": null
 }

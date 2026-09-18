@@ -177,7 +177,7 @@ function sanitiseArtistPanel(panel: ArtistPanel): ArtistPanel {
   };
 }
 
-import type { Comment, CommentText, CommentStyleRun, CommentCommandRun } from './types.ts';
+import type { Comment, CommentText } from './types.ts';
 
 function sanitiseCommentText(text: CommentText, index: number): CommentText {
   return {
@@ -198,6 +198,8 @@ function sanitiseComment(comment: Comment, index: number): Comment {
     text: sanitiseCommentText(comment.text, index),
     likeCount: comment.likeCount ? `Sanitised Likes ${index + 1}` : null,
     repliesContinuation: comment.repliesContinuation ? `CONTINUATION_TOKEN_${seq}` : null,
+    replyParams: comment.replyParams ? 'REPLY_PARAMS' : null,
+    deleteParams: comment.deleteParams ? 'DELETE_PARAMS' : null,
   };
 }
 
@@ -219,6 +221,7 @@ async function main() {
         chips: parsed.chips?.map(sanitiseChip()),
         items: parsed.items.map(sanitiseComment),
         continuation: sanitiseContinuation(parsed.continuation, fileIndex),
+        createParams: parsed.createParams ? 'CREATE_PARAMS' : null,
       };
       await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
       log.info(`exported sanitised ${file}`);

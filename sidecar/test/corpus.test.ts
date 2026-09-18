@@ -126,6 +126,10 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   label: /^(All|Category \d+)$/,
   token: /^(|CHIP_TOKEN_(ALL|\d+))$/,
   continuation: /^CONTINUATION_TOKEN_\d+$/,
+  // Task 27's own continuation, sanitised the same way but never added here —
+  // exactly the export/test-in-different-files gap CLAUDE.md already warns
+  // about, caught the same way: running the exporter, not `bun run check`.
+  repliesContinuation: /^CONTINUATION_TOKEN_\d+$/,
 
   // Channel subscriber counts are public, but no channel tile has reached the
   // corpus yet; require a synthetic value rather than guessing a policy.
@@ -147,6 +151,13 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   likeCount: /^Sanitised Likes \d+$/,
   url: /^https:\/\/fake\.url$/,
   videoId: /^vid_\d{3,}$/,
+  // Reply/delete tokens (2026-09-18) — opaque, server-issued, same treatment
+  // as `startParams`.
+  replyParams: /^REPLY_PARAMS$/,
+  deleteParams: /^DELETE_PARAMS$/,
+  // The comment box's own submit token. Real ones encode the video id in
+  // base64, which layer 1's forbidden-shape list would flag on its own.
+  createParams: /^CREATE_PARAMS$/,
 
   // Caption tracks. `languageCode` is a BCP-47-ish tag from a closed-ish
   // vocabulary and identifies nobody, so it survives verbatim — but it is
