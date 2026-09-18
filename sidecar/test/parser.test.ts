@@ -16,7 +16,7 @@ import { parseFeed, parsePlayer, parseVideoDetail } from '../src/parser/index.ts
 import { logger, resetUnknownRenderers, unknownRendererCounts } from '../src/log.ts';
 import { countTiles } from '../src/innertube/session.ts';
 import { isPublishedText, isViewCountText } from '../src/parser/text.ts';
-import { walk, type JsonObject } from '../src/parser/tree.ts';
+import { get, walk, type JsonObject } from '../src/parser/tree.ts';
 import { firstChannelOrderViolation } from '../src/parser/channel-order.ts';
 import type { FeedItem } from '../src/types.ts';
 
@@ -1765,6 +1765,163 @@ describe('video.comments — reply tree, pagination and the comment box', () => 
       const raw = page([thread('t1')], commentEntities('t1', 'top-1', 0));
       expect(parseComments(raw, 'synthetic').createParams).toBeNull();
     });
+  });
+});
+
+describe("video.comments — the viewer's like and the creator's heart", () => {
+  type State = { likeState?: string; heartState?: string };
+  const LIKED = { likeState: 'TOOLBAR_LIKE_STATE_LIKED', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED' };
+  const HEARTED = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_HEARTED' };
+  const NEITHER = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED' };
+
+  /**
+   * A comment entity shaped like a real toolbar — including the two things the
+   * old parser misread. `heartActiveTooltip` is on **every** comment, hearted or
+   * not (measured 2026-09-19, 120 of 120), and the count ships twice, with the
+   * viewer's like in it and without. `state: null` leaves the state entity out.
+   */
+  function comment(key: string, id: string, state: State | null, replyLevel = 0): unknown[] {
+    const out: unknown[] = [
+      {
+        payload: {
+          commentEntityPayload: {
+            key,
+            properties: { commentId: id, content: { content: `text of ${id}` }, replyLevel },
+            author: { displayName: `Author of ${id}`, avatarThumbnailUrl: 'https://example.com/a.jpg' },
+            toolbar: {
+              likeCountLiked: '11',
+              likeCountNotliked: '10',
+              likeCountA11y: '10 likes',
+              heartActiveTooltip: '❤ by @creator',
+            },
+          },
+        },
+      },
+    ];
+    if (state) out.push({ payload: { engagementToolbarStateEntityPayload: { key: `${key}-state`, ...state } } });
+    return out;
+  }
+
+  function thread(key: string, subThreads: unknown[] = []): unknown {
+    return {
+      commentThreadRenderer: {
+        commentViewModel: {
+          commentViewModel: { commentKey: key, toolbarStateKey: `${key}-state` },
+        },
+        ...(subThreads.length ? { replies: { commentRepliesRenderer: { subThreads } } } : {}),
+      },
+    };
+  }
+
+  function page(items: unknown[], mutations: unknown[]): unknown {
+    return {
+      frameworkUpdates: { entityBatchUpdate: { mutations } },
+      onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: items } }],
+    };
+  }
+
+  test('a comment the viewer liked is isLiked, and the others are not', () => {
+    const raw = page(
+      [thread('a'), thread('b'), thread('c')],
+      [...comment('a', 'liked', LIKED), ...comment('b', 'hearted', HEARTED), ...comment('c', 'plain', NEITHER)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.isLiked])).toEqual([['liked', true], ['hearted', false], ['plain', false]]);
+  });
+
+  test('creatorHearted follows the heart state, not the tooltip every comment carries', () => {
+    // All three carry `heartActiveTooltip`; exactly one is hearted. The
+    // tooltip-based reading reported all three — measured live as 120 of 120.
+    const raw = page(
+      [thread('a'), thread('b'), thread('c')],
+      [...comment('a', 'liked', LIKED), ...comment('b', 'hearted', HEARTED), ...comment('c', 'plain', NEITHER)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.creatorHearted])).toEqual([['liked', false], ['hearted', true], ['plain', false]]);
+  });
+
+  test('a comment can be both liked and hearted', () => {
+    const both = { likeState: LIKED.likeState, heartState: HEARTED.heartState };
+    const [item] = parseComments(page([thread('a')], comment('a', 'both', both)), 'synthetic').items;
+    expect([item!.isLiked, item!.creatorHearted]).toEqual([true, true]);
+  });
+
+  test("the count is the viewer's own: with their like in it when they liked the comment", () => {
+    // A liked comment: `likeCountLiked` 11 / `likeCountNotliked` 10 — the shape
+    // measured 2026-09-19 (737 / 736, a11y "737 likes"). Shipping the un-liked
+    // one showed a comment you liked one like short, beside a filled thumb.
+    const raw = page(
+      [thread('a'), thread('b')],
+      [...comment('a', 'liked', LIKED), ...comment('b', 'plain', NEITHER)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => c.likeCount)).toEqual(['11', '10']);
+  });
+
+  test('a comment with no state entity is neither liked nor hearted, and is still shipped', () => {
+    // The view model names a state key the batch does not hold. Not a reason to
+    // drop the comment (CLAUDE.md, "still ship the item"): the answer is false.
+    const raw = page([thread('a')], comment('a', 'orphan', null));
+    const [item] = parseComments(raw, 'synthetic').items;
+    expect(item!.id).toBe('orphan');
+    expect([item!.isLiked, item!.creatorHearted]).toEqual([false, false]);
+    expect(item!.likeCount).toBe('10');
+  });
+
+  test('a view model with no toolbarStateKey at all reads the same way', () => {
+    const noKey = {
+      commentThreadRenderer: { commentViewModel: { commentViewModel: { commentKey: 'a' } } },
+    };
+    const [item] = parseComments(page([noKey], comment('a', 'keyless', LIKED)), 'synthetic').items;
+    expect([item!.isLiked, item!.creatorHearted]).toEqual([false, false]);
+  });
+
+  test('a reply carries its own state, including one nested under another reply', () => {
+    const raw = page(
+      [thread('r1', [thread('r2')])],
+      [...comment('r1', 'reply-1', NEITHER, 1), ...comment('r2', 'reply-2', LIKED, 2)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.isLiked])).toEqual([['reply-1', false], ['reply-2', true]]);
+  });
+
+  // The dedicated signed-in capture (`fixtures/comments-viewer-state.json`, a
+  // page with liked and hearted comments in it). What it must hold is computed
+  // from the raw entities here, not written down, so a recapture on another
+  // video or day cannot make this pass or fail for a reason that is not the parser.
+  function rawStates(raw: unknown): { liked: number; hearted: number } {
+    let liked = 0;
+    let hearted = 0;
+    const mutations = get(raw, 'frameworkUpdates', 'entityBatchUpdate', 'mutations');
+    for (const m of Array.isArray(mutations) ? mutations : []) {
+      const state = get(m, 'payload', 'engagementToolbarStateEntityPayload');
+      if (get(state, 'likeState') === 'TOOLBAR_LIKE_STATE_LIKED') liked++;
+      if (get(state, 'heartState') === 'TOOLBAR_HEART_STATE_HEARTED') hearted++;
+    }
+    return { liked, hearted };
+  }
+
+  test.if(hasFixture('comments-viewer-state'))('a real signed-in page reads the states its entities hold', () => {
+    const raw = fixture('comments-viewer-state');
+    const truth = rawStates(raw);
+    const items = parseComments(raw, 'comments-viewer-state').items;
+
+    // The capture is only a control if the states are actually in it.
+    expect(truth.liked).toBeGreaterThan(0);
+    expect(truth.hearted).toBeGreaterThan(0);
+    expect(truth.hearted).toBeLessThan(items.length);
+
+    expect(items.filter((c) => c.isLiked).length).toBe(truth.liked);
+    expect(items.filter((c) => c.creatorHearted).length).toBe(truth.hearted);
+  });
+
+  test.if(hasFixture('comments'))('an anonymous page never reads as liked, and hearts are not universal', () => {
+    const raw = fixture('comments');
+    const truth = rawStates(raw);
+    const items = parseComments(raw, 'comments').items;
+    expect(truth.liked).toBe(0);
+    expect(items.some((c) => c.isLiked)).toBe(false);
+    expect(items.filter((c) => c.creatorHearted).length).toBe(truth.hearted);
   });
 });
 

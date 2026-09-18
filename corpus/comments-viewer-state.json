@@ -6,15 +6,15 @@
       "authorAvatarUrl": "https://fake.url/avatar1.jpg",
       "authorChannelId": "chan_001",
       "isUploader": false,
-      "isVerified": false,
+      "isVerified": true,
       "text": {
         "content": "Sanitised Comment Text 1"
       },
       "likeCount": "Sanitised Likes 1",
-      "publishedText": "2 weeks ago",
-      "replyCount": 10,
+      "publishedText": "1 year ago",
+      "replyCount": 962,
       "isLiked": false,
-      "creatorHearted": false,
+      "creatorHearted": true,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_001",
       "replyParams": null,
@@ -31,13 +31,13 @@
         "content": "Sanitised Comment Text 2"
       },
       "likeCount": "Sanitised Likes 2",
-      "publishedText": "1 year ago",
-      "replyCount": 16,
+      "publishedText": "1 month ago",
+      "replyCount": 106,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_002",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -51,13 +51,13 @@
         "content": "Sanitised Comment Text 3"
       },
       "likeCount": "Sanitised Likes 3",
-      "publishedText": "1 year ago",
-      "replyCount": 9,
+      "publishedText": "1 month ago",
+      "replyCount": 248,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_003",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -71,13 +71,13 @@
         "content": "Sanitised Comment Text 4"
       },
       "likeCount": "Sanitised Likes 4",
-      "publishedText": "2 weeks ago",
-      "replyCount": 0,
-      "isLiked": false,
+      "publishedText": "6 years ago",
+      "replyCount": 695,
+      "isLiked": true,
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": null,
-      "replyParams": null,
+      "repliesContinuation": "CONTINUATION_TOKEN_004",
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -88,23 +88,16 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 5",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ]
+        "content": "Sanitised Comment Text 5"
       },
       "likeCount": "Sanitised Likes 5",
-      "publishedText": "6 years ago",
-      "replyCount": 28,
+      "publishedText": "16 hours ago",
+      "replyCount": 1,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_005",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -118,13 +111,13 @@
         "content": "Sanitised Comment Text 6"
       },
       "likeCount": "Sanitised Likes 6",
-      "publishedText": "2 years ago (edited)",
-      "replyCount": 23,
+      "publishedText": "1 month ago",
+      "replyCount": 50,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_006",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -138,13 +131,13 @@
         "content": "Sanitised Comment Text 7"
       },
       "likeCount": "Sanitised Likes 7",
-      "publishedText": "5 years ago",
-      "replyCount": 260,
+      "publishedText": "1 month ago",
+      "replyCount": 40,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_007",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -158,13 +151,13 @@
         "content": "Sanitised Comment Text 8"
       },
       "likeCount": "Sanitised Likes 8",
-      "publishedText": "1 month ago",
-      "replyCount": 0,
+      "publishedText": "6 years ago",
+      "replyCount": 653,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": null,
-      "replyParams": null,
+      "repliesContinuation": "CONTINUATION_TOKEN_008",
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -178,13 +171,13 @@
         "content": "Sanitised Comment Text 9"
       },
       "likeCount": "Sanitised Likes 9",
-      "publishedText": "2 years ago",
-      "replyCount": 3,
+      "publishedText": "2 days ago",
+      "replyCount": 23,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_009",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -195,32 +188,16 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 10",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ],
-        "commandRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "url": "https://fake.url",
-            "videoId": "vid_001",
-            "startTimeSeconds": 120
-          }
-        ]
+        "content": "Sanitised Comment Text 10"
       },
       "likeCount": "Sanitised Likes 10",
-      "publishedText": "7 years ago",
-      "replyCount": 9,
+      "publishedText": "6 years ago (edited)",
+      "replyCount": 542,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_010",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -234,13 +211,13 @@
         "content": "Sanitised Comment Text 11"
       },
       "likeCount": "Sanitised Likes 11",
-      "publishedText": "10 years ago",
-      "replyCount": 85,
+      "publishedText": "7 years ago",
+      "replyCount": 580,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_011",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -254,13 +231,13 @@
         "content": "Sanitised Comment Text 12"
       },
       "likeCount": "Sanitised Likes 12",
-      "publishedText": "9 months ago",
-      "replyCount": 3,
+      "publishedText": "1 month ago",
+      "replyCount": 48,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_012",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -268,19 +245,19 @@
       "authorName": "Sanitised Author 13",
       "authorAvatarUrl": "https://fake.url/avatar13.jpg",
       "authorChannelId": "chan_013",
-      "isUploader": true,
-      "isVerified": true,
+      "isUploader": false,
+      "isVerified": false,
       "text": {
         "content": "Sanitised Comment Text 13"
       },
       "likeCount": "Sanitised Likes 13",
-      "publishedText": "6 years ago",
-      "replyCount": 394,
+      "publishedText": "1 day ago (edited)",
+      "replyCount": 1,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_013",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -291,19 +268,12 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 14",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ]
+        "content": "Sanitised Comment Text 14"
       },
       "likeCount": "Sanitised Likes 14",
       "publishedText": "6 years ago",
-      "replyCount": 6,
-      "isLiked": false,
+      "replyCount": 962,
+      "isLiked": true,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_014",
@@ -321,13 +291,13 @@
         "content": "Sanitised Comment Text 15"
       },
       "likeCount": "Sanitised Likes 15",
-      "publishedText": "7 years ago (edited)",
-      "replyCount": 31,
+      "publishedText": "1 month ago",
+      "replyCount": 66,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_015",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -338,32 +308,16 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 16",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ],
-        "commandRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "url": "https://fake.url",
-            "videoId": "vid_001",
-            "startTimeSeconds": 120
-          }
-        ]
+        "content": "Sanitised Comment Text 16"
       },
       "likeCount": "Sanitised Likes 16",
-      "publishedText": "5 months ago",
-      "replyCount": 3,
+      "publishedText": "7 months ago",
+      "replyCount": 867,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_016",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -377,13 +331,13 @@
         "content": "Sanitised Comment Text 17"
       },
       "likeCount": "Sanitised Likes 17",
-      "publishedText": "5 years ago",
-      "replyCount": 13,
+      "publishedText": "4 days ago",
+      "replyCount": 20,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_017",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -397,13 +351,13 @@
         "content": "Sanitised Comment Text 18"
       },
       "likeCount": "Sanitised Likes 18",
-      "publishedText": "4 years ago",
-      "replyCount": 35,
-      "isLiked": false,
+      "publishedText": "6 years ago",
+      "replyCount": 855,
+      "isLiked": true,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_018",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -417,13 +371,13 @@
         "content": "Sanitised Comment Text 19"
       },
       "likeCount": "Sanitised Likes 19",
-      "publishedText": "6 years ago",
-      "replyCount": 19,
+      "publishedText": "1 month ago",
+      "replyCount": 17,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_019",
-      "replyParams": null,
+      "replyParams": "REPLY_PARAMS",
       "deleteParams": null
     },
     {
@@ -434,20 +388,27 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 20"
+        "content": "Sanitised Comment Text 20",
+        "styleRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "weightLabel": "FONT_WEIGHT_MEDIUM"
+          }
+        ]
       },
       "likeCount": "Sanitised Likes 20",
-      "publishedText": "13 days ago",
-      "replyCount": 0,
-      "isLiked": false,
+      "publishedText": "6 years ago (edited)",
+      "replyCount": 933,
+      "isLiked": true,
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": null,
+      "repliesContinuation": "CONTINUATION_TOKEN_020",
       "replyParams": null,
       "deleteParams": null
     }
   ],
-  "continuation": "CONTINUATION_TOKEN_4",
+  "continuation": "CONTINUATION_TOKEN_3",
   "chips": [
     {
       "label": "Category 1",
@@ -462,6 +423,6 @@
       "scope": "feed"
     }
   ],
-  "commentCount": "86,800 Comments",
-  "createParams": null
+  "commentCount": "2,457,470 Comments",
+  "createParams": "CREATE_PARAMS"
 }

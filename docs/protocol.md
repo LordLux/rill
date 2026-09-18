@@ -245,6 +245,20 @@ returned zero renderers, while the *anonymous* view of the same comment, at the
 same moment, advertised 0 and carried no token. The client therefore trusts the
 list it has actually fetched over the count it was told (`comments_section.dart`).
 
+**A comment's like state and the creator's heart are on their own entity, not on the comment — measured 2026-09-19 (`architecture.md` F33).**
+`isLiked` and `creatorHearted` are read from `engagementToolbarStateEntityPayload`
+(`{likeState, heartState}`, reached through the view model's `toolbarStateKey`)
+and from nothing else. The comment entity's own `toolbar` looks as though it
+should carry them and does not: it holds `heartActiveTooltip` (`"❤ by @creator"`)
+on **every** comment, which is the tooltip *for* the hearted state, present
+whether or not there is a heart. Reading it as one marked all 120 comments of a
+six-video sample hearted where the state entity says 4, and the key the parser
+read for `isLiked` was never there, so that was `false` throughout. `likeState`
+is the *viewer's* — an anonymous session reads `INDIFFERENT` on every comment —
+while `heartState` is public and the same in both views. `Comment.likeCount`
+follows the state as well: the toolbar ships the count with the viewer's like in
+it and without, and a comment the viewer liked is shown with the first.
+
 **What this does and does not show about "shadowbanned" replies.** It shows the
 count lagging the list in a signed-in view after a removal, which is enough to
 explain "I deleted my reply and it still says 1 reply" with no hiding involved.

@@ -384,3 +384,27 @@ describe('corpus sanitisation', () => {
     });
   });
 });
+
+// The sanitiser replaces every comment's text and count, so nothing above says
+// anything about the two booleans that ride through untouched. They were both
+// wrong for weeks with an all-green corpus: `creatorHearted` true for every
+// comment ever exported, `isLiked` for none, because no fixture had a liked
+// comment in it to disagree. `comments-viewer-state.json` is that comment.
+describe('comment corpus — viewer state', () => {
+  type CommentDoc = { items: { isLiked: boolean; creatorHearted: boolean }[] };
+  const pages = corpus.filter((d) => d.name.startsWith('comments')).map((d) => d.value as CommentDoc);
+  const all = pages.flatMap((p) => p.items);
+
+  test('the comment corpus can see a liked comment and a hearted one', () => {
+    expect(all.some((c) => c.isLiked)).toBe(true);
+    expect(all.some((c) => c.creatorHearted)).toBe(true);
+  });
+
+  test('a creator heart is not universal — no page of comments is hearted throughout', () => {
+    // The old reading marked every comment on every page. A creator hearting
+    // *every* comment on a page of 20 is not a thing a person does.
+    for (const page of pages.filter((p) => p.items.length > 3)) {
+      expect(page.items.every((c) => c.creatorHearted)).toBe(false);
+    }
+  });
+});
