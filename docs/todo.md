@@ -26,10 +26,12 @@ Nothing here right now.
 
 ## Soon
 
-### 39. Comments: five gaps left after replies, delete and the comment box
+### 39. Comments: four gaps left after replies, delete and the comment box
 
 Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
 a tree that the UI shows flat"). None is a regression; each is a known hole.
+Numbers are stable: item 4 (the viewer's like state and the creator's heart)
+landed 2026-09-19 (`architecture.md` F33) and is gone.
 
 1. **A reply's own "Show more replies" is unreachable.** A reply can carry a
    load-more button of its own (more replies *to that one reply*). The parser
@@ -53,16 +55,6 @@ a tree that the UI shows flat"). None is a regression; each is a known hole.
    takes this path (it always sends `commentsContinuation`), so it bites only a
    caller that does. Filed as a separate task when found; recorded here so it
    is not lost if that is dismissed.
-4. **`Comment.isLiked` is never true, and `creatorHearted` is inferred.** The
-   parser reads `entity.toolbar.isLiked`, a key present in **0 of 20** comment
-   entities of a signed-in page; the state lives on a different entity,
-   `engagementToolbarStateEntityPayload` (keyed by the view model's
-   `toolbarStateKey`), which nothing reads. Measured 2026-09-18 on that page:
-   `likeState` was `TOOLBAR_LIKE_STATE_LIKED` for **4** of 20 and `heartState`
-   `TOOLBAR_HEART_STATE_HEARTED` for 1. Task 27 §2 required the viewer's like
-   state and §"Tests" a liked/not-liked render test; neither is met. **Done
-   when:** `isLiked` and `creatorHearted` come from that entity, with a test
-   built from a page where at least one comment is liked, mutation-checked.
 5. **The comments widgets have no test of their own.** `CommentsSection` and
    `CommentThreadWidget` reach the sidecar through the `RpcClient` singleton,
    which has no seam, so the rules that live in their state — the reply count

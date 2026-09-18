@@ -617,8 +617,14 @@ the answer.
   a top-level thread's inline ones) and reads both token shapes; the client trusts
   the list it has *completely* fetched over the count it was told. `protocol.md`
   §3.3 and `architecture.md` F30 have the shapes. Still open: a reply's own
-  "Show more replies" is unreachable, and `Comment.isLiked` is never true
-  (`todo.md` 39).
+  "Show more replies" is unreachable (`todo.md` 39).
+- **A comment's like and heart are on a different entity than the comment —
+  Task 27, measured 2026-09-19.** `isLiked` and `creatorHearted` come from
+  `engagementToolbarStateEntityPayload` (via the view model's `toolbarStateKey`)
+  and nothing else. The comment's own `toolbar` has `heartActiveTooltip` on
+  **every** comment — the tooltip *for* a heart, not evidence of one — and
+  reading it marked 120 of 120 comments hearted where 4 were. `likeCount` is the
+  viewer's variant (`likeCountLiked` once they liked it). `architecture.md` F33.
 - **A running debug app locks `sidecar/dist/sidecar.exe`.** `bun run build`,
   `rill build` and `rill run` all fail with `EPERM: failed to move executable to
   result path` while a `flutter run` session is open, because that session runs

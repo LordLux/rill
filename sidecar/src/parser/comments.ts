@@ -92,6 +92,42 @@ function extractSurfaceCommands(
 }
 
 /**
+ * The viewer's own state on a comment: whether they liked it, and whether the
+ * video's creator hearted it.
+ *
+ * Neither is on the `commentEntityPayload` the rest of `collectThread` reads.
+ * Both are on a separate entity, `engagementToolbarStateEntityPayload`, reached
+ * through the view model's `toolbarStateKey`, as `{ likeState, heartState }` —
+ * `TOOLBAR_LIKE_STATE_LIKED` / `_INDIFFERENT` and `TOOLBAR_HEART_STATE_HEARTED`
+ * / `_UNHEARTED`. Measured 2026-09-19, six videos and 120 comments, signed in
+ * and anonymous:
+ *
+ * - `likeState` is the *viewer's*: an anonymous session reads `INDIFFERENT` on
+ *   every comment, a signed-in one `LIKED` on the ones that account liked (1, 4,
+ *   0, 0, 2, 0 per video). `heartState` is public and identical in both views.
+ * - The comment entity's own `toolbar` carries neither, but it does carry
+ *   `heartActiveTooltip` (`"❤ by @<creator>"`) on **every** comment — it is the
+ *   tooltip for the hearted *state*, present whether or not there is a heart.
+ *   The parser used to read that as "hearted" and reported all 120 comments
+ *   hearted where the state entity says 4; `heartedTooltipA11y`, the other field
+ *   it read, appears in none of them. `isLiked` read `toolbar.isLiked`, a key
+ *   that is never there, and was `false` for all of them.
+ *
+ * A missing state entity is `false` for both — "not known to be liked" — and
+ * `EntityStore.get` has already logged it.
+ */
+function extractToolbarState(
+  store: EntityStore,
+  stateKey: string | null | undefined,
+): { isLiked: boolean; creatorHearted: boolean } {
+  const state = store.get<any>(stateKey);
+  return {
+    isLiked: state?.likeState === 'TOOLBAR_LIKE_STATE_LIKED',
+    creatorHearted: state?.heartState === 'TOOLBAR_HEART_STATE_HEARTED',
+  };
+}
+
+/**
  * The token inside a `continuationItemRenderer`, in either of the two shapes
  * YouTube uses for it.
  *
@@ -162,6 +198,14 @@ export function parseComments(root: any, context: string): CommentsResult {
     }
 
     const { replyParams, deleteParams } = extractSurfaceCommands(store, vm.toolbarSurfaceKey);
+    const { isLiked, creatorHearted } = extractToolbarState(store, vm.toolbarStateKey);
+
+    // The toolbar ships the count twice — with the viewer's like in it and
+    // without — and `likeCountA11y` follows whichever one the state selects
+    // (measured 2026-09-19: a liked comment read `likeCountLiked` 737,
+    // `likeCountNotliked` 736, a11y "737 likes"). Always shipping the un-liked
+    // one showed a comment you liked one like short, next to a filled thumb.
+    const likeCount = isLiked ? entity.toolbar?.likeCountLiked : entity.toolbar?.likeCountNotliked;
 
     items.push({
       id: props.commentId || '',
@@ -171,11 +215,11 @@ export function parseComments(root: any, context: string): CommentsResult {
       isUploader: !!author.isCreator,
       isVerified: !!author.isVerified,
       text: parseCommentText(props.content),
-      likeCount: entity.toolbar?.likeCountNotliked || null,
+      likeCount: likeCount || null,
       publishedText: props.publishedTime || null,
       replyCount: replyCount,
-      isLiked: !!entity.toolbar?.isLiked,
-      creatorHearted: !!entity.toolbar?.heartedTooltipA11y || !!entity.toolbar?.heartActiveTooltip,
+      isLiked,
+      creatorHearted,
       isPinned: !!props.pinnedText,
       repliesContinuation: replyToken,
       replyParams,

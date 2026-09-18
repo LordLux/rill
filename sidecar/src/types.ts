@@ -690,10 +690,20 @@ export interface Comment {
   isUploader: boolean;
   isVerified: boolean;
   text: CommentText;
+  /**
+   * The count as this viewer sees it — a comment they liked carries the count
+   * *with* their like in it. A display string ("737", "4.8M"), not parsed.
+   */
   likeCount: string | null;
   publishedText: string | null;
   replyCount: number;
+  /** The signed-in viewer liked this comment. Always `false` when anonymous. */
   isLiked: boolean;
+  /**
+   * The video's creator hearted this comment. Public: the same in an anonymous
+   * and a signed-in view. Read from the state entity, never inferred from a
+   * tooltip — `parser/comments.ts` has what that cost.
+   */
   creatorHearted: boolean;
   isPinned: boolean;
   repliesContinuation: string | null;
