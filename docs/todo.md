@@ -55,18 +55,19 @@ landed 2026-09-19 (`architecture.md` F33) and is gone.
    takes this path (it always sends `commentsContinuation`), so it bites only a
    caller that does. Filed as a separate task when found; recorded here so it
    is not lost if that is dismissed.
-5. **The comments widgets have no test of their own.** `CommentsSection` and
-   `CommentThreadWidget` reach the sidecar through the `RpcClient` singleton,
-   which has no seam, so the rules that live in their state — the reply count
-   trusting a *complete* list, load-once, optimistic reply and delete, a sort
-   change discarding the old list — were verified by running the app, not by a
-   test. Only `CommentComposer` (which takes its post as a callback) is covered.
-   Task 27's own "Tests" section asks for per-thread pagination isolation and
-   the sort-discards-the-list case. Also unmet from it: `$cancel` and a
-   generation guard — a sort change while a page is loading is *dropped*
-   (`_fetch` returns early), not cancelled, so the click is lost.
-   **Done when:** the client is injectable (or the widgets take their fetch as a
-   callback, as the composer does) and those cases are asserted.
+5. **The comments widgets are only partly tested.** The page fetch now goes
+   through `CommentsSource` (`lib/data/comments_source.dart`), and
+   `comments_section_test.dart` covers a re-sort superseding the page in flight
+   (`$cancel` plus a generation guard, which the first delivery lacked), leaving
+   mid-load, a change of video, and the like/heart rendering. **Still
+   untested,** because they call the `RpcClient` singleton directly: post, reply
+   and delete — including `_postComment`'s guard against landing in another
+   video's list — and the rules in a thread's own state: the reply count
+   trusting a *complete* list, load-once, optimistic reply and delete. Task 27's
+   own "Tests" section also asks for per-thread pagination isolation (two
+   expanded threads must not interfere), which holds by construction and is not
+   asserted. **Done when:** post, reply and delete take a seam like
+   `CommentsSource`, and those cases are asserted.
 
 **Done when:** each is fixed, or deliberately dropped with the reason written
 next to it.

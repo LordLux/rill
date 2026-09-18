@@ -84,6 +84,7 @@ class _CommentComposerState extends State<CommentComposer> {
         CircleAvatar(
           radius: 16,
           backgroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl),
+          onBackgroundImageError: avatarUrl == null ? null : (_, _) {},
           child: avatarUrl == null ? const Icon(Icons.person, size: 18) : null,
         ),
         const SizedBox(width: 12),
