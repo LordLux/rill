@@ -21,6 +21,7 @@ import {
   addToWatchLater,
   createPlaylist,
   deletePlaylist,
+  parsePlaylistMembership,
   playlistsForVideo,
   removeFromPlaylist,
 } from '../src/actions/playlist.ts';
@@ -999,7 +1000,15 @@ describe('action.postComment / replyToComment / deleteComment', () => {
 
 const PLAYLIST_ID = 'PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 
-/** A `/playlist/get_add_to_playlist` body: one row already containing the video, one not. */
+/**
+ * A `/playlist/get_add_to_playlist` body: one row already containing the video, one not.
+ *
+ * `containsSelectedVideos` is the **string** `"ALL"` / `"NONE"` and the remove
+ * action is `ACTION_REMOVE_VIDEO_BY_VIDEO_ID` — both measured 2026-09-20. This
+ * builder used to send `true`/`false` and `ACTION_REMOVE_VIDEO` with a
+ * `setVideoId`, which are the community library's guesses, and the parser was
+ * written to match them: it passed every test and read every real response wrong.
+ */
 function addToPlaylistBody(): unknown {
   return {
     contents: {
@@ -1011,11 +1020,11 @@ function addToPlaylistBody(): unknown {
               playlistId: 'WL',
               title: { simpleText: 'Watch later' },
               privacy: 'PRIVATE',
-              containsSelectedVideos: true,
+              containsSelectedVideos: 'ALL',
               removeFromPlaylistServiceEndpoint: {
                 playlistEditEndpoint: {
                   playlistId: 'WL',
-                  actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+                  actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }],
                 },
               },
             },
@@ -1025,7 +1034,7 @@ function addToPlaylistBody(): unknown {
               playlistId: PLAYLIST_ID,
               title: { simpleText: 'My mix tape' },
               privacy: 'PUBLIC',
-              containsSelectedVideos: false,
+              containsSelectedVideos: 'NONE',
               addToPlaylistServiceEndpoint: {
                 playlistEditEndpoint: {
                   playlistId: PLAYLIST_ID,
@@ -1062,10 +1071,34 @@ describe('playlist.forVideo', () => {
         expect(other.removeToken).toBeNull();
         expect(JSON.parse(wl.removeToken!)).toEqual({
           playlistId: 'WL',
-          actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+          actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }],
         });
       },
     );
+  });
+
+  test('containsSelectedVideos is a string enum: ALL is in it, NONE is not, and a boolean means nothing', () => {
+    // Measured 2026-09-20 on a signed-in account: `"ALL"` for a video in Watch Later,
+    // `"NONE"` for one that is not. `true` is what the parser used to demand and what
+    // YouTube has never been seen to send — it must not read as membership.
+    const rowsWith = (value: unknown) =>
+      parsePlaylistMembership({
+        playlistAddToOptionRenderer: {
+          playlistId: 'WL',
+          title: { simpleText: 'Watch later' },
+          containsSelectedVideos: value,
+          removeFromPlaylistServiceEndpoint: {
+            playlistEditEndpoint: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }] },
+          },
+        },
+      }).playlists[0]!;
+
+    expect(rowsWith('ALL').containsVideo).toBe(true);
+    expect(rowsWith('ALL').removeToken).not.toBeNull();
+    for (const notMembership of ['NONE', 'SOME', '', true, false, null, undefined]) {
+      expect(rowsWith(notMembership).containsVideo).toBe(false);
+      expect(rowsWith(notMembership).removeToken).toBeNull();
+    }
   });
 
   test('an unrecognised privacy value is null, never guessed', async () => {
@@ -1088,7 +1121,7 @@ describe('playlist.forVideo', () => {
 describe('action.removeFromPlaylist', () => {
   const TOKEN = JSON.stringify({
     playlistId: 'WL',
-    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+    actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }],
   });
 
   test('replays the token verbatim against /browse/edit_playlist', async () => {
@@ -1096,7 +1129,7 @@ describe('action.removeFromPlaylist', () => {
     await removeFromPlaylist(session, 'WL', TOKEN);
     expect(session.calls[0]).toEqual({
       endpoint: '/browse/edit_playlist',
-      params: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }] },
+      params: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }] },
     });
   });
 

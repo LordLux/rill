@@ -113,6 +113,16 @@ function extractSurfaceCommands(
  *   it read, appears in none of them. `isLiked` read `toolbar.isLiked`, a key
  *   that is never there, and was `false` for all of them.
  *
+ * **`heartState` has more than one "hearted" value, and the first version of
+ * this read only one of them.** `TOOLBAR_HEART_STATE_HEARTED` is what everyone
+ * but the creator sees. The *creator's own* view of a comment they hearted is
+ * `TOOLBAR_HEART_STATE_HEARTED_EDITABLE` (measured 2026-09-20 on a video the
+ * signed-in account owns: every comment it had hearted read this way, and
+ * `=== 'TOOLBAR_HEART_STATE_HEARTED'` reported all of them un-hearted). The
+ * six videos the first version was checked on were all viewed as a non-creator,
+ * so it never met the value. Read as "starts with `..._HEARTED`", which is both
+ * of them and does not match `..._UNHEARTED`.
+ *
  * A missing state entity is `false` for both — "not known to be liked" — and
  * `EntityStore.get` has already logged it.
  */
@@ -123,7 +133,8 @@ function extractToolbarState(
   const state = store.get<any>(stateKey);
   return {
     isLiked: state?.likeState === 'TOOLBAR_LIKE_STATE_LIKED',
-    creatorHearted: state?.heartState === 'TOOLBAR_HEART_STATE_HEARTED',
+    creatorHearted:
+      typeof state?.heartState === 'string' && state.heartState.startsWith('TOOLBAR_HEART_STATE_HEARTED'),
   };
 }
 
