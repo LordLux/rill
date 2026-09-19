@@ -1773,6 +1773,10 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
   const LIKED = { likeState: 'TOOLBAR_LIKE_STATE_LIKED', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED' };
   const HEARTED = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_HEARTED' };
   const NEITHER = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED' };
+  // The creator's own view of their own video's comments (measured 2026-09-20): the same
+  // two facts, under different names — `_EDITABLE` because the creator can toggle the heart.
+  const CREATOR_HEARTED = { likeState: 'TOOLBAR_LIKE_STATE_LIKED', heartState: 'TOOLBAR_HEART_STATE_HEARTED_EDITABLE' };
+  const CREATOR_UNHEARTED = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED_EDITABLE' };
 
   /**
    * A comment entity shaped like a real toolbar — including the two things the
@@ -1844,6 +1848,19 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
     const both = { likeState: LIKED.likeState, heartState: HEARTED.heartState };
     const [item] = parseComments(page([thread('a')], comment('a', 'both', both)), 'synthetic').items;
     expect([item!.isLiked, item!.creatorHearted]).toEqual([true, true]);
+  });
+
+  test("the creator's own view: a heart they gave reads as hearted, one they have not given does not", () => {
+    // The first version compared `heartState` to the plain `..._HEARTED` and so read
+    // every comment the creator had hearted as un-hearted, on their own video. It was
+    // checked on six videos, all seen as a non-creator, and never met this value.
+    const raw = page(
+      [thread('a'), thread('b')],
+      [...comment('a', 'given', CREATOR_HEARTED), ...comment('b', 'not-given', CREATOR_UNHEARTED)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.creatorHearted])).toEqual([['given', true], ['not-given', false]]);
+    expect(items.map((c) => [c.id, c.isLiked])).toEqual([['given', true], ['not-given', false]]);
   });
 
   test("the count is the viewer's own: with their like in it when they liked the comment", () => {
