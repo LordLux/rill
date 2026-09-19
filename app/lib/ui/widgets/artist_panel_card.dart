@@ -710,6 +710,7 @@ class _Shelf extends ConsumerWidget {
                           onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
+                          menu: menuForTile(context, ref, item, spec),
                         ),
                       ),
                     );

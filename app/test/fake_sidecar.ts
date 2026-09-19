@@ -401,7 +401,9 @@ rl.on('line', (line) => {
       // token is exactly `{playlistId, actions}` — `sidecar/src/actions/
       // playlist.ts`) — smuggled in here only so this fake's
       // `action.removeFromPlaylist` below can tell which video/playlist pair
-      // to clear, since the real request never carries a video id at all.
+      // to clear. (The real token does name the video — `removedVideoId`, measured
+      // 2026-09-20 — but not the playlist row it came from, and a fake that reads a
+      // field of its own is easier to reason about than one that reads the real one.)
       process.stdout.write(JSON.stringify({
         id: req.id,
         result: {
@@ -416,7 +418,7 @@ rl.on('line', (line) => {
                     playlistId: 'WL',
                     _videoId: videoId,
                     _playlistId: 'WL',
-                    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'fake_set_video_id' }],
+                    actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: videoId }],
                   })
                 : null,
             },
@@ -430,7 +432,7 @@ rl.on('line', (line) => {
                     playlistId: TEST_PLAYLIST_ID,
                     _videoId: videoId,
                     _playlistId: TEST_PLAYLIST_ID,
-                    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'fake_set_video_id_2' }],
+                    actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: videoId }],
                   })
                 : null,
             },

@@ -679,6 +679,5 @@ dated observations, not permanent properties.
 
 ## Deferred items
 
-- `MediaTile.onMore` is never wired up, so every 3-dot menu button on media tiles is disabled.
 - `ShortcutTooltip`'s plain tooltips show with no delay (the layout-crash risk described in architecture.md §2.8).
 - `deletePlaylist` does not assert that the delete actually succeeded (`assertSucceeded`).

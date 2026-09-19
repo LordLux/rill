@@ -419,12 +419,14 @@ class _FeedViewState extends ConsumerState<FeedView> {
                                   onTap: tapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
+                                  menu: menuForTile(context, ref, feedItem, spec),
                                 )
                               : MediaTile(
                                   spec: spec,
                                   onTap: tapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
+                                  menu: menuForTile(context, ref, feedItem, spec),
                                 ))
                         : feedItem.maybeMap(
                             channel: (c) => widget.isWideLayout //
@@ -592,6 +594,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                           onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
+                          menu: menuForTile(context, ref, item, spec),
                         ),
                       ),
                     );
@@ -675,6 +678,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                           onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
+                          menu: menuForTile(context, ref, item, spec),
                         ),
                       ),
                     );
