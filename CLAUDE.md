@@ -277,7 +277,7 @@ that do not exist yet.
   /src/rpc        NDJSON transport
   /fixtures       raw captured responses (parse:false) — the test corpus
 /app              Flutter
-  /lib            main.dart + probe_task19.dart — the only two entrypoints
+  /lib            main.dart + probe_task19.dart, probe_comments.dart — the only entrypoints; the probes are measurements, never wired in
   /lib/domain     freezed models mirroring the DTOs above
   /lib/data       RPC client
   /lib/ui         screens, tiles, player
