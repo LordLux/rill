@@ -255,7 +255,10 @@ whether or not there is a heart. Reading it as one marked all 120 comments of a
 six-video sample hearted where the state entity says 4, and the key the parser
 read for `isLiked` was never there, so that was `false` throughout. `likeState`
 is the *viewer's* — an anonymous session reads `INDIFFERENT` on every comment —
-while `heartState` is public and the same in both views. `Comment.likeCount`
+while `heartState` is public, with one exception found 2026-09-20 (F35): on a video
+the viewer *owns*, the creator's own view says `TOOLBAR_HEART_STATE_HEARTED_EDITABLE`
+for a comment they hearted and `..._UNHEARTED_EDITABLE` for one they have not,
+because they can toggle it. Both "hearted" values read as `creatorHearted`. `Comment.likeCount`
 follows the state as well: the toolbar ships the count with the viewer's like in
 it and without, and a comment the viewer liked is shown with the first.
 
@@ -867,6 +870,15 @@ outside the sidecar. `playlistId` is required and checked against the token
 rather than trusted from it alone, so a stale token from a previous video's
 dialog cannot edit the wrong playlist silently.
 
+**Measured 2026-09-20 (F35): for Watch Later that endpoint removes by *video* id, not
+by an entry id.** The token was
+`{playlistId: 'WL', actions: [{action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId}]}`,
+and replayed verbatim it removed the video — the first time this path ever ran
+against the real service, because `containsVideo` was always false until then and
+so no row ever carried a token. Whether a playlist that holds the same video twice
+gets an entry-id form instead was not measured; the opaque-token design does not
+depend on the answer.
+
 ### 3.9 Playlists — the save dialog
 
 | Method | Params | Result |
@@ -886,6 +898,14 @@ interface PlaylistMembership {
   removeToken: string | null;        // opaque; hand back to action.removeFromPlaylist. Present only when containsVideo
 }
 ```
+
+**`containsVideo` is read from a string, not a boolean — measured 2026-09-20
+(`architecture.md` F35).** `containsSelectedVideos` is `"ALL"` for a video in that
+playlist and `"NONE"` for one that is not (`"SOME"` exists for a request naming
+several videos and cannot occur here). The parser tested `=== true` for as long as
+this section has existed, so `containsVideo` was `false` for every row of every
+video and `removeToken` was always `null`; the unit test fed it `true`, a value
+YouTube does not send. Anything but `"ALL"` is now "not in it".
 
 **One call answers both halves the save dialog needs** — Task 25 §5 asked for
 "the user's playlists" and, separately, "which playlists already contain this

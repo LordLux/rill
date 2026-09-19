@@ -90,9 +90,16 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // Task 25 §3 — a closed set the sidecar itself defines, not free text off
   // the watch page. Same treatment as `kind`/`scope` above.
   myRating: /^(like|dislike|none)$/,
+  // PlaylistMembership (the save dialog): `privacy` is the sidecar's closed set,
+  // and a `removeToken` names a real video and playlist, so it is a placeholder.
+  privacy: /^(public|unlisted|private)$/,
+  removeToken: /^REMOVE_TOKEN$/,
 
   // Ids are replaced outright, never truncated, and indexed to the item.
-  id: /^(vid|mix|list|chan|item|cmt)_\d{3,}$/,
+  // `WL` is Watch Later's fixed, public playlist id (the save dialog's row) — a
+  // constant every account shares, so it identifies nobody. Every other id is
+  // replaced.
+  id: /^((vid|mix|list|chan|item|cmt)_\d{3,}|WL)$/,
   channelId: /^chan_\d{3,}$/,
 
   // Indexed so a mapper that gives every item the same value cannot pass.
@@ -290,8 +297,13 @@ function loadCaptureIndex(): CaptureIndex {
     }
   };
 
-  for (const file of readdirSync(FIXTURES).filter((f) => f.endsWith('.json'))) {
-    collect(JSON.parse(readFileSync(join(FIXTURES, file), 'utf8')));
+  // `viewer-state/` holds real comment text, playlist titles and ids too — a
+  // capture family of its own that the top-level listing never reaches.
+  for (const dir of [FIXTURES, join(FIXTURES, 'viewer-state')]) {
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+      collect(JSON.parse(readFileSync(join(dir, file), 'utf8')));
+    }
   }
 
   const idPrefixes = new Set<string>();
@@ -383,6 +395,34 @@ describe('corpus sanitisation', () => {
       expect(auditShapes(corpus)).toEqual([]);
     });
   });
+
+  // A privacy check that silently does not look is worse than none. `viewer-state/`
+  // is a capture family of its own — real comment text, real playlist titles, the
+  // account's real ids — and the top-level listing that used to build the index
+  // never reached it, so nothing in it could have been caught.
+  //
+  // It asserts on values that exist *only* there. The capture's video and channel id
+  // do not qualify: the standard capture uses the same video, so they are in the
+  // top-level fixtures too, and a first version of this test built on them passed with
+  // the fix reverted.
+  const viewerStateManifest = (() => {
+    try {
+      return JSON.parse(readFileSync(join(FIXTURES, 'viewer-state', 'manifest.json'), 'utf8')) as {
+        commentVideo: string | null;
+        commentId: string | null;
+      };
+    } catch {
+      return null;
+    }
+  })();
+  test.skipIf(!viewerStateManifest?.commentId || !viewerStateManifest.commentVideo)(
+    'the traceability index reaches fixtures/viewer-state/',
+    () => {
+      const index = loadCaptureIndex();
+      expect(index.values.has(viewerStateManifest!.commentId!)).toBe(true);
+      expect(index.values.has(viewerStateManifest!.commentVideo!)).toBe(true);
+    },
+  );
 });
 
 // The sanitiser replaces every comment's text and count, so nothing above says
@@ -406,5 +446,93 @@ describe('comment corpus — viewer state', () => {
     for (const page of pages.filter((p) => p.items.length > 3)) {
       expect(page.items.every((c) => c.creatorHearted)).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The viewer-state pair: states asserted, not just shapes
+// ---------------------------------------------------------------------------
+//
+// Everything above tests *shape*. The account state a field reports is the one
+// thing a shape test cannot see, and it is where `creatorHearted`, `isLiked` and
+// `containsVideo` were all wrong at once with an all-green suite. These files
+// were captured with the account put in a known state and the state *proven from
+// the raw response* first (`capture-viewer-state.ts`), so what they must parse to
+// is not in question. They are committed sanitised, so this runs on any checkout.
+describe('viewer-state corpus — the account states the parsers must report', () => {
+  const doc = <T>(name: string): T => {
+    const found = corpus.find((d) => d.name === `viewer-state-${name}.json`);
+    if (!found) throw new Error(`corpus/viewer-state-${name}.json is missing — run capture:viewer-state, then export-contract-corpus`);
+    return found.value as T;
+  };
+
+  describe('the watch page: myRating and isSubscribed', () => {
+    type Detail = { myRating: string; isSubscribed: boolean };
+    test('before — unrated, channel not subscribed', () => {
+      expect(doc<Detail>('video-detail-before')).toMatchObject({ myRating: 'none', isSubscribed: false });
+    });
+    test('after — liked, channel subscribed', () => {
+      expect(doc<Detail>('video-detail-after')).toMatchObject({ myRating: 'like', isSubscribed: true });
+    });
+    test('a video the account disliked reads as dislike — the third value', () => {
+      expect(doc<Detail>('video-detail-disliked').myRating).toBe('dislike');
+    });
+  });
+
+  describe('the save dialog: containsVideo and removeToken', () => {
+    type Row = { id: string; containsVideo: boolean; removeToken: string | null };
+    const rows = (name: string): Row[] => doc<{ playlists: Row[] }>(name).playlists;
+
+    test('before — no playlist holds the video, and there is nothing to remove', () => {
+      expect(rows('membership-before').length).toBeGreaterThan(1);
+      expect(rows('membership-before').some((r) => r.containsVideo)).toBe(false);
+      expect(rows('membership-before').some((r) => r.removeToken !== null)).toBe(false);
+    });
+
+    test('after — exactly Watch Later holds it, and only that row can be removed from', () => {
+      const after = rows('membership-after');
+      expect(after.filter((r) => r.containsVideo).map((r) => r.id)).toEqual(['WL']);
+      expect(after.filter((r) => r.removeToken !== null).map((r) => r.id)).toEqual(['WL']);
+    });
+  });
+
+  describe("comments: the viewer's like and the creator's heart", () => {
+    type C = { isLiked: boolean; creatorHearted: boolean; deleteParams: string | null };
+    const page = (name: string): C[] => doc<{ items: C[] }>(name).items;
+    const count = (items: C[], f: (c: C) => boolean) => items.filter(f).length;
+
+    // The capture is the creator's own video and the account's own comment on it.
+    // The comments by other people were liked and hearted by the creator already
+    // and stay that way; the pair differs in exactly the own comment.
+    test('the creator sees every comment liked and hearted except the own one, before', () => {
+      const before = page('comments-before');
+      expect(before.length).toBeGreaterThan(1);
+      const own = before.filter((c) => c.deleteParams !== null);
+      expect(own).toHaveLength(1);
+      expect([own[0]!.isLiked, own[0]!.creatorHearted]).toEqual([false, false]);
+      expect(count(before, (c) => c.isLiked)).toBe(before.length - 1);
+      expect(count(before, (c) => c.creatorHearted)).toBe(before.length - 1);
+    });
+
+    test('after, the own comment is liked and hearted and nothing else moved', () => {
+      const before = page('comments-before');
+      const after = page('comments-after');
+      expect(after).toHaveLength(before.length);
+      expect(count(after, (c) => c.isLiked)).toBe(after.length);
+      expect(count(after, (c) => c.creatorHearted)).toBe(after.length);
+      const changed = after.filter((c, i) => c.isLiked !== before[i]!.isLiked || c.creatorHearted !== before[i]!.creatorHearted);
+      expect(changed).toHaveLength(1);
+      expect(changed[0]!.deleteParams).not.toBeNull();
+    });
+
+    test("anyone else sees the hearts and none of the creator's likes", () => {
+      // The same comments as an anonymous viewer: the heart is public, the like is
+      // the *viewer's* — so every comment reads hearted and none reads liked.
+      const anonymous = page('comments-after-anonymous');
+      expect(anonymous.length).toBeGreaterThan(1);
+      expect(count(anonymous, (c) => c.creatorHearted)).toBe(anonymous.length);
+      expect(count(anonymous, (c) => c.isLiked)).toBe(0);
+      expect(count(anonymous, (c) => c.deleteParams !== null)).toBe(0);
+    });
   });
 });

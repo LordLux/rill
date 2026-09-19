@@ -244,6 +244,21 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
 
+### 41. The comments fixtures are not in `capture.ts`, so a recapture deletes them
+
+`comments.json`, `comments-replies.json` and `comments-viewer-state.json` sit in
+`sidecar/fixtures/`, but no stage of `capture.ts` writes them — they were
+captured ad hoc — and `promoteStaging` replaces that directory wholesale.
+**Found by reading the code, not by running a recapture** (which would delete
+them): a full `bun run capture` removes all three, and every test guarded by
+`test.if(hasFixture('comments…'))` then skips silently, including the raw
+viewer-state reading in `parser.test.ts`. The committed corpus keeps its own
+assertions, which is why this is not urgent; it is the same trap as an
+unloadable test file. **Done when:** the three are stages of `capture.ts` (the
+replies one needs a thread that has replies; the viewer-state one is now better
+made by `capture-viewer-state.ts`), or they move under `fixtures/viewer-state/`,
+which `capture.ts` already carries across.
+
 ---
 
 ## Low priority

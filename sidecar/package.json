@@ -7,6 +7,7 @@
   "scripts": {
     "build": "bun build --compile --outfile dist/sidecar src/main.ts",
     "capture": "bun run src/capture.ts",
+    "capture:viewer-state": "bun run src/capture-viewer-state.ts",
     "export-contract-corpus": "bun run src/export-contract-corpus.ts",
     "probe": "bun run src/probe-playback.ts",
     "test": "bun test",
