@@ -26,7 +26,7 @@ Nothing here right now.
 
 ## Soon
 
-### 39. Comments: four gaps left after replies, delete and the comment box
+### 39. Comments: five gaps left after replies, delete and the comment box
 
 Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
 a tree that the UI shows flat"). None is a regression; each is a known hole.
@@ -68,6 +68,25 @@ landed 2026-09-19 (`architecture.md` F33) and is gone.
    expanded threads must not interfere), which holds by construction and is not
    asserted. **Done when:** post, reply and delete take a seam like
    `CommentsSource`, and those cases are asserted.
+
+6. **A thread's expansion does not survive scrolling away.** A
+   `CommentThreadWidget` keeps `_expanded`, `_replies` and the reply box's text in
+   its `State`, and `SliverList.builder` disposes a child that leaves the
+   viewport — nothing opts into keep-alive. Measured 2026-09-19 with the real
+   widgets in `lib/probe_comments.dart`, in a release process: expand a thread,
+   scroll a screen's worth away and back, and *"the thread is still expanded:
+   false"* at 20 and 100 replies. (At 500 and 1000 it was still expanded — most
+   likely because a thread that tall never left the viewport entirely; that is
+   an inference, not a measurement.) That the loaded replies and a half-typed
+   reply go with it follows from where they live, `State`, and was not observed.
+   Not yet seen in the running app, and how youtube.com behaves was not checked.
+   **Done when:** an expanded thread, or one holding a reply draft, keeps its
+   state off screen — `AutomaticKeepAliveClientMixin` with `wantKeepAlive` while
+   expanded is the obvious shape, and it turns the eager reply list into a
+   *retained* cost, so re-measure with the probe (`architecture.md` F34). That
+   rewrite is also the place to make the reply list lazy: re-expanding a thread
+   that holds many replies mounts them all in one frame (49 ms at 100 loaded,
+   345 ms at 500), which the memoised rows do not help.
 
 **Done when:** each is fixed, or deliberately dropped with the reason written
 next to it.

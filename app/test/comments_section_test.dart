@@ -283,6 +283,64 @@ void main() {
     });
   });
 
+  group('CommentThreadWidget — replies already loaded are not rebuilt', () {
+    // Any `setState` in a thread — a page of replies arriving, the reply box
+    // opening, a delete — rebuilds it, and it used to hand every loaded reply a
+    // *new* widget each time, so all of them were rebuilt with it: ~0.15 ms per
+    // reply in a release build, 77 ms at 500 replies, every time
+    // (`architecture.md` F34). A reply is immutable once loaded, so the thread
+    // now hands back the instance it built before and the framework skips it.
+    testWidgets('a rebuild of the thread gives each loaded reply the same widget instance', (tester) async {
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source));
+      source.issued.single.completer.complete(
+        CommentsResult(items: [comment('t1', replyCount: 2, repliesContinuation: 'rep-t1', replyParams: 'RP')]),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Show 2 replies'));
+      await tester.pump();
+      source.issued.last.completer.complete(CommentsResult(items: [comment('r1'), comment('r2')]));
+      await tester.pump();
+      expect(text('r2'), findsOneWidget);
+
+      CommentThreadWidget reply(String id) => tester.widget<CommentThreadWidget>(find.byKey(ValueKey(id)));
+      final before = (reply('r1'), reply('r2'));
+
+      // Opening the reply box is a setState in the thread; replies have no such button.
+      await tester.tap(find.text('Reply'));
+      await tester.pump();
+
+      expect(identical(reply('r1'), before.$1), isTrue);
+      expect(identical(reply('r2'), before.$2), isTrue);
+    });
+
+    testWidgets('a reply page arriving keeps the earlier replies\' instances and adds the new ones', (tester) async {
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source));
+      source.issued.single.completer.complete(
+        CommentsResult(items: [comment('t1', replyCount: 3, repliesContinuation: 'rep-t1')]),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Show 3 replies'));
+      await tester.pump();
+      source.issued.last.completer.complete(
+        CommentsResult(items: [comment('r1'), comment('r2')], continuation: 'rep-t1-2'),
+      );
+      await tester.pump();
+
+      CommentThreadWidget reply(String id) => tester.widget<CommentThreadWidget>(find.byKey(ValueKey(id)));
+      final first = reply('r1');
+
+      await tester.tap(find.text('Show more replies'));
+      await tester.pump();
+      source.issued.last.completer.complete(CommentsResult(items: [comment('r3')]));
+      await tester.pump();
+
+      expect(text('r3'), findsOneWidget);
+      expect(identical(reply('r1'), first), isTrue);
+    });
+  });
+
   group('CommentThreadWidget — the viewer\'s like and the creator\'s heart', () {
     Future<void> pumpThread(WidgetTester tester, Comment thread) {
       return tester.pumpWidget(

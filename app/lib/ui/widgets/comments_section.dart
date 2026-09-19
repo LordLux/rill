@@ -155,8 +155,10 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   /// the same page asked twice. A [refresh] (a re-sort) does, always: it drops
   /// the list, cancels whatever was loading, and the page it asks for is the only
   /// one that may land. Before this the click was *dropped* while a page was
-  /// loading, and the old sort's answer then arrived and was merged in — the
-  /// exact case `docs/tasks/27-comments.md` §3 says must not happen.
+  /// loading — after [_applySort] had already overwritten [_continuation], so if
+  /// that page then failed, "Tap to retry" appended the *new* sort's first page to
+  /// the old sort's threads (`docs/tasks/27-comments.md` §3: a sort change must
+  /// not merge pages).
   Future<void> _fetch({bool refresh = false}) async {
     if (!mounted) return;
     if (_loading && !refresh) return;
@@ -346,6 +348,9 @@ class CommentThreadWidget extends ConsumerStatefulWidget {
 
 class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
   final List<Comment> _replies = [];
+
+  /// The reply rows built so far, by reply id — see [_replyRow].
+  final Map<String, Widget> _replyRows = {};
   bool _expanded = false;
   bool _loadingReplies = false;
   bool _errorReplies = false;
@@ -452,6 +457,34 @@ class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
         });
       }
     }
+  }
+
+  /// A loaded reply's row, built once and handed back as the *same instance* on
+  /// every later build.
+  ///
+  /// Any `setState` here — a page of replies arriving, the reply box opening, a
+  /// delete — rebuilds this widget, and a fresh row per reply meant the framework
+  /// updated every loaded reply each time: ~0.1-0.18 ms apiece, 10 ms at 100
+  /// replies and 80 ms at 500 (`architecture.md` F34). An unchanged instance is
+  /// skipped outright, and a reply is immutable once loaded — a delete removes
+  /// its row, nothing edits one — so a rebuilt row would have nothing to pick up.
+  Widget _replyRow(Comment reply) {
+    return _replyRows.putIfAbsent(
+      reply.id,
+      () => Padding(
+        padding: const EdgeInsets.only(top: 12.0),
+        child: CommentThreadWidget(
+          key: ValueKey(reply.id),
+          thread: reply,
+          videoId: widget.videoId,
+          isReply: true,
+          onDeleted: () => setState(() {
+            _replies.removeWhere((r) => r.id == reply.id);
+            _replyRows.remove(reply.id);
+          }),
+        ),
+      ),
+    );
   }
 
   void _startReply() {
@@ -700,17 +733,7 @@ class _CommentThreadWidgetState extends ConsumerState<CommentThreadWidget> {
                       ),
                     ),
                   if (_expanded) ...[
-                    for (final reply in _replies)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12.0),
-                        child: CommentThreadWidget(
-                          key: ValueKey(reply.id),
-                          thread: reply,
-                          videoId: widget.videoId,
-                          isReply: true,
-                          onDeleted: () => setState(() => _replies.removeWhere((r) => r.id == reply.id)),
-                        ),
-                      ),
+                    for (final reply in _replies) _replyRow(reply),
                     if (_loadingReplies)
                       const Padding(
                         padding: EdgeInsets.only(top: 12.0, bottom: 8.0),
