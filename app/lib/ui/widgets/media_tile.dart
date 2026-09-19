@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'tile_badges.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
@@ -235,11 +236,15 @@ class MediaTile extends StatefulWidget {
   final VoidCallback? onWatchLater;
   final VoidCallback? onAddToQueue;
 
-  /// The 3-dot menu (Task 25 §5: "the tile's 3-dot menu... opens this" — the
-  /// save-to-playlist dialog). Null renders the icon disabled rather than
-  /// absent, so a tile whose kind has nothing to offer there does not shift
-  /// its neighbours' layout.
-  final VoidCallback? onMore;
+  /// The 3-dot menu's entries — `tileMenuFor` builds them (Task 25 §5: "the
+  /// tile's 3-dot menu... opens this", the save-to-playlist dialog). Empty draws
+  /// the button disabled rather than absent, so a tile with nothing to offer
+  /// does not shift its neighbours' layout.
+  ///
+  /// Replaces `onMore`, a bare callback that no call site ever passed, so every
+  /// 3-dot button in the app was drawn disabled (the b2549cb review). A menu has
+  /// to open from somewhere, and a callback has no position to give it.
+  final List<TileMenuItem> menu;
 
   const MediaTile({
     super.key,
@@ -247,7 +252,7 @@ class MediaTile extends StatefulWidget {
     this.onTap,
     this.onWatchLater,
     this.onAddToQueue,
-    this.onMore,
+    this.menu = const [],
   }) : layout = MediaTileLayout.standard,
        size = MediaTileSize.standard;
 
@@ -257,7 +262,7 @@ class MediaTile extends StatefulWidget {
     this.onTap,
     this.onWatchLater,
     this.onAddToQueue,
-    this.onMore,
+    this.menu = const [],
     this.size = MediaTileSize.standard,
   }) : layout = MediaTileLayout.wide;
 
@@ -267,7 +272,7 @@ class MediaTile extends StatefulWidget {
     this.onTap,
     this.onWatchLater,
     this.onAddToQueue,
-    this.onMore,
+    this.menu = const [],
   }) : layout = MediaTileLayout.shorts,
        size = MediaTileSize.standard;
 
@@ -728,15 +733,21 @@ class _MediaTileState extends State<MediaTile> {
     Widget bottomArea({bool showAvatar = true}) {
       showAvatar = showAvatar && !widget.spec.isShort;
       if (widget.size == MediaTileSize.large) {
-        return Column(
+        // The 3-dot button hangs off the *whole* text column, not off the title
+        // row. A `Stack` hit-tests its children only inside its own bounds, and the
+        // title row is one text line — about 20 px — against a 48 px tap target, so
+        // hung off the row the lower half of the button was dead on any tile with a
+        // one-line title (measured 2026-09-20). Nothing showed it while the button
+        // was disabled. The column is taller than the button, and the offsets are
+        // the same, so nothing on screen moves.
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.start,
           children: [
-            // Title + 3 dot menu
-            Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.topLeft,
-              children: [
+            // Title
                 SizedBox(
                   width: double.infinity,
                   child: Padding(
@@ -753,26 +764,6 @@ class _MediaTileState extends State<MediaTile> {
                     ),
                   ),
                 ),
-                Positioned(
-                  top: -1,
-                  right: -2,
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.more_vert,
-                      size: 21,
-                      color: scheme.onSurface,
-                    ),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 34,
-                      minHeight: 34,
-                    ),
-                    mouseCursor: SystemMouseCursors.click,
-                    onPressed: widget.onMore,
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 2),
             // Views + date
             if (widget.spec.secondaryLine != null &&
@@ -838,6 +829,13 @@ class _MediaTileState extends State<MediaTile> {
               isMembersOnly: widget.spec.isMembersOnly,
             ),
           ],
+            ),
+            Positioned(
+              top: -1,
+              right: -2,
+              child: _TileMoreButton(items: widget.menu),
+            ),
+          ],
         );
       }
 
@@ -868,17 +866,17 @@ class _MediaTileState extends State<MediaTile> {
           ), // Separator if channel avatar is present
           // Title + primary/secondary lines + 3 dot menu
           Expanded(
-            child: Column(
+            // The button hangs off the whole column, not the title row — see the
+            // large layout above for why.
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Title + trailing 3 dot menu
-                Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.topLeft,
-                  children: [
-                    // Title text
+                // Title
                     SizedBox(
                       width: double.infinity,
                       child: Padding(
@@ -897,27 +895,6 @@ class _MediaTileState extends State<MediaTile> {
                         ),
                       ),
                     ),
-                    // 3-dot menu icon
-                    Positioned(
-                      top: -1,
-                      right: -4,
-                      child: IconButton(
-                        icon: Icon(
-                          Icons.more_vert,
-                          size: 21,
-                          color: scheme.onSurface,
-                        ),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 34,
-                          minHeight: 34,
-                        ),
-                        mouseCursor: SystemMouseCursors.click,
-                        onPressed: widget.onMore,
-                      ),
-                    ),
-                  ],
-                ),
                 const SizedBox(height: 1.5),
                 // Channel name
                 if (!widget.spec.isShort)
@@ -1000,6 +977,13 @@ class _MediaTileState extends State<MediaTile> {
                       ),
                     ),
                   ),
+              ],
+            ),
+                Positioned(
+                  top: -1,
+                  right: -4,
+                  child: _TileMoreButton(items: widget.menu),
+                ),
               ],
             ),
           ),
@@ -1136,5 +1120,94 @@ class _MediaTileState extends State<MediaTile> {
     };
 
     return (layout, isEffectiveWide);
+  }
+}
+
+/// Finds a tile's 3-dot button in a test.
+@visibleForTesting
+const Key tileMoreButtonKey = ValueKey('tile-more');
+
+/// The 3-dot menu for the tile [spec] draws from [item]: [tileMenuFor], with the
+/// two flags it needs read off the spec, so a call site is one short line.
+List<TileMenuItem> menuForTile(BuildContext context, WidgetRef ref, FeedItem item, TileSpec spec) =>
+    tileMenuFor(context, ref, item, canWatchLater: spec.canWatchLater, canAddToQueue: spec.canAddToQueue);
+
+/// The tile's 3-dot button and the menu it opens.
+///
+/// A `MenuAnchor` rather than a `PopupMenuButton`, the way `SubscribeButton` and
+/// `AccentDebugButton` do it: the menu is an overlay entry, not a pushed route,
+/// so nothing that watches the navigator (`RouteTracker`, `player_shell.dart`)
+/// sees it. The button keeps exactly the look and hit target the disabled one
+/// always had; an empty [items] draws that disabled button and nothing else.
+///
+/// Hover is tracked by a `MouseRegion` on each entry, not by `MenuItemButton`'s
+/// own hovered state, which stuck once the pointer left the menu —
+/// `subscribe_button.dart` has the account of it, and this is the same
+/// workaround for the same reason.
+class _TileMoreButton extends StatefulWidget {
+  const _TileMoreButton({required this.items});
+
+  final List<TileMenuItem> items;
+
+  @override
+  State<_TileMoreButton> createState() => _TileMoreButtonState();
+}
+
+class _TileMoreButtonState extends State<_TileMoreButton> {
+  int? _hovered;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    Widget button({VoidCallback? onPressed}) => IconButton(
+      key: tileMoreButtonKey,
+      icon: Icon(Icons.more_vert, size: 21, color: scheme.onSurface),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+      mouseCursor: SystemMouseCursors.click,
+      onPressed: onPressed,
+    );
+
+    if (widget.items.isEmpty) return button();
+
+    return MenuAnchor(
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
+        shape: const WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+        ),
+        mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+      ),
+      animated: true,
+      builder: (context, controller, _) =>
+          button(onPressed: () => controller.isOpen ? controller.close() : controller.open()),
+      menuChildren: [
+        for (var i = 0; i < widget.items.length; i++)
+          MouseRegion(
+            onEnter: (_) => setState(() => _hovered = i),
+            onExit: (_) => setState(() {
+              if (_hovered == i) _hovered = null;
+            }),
+            child: MenuItemButton(
+              style: MenuItemButton.styleFrom(
+                overlayColor: Colors.transparent,
+                backgroundColor: _hovered == i && widget.items[i].onPressed != null
+                    ? scheme.onSurface.withValues(alpha: 0.07)
+                    : null,
+              ),
+              leadingIcon: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(widget.items[i].icon),
+              ),
+              onPressed: widget.items[i].onPressed,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Text(widget.items[i].label),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
