@@ -1,0 +1,101 @@
+{
+  "items": [
+    {
+      "id": "cmt_001",
+      "authorName": "Sanitised Author 1",
+      "authorAvatarUrl": "https://fake.url/avatar1.jpg",
+      "authorChannelId": "chan_001",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 1"
+      },
+      "likeCount": "Sanitised Likes 1",
+      "publishedText": "8 years ago (edited)",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
+    },
+    {
+      "id": "cmt_002",
+      "authorName": "Sanitised Author 2",
+      "authorAvatarUrl": "https://fake.url/avatar2.jpg",
+      "authorChannelId": "chan_002",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 2"
+      },
+      "likeCount": "Sanitised Likes 2",
+      "publishedText": "8 years ago (edited)",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
+    },
+    {
+      "id": "cmt_003",
+      "authorName": "Sanitised Author 3",
+      "authorAvatarUrl": "https://fake.url/avatar3.jpg",
+      "authorChannelId": "chan_003",
+      "isUploader": true,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 3"
+      },
+      "likeCount": "Sanitised Likes 3",
+      "publishedText": "8 years ago",
+      "replyCount": 6,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false,
+      "repliesContinuation": "CONTINUATION_TOKEN_003",
+      "replyParams": null,
+      "deleteParams": null
+    },
+    {
+      "id": "cmt_004",
+      "authorName": "Sanitised Author 4",
+      "authorAvatarUrl": "https://fake.url/avatar4.jpg",
+      "authorChannelId": "chan_004",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 4"
+      },
+      "likeCount": "Sanitised Likes 4",
+      "publishedText": "8 years ago",
+      "replyCount": 0,
+      "isLiked": false,
+      "creatorHearted": true,
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": null,
+      "deleteParams": null
+    }
+  ],
+  "continuation": null,
+  "chips": [
+    {
+      "label": "Category 1",
+      "token": "CHIP_TOKEN_1",
+      "selected": true,
+      "scope": "feed"
+    },
+    {
+      "label": "Category 2",
+      "token": "CHIP_TOKEN_2",
+      "selected": false,
+      "scope": "feed"
+    }
+  ],
+  "commentCount": "10 Comments",
+  "createParams": null
+}

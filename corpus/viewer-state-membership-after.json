@@ -1,0 +1,32 @@
+{
+  "playlists": [
+    {
+      "id": "WL",
+      "title": "Sanitised Title 1",
+      "privacy": "private",
+      "containsVideo": true,
+      "removeToken": "REMOVE_TOKEN"
+    },
+    {
+      "id": "list_002",
+      "title": "Sanitised Title 2",
+      "privacy": "unlisted",
+      "containsVideo": false,
+      "removeToken": null
+    },
+    {
+      "id": "list_003",
+      "title": "Sanitised Title 3",
+      "privacy": "private",
+      "containsVideo": false,
+      "removeToken": null
+    },
+    {
+      "id": "list_004",
+      "title": "Sanitised Title 4",
+      "privacy": "private",
+      "containsVideo": false,
+      "removeToken": null
+    }
+  ]
+}

@@ -305,6 +305,7 @@ cd sidecar && bun test          # parser tests, offline, no network
 cd sidecar && bun run check     # typecheck + lint + tests — run before calling it done
 cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
+cd sidecar && bun run capture:viewer-state before|after   # fixtures in a known account state — read its header first
 cd sidecar && bun run build     # the sidecar alone — a release app needs `rill build`, see below
 setup.bat                       # fresh machine: FVM SDK, pub get, codegen, lint gate
 cd app && fvm dart run build_runner build --delete-conflicting-outputs   # codegen — see below
@@ -624,7 +625,23 @@ the answer.
   and nothing else. The comment's own `toolbar` has `heartActiveTooltip` on
   **every** comment — the tooltip *for* a heart, not evidence of one — and
   reading it marked 120 of 120 comments hearted where 4 were. `likeCount` is the
-  viewer's variant (`likeCountLiked` once they liked it). `architecture.md` F33.
+  viewer's variant (`likeCountLiked` once they liked it). **`heartState` has two
+  "hearted" values**: the creator's own view of a video they own says
+  `..._HEARTED_EDITABLE`, and the first version of this read only the plain one.
+  `architecture.md` F33, F35.
+- **A viewer-state field is untested until a fixture holds the state —
+  measured 2026-09-20.** `creatorHearted`, `isLiked` and
+  `PlaylistMembership.containsVideo` were each wrong with an all-green suite,
+  because every fixture was captured with the account in whatever state it
+  happened to be in, and none held a liked comment, a hearted one, or a video in
+  Watch Later. `bun run capture:viewer-state <before|after>` captures a pair with
+  the account in a *known* state and refuses to write unless the raw response
+  proves it; its header has the recipe (like a video, subscribe, add to Watch
+  Later, like and heart your own comment on your own video, then undo it all).
+  `capture.ts` carries `fixtures/viewer-state/` across instead of deleting it.
+  The assertions are `viewer-state.test.ts` (raw, local) and `corpus.test.ts`
+  (sanitised, runs anywhere). `canWatchLater` is *not* viewer state: it is `true`
+  on every tile, anonymous ones included. `architecture.md` F35.
 - **A running debug app locks `sidecar/dist/sidecar.exe`.** `bun run build`,
   `rill build` and `rill run` all fail with `EPERM: failed to move executable to
   result path` while a `flutter run` session is open, because that session runs
