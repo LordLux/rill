@@ -9,7 +9,7 @@
  *
  *   bun run spiking/07-resolve.ts [videoId]     → spiking/07-out/stream.json
  *
- * Two things it deliberately does beyond `tierAndroidVr`:
+ * Two things it deliberately does beyond `tierVisionOs`:
  *
  *   - It signs itag 401 (AV1) and 315 (VP9) explicitly as `variants`, because
  *     Q3 asks for a decoder measurement on *both* codecs and the ladder only
@@ -29,7 +29,7 @@ import { getPlayerResponse } from '../sidecar/src/innertube/player-response.ts';
 import { createSession } from '../sidecar/src/innertube/session.ts';
 import { sign } from '../sidecar/src/innertube/signed-url.ts';
 import { logger } from '../sidecar/src/log.ts';
-import { tierAndroidVr } from '../sidecar/src/playback/resolve.ts';
+import { tierVisionOs } from '../sidecar/src/playback/resolve.ts';
 import type { PlayerFormat, PlayerResult } from '../sidecar/src/types.ts';
 
 const log = logger('07-resolve');
@@ -93,7 +93,7 @@ const session = await createSession({ clientType: 'MWEB' });
 
 // Tier 1 itself, not a reimplementation of it — including the fresh-visitor-id
 // retry. Its pair is what the harness plays by default.
-const source = await tierAndroidVr({ session }, videoId, null);
+const source = await tierVisionOs({ session }, videoId, null);
 
 // Cached from the call tier 1 just made; no second round trip.
 const response = await getPlayerResponse(session, videoId, 'ANDROID_VR');

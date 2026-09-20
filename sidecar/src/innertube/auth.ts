@@ -216,8 +216,8 @@ export class BrowseAuth {
    * `setCookie` or `signOut`, both of which drop this.
    *
    * A failed account fetch is not a failed status. The state is the part that
-   * drives a re-auth prompt; a name is decoration, and answering
-   * `AUTH_DEGRADED` because a menu endpoint hiccuped would send the user to a
+   * drives a re-auth prompt; a name is decoration, and reporting the session
+   * as degraded because a menu endpoint hiccuped would send the user to a
    * login page they do not need.
    */
   async status(): Promise<AuthStatus> {

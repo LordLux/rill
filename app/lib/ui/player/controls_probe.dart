@@ -101,26 +101,36 @@ Future<void> _probe(ProviderContainer container) async {
     // that the window was asked.
     final chrome = container.read(windowChromeProvider);
     List<int>? bounds() => chrome is Win32WindowChrome ? chrome.debugBounds() : null;
+    // The style as well as the rectangle: bitsdojo_window draws a custom frame,
+    // and a restored rectangle with a changed style is a native title bar coming
+    // back, which the bounds alone would call RESTORED.
+    String style() {
+      final value = chrome is Win32WindowChrome ? chrome.debugStyle() : null;
+      return value == null ? 'unreadable' : '0x${value.toUnsigned(32).toRadixString(16)}';
+    }
 
     view.toggleTheatre();
     await _wait();
     checkTexture('theatre on');
 
     final before = bounds();
-    _say('window before fullscreen: $before');
+    final styleBefore = style();
+    _say('window before fullscreen: $before style=$styleBefore');
 
     view.toggleFullscreen();
     await _wait(3000);
     checkTexture('fullscreen on');
-    _say('window while fullscreen: ${bounds()}');
+    _say('window while fullscreen: ${bounds()} style=${style()}');
 
     // Esc twice: fullscreen first, then theatre.
     _say('escape consumed=${view.escape()}');
     await _wait(3000);
     checkTexture('fullscreen off');
     final after = bounds();
+    final styleAfter = style();
     _say('window after fullscreen: $after '
-        '${before != null && after != null ? (_same(before, after) ? 'RESTORED' : 'CHANGED') : 'unreadable'}');
+        '${before != null && after != null ? (_same(before, after) ? 'RESTORED' : 'CHANGED') : 'unreadable'}'
+        ' style=$styleAfter ${styleAfter == styleBefore ? 'RESTORED' : 'CHANGED'}');
 
     _say('escape consumed=${view.escape()}');
     await _wait();

@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'data/log_capture.dart';
 import 'data/playback/engine.dart';
+import 'data/playback/mpv_log.dart';
 import 'domain/feed_item.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
@@ -25,6 +28,11 @@ import 'ui/queue_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // First, so nothing below can print a cookie or an error the log misses.
+  // `YT_COOKIE` is the development path's cookie (the sidecar reads it too).
+  installErrorLogging();
+  registerLogSecret(Platform.environment['YT_COOKIE'] ?? '');
+  await runLogTest(Platform.environment['RILL_LOG_TEST']);
   MediaKit.ensureInitialized();
 
   // If the harness environment variables are set, boot directly into the debug player harness
@@ -64,7 +72,9 @@ Future<void> main() async {
   // surviving a route change is not a feature, it is the absence of a bug.
   // `RILL_LAUNCH_PROBE` needs mpv's own log to tell a dead URL from one mpv
   // never opened. Off otherwise: `v` is thousands of lines a run.
-  final engine = MediaKitEngine(
+  // `RILL_MPV_LOG=<path>` writes both players' log to a file (`mpv_log.dart`).
+  final engine = createEngine(
+    'shell',
     logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
   );
 
@@ -83,6 +93,15 @@ Future<void> main() async {
       child: const RillApp(),
     ),
   );
+
+  doWhenWindowReady(() {
+    const initialSize = Size(1280, 720);
+    appWindow.minSize = const Size(640, 480);
+    appWindow.size = initialSize;
+    appWindow.alignment = Alignment.center;
+    appWindow.title = 'Rill';
+    appWindow.show();
+  });
 
   // Restore the stored session before anything asks the sidecar a question the
   // answer depends on — Task 22 §6's last paragraph. Not awaited: a cold
@@ -225,7 +244,7 @@ class RillApp extends ConsumerWidget {
         // Lazy and called at most once, so a user who never hovers pays for no second mpv. A
         // *second* engine rather than the shell's: previewing on that one would open media over
         // whatever is paused there and take its position with it.
-        engineFactory: MediaKitEngine.new,
+        engineFactory: () => createEngine('preview'),
         child: PlayerShell(child: child ?? const SizedBox.shrink()),
       ),
       home: const FeedPage(),

@@ -526,10 +526,6 @@ class FeedController extends Notifier<FeedState> {
     } on RpcException catch (e) {
       if (generation != _generation) return;
       _inFlight = null;
-      if (e.code == 'AUTH_DEGRADED') {
-        state = state.copyWith(isAuthDegraded: true, isLoading: false);
-        return;
-      }
       _fail(
         e.message,
         e.retry,

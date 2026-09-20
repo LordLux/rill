@@ -56,6 +56,12 @@ const BROKEN_ID = 'broken1';
  * page must still show the members slate, because `video.info` says so from a
  * badge style YouTube does not translate.
  */
+/**
+ * An open that YouTube's throttle refused — `RATE_LIMITED`, `retry: "user"`
+ * (decided 2026-09-17). The watch page has to say the connection is limited,
+ * not that the video would not open.
+ */
+const RATE_LIMITED_ID = 'ratelimited1';
 const MEMBERS_ID = 'members1';
 const MEMBERS_LOCALE_ID = 'memberslocale1';
 /** Members-only, and nothing anywhere knows the channel's name. */
@@ -236,6 +242,17 @@ rl.on('line', (line) => {
         process.stdout.write(JSON.stringify({
           id: req.id,
           error: { code: 'VIDEO_UPCOMING', message: 'Premieres in 9 days', retry: 'no' },
+        }) + '\n');
+        return;
+      }
+      if (req.params?.videoId === RATE_LIMITED_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'ratelimited1: YouTube is throttling this connection',
+            retry: 'user',
+          },
         }) + '\n');
         return;
       }

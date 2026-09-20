@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import { probeCapabilities, resolveYtDlp, ytDlpBinary } from '../src/capabilities.ts';
 import { hasCode, isRpcError, RpcError } from '../src/errors.ts';
-import { resetPlayerCache, type Player } from '../src/innertube/player.ts';
+import { getPlayer, resetPlayerCache, type Player } from '../src/innertube/player.ts';
 import { forgetPlayerResponse } from '../src/innertube/player-response.ts';
 import type { PlayerClient, Session } from '../src/innertube/session.ts';
 import { adoptExternallyDeciphered, sign } from '../src/innertube/signed-url.ts';
@@ -27,8 +27,12 @@ import {
   descendLadder,
   fetchWithVisitorRetry,
   openPlayback,
+  responseForDecipher,
   sourceFromYtDlpDump,
+  tierPlainAdaptive,
+  tierProgressive,
   tierYtDlp,
+  type PlayerEntry,
   type Tier,
   type YtDlpDump,
 } from '../src/playback/resolve.ts';
@@ -617,6 +621,76 @@ describe('the ladder as openPlayback wires it', () => {
 // LOGIN_REQUIRED and the visitor id
 // ---------------------------------------------------------------------------
 
+describe('a throttle is RATE_LIMITED, not "would not open" — decided 2026-09-17', () => {
+  beforeEach(() => {
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
+  const botCheck = { status: 'LOGIN_REQUIRED', reason: "Sign in to confirm you're not a bot" };
+
+  const failureOf = (promise: Promise<unknown>): Promise<unknown> =>
+    promise.then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+  test('the ladder reports RATE_LIMITED when a throttled tier is followed only by declines', async () => {
+    const tiers: Tier[] = [
+      { name: 'one', run: async () => Promise.reject(new RpcError('RATE_LIMITED', 'bot check')) },
+      { name: 'two', run: async () => Promise.reject(new RpcError('UPSTREAM_ERROR', 'down')) },
+    ];
+    const failure = await failureOf(descendLadder('aqz-KE-bpKQ', tiers));
+    expect(hasCode(failure, 'RATE_LIMITED')).toBe(true);
+    // `user`, not `auto`: a throttle lasts minutes to an hour, and a silent
+    // retry would be a spinner that never ends.
+    expect((failure as RpcError).retry).toBe('user');
+  });
+
+  test('a throttled tier does not end the ladder: a lower tier can still serve', async () => {
+    const tiers: Tier[] = [
+      { name: 'one', run: async () => Promise.reject(new RpcError('RATE_LIMITED', 'bot check')) },
+      { name: 'two', run: async () => stubSource('plain', 360) },
+    ];
+    const source = await descendLadder('aqz-KE-bpKQ', tiers);
+    expect(source.variants[0]!.height).toBe(360);
+  });
+
+  test('throttled on every client: openPlayback answers RATE_LIMITED after trying them all', async () => {
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', ...botCheck }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', ...botCheck }),
+    });
+    const failure = await failureOf(openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' }));
+
+    expect(hasCode(failure, 'RATE_LIMITED')).toBe(true);
+    // Tier 1 retried once with a fresh visitor id before being believed, and
+    // the ladder still reached tier 5's ANDROID response.
+    expect(session.calls).toEqual(['VISIONOS', 'VISIONOS', 'ANDROID']);
+  });
+
+  test('a throttled tier 1 is rescued by the 360p floor when ANDROID still answers', async () => {
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', ...botCheck }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false, sabrOnly: true }),
+    });
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    expect(source.variants[0]!.height).toBe(360);
+    expect(source.qualityDegraded).toBe(true);
+  });
+
+  test('an age gate is not a throttle, although it is also LOGIN_REQUIRED', async () => {
+    const ageGate = { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm your age' };
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', ...ageGate }),
+      ANDROID: rawPlayerBody({ client: 'ANDROID', ...ageGate }),
+    });
+    const failure = await failureOf(openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' }));
+    expect(hasCode(failure, 'STREAM_UNAVAILABLE')).toBe(true);
+  });
+});
+
 describe('fetchWithVisitorRetry', () => {
   const ok = parsePlayer(rawPlayerBody({ client: 'VISIONOS' }));
   const refused = parsePlayer(
@@ -733,6 +807,255 @@ describe('fetchWithVisitorRetry', () => {
     expect(result).toBe(refused);
     // No second /player call: there is no new identity to make it with.
     expect(t.refreshes).toEqual([false]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Player-revision consistency — Task 04 §1
+//
+// The response and the decipher script must never be paired across a
+// revision change. `responseForDecipher` is the function both
+// `tierPlainAdaptive` and `tierProgressive` route through to enforce that,
+// right before they decipher — tested directly against the real
+// implementation, with a stub session, rather than against a second copy of
+// the rule.
+// ---------------------------------------------------------------------------
+
+describe('responseForDecipher — Task 04 §1', () => {
+  beforeEach(() => {
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  test('a response already minted under the current player is used as-is — no /player call at all', async () => {
+    const session = fakeSession({ MWEB: rawPlayerBody({ client: 'MWEB', withN: true }) });
+    const player = fakePlayer({ playerId: 'same' });
+    const entry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'MWEB', withN: true })),
+      playerId: 'same',
+    };
+
+    const response = await responseForDecipher(session, 'aqz-KE-bpKQ', 'MWEB', entry, player);
+
+    expect(response).toBe(entry.result);
+    expect(session.calls).toEqual([]);
+  });
+
+  test('a mismatched revision refetches exactly once under {refresh: true}, and returns it once it matches', async () => {
+    // The session's real player is `fakeJsPlayer` (playerId 'testplayer') —
+    // what the refetch will read. `player` below names that same revision, so
+    // the post-refetch check passes and the refetched response is returned.
+    const session = fakeSession({ MWEB: rawPlayerBody({ client: 'MWEB', withN: true }) });
+    const player = fakePlayer({ playerId: 'testplayer' });
+    const staleEntry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'MWEB', withN: true })),
+      playerId: 'oldRevision',
+    };
+
+    const response = await responseForDecipher(session, 'aqz-KE-bpKQ', 'MWEB', staleEntry, player);
+
+    expect(session.calls).toEqual(['MWEB']);
+    expect(response).not.toBe(staleEntry.result);
+    expect(response.playabilityStatus).toBe('OK');
+  });
+
+  test('a revision that has moved again by the time the refetch lands declines — never a mismatched decipher', async () => {
+    // The session's real player is still 'testplayer', but `player` here — the
+    // one about to decipher — names a third, different revision. Even the
+    // refetch cannot satisfy it: two revisions inside one resolution.
+    const session = fakeSession({ MWEB: rawPlayerBody({ client: 'MWEB', withN: true }) });
+    const player = fakePlayer({ playerId: 'yetAnotherRevision' });
+    const staleEntry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'MWEB', withN: true })),
+      playerId: 'oldRevision',
+    };
+
+    const failure = await responseForDecipher(
+      session,
+      'aqz-KE-bpKQ',
+      'MWEB',
+      staleEntry,
+      player,
+    ).catch((error: unknown) => error);
+
+    expect(isRpcError(failure)).toBe(true);
+    expect(hasCode(failure, 'STREAM_UNAVAILABLE')).toBe(true);
+    expect((failure as RpcError).message).toContain('testplayer');
+    expect((failure as RpcError).message).toContain('yetAnotherRevision');
+    // Exactly one refetch — a decline, not a retry loop.
+    expect(session.calls).toEqual(['MWEB']);
+  });
+
+  test('a null recorded revision counts as a mismatch, not as "trust it"', async () => {
+    const session = fakeSession({ MWEB: rawPlayerBody({ client: 'MWEB', withN: true }) });
+    const player = fakePlayer({ playerId: 'testplayer' });
+    const entry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'MWEB', withN: true })),
+      playerId: null,
+    };
+
+    const response = await responseForDecipher(session, 'aqz-KE-bpKQ', 'MWEB', entry, player);
+
+    // Refetched despite there being no known prior revision to compare against.
+    expect(session.calls).toEqual(['MWEB']);
+    expect(response.playabilityStatus).toBe('OK');
+  });
+
+  test('a mismatch is not worth a refetch when nothing in the response would ever be deciphered', async () => {
+    // VISIONOS formats carry neither a cipher nor an `n` — nothing `sign()`
+    // would ever run through the player script — so a revision mismatch here
+    // must not cost a spare /player call.
+    const session = fakeSession({ VISIONOS: rawPlayerBody({ client: 'VISIONOS' }) });
+    const player = fakePlayer({ playerId: 'current' });
+    const staleEntry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'VISIONOS' })),
+      playerId: 'stale',
+    };
+
+    const response = await responseForDecipher(session, 'aqz-KE-bpKQ', 'VISIONOS', staleEntry, player);
+
+    expect(response).toBe(staleEntry.result);
+    expect(session.calls).toEqual([]);
+  });
+});
+
+describe('the tiers close the loop end to end — Task 04 §1', () => {
+  beforeEach(() => {
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
+
+  test('a premiere still ends the ladder when the player cannot be loaded', async () => {
+    // Playability is decided before the player is touched. It does not depend
+    // on the revision, and it is where a premiere ends the ladder — so a
+    // `getPlayer()` that fails (here: a session with no JS player at all) must
+    // not turn VIDEO_UPCOMING into an ordinary decline, which the watch page
+    // would show as a *Try again* on a video that is fine.
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({
+        client: 'VISIONOS',
+        status: 'LIVE_STREAM_OFFLINE',
+        reason: 'Premieres in 9 days',
+      }),
+    });
+    (session.innertube.session as { player?: unknown }).player = undefined;
+
+    const failure = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(hasCode(failure, 'VIDEO_UPCOMING')).toBe(true);
+    // Two VISIONOS calls — tier 1 retries once with a fresh visitor id on any
+    // non-OK status — and nothing below it: the ladder ended at tier 1.
+    expect(session.calls).toEqual(['VISIONOS', 'VISIONOS']);
+  });
+
+  test('tierPlainAdaptive refetches a stale entry and deciphers with the current player’s script and signatureTimestamp', async () => {
+    const session = fakeSession({ MWEB: rawPlayerBody({ client: 'MWEB', withN: true }) });
+
+    // Capture the raw params of every /player call this test makes, so the
+    // refetch's signatureTimestamp can be inspected directly, not just its side
+    // effects.
+    const paramsSeen: Record<string, unknown>[] = [];
+    const rawExecute = session.execute.bind(session);
+    session.execute = async (endpoint: string, params: Record<string, unknown> = {}) => {
+      paramsSeen.push(params);
+      return rawExecute(endpoint, params);
+    };
+
+    // Adopts `fakeJsPlayer`: playerId 'testplayer', signatureTimestamp 20662 —
+    // the session's current revision.
+    const player = await getPlayer(session);
+    const staleEntry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'MWEB', withN: true })),
+      playerId: 'oldRevision',
+    };
+
+    const source = await tierPlainAdaptive({ session, ...noYtDlp }, 'aqz-KE-bpKQ', 'MWEB', null, staleEntry);
+
+    // Refetched — the stale entry was never served straight through.
+    expect(session.calls).toEqual(['MWEB']);
+    const sts = (
+      paramsSeen[0]!['playbackContext'] as { contentPlaybackContext: { signatureTimestamp: number } }
+    ).contentPlaybackContext.signatureTimestamp;
+    expect(sts).toBe(player.signatureTimestamp);
+
+    // And deciphered by the current player's script.
+    const url = new URL(source.variants[0]!.videoUrl);
+    expect(url.searchParams.get('n')).toBe('n(RAWN315)');
+  });
+
+  test('tierProgressive gives the same guarantee for the itag-18 floor', async () => {
+    const session = fakeSession({ ANDROID: rawPlayerBody({ client: 'ANDROID', withN: true }) });
+    await getPlayer(session); // adopts fakeJsPlayer, playerId 'testplayer'
+    const staleEntry: PlayerEntry = {
+      result: parsePlayer(rawPlayerBody({ client: 'ANDROID', withN: true })),
+      playerId: 'oldRevision',
+    };
+
+    const source = await tierProgressive(
+      { session, ...noYtDlp },
+      'aqz-KE-bpKQ',
+      'ANDROID',
+      null,
+      staleEntry,
+    );
+
+    expect(session.calls).toEqual(['ANDROID']);
+    expect(source.variants[0]!.height).toBe(360);
+    const url = new URL(source.variants[0]!.videoUrl);
+    expect(url.searchParams.get('n')).toBe('n(RAWN18)');
+  });
+
+  test('openPlayback (through tierVisionOs) refetches when the session’s player has moved since the last resolution — the original Task 04 §1 scenario', async () => {
+    // First resolution: ordinary, nothing stale yet. Populates both caches —
+    // player.ts's deciphering-player cache, and player-response.ts's response
+    // cache — under the session's player (`fakeJsPlayer`, playerId
+    // 'testplayer').
+    const session = fakeSession({
+      VISIONOS: rawPlayerBody({ client: 'VISIONOS', withN: true }), // withN so decipher is actually exercised
+      ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false }),
+    });
+
+    const first = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    expect(session.calls).toEqual(['VISIONOS']);
+    expect(new URL(first.variants[0]!.videoUrl).searchParams.get('n')).toBe('n(RAWN315)');
+
+    // Simulate a player rollout landing between resolutions — exactly what
+    // `player.ts`'s `build()` does when `getPlayer`'s TTL expires and YouTube
+    // has shipped a new revision. The response cache still holds the entry
+    // from the first call, minted under 'testplayer'.
+    const fakeJsPlayerB = {
+      player_id: 'playerB',
+      signature_timestamp: 99999,
+      decipher(url?: string, cipher?: string): string {
+        if (cipher) {
+          const args = new URLSearchParams(cipher);
+          const out = new URL(args.get('url')!);
+          out.searchParams.set(args.get('sp') ?? 'signature', `sigB(${args.get('s')})`);
+          return out.toString();
+        }
+        const out = new URL(url!);
+        const n = out.searchParams.get('n');
+        if (n) out.searchParams.set('n', `nB(${n})`);
+        return out.toString();
+      },
+    };
+    (session.innertube.session as { player: unknown }).player = fakeJsPlayerB;
+
+    const second = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    // Refetched — the response cached under 'testplayer' was not served
+    // straight through to a decipher against 'playerB'.
+    expect(session.calls).toEqual(['VISIONOS', 'VISIONOS']);
+    // And deciphered with the NEW player's script, proving the pair was never
+    // mismatched: 'n(...)' would mean the stale response was deciphered with
+    // the old (still-cached, still matching) script; 'nB(...)' is only
+    // reachable via a refetch minted under player B.
+    expect(new URL(second.variants[0]!.videoUrl).searchParams.get('n')).toBe('nB(RAWN315)');
   });
 });
 

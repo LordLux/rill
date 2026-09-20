@@ -133,6 +133,13 @@ class PlaybackState {
   /// explanation rather than a *Try again*.
   bool get isMembersOnly => errorCode == 'VIDEO_MEMBERS_ONLY';
 
+  /// YouTube is throttling this connection — `RATE_LIMITED`, `retry: user`.
+  ///
+  /// The video is not the problem, so the failure screen must not say it is.
+  /// A retry is still offered: the limit lifts after minutes, and the user is
+  /// the one who knows when to try again.
+  bool get isRateLimited => errorCode == 'RATE_LIMITED';
+
   /// The ladder the quality menu lists. Empty when nothing is open.
   List<PlaybackVariant> get variants => source?.variants ?? const [];
 

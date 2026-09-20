@@ -1,0 +1,17 @@
+name: rill_lints_canary
+description: >
+  A fixture with exactly one no_color_literals violation. tool/lint_gate.dart
+  analyzes this package to prove the plugin actually loaded — see the header
+  comment on that file for why a clean app-wide analysis alone can't prove it.
+publish_to: 'none'
+version: 0.0.0
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  # `dart:ui` only resolves inside a Flutter SDK context, so canary.dart's one
+  # violation needs this even though it's otherwise a plain Dart package.
+  # `sdk: flutter` is a local reference, not a pub.dev fetch.
+  flutter:
+    sdk: flutter

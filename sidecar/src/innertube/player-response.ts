@@ -16,6 +16,12 @@
  * ~6 h), but playability is not fixed — a video can be pulled, age-gated, or
  * region-blocked between one open and the next, and a long-lived cache would
  * keep serving the old answer.
+ *
+ * **Each entry also records which player revision its `signatureTimestamp`
+ * was sent for — Task 04 §1.** This module does not act on that; it is read
+ * by `resolve.ts`, which is the code that later deciphers `s`/`n` against a
+ * specific player and must never do so against a response minted for a
+ * different one (hard invariant 2). See `Entry.playerId`.
  */
 
 import { logger } from '../log.ts';
@@ -35,6 +41,20 @@ interface Entry {
   result: PlayerResult;
   raw: unknown;
   fetchedAt: number;
+  /**
+   * The player revision whose `signatureTimestamp` was sent for this fetch —
+   * `session.innertube.session.player.player_id` read in the same
+   * synchronous tick as the payload that carries it, or `null` if the
+   * session had no player at all at that moment (Task 04 §1).
+   *
+   * This module only records it — it does not act on it. The consumers that
+   * decipher against a specific revision (`resolve.ts`) check it against the
+   * player they are about to decipher with, and refetch when it does not
+   * match. That point-of-use check already covers a stale cache entry, so the
+   * revision is deliberately not part of `keyFor`: a second mechanism would
+   * add nothing.
+   */
+  playerId: string | null;
 }
 
 const cache = new Map<string, Entry>();
@@ -74,6 +94,12 @@ async function fetchPlayer(
   client: PlayerClient,
   playlistId?: string | null,
 ): Promise<Entry> {
+  // Read in the same synchronous tick as `playerPayload`'s own read of the
+  // same object, before the `await` below gives anything else a chance to
+  // run — so this can never name a different revision than the one the
+  // request's signatureTimestamp actually describes (Task 04 §1).
+  const playerId = session.innertube.session.player?.player_id ?? null;
+
   // `playerPayload` carries the signatureTimestamp. Hard invariant 7: without it
   // YouTube answers UNPLAYABLE — "The page needs to be reloaded." — which reads
   // like a dead or region-locked video and is neither.
@@ -88,7 +114,7 @@ async function fetchPlayer(
       `formats=${result.formats.length} sabrOnly=${result.sabrOnly}`,
   );
 
-  return { result, raw, fetchedAt: Date.now() };
+  return { result, raw, fetchedAt: Date.now(), playerId };
 }
 
 export interface PlayerRequestOptions {
@@ -129,13 +155,18 @@ export async function getPlayerResponse(
   return (await getPlayerEntry(session, videoId, client, options)).result;
 }
 
-/** As `getPlayerResponse`, but also exposes the raw body for fixture capture. */
+/**
+ * As `getPlayerResponse`, but also exposes the raw body for fixture capture
+ * and the player revision the response was minted under (Task 04 §1) — for a
+ * caller that is about to decipher formats from it and has to know whether
+ * that revision still matches the player it will decipher with.
+ */
 export async function getPlayerEntry(
   session: Session,
   videoId: string,
   client: PlayerClient,
   options: PlayerRequestOptions = {},
-): Promise<{ result: PlayerResult; raw: unknown }> {
+): Promise<{ result: PlayerResult; raw: unknown; playerId: string | null }> {
   const key = keyFor(videoId, client, options.playlistId);
 
   if (options.refresh) {

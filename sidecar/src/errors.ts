@@ -13,7 +13,6 @@
  * Codes that can reach Flutter in a failure envelope. Each one has a `retry`.
  */
 export type EnvelopeErrorCode =
-  | 'AUTH_DEGRADED'
   | 'AUTH_REQUIRED'
   /** Unknown method, or params that failed validation. The caller is at fault. */
   | 'BAD_REQUEST'
@@ -41,6 +40,12 @@ export type EnvelopeErrorCode =
    * more often than not.
    */
   | 'VIDEO_MEMBERS_ONLY'
+  /**
+   * YouTube is throttling this connection's anonymous resolution — "Sign in to
+   * confirm you're not a bot", still refused after tier 1's fresh visitor id
+   * (F20 saw it after ~180 resolutions in an hour). Not a verdict on the video,
+   * so it is not `STREAM_UNAVAILABLE`, whose message would blame the video.
+   */
   | 'RATE_LIMITED'
   | 'UPSTREAM_ERROR';
 
@@ -48,7 +53,7 @@ export type EnvelopeErrorCode =
  * Codes that are control flow inside the sidecar and never cross the wire.
  *
  * They are deliberately *not* given a `retry` value. Marking them `no` would put
- * them in the same column as `AUTH_DEGRADED` and quietly claim something about
+ * them in the same column as `AUTH_REQUIRED` and quietly claim something about
  * what the app should do with an error the app never receives — and a value that
  * is inert today is exactly the kind that gets read as meaningful later, by
  * whoever builds the RPC layer and sees three codes marked alike.
@@ -91,7 +96,6 @@ export type RetryMode =
  * on which line threw.
  */
 const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.freeze({
-  AUTH_DEGRADED: 'no',
   AUTH_REQUIRED: 'no',
   // The only `no` that is a certainty rather than a judgement: the same bytes
   // will fail the same way forever. Retrying a client bug just hides it behind a
@@ -107,7 +111,10 @@ const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.fre
   // something better than a retry button to offer — the date and a reminder.
   VIDEO_UPCOMING: 'no',
   VIDEO_MEMBERS_ONLY: 'no',
-  RATE_LIMITED: 'auto',
+  // `user`, not `auto` — decided 2026-09-17. A throttle lasts minutes to an
+  // hour, so a silent automatic retry is a spinner that never ends; the user is
+  // told what is happening and chooses when to try again.
+  RATE_LIMITED: 'user',
   UPSTREAM_ERROR: 'auto',
 });
 

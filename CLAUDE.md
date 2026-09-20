@@ -155,12 +155,26 @@ view-based surface.
 
 | Concern | Classic | View-based |
 |---|---|---|
-| Video tile | `videoRenderer`, `richItemRenderer`, `playlistVideoRenderer` | `lockupViewModel` |
-| Filter bar | `chipCloudChipRenderer` (top level) | `ChipsShelfView` → `ChipView` (shelf) |
-| Mix tile | — | `CollectionThumbnailView` + `"Mix"` badge |
+| Video tile | `videoRenderer`, `playlistVideoRenderer`, and their `grid`/`compact` variants | `lockupViewModel` |
+| Filter bar | `chipCloudChipRenderer` (top level) | `chipViewModel`, inside `chipsShelfViewModel` / `chipBarViewModel` (shelf) |
+| Mix tile | `radioRenderer` family (supported; absent from current captures) | a playlist-type `lockupViewModel` whose id starts `RD` |
 | Mix/playlist panel | — | *(none — a bare object, see below)* |
-| Hover actions | — | `ThumbnailHoverOverlayToggleActionsView` |
-| Continuation | `continuationItemRenderer` | `ContinuationItem` |
+| Hover actions | — | `thumbnailHoverOverlayToggleActionsViewModel`, read by what it holds |
+| Continuation | `continuationItemRenderer` | `continuationItemViewModel` |
+| Artist panel | — | `officialCardViewModel` (search only) |
+
+**These are the raw `parse: false` keys, and `sidecar/src/parser/vocabulary.ts` is
+the authority.** Four corrections to how this table used to read — the first
+version (2026-08-01, in `architecture.md` §2.2) printed youtubei.js's *typed*
+spellings (`ChipView`, `ContinuationItem`, `ThumbnailHoverOverlayToggleActionsView`),
+which never appear in a response this app reads; `normaliseRendererName`
+accepts both, but only the raw key is ever there. `richItemRenderer` is not a
+tile: it is a wrapper the walker descends through to reach one. A mix is
+recognised by its `RD…` id — `collectionThumbnailViewModel` is the thumbnail of
+*every* playlist lockup, and a `"Mix"` badge label is only a fallback, since the
+label is localised. And the Watch Later / queue actions are found by what the
+tile contains (`playlistEditEndpoint` on `WL`, `addToPlaylistCommand`, icon
+names; `scanTileActions` in `parser/text.ts`), not by the overlay's key.
 
 **Shorts are split, not simply stripped** (revised by Task 21 §1; this line
 used to read "stripped, never rendered" and both halves of that are now
@@ -222,11 +236,19 @@ that do not exist yet.
   /src/rpc        NDJSON transport
   /fixtures       raw captured responses (parse:false) — the test corpus
 /app              Flutter
+  /lib            main.dart + probe_task19.dart — the only two entrypoints
   /lib/domain     freezed models mirroring the DTOs above
   /lib/data       RPC client
   /lib/ui         screens, tiles, player
-/docs             architecture.md, protocol.md, tasks/
+  /test/README.md the Task 19 measurement probes, and why they are not tests
+/docs             architecture.md, protocol.md, todo.md, tasks/
+/third_party      vendored packages carrying a local fix — media_kit_video (F28)
 ```
+
+**`docs/todo.md` is the live backlog** — work that is agreed but not done, each
+entry carrying enough context to be picked up cold. `docs/tasks/` is the
+archive: what was asked for at a moment in time. An item leaves `todo.md` when
+the work lands; a task file is never rewritten to match today's code.
 
 ## Reports
 
@@ -242,10 +264,36 @@ cd sidecar && bun test          # parser tests, offline, no network
 cd sidecar && bun run check     # typecheck + lint + tests — run before calling it done
 cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
-cd sidecar && bun run build     # compile to dist/sidecar.exe — see below
-cd app && flutter run -d windows
-cd app && dart run tool/test_suite_guard.dart   # flutter test + the guard below
+cd sidecar && bun run build     # the sidecar alone — a release app needs `rill build`, see below
+setup.bat                       # fresh machine: FVM SDK, pub get, codegen, lint gate
+cd app && fvm dart run build_runner build --delete-conflicting-outputs   # codegen — see below
+cd app && fvm flutter run -d windows   # debug build with hot reload
+rill build                      # compile sidecar and app, bundle, and stop
+rill run                        # build, bundle, then launch the exe in this terminal
+rill open                       # launch the last release build as-is, no build
+rill check                      # flutter test guard + lint gate
+# run `rill --help` for the full surface; `rill` works from any directory
 ```
+
+**Generated code is not committed.** `*.g.dart` and `*.freezed.dart` are
+gitignored, so a fresh clone does not compile until `build_runner` has run —
+`setup.bat` does it once, and it has to be re-run after changing any `freezed`
+or `json_serializable` model. If it fails, the `build_runner` note under
+"Notes that will bite otherwise" is where to start.
+
+**App commands go through `fvm`, never the global SDK.** `app/.fvmrc` pins
+Flutter 3.44.9, and a bare `flutter`/`dart` in `app/` is a different SDK that
+breaks things in ways that point nowhere near it — measured 2026-09-16: it
+re-resolves `pubspec.lock` against its own pins (`meta`, `matcher`, `test_api`,
+`vector_math` move), and after an `fvm` run it cannot read
+`.dart_tool/hooks_runner`, so the test guard dies before running a test with
+*"Invalid kernel binary format version"*.
+
+**`flutter analyze` and `dart analyze` are not a check for `rill_lints`.** They
+stop listening before the plugin's diagnostics arrive, and report
+"No issues found!" on code with real violations — the plugin loading fine the
+whole time. `tool/lint_gate.dart` is the check; `app/tool/rill_lints/README.md`
+has why.
 
 **Run the app's tests through `tool/test_suite_guard.dart`, not `flutter test`
 alone.** A test file that does not compile fails to *load*, and `flutter test`
@@ -273,22 +321,22 @@ directory beside the executable *first* — so a release app runs that copy, not
 the one in the repo. Rebuilding the sidecar alone leaves the app on whatever was
 current when Flutter last built. This is silent and it wastes whole measurement
 runs: a fix verified this way appears not to work, with no error and no clue,
-because the code being exercised is the old code. Either re-run
-`flutter build windows --release` after `bun run build`, or copy
-`sidecar/dist/sidecar.exe` over the bundled one. **Re-running
-`flutter build windows --release` is *not* enough** — measured 2026-08-13: the
-copy step does not re-run for an already-populated bundle, so the app kept a
-sidecar nine hours older than the one just built, with no warning. Copy the
-binary over the bundled one **explicitly**, and check it took — `grep` a string
-from the new build inside the bundled `.exe` — before trusting any device
-measurement. Otherwise the run measures the previous sidecar and says so
-nowhere.
+because the code being exercised is the old code. **Re-running
+`fvm flutter build windows --release` after `bun run build` is *not* enough** —
+measured 2026-08-13: the copy step does not re-run for an already-populated
+bundle, so the app kept a sidecar nine hours older than the one just built, with
+no warning. Copy `sidecar/dist/sidecar.exe` over the bundled one **explicitly**
+(`rill build`, `run` and `zip` do this after building), and check it took —
+`grep` a string from the new build inside the bundled `.exe` — before trusting
+any device measurement. Otherwise the run measures the previous sidecar and says
+so nowhere.
 
 **It bit again on 2026-08-19, and it does not look like a stale binary.** It
 looks like a half-finished feature: captions rendered position and outline but no
 colour or font, because the bundled sidecar predated the change that reads
 per-segment pens, while `sidecar/dist/` had it. Two things now make it cheaper to
-spot. The client logs `rill: sidecar <path> (built <mtime>)` at startup — compare
+spot. The client logs `rill: sidecar <path> (built <mtime>)` at startup — in a
+release build that line is also in the newest `%LOCALAPPDATA%\rill\logs\rill-*.log` — compare
 that timestamp against `sidecar/dist/sidecar.exe`. And `grep -a` for a symbol
 only the new code has (`layerAlpha`, `includeStyled`) inside **both** binaries;
 if the bundled one is busy, the app is running and holding it, which is itself
@@ -360,8 +408,10 @@ the answer.
   to nothing, as the scrubber's input: at ~6 s between frames they are good for
   showing one frame at a pointer position and nothing else.
 - **Browse and resolve are different clients.** Browse and report as `WEB` with
-  cookies; resolve streams anonymously, asking as `VISIONOS` (ladder tier 1)
-  and falling back to `MWEB` (tier 2). **Tier 1 was `ANDROID_VR` until
+  cookies; resolve streams anonymously, asking as `VISIONOS` (ladder tier 1),
+  then yt-dlp, then `ANDROID`'s 360p itag 18. **`MWEB` is not a playback tier**
+  — it left the ladder on 2026-08-19 (`architecture.md` §2.4), and nothing in
+  the ladder deciphers since. **Tier 1 was `ANDROID_VR` until
   2026-08-18** — it now requires a PO token and is no longer viable
   (`architecture.md` F11), so any note here still naming it is stale. Do not attempt to bridge CPNs between
   them — issue two independent calls.
@@ -372,7 +422,10 @@ the answer.
   mints a fresh id and retries **once** on any response that is not `OK` with a
   non-empty adaptive ladder — not just on `LOGIN_REQUIRED`, because no one has
   ever seen a server-issued id expire and so nobody knows what shape that
-  failure takes. A SABR-only response is not an identity refusal.
+  failure takes. A SABR-only response is not an identity refusal. A "not a
+  bot" refusal that survives the fresh id is YouTube throttling the
+  connection: `playback.open` answers `RATE_LIMITED` for it (`retry: user`)
+  if no lower tier gets through — never "would not open".
 - **When `app/pubspec.yaml` is first created**, pin
   `media_kit_libs_windows_video: 1.0.11` exactly (not caret). A bump lands
   modern FFmpeg and reintroduces the F13 seek freeze. See §2.4.
@@ -425,6 +478,11 @@ the answer.
   sequential, and this note's "removing it fixes all codegen" was too broad** —
   it fixed the bootstrap, not the builders. If codegen breaks again, check
   which phase fails before assuming either cause.
+
+  `16b70c7` also overrode `source_gen` and `build`, and those two survived the
+  2026-09-09 fix undocumented. Tested out and removed 2026-09-16: without them
+  the solver picked identical versions, and codegen and both app gates passed.
+  `dependency_overrides` is now empty on purpose.
 - **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
   draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
   `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:
@@ -475,13 +533,17 @@ the answer.
   silence — `ChannelItem.descriptionSnippet`, and `ANDROID_VR` surviving as
   "ladder tier 1" in thirteen places after `VISIONOS` replaced it (F11). Since
   CLAUDE.md is loaded into every session, that one taught the wrong client for
-  months. `sidecar/test/contract-docs.test.ts` compares the DTO block here
-  against `types.ts` field by field, and fails on any doc sentence naming an
-  InnerTube client that appears nowhere in `sidecar/src`. **A sentence carrying
-  an `F<n>` reference or an ISO date is exempt** — that is how this repo writes
-  history, and history about a retired client has to survive. The cost is real
-  and worth knowing: adding a dated note to a sentence also stops it being
-  checked.
+  months. `sidecar/test/contract-docs.test.ts` compares every shape in a
+  fenced `ts` block — the DTO block here, and `VideoDetail`,
+  `PlaylistMembership` and `SearchFilters` in `protocol.md` — against its one
+  declaration in `sidecar/src`: field names, optionality and types, `| null`
+  included. A new block is picked up without touching the test, so a shape
+  that should be checked only has to be written down. It also fails on any doc
+  sentence naming an InnerTube client that appears nowhere in `sidecar/src`.
+  **A sentence carrying an `F<n>` reference or an ISO date is exempt** — that is
+  how this repo writes history, and history about a retired client has to
+  survive. The cost is real and worth knowing: adding a dated note to a
+  sentence also stops it being checked.
 - **A mix is a sliding window, and the watch page's playlist panel is not a
   renderer at all — Task 26, measured 2026-09-12.** The panel sits at
   `contents.twoColumnWatchNextResults.playlist.playlist` as a **bare object**
@@ -503,6 +565,16 @@ the answer.
   tail; anchor absent after a server re-seed) that an empty `items[]` would
   conflate. **`isInfinite` is `true` on every mix, including curated ones that
   run out after ~51 items** — never branch on it.
+- **A release `rill.exe` is two processes, and the first one is the log.**
+  In a Release build the process you start is a launcher: it starts a second
+  `rill.exe` with stdout/stderr on a pipe and writes every line, redacted and
+  timestamped, to `%LOCALAPPDATA%\rill\logs` (newest 10 runs), ending with the
+  app's exit code — `CRASHED with code 0x…` for a crash. `architecture.md`
+  §2.11 has why it cannot be a redirect inside one process. So: a debugger
+  started on `rill.exe` lands on the launcher (set `RILL_LOG_CAPTURE=0`), and
+  **a crash is diagnosed from that file first.** A crash dump, if Windows took
+  one (`%LOCALAPPDATA%\CrashDumps`), holds the session cookie: read the stack,
+  then delete it; never attach it.
 - **`bun run export-contract-corpus` runs the auditor itself, and exits 1 if it
   is red.** Not a courtesy — the export is what breaks `corpus.test.ts`, by
   writing a field with no sanitiser, and it breaks it *in a different file from
@@ -512,7 +584,8 @@ the answer.
 
 ## Current state
 
-Phase 1: plain `MWEB` URLs, no SABR, no media proxy. Phase 2 (SABR → local DASH
+Phase 1: plain URLs — `VISIONOS`, with yt-dlp and a 360p `ANDROID` floor behind
+it — no SABR, no media proxy. Phase 2 (SABR → local DASH
 bridge) is specified but **not** to be built speculatively.
 
 Findings in `architecture.md` are dated where they were measured. They are
