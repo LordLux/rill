@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseFeed, parsePlayer, parseVideoDetail } from '../src/parser/index.ts';
-import { resetUnknownRenderers, unknownRendererCounts } from '../src/log.ts';
+import { logger, resetUnknownRenderers, unknownRendererCounts } from '../src/log.ts';
 import { countTiles } from '../src/innertube/session.ts';
 import { isPublishedText, isViewCountText } from '../src/parser/text.ts';
 import { walk, type JsonObject } from '../src/parser/tree.ts';
@@ -37,8 +37,11 @@ function hasFixture(name: string): boolean {
  */
 const HAS_CAPTURES = hasFixture('home') && hasFixture('history');
 
+/** stderr, like everything else — hard invariant 3 applies to the suite too. */
+const log = logger('parser-test');
+
 if (!HAS_CAPTURES) {
-  console.warn(
+  log.warn(
     '[parser] sidecar/fixtures/ is absent — skipping every parser test. ' +
       'These are the only tests that prove tolerant parsing against real renderer ' +
       'trees; with them skipped, a parser regression is a green suite. ' +

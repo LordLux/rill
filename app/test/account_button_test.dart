@@ -32,7 +32,10 @@ Future<void> pumpWith(WidgetTester tester, AuthState state) async {
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  // Not `pumpAndSettle`: a busy state's `CircularProgressIndicator` is
+  // indeterminate and animates forever, so settling would time out rather
+  // than finish. One pump is enough — nothing here needs a second frame.
+  await tester.pump();
 }
 
 const signedIn = AuthState(
@@ -64,9 +67,8 @@ void main() {
 
   testWidgets('signed in shows the account name and handle in the menu', (tester) async {
     await pumpWith(tester, signedIn);
-    // By tooltip rather than by type: the button is a
-    // `PopupMenuButton<_AccountAction>` over a private enum, so `find.byType`
-    // has no name to match against from out here.
+    // By tooltip rather than by type: the button opens a bare `OverlayEntry`
+    // menu (not a named widget reachable by type from out here).
     await tester.tap(find.byTooltip('Ada Lovelace'));
     await tester.pumpAndSettle();
     expect(find.text('Ada Lovelace'), findsWidgets);
@@ -100,11 +102,13 @@ void main() {
   });
 
   testWidgets('a busy sign-in does not open a second flow', (tester) async {
+    // `TitleBarWidgetButton` only wraps its child in an `InkWell` when it has
+    // an `onTap` — a busy button passes `null`, so there is no ink well (and
+    // therefore nothing tappable) at all, rather than one with a null callback.
     await pumpWith(
       tester,
       const AuthState(status: AuthStatus.anonymous, isBusy: true),
     );
-    final inkWell = tester.widget<InkWell>(find.byType(InkWell).first);
-    expect(inkWell.onTap, isNull);
+    expect(find.byType(InkWell), findsNothing);
   });
 }

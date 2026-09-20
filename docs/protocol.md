@@ -36,10 +36,10 @@ JSON-RPC 2.0 in shape, without batching.
 {"id": 42, "result": {"chips": [], "items": [], "continuation": "..."}}
 
 // failure
-{"id": 42, "error": {"code": "AUTH_DEGRADED", "message": "...", "retry": "no"}}
+{"id": 42, "error": {"code": "STREAM_UNAVAILABLE", "message": "...", "retry": "user"}}
 
 // unsolicited
-{"method": "event.authChanged", "params": {"state": "degraded"}}
+{"method": "event.ready", "params": {"protocolVersion": 1, "capabilities": {"ytDlp": true}}}
 ```
 
 `id` correlation is mandatory — feed loads, previews and search race constantly.
@@ -59,9 +59,9 @@ Mismatched versions fail fast rather than misbehaving.
 ```
 
 `capabilities` reports optional pieces of the machine the app cannot discover on
-its own. `ytDlp: false` means ladder tier 4 is gone: the ladder is four rungs,
-and age-restricted or Vevo videos fail with `STREAM_UNAVAILABLE` and no way for
-the UI to say why. The sidecar also warns about it at startup — a missing
+its own. `ytDlp: false` means ladder tier 4 is gone, leaving only `VISIONOS`
+and the 360p floor (§3.5), so age-restricted or Vevo videos fail with
+`STREAM_UNAVAILABLE` and no way for the UI to say why. The sidecar also warns about it at startup — a missing
 fallback that removes a capability without removing anything visible is exactly
 the kind of degradation this protocol makes explicit rather than leaving to be
 inferred from a video that will not play.
@@ -114,8 +114,8 @@ by path, preferring `isSelected`, because every layer above it is menu chrome.
 
 **A failed account fetch is not a failed status.** `state` is what drives a
 re-authentication prompt and it is measured independently; the name and picture
-are decoration. Answering `AUTH_DEGRADED` because a menu endpoint hiccuped
-would send a perfectly good session to a login page.
+are decoration. Reporting `degraded` because a menu endpoint hiccuped would
+send a perfectly good session to a login page.
 
 **`auth.setCookie`'s `{state}` is measured before it answers.** It replaces the
 browse session, **drops the base-browse cache**, then fetches home and counts
@@ -592,6 +592,40 @@ collation *within* a letter is YouTube's business, and only `M` landing after
 `export-contract-corpus` rewrites every channel name to
 `Sanitised Channel <n>`, which is sorted by construction.
 
+**`VideoDetail` — the whole of `video.info`'s result.** The same DTO rules as
+CLAUDE.md's list shapes: every field a value or `null`, never omitted. The
+paragraphs below explain the fields that are not obvious;
+`sidecar/test/contract-docs.test.ts` checks this block against `types.ts`,
+types and nullability included.
+
+```ts
+interface VideoDetail {
+  id: string;
+  title: string;
+  description: string | null;
+  channelName: string;
+  channelId: string | null;
+  channelAvatarUrl: string | null;
+  subscriberText: string | null;
+  durationSeconds: number | null;     // null when live
+  isLive: boolean;
+  viewCountText: string | null;       // display string
+  viewCount: number | null;           // exact, or null when only a rounded string exists
+  publishedText: string | null;       // relative ("14 years ago")
+  publishedDateText: string | null;   // exact ("Dec 6, 2009")
+  likeText: string | null;
+  myRating: 'like' | 'dislike' | 'none';
+  isSubscribed: boolean;
+  isVerified: boolean;
+  isArtistChannel: boolean;
+  badges: string[];
+  isMembersOnly: boolean;             // structural; the members slate reads this
+  premiereAtMs: number | null;        // unix ms; null unless it is a premiere
+  related: FeedItem[];                // the watch page's rail
+  relatedContinuation: string | null; // → video.related
+}
+```
+
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The
 `/player` half asks as **`VISIONOS` over the anonymous resolve session**, which
@@ -846,15 +880,24 @@ the sidecar would be wrong differently on every machine.
 Flutter never learns which tier served the request. `transport` is telemetry;
 `qualityDegraded` drives a badge, never a dead end.
 
-**Resolution ladder**, tried in order inside `playback.open`:
+**Resolution ladder**, tried in order inside `playback.open`. The numbers are
+names rather than positions — code, tests and logs use them — so tiers 2 and 3
+keep theirs while not being in the ladder:
 
 1. `VISIONOS` plain adaptive URLs — the primary path; no `n`, and libmpv can
    consume them directly (F5, F11, F13)
-2. `MWEB` plain adaptive URLs — the decipher path, kept as a fallback
-3. SABR → local DASH bridge — Phase 2
+2. *Not in the ladder.* `MWEB` plain adaptive URLs, retired 2026-08-19: they
+   refuse the open-ended range ffmpeg always sends (F10), so this tier could
+   resolve a video but never play it. `architecture.md` §2.4
+3. *Not in the ladder.* SABR → local DASH bridge — Phase 2, unbuilt
 4. `yt-dlp` subprocess with PO token provider — age-restricted, Vevo, edge cases
-5. itag 18 progressive, 360p — the floor: usually present, **not guaranteed**
-   (F9); sets `qualityDegraded`
+5. itag 18 progressive, 360p, from an `ANDROID` `/player` response — the floor:
+   usually present, **not guaranteed** (F9); sets `qualityDegraded`
+
+**Nothing in this ladder deciphers.** `VISIONOS` and `ANDROID` URLs carry no
+`n`, and yt-dlp runs its own transform. Every address still passes through the
+`SignedUrl` door below, so the boundary holds; what no longer runs in
+production is the signature and `n` transform behind it.
 
 The floor is a very good bet, not a promise. On 2026-08-02 an `MWEB` response
 came back carrying no progressive format at all, so every rung can decline and
@@ -921,6 +964,23 @@ that, including that an explicit `null` keys the same as an absent one. **The
 resolution ladder deliberately asks without a playlist id**: a mix changes
 nothing about which streams exist, and splitting the resolve cache by playlist
 would buy a second `/player` round trip per open for nothing.
+
+**Each cached response also records the player revision its
+`signatureTimestamp` was sent for — Task 04 §1.** The script that deciphers a
+response's `s`/`n` comes from a separate, TTL-bounded lookup that can move to a
+newer revision in between: a cache entry minted minutes earlier, or a rebuild
+landing between one call's fetch and its decipher. Deciphering that pair is the
+failure hard invariant 2 exists to prevent — a wrong `n` is not rejected, it
+streams at ~50 KB/s. So the tiers check at the point of use: once playability is
+settled, and before anything is signed, the response's recorded revision is
+compared with the player about to decipher it. On a mismatch the response is
+refetched once under the current revision; if the revision has moved again by
+then, the tier declines rather than decipher a mismatched pair. The revision is
+not part of the cache key, because the point-of-use check already covers a stale
+entry and a second mechanism would add nothing. The check is skipped when nothing
+in the response would reach a player script — no `signatureCipher`, no `n` on
+any URL — which is true of `VISIONOS` and `ANDROID` today, so a player rollout
+costs the production ladder nothing.
 
 The report itself goes out over the authenticated `WEB` session with a CPN of the
 sidecar's own, one per session (F6, and A5 which rejects bridging a resolution
@@ -1266,13 +1326,12 @@ them has a `retry` value:
 
 | Code | `retry` | UI response |
 | --- | --- | --- |
-| `AUTH_DEGRADED` | `no` | Re-authentication prompt |
 | `AUTH_REQUIRED` | `no` | Login flow |
 | `BAD_REQUEST` | `no` | This is a client bug. Surface it — never retry, never swallow |
 | `STREAM_UNAVAILABLE` | `user` | "Unavailable" state on the video, with a retry affordance |
 | `VIDEO_UPCOMING` | `no` | The premiere slate: thumbnail, scheduled time, reminder. **Not** an error state |
 | `VIDEO_MEMBERS_ONLY` | `no` | The members slate: thumbnail, the channel, a Join affordance. **Not** an error state |
-| `RATE_LIMITED` | `auto` | App backs off and retries silently |
+| `RATE_LIMITED` | `user` | "YouTube is limiting requests from this connection", with a retry — never "would not open" |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
 
 **`BAD_REQUEST` is for an unknown method or params that fail validation** — the
@@ -1331,6 +1390,31 @@ point rather than a wording one. Stream resolution is anonymous (§2.3), so a
 members-only video refuses even for a paying member; YouTube's own "Join this
 channel" prose describes the anonymous session that asked, not the person
 reading it.
+
+**`RATE_LIMITED` is YouTube throttling this connection — decided 2026-09-17.**
+Anonymous resolution is limited per connection: F20 hit "Sign in to confirm
+you're not a bot" after ~180 resolutions in an hour. `playback.open` answers
+`RATE_LIMITED` when a tier gets that refusal (`LOGIN_REQUIRED` with YouTube's
+"not a bot" wording) and no tier gets through:
+
+- **Not `LOGIN_REQUIRED` alone.** An age gate answers with the same status
+  ("Sign in to confirm your age") and is a different problem. Like
+  `VIDEO_MEMBERS_ONLY`, this reads prose on a response that has already
+  failed, so a locale the pattern misses falls back to `STREAM_UNAVAILABLE`.
+- **Not a bad visitor id.** Tier 1 has already retried once with a fresh id by
+  the time the refusal is believed (§3.5).
+- **Not terminal.** yt-dlp or the 360p floor may still get through, so the
+  ladder keeps going, and only a ladder that ends with nothing — having seen a
+  throttle on the way — answers `RATE_LIMITED` instead of `STREAM_UNAVAILABLE`.
+- **`user`, not `auto`.** A throttle lasts minutes to an hour, so a silent
+  automatic retry would be a spinner that never ends. The watch page names the
+  cause and leaves the retry to the user.
+
+**There is no `AUTH_DEGRADED` — removed 2026-09-17.** A degraded session is not
+a failure the sidecar can see: it answers HTTP 200 with an empty feed (F7). So
+it is a *state*, reported by `auth.verify` / `auth.status`, which the app
+checks after an empty base feed (§3.1, `checkAuthOnEmpty`). The code sat in this
+table with a UI response for months while nothing ever sent it.
 
 `STREAM_UNAVAILABLE` is `user` rather than `no` because the ladder's floor is a
 very good bet and not a promise (§3.5, F9): every rung can decline for a video

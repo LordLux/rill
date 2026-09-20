@@ -1,0 +1,4 @@
+# Generated when pub resolves a vendored package as a path dependency;
+# not part of the package as published.
+.dart_tool/
+pubspec.lock

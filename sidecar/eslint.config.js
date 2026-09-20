@@ -9,7 +9,11 @@ export default tseslint.config(
       // Hard invariant 3: stdout is protocol only. One stray console.log corrupts
       // the NDJSON stream, and the failure is silent on the Flutter side — it just
       // sees a malformed frame and drops it. Logging goes to stderr, via src/log.ts.
-      'no-console': ['error', { allow: ['error', 'warn'] }],
+      // No `allow` list: console.error and console.warn write to stderr directly,
+      // bypassing redact.ts, the chokepoint that keeps cookie values out of stderr
+      // (CLAUDE.md, "No cookie value goes to stderr…") — so every console.* call
+      // is banned, not just the stdout ones.
+      'no-console': 'error',
       'no-restricted-properties': [
         'error',
         {
@@ -40,7 +44,7 @@ export default tseslint.config(
     // no-console rule, and every other rule here, still guards all of src/
     // at full strength, and a new file added under src/ can never land in
     // this list by accident. Confirmed by `bun run lint` at the time this
-    // was written: these seven names are exactly the files with violations.
+    // was written: these four names are exactly the files with violations.
     ignores: [
       'node_modules/**',
       'fixtures/**',
@@ -49,9 +53,6 @@ export default tseslint.config(
       'dump-player.ts',
       'feed-test.ts',
       'session-test.ts',
-      'test-captions.ts',
-      'test-l-bgx.ts',
-      'test-web-subs.ts',
     ],
   },
 );

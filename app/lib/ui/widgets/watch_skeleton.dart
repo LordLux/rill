@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/screen_values.dart';
+import '../../theme/tokens.dart';
 import '../pages/watch_layout.dart';
 import '../playback_controller.dart';
 import '../player/view_mode.dart';
@@ -94,7 +95,7 @@ class _WatchSkeletonState extends ConsumerState<WatchSkeleton>
               return WatchLayout(
                 geometry: geometry,
                 playerSlot: _Block(radius: theatre ? 0 : 12),
-                theatreBackground: theatre ? Colors.black : null,
+                theatreBackground: theatre ? Theme.of(context).tokens.scrim : null,
                 metadataSlot: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
                   child: Column(

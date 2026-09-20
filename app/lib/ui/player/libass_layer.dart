@@ -52,6 +52,9 @@ String _ts() {
 /// default must not also forget a colour the user picked, and vice versa.
 /// Each falls back to [fallback]'s own channel only when its own component is
 /// untouched (`null`).
+// Assembles a colour from the user's own channel picks — `Color.from` is a
+// constructor, not a literal, but the rule cannot tell the difference.
+// ignore: rill_lints/no_color_literals
 Color _resolveOverlayColor(Color? rgb, double? opacity, Color fallback) => Color.from(
       alpha: opacity ?? fallback.a,
       red: rgb?.r ?? fallback.r,
@@ -780,7 +783,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final isDraggable = !isPositional;
         final isFullscreen = ref.watch(playerViewProvider.select((s) => s.fullscreen));
 
-        final defaultBg = isPositional ? const Color(0x00000000) : captionDefaultBackground;
+        final defaultBg = isPositional ? Colors.transparent : captionDefaultBackground;
         final backgroundColor = _resolveOverlayColor(
           captions.style.background,
           captions.style.backgroundOpacity,
@@ -789,7 +792,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         final windowColor = _resolveOverlayColor(
           captions.style.window,
           captions.style.windowOpacity,
-          const Color(0x00000000),
+          Colors.transparent,
         );
 
         // Consumed here, once — this build is the only one that gets the
@@ -953,6 +956,9 @@ class _CaptionGroup extends StatelessWidget {
                     child: IgnorePointer(
                       child: Container(
                         decoration: BoxDecoration(
+                          // Debug outline (`_showBounds`, hard-coded off): it has to stand
+                          // out against any video, so a fixed colour is the point.
+                          // ignore: rill_lints/no_color_literals
                           border: Border.all(color: Colors.cyanAccent, width: 1),
                         ),
                       ),

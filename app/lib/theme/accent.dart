@@ -6,8 +6,7 @@
 /// `tool/rill_lints`.
 library;
 
-import 'dart:ui';
-
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -64,3 +63,26 @@ class AccentController extends Notifier<Color> {
 final accentProvider = NotifierProvider<AccentController, Color>(
   AccentController.new,
 );
+
+extension ColorLightVariation on Color {
+  Color darken([double amount = .1]) => _darken(this, amount);
+  Color lighten([double amount = .1]) => _lighten(this, amount);
+}
+
+Color _darken(Color color, [double amount = .1]) {
+  assert(amount >= 0 && amount <= 1);
+
+  final hsl = HSLColor.fromColor(color);
+  final hslDark = hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0));
+
+  return hslDark.toColor();
+}
+
+Color _lighten(Color color, [double amount = .1]) {
+  assert(amount >= 0 && amount <= 1);
+
+  final hsl = HSLColor.fromColor(color);
+  final hslLight = hsl.withLightness((hsl.lightness + amount).clamp(0.0, 1.0));
+
+  return hslLight.toColor();
+}

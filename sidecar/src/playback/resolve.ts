@@ -1,27 +1,35 @@
 /**
  * `playback.open` — the resolution ladder from `protocol.md` §3.5.
  *
- * Five tiers, tried in order, each of which either returns a `PlaybackSource` or
- * throws to decline:
+ * Three tiers, tried in order, each of which either returns a `PlaybackSource` or
+ * throws to decline. They keep the numbers of the original five, because tests,
+ * logs and docs name them that way:
  *
  *   1. `VISIONOS` plain adaptive — the primary path (F5, F11, F13)
- *   2. `MWEB` plain adaptive       — the only proven decipher path (F3/F4)
- *   3. SABR → local DASH           — Phase 2, deliberately unbuilt; throws
  *   4. `yt-dlp` subprocess         — age-restricted, Vevo, whatever else refuses
- *   5. itag 18 progressive         — 360p, nearly always there, `qualityDegraded`
+ *   5. itag 18 progressive         — 360p from the `ANDROID` response (F9),
+ *                                    nearly always there, `qualityDegraded`
+ *
+ * Tier 2 (`MWEB` plain adaptive) was retired on 2026-08-19 in `c53fb54`, and
+ * tier 3 (SABR → local DASH) is Phase 2: `tierSabrDash` below is its unbuilt
+ * placeholder and nothing calls it. `architecture.md` §2.4 has the retirement.
  *
  * `VISIONOS` leads because it is the only client measured that satisfies every
  * constraint at once: plain URLs, no `n` to decipher, open-ended ranges accepted
  * (F10 is an `MWEB` property, not a YouTube one), bare GETs accepted, throughput
  * above the bar, hardware decode, and seeks on the libmpv media_kit ships with no
  * options set (F13). Its one condition is a server-issued visitor id — see
- * `tierAndroidVr`.
+ * `tierVisionOs`.
  *
- * `MWEB` stays a tier rather than being deleted. It is the only client with a
- * proven decipher path, and F10 constrains how its URLs can be *consumed*, not
- * whether they resolve — so as a fallback that reaches a lower tier's floor it
- * still earns its place, and deleting it would throw away the decipher coverage
- * the network suite depends on.
+ * **Nothing in this ladder deciphers.** `VISIONOS` and `ANDROID` URLs carry no
+ * `n`, and yt-dlp runs its own transform. Every address still crosses `sign()`
+ * or `adoptExternallyDeciphered()`, so the `SignedUrl` boundary (hard
+ * invariant 2) holds — but the signature/`n` transform behind `sign()` only
+ * runs in the network suite, which still calls `tierPlainAdaptive` with
+ * `MWEB`. Keep it: it is the only proven decipher path, and Phase 2 may need
+ * it. Do not restore `MWEB` as a playback tier either — its URLs refuse the
+ * open-ended range ffmpeg always sends (F10). `MWEB` is still asked for one
+ * thing here: a live stream's start time, when tier 1's response lacks it.
  *
  * The ladder is the error-handling strategy, not a fallback bolted onto one. A
  * tier that cannot serve a video throws; the ladder logs it and moves down. Only
@@ -37,7 +45,7 @@ import { ytDlpBinary } from '../capabilities.ts';
 import { RpcError, hasCode, type EnvelopeErrorCode } from '../errors.ts';
 import { logger } from '../log.ts';
 import { getPlayer, type Player } from '../innertube/player.ts';
-import { getPlayerResponse } from '../innertube/player-response.ts';
+import { getPlayerEntry, getPlayerResponse } from '../innertube/player-response.ts';
 import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
@@ -281,6 +289,19 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
     throw new RpcError('VIDEO_MEMBERS_ONLY', reason);
   }
 
+  // Throttled — YouTube limiting this connection's anonymous resolution (F20
+  // saw it after ~180 resolutions in an hour). `LOGIN_REQUIRED` alone is not
+  // the signal: an age gate answers with the same status ("Sign in to confirm
+  // your age"). So this reads YouTube's own wording, the same trade
+  // `VIDEO_MEMBERS_ONLY` makes: it refines a response that has already failed,
+  // and a locale the pattern misses falls back to `STREAM_UNAVAILABLE`, which
+  // is what it was before. By the time tier 1 gets here it has already retried
+  // with a fresh visitor id, so a bad id is ruled out. Not terminal — a lower
+  // tier may still get through; `descendLadder` reports it if none does.
+  if (status === 'LOGIN_REQUIRED' && /not a bot/i.test(reason)) {
+    throw new RpcError('RATE_LIMITED', `${videoId}: ${status} — ${reason}`);
+  }
+
   if (status === 'UNPLAYABLE' && /page needs to be reloaded/i.test(reason)) {
     // Hard invariant 7. If this ever fires, the `/player` payload lost its
     // signatureTimestamp or it no longer matches the deciphering player.
@@ -292,6 +313,111 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
   }
 
   throw new RpcError('STREAM_UNAVAILABLE', `${videoId}: ${status} — ${reason}`);
+}
+
+// ---------------------------------------------------------------------------
+// Player-revision consistency — Task 04 §1
+//
+// `signatureTimestamp` is stamped onto a `/player` request from
+// `session.innertube.session.player` at fetch time (hard invariant 7). The
+// script that later deciphers the response's `s`/`n` comes from a separate
+// `getPlayer()` call that, past its TTL, can have rebuilt the session onto a
+// *newer* revision — either because the response came from a cache entry
+// minted minutes ago under an older one, or because a concurrent caller's
+// rebuild landed between this call's fetch and its decipher. Either way the
+// response and the script would then describe two different revisions, and
+// deciphering that pair is exactly the failure hard invariant 2 exists to
+// prevent: a wrong `n` is not rejected, it streams at ~50 KB/s.
+//
+// `player-response.ts` records which revision produced each response
+// (`Entry.playerId`) but does not act on it — the two tiers below are the
+// ones that decipher, so they are the ones that check it, right before they
+// do, against the `Player` they are about to decipher with.
+// ---------------------------------------------------------------------------
+
+/** What this file reads off a `getPlayerEntry` result. */
+export interface PlayerEntry {
+  result: PlayerResult;
+  playerId: string | null;
+}
+
+/**
+ * Whether anything in this response would actually be run through a player
+ * script. Mirrors `sign()`'s own trigger condition in `signed-url.ts` — a
+ * `signatureCipher`, or a URL carrying an `n` parameter — directly, rather
+ * than importing that file's private client whitelist
+ * (`CLIENTS_WITH_N_PARAM`), so this stays a self-contained check instead of
+ * reaching into another module's internals for an optimisation.
+ *
+ * Used to skip the refetch below when a revision mismatch is found but
+ * nothing in the response would be deciphered anyway — `VISIONOS` and
+ * `ANDROID` formats carry neither, so without this every player rollout
+ * would cost tier 1 and tier 5 a spare `/player` round trip for a check that
+ * cannot matter.
+ */
+function responseNeedsDecipher(response: PlayerResult): boolean {
+  const urlHasN = (raw: string | null): boolean => {
+    if (!raw) return false;
+    try {
+      return new URL(raw).searchParams.has('n');
+    } catch {
+      // Unparsable is exactly the shape `sign()` itself declines on — safer
+      // to say "this needs checking" than to assume it is harmless.
+      return true;
+    }
+  };
+
+  if (urlHasN(response.hlsManifestUrl) || urlHasN(response.dashManifestUrl)) return true;
+  return response.formats.some(
+    (format) => format.signatureCipher !== null || urlHasN(format.rawUrl),
+  );
+}
+
+/**
+ * Confirm `entry` was minted under `player`'s revision before anything
+ * deciphers it, refetching once under the session's current player if it
+ * was not. A `null` recorded revision — no player installed on the session
+ * at fetch time — counts as a mismatch too: nothing vouches for it.
+ *
+ * If the revision has moved *again* by the time that refetch lands, this
+ * declines the tier (an ordinary, non-terminal `RpcError` the ladder in
+ * `descendLadder` treats like any other decline) rather than pairing a
+ * response with a script from a different revision — a thrown error costs
+ * one video, a wrong `n` costs a silent ~50 KB/s throttle nobody attributes
+ * correctly.
+ *
+ * Exported so the reconciliation rule can be tested directly against the
+ * real implementation with stub sessions, rather than against a second copy
+ * of it written in the test file — the same reasoning as `descendLadder` and
+ * `fetchWithVisitorRetry`.
+ */
+export async function responseForDecipher(
+  session: Session,
+  videoId: string,
+  client: PlayerClient,
+  entry: PlayerEntry,
+  player: Player,
+): Promise<PlayerResult> {
+  if (entry.playerId === player.playerId) return entry.result;
+
+  if (!responseNeedsDecipher(entry.result)) return entry.result;
+
+  log.info(
+    `${videoId}: ${client} /player response was minted under player ` +
+      `${entry.playerId ?? '(unknown)'}, the session's current player is ` +
+      `${player.playerId} — refetching`,
+  );
+  const fresh = await getPlayerEntry(session, videoId, client, { refresh: true });
+
+  if (fresh.playerId !== player.playerId) {
+    throw new RpcError(
+      'STREAM_UNAVAILABLE',
+      `${videoId}: ${client} player revision changed twice while resolving ` +
+        `(refetched response minted under ${fresh.playerId ?? '(unknown)'}, ` +
+        `decipher target ${player.playerId})`,
+    );
+  }
+  return fresh.result;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,26 +441,39 @@ export async function tierPlainAdaptive(
   videoId: string,
   client: PlayerClient,
   poToken: string | null,
-  response: PlayerResult | null,
+  entry: PlayerEntry | null,
 ): Promise<PlaybackSource> {
-  if (!response) {
+  if (!entry) {
     throw new RpcError(
       'UPSTREAM_ERROR',
       `${videoId}: the ${client} /player call did not return`,
     );
   }
-  assertPlayable(response, videoId);
 
-  if (isSabrOnly(response)) {
-    // The Phase 2 trigger fired on this client. Decline so the ladder continues;
-    // the suite is what is supposed to tell us about this, not a user.
-    throw new RpcError(
-      'STREAM_REQUIRES_SABR',
-      `${videoId}: ${client} adaptive formats are SABR-only`,
-    );
-  }
+  const checkUsable = (candidate: PlayerResult): void => {
+    assertPlayable(candidate, videoId);
+    if (isSabrOnly(candidate)) {
+      // The Phase 2 trigger fired on this client. Decline so the ladder
+      // continues; the suite is what is supposed to tell us about this, not a
+      // user.
+      throw new RpcError(
+        'STREAM_REQUIRES_SABR',
+        `${videoId}: ${client} adaptive formats are SABR-only`,
+      );
+    }
+  };
 
+  // Playability first, before the player is touched. It does not depend on the
+  // player revision, and it is where a premiere or a members-only video ends
+  // the ladder (`LADDER_TERMINAL_CODES`) — a `getPlayer()` that has to rebuild
+  // and fails must not be able to turn that into an ordinary failure.
+  checkUsable(entry.result);
+
+  // Then reconcile against the player that will decipher — see
+  // "Player-revision consistency" above. A refetched response is judged again.
   const player = await getPlayer(deps.session);
+  const response = await responseForDecipher(deps.session, videoId, client, entry, player);
+  if (response !== entry.result) checkUsable(response);
 
   // **Gated on `isLive`.** `VISIONOS` hands back an `hlsManifestUrl` on
   // ordinary VOD responses too — confirmed live against `dQw4w9WgXcQ` and
@@ -525,19 +664,32 @@ export async function fetchWithVisitorRetry(
  * headers, cookies and client version making no difference either way.
  * `createSession` fetches one by default; this only has to handle the case where
  * the one in hand stopped convincing YouTube.
+ *
+ * Also captures the `playerId` each fetch was minted under, alongside
+ * `fetchWithVisitorRetry`'s own identity-refusal retry, and hands the whole
+ * entry to `tierPlainAdaptive` — which does its own, independent check
+ * against the session's *current* player before deciphering (Task 04 §1).
+ * The two retry reasons (a refused identity, a moved revision) are unrelated
+ * and are kept that way rather than merged into one loop.
  */
-export async function tierAndroidVr(
+export async function tierVisionOs(
   deps: PlaybackDeps,
   videoId: string,
   poToken: string | null,
 ): Promise<PlaybackSource> {
-  const response = await fetchWithVisitorRetry(
+  let lastEntry: PlayerEntry | null = null;
+
+  await fetchWithVisitorRetry(
     videoId,
-    (refresh) => getPlayerResponse(deps.session, videoId, 'VISIONOS', { refresh }),
+    async (refresh) => {
+      const fetched = await getPlayerEntry(deps.session, videoId, 'VISIONOS', { refresh });
+      lastEntry = fetched;
+      return fetched.result;
+    },
     () => refreshVisitorId(deps.session),
   );
 
-  return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, response);
+  return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, lastEntry);
 }
 
 // ---------------------------------------------------------------------------
@@ -614,7 +766,7 @@ export function sourceFromYtDlpDump(
   const variant: PlaybackVariant = {
     videoUrl: adoptExternallyDeciphered(videoAddress, tool),
     audioUrl: audio?.url ? adoptExternallyDeciphered(audio.url, tool) : null,
-    // yt-dlp does not give us an itag reliably; 0 signals "unknown".
+    // yt-dlp does not give us an itag reliably; null signals "unknown".
     itag: null,
     height: height ?? 0,
     fps: 0,
@@ -733,13 +885,20 @@ export async function tierYtDlp(
 export async function tierProgressive(
   deps: PlaybackDeps,
   videoId: string,
+  client: PlayerClient,
   poToken: string | null,
-  response: PlayerResult | null,
+  entry: PlayerEntry | null,
 ): Promise<PlaybackSource> {
-  if (!response) {
-    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the MWEB /player call did not return`);
+  if (!entry) {
+    throw new RpcError('UPSTREAM_ERROR', `${videoId}: the ${client} /player call did not return`);
   }
-  assertPlayable(response, videoId);
+
+  // Playability before the player, then reconciliation — the same order and
+  // the same reasons as `tierPlainAdaptive`.
+  assertPlayable(entry.result, videoId);
+  const player = await getPlayer(deps.session);
+  const response = await responseForDecipher(deps.session, videoId, client, entry, player);
+  if (response !== entry.result) assertPlayable(response, videoId);
 
   const progressive = response.formats
     .filter((f) => !f.isAdaptive && addressOf(f) !== null)
@@ -754,7 +913,6 @@ export async function tierProgressive(
     throw new RpcError('STREAM_UNAVAILABLE', `${videoId}: no progressive format either`);
   }
 
-  const player = await getPlayer(deps.session);
   const videoUrl = await signFormat(progressive, player, poToken);
 
   log.warn(`${videoId}: falling back to itag ${progressive.itag} (${progressive.height ?? '?'}p)`);
@@ -806,6 +964,7 @@ export async function descendLadder(
   preload = false,
 ): Promise<PlaybackSource> {
   const declined: string[] = [];
+  let throttled = false;
 
   for (const [index, tier] of tiers.entries()) {
     try {
@@ -838,6 +997,7 @@ export async function descendLadder(
 
       const message = error instanceof Error ? error.message : String(error);
       declined.push(`${tier.name}: ${message}`);
+      if (hasCode(error, 'RATE_LIMITED')) throttled = true;
       if (hasCode(error, 'STREAM_REQUIRES_SABR')) {
         log.debug(`${videoId}: tier ${index + 1} (${tier.name}) declined — ${message}`);
       } else {
@@ -856,6 +1016,16 @@ export async function descendLadder(
   // `VIDEO_MEMBERS_ONLY` did until 2026-09-09: it was thrown, documented as
   // ending the ladder, and then collected as an ordinary decline because this
   // check named one code instead of a list.
+  //
+  // A throttle is the one decline that changes the answer without ending the
+  // ladder: if any tier was throttled and none got through, the video is not
+  // the problem, the connection is — and "would not open" would say otherwise.
+  if (throttled) {
+    throw new RpcError(
+      'RATE_LIMITED',
+      `${videoId}: YouTube is throttling this connection —\n  ${declined.join('\n  ')}`,
+    );
+  }
   throw new RpcError(
     'STREAM_UNAVAILABLE',
     `${videoId}: every resolution tier declined —\n  ${declined.join('\n  ')}`,
@@ -869,12 +1039,16 @@ export async function openPlayback(
   const { videoId, preload = false } = params;
   const poToken = await (deps.poTokens ?? nullPoTokenProvider).mint(videoId);
 
-  // The `ANDROID` response, fetched at most once and only if something below tier 1
-  // asks for it. Tiers 2 and 3 read their formats from it, and tier 2 wants its
-  // storyboards and duration even though yt-dlp finds its own streams.
-  let androidRequest: Promise<PlayerResult | null> | null = null;
-  const androidResponse = (): Promise<PlayerResult | null> =>
-    (androidRequest ??= getPlayerResponse(deps.session, videoId, 'ANDROID').catch(
+  // The `ANDROID` entry, fetched at most once and only if something below
+  // tier 1 asks for it. Tiers 2 and 3 read their formats from it, and tier 2
+  // wants its storyboards and duration even though yt-dlp finds its own
+  // streams. Kept as a full `PlayerEntry` (not just its `.result`) so tier 5
+  // can check its `playerId` against the session's current player before
+  // deciphering (Task 04 §1) — tier 2 (`yt-dlp`) never decichers through
+  // `getPlayer`, so it only ever reads `.result`.
+  let androidRequest: Promise<PlayerEntry | null> | null = null;
+  const androidEntry = (): Promise<PlayerEntry | null> =>
+    (androidRequest ??= getPlayerEntry(deps.session, videoId, 'ANDROID').catch(
       (error: unknown): null => {
         log.warn(
           `${videoId}: ANDROID /player failed (${(error as Error).message}); ` +
@@ -887,21 +1061,14 @@ export async function openPlayback(
   const source = await descendLadder(
     videoId,
     [
+      { name: 'VISIONOS plain adaptive', run: () => tierVisionOs(deps, videoId, poToken) },
       {
-        name: 'VISIONOS plain adaptive',
-        run: async () => {
-          const response = await fetchWithVisitorRetry(
-            videoId,
-            (refresh) => getPlayerResponse(deps.session, videoId, 'VISIONOS', { refresh }),
-            () => refreshVisitorId(deps.session),
-          );
-          return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, response);
-        },
+        name: 'yt-dlp',
+        run: async () => tierYtDlp(deps, videoId, poToken, (await androidEntry())?.result ?? null),
       },
-      { name: 'yt-dlp', run: async () => tierYtDlp(deps, videoId, poToken, await androidResponse()) },
       {
         name: 'itag 18 progressive',
-        run: async () => tierProgressive(deps, videoId, poToken, await androidResponse()),
+        run: async () => tierProgressive(deps, videoId, 'ANDROID', poToken, await androidEntry()),
       },
     ],
     preload,
