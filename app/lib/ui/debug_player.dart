@@ -230,6 +230,7 @@ class _HarnessPageState extends State<HarnessPage> {
   @override
   void initState() {
     super.initState();
+    (_player.platform as NativePlayer).setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     unawaited(_start());
   }
 

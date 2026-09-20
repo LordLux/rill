@@ -642,15 +642,6 @@ the answer.
   The assertions are `viewer-state.test.ts` (raw, local) and `corpus.test.ts`
   (sanitised, runs anywhere). `canWatchLater` is *not* viewer state: it is `true`
   on every tile, anonymous ones included. `architecture.md` F35.
-- **A running debug app locks `sidecar/dist/sidecar.exe`.** `bun run build`,
-  `rill build` and `rill run` all fail with `EPERM: failed to move executable to
-  result path` while a `flutter run` session is open, because that session runs
-  the binary — and it runs the *old* one, so a new RPC or DTO field does not
-  exist there until the app is closed and the sidecar rebuilt. To verify without
-  disturbing it, build to another path (`bun build --compile --outfile
-  scratch/verify-sidecar src/main.ts`), copy that over the release bundle's
-  sidecar, and grep the bundle for a name only the new code has. Both apps are
-  titled "Rill": screenshots and clicks go to whichever is in front.
 - **A release `rill.exe` is two processes, and the first one is the log.**
   In a Release build the process you start is a launcher: it starts a second
   `rill.exe` with stdout/stderr on a pipe and writes every line, redacted and

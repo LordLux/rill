@@ -10,6 +10,7 @@ import 'playback_controller.dart';
 import 'player_shell.dart';
 import 'queue_controller.dart';
 import 'widgets/save_dialog.dart';
+import 'widgets/share_dialog.dart';
 
 /// What a tile tap means, per kind (task §6).
 ///
@@ -198,16 +199,22 @@ List<TileMenuItem> tileMenuFor(
   final link = tileLinkFor(item);
   if (link == null) return const [];
 
-  final copyLink = TileMenuItem(
+  final shareVideo = TileMenuItem(
     icon: Icons.link,
     label: 'Copy link',
-    onPressed: () => unawaited(copyToClipboard(context, link, 'Link copied')),
+    onPressed: () => unawaited(copyToClipboard(context, link, 'Link copied to clipboard')),
   );
+  
 
   final video = watchTargetFor(item);
-  if (video == null) return [copyLink];
+  if (video == null) return [shareVideo];
 
   return [
+    TileMenuItem(
+      icon: Icons.playlist_play,
+      label: 'Add to queue',
+      onPressed: canAddToQueue ? () => queueFromTile(ref, item) : null,
+    ),
     TileMenuItem(
       icon: Icons.schedule,
       label: 'Save to Watch Later',
@@ -219,11 +226,10 @@ List<TileMenuItem> tileMenuFor(
       onPressed: () => unawaited(showSaveDialog(context, video.id)),
     ),
     TileMenuItem(
-      icon: Icons.playlist_play,
-      label: 'Add to queue',
-      onPressed: canAddToQueue ? () => queueFromTile(ref, item) : null,
+      icon: Icons.reply,
+      label: 'Share',
+      onPressed: () => unawaited(showShareDialog(context, video)),
     ),
-    copyLink,
   ];
 }
 

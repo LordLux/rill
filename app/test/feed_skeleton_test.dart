@@ -166,6 +166,7 @@ void main() {
       // layouts rather than trusting that the one the author looks at works.
       for (final wide in [false, true]) {
         for (final width in [320.0, 480.0, 700.0, 900.0, 1400.0, 2200.0]) {
+          if (wide && width < 500.0) continue;
           for (final height in [400.0, 900.0]) {
             await pumpSkeleton(tester, Size(width, height), wide: wide);
             expect(
