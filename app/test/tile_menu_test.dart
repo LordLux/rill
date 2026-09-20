@@ -206,21 +206,21 @@ void main() {
   });
 
   group('what each kind of tile offers', () {
-    testWidgets('a video: save, save to a playlist, queue and link, in that order, all pressable', (tester) async {
+    testWidgets('a video: queue, save, save to a playlist, and share, in that order, all pressable', (tester) async {
       expect(await menuOf(tester, video()), [
+        ('Add to queue', true),
         ('Save to Watch Later', true),
         ('Save to playlist…', true),
-        ('Add to queue', true),
-        ('Copy link', true),
+        ('Share', true),
       ]);
     });
 
     testWidgets("a video that cannot be saved or queued shows those entries disabled, as the hover buttons hide", (tester) async {
       expect(await menuOf(tester, video(canWatchLater: false, canAddToQueue: false)), [
+        ('Add to queue', false),
         ('Save to Watch Later', false),
         ('Save to playlist…', true),
-        ('Add to queue', false),
-        ('Copy link', true),
+        ('Share', true),
       ]);
     });
 
@@ -245,14 +245,17 @@ void main() {
       expect(tileLinkFor(playlist), 'https://www.youtube.com/playlist?list=PLbbbbbbbbbbbbbbbbbb');
     });
 
-    testWidgets('Copy link puts it on the clipboard and says so', (tester) async {
+    testWidgets('Share opens the dialog and Copy puts it on the clipboard and says so', (tester) async {
       await tester.pumpWidget(harness(TileFor(video())));
       await openMenu(tester);
 
-      await tester.tap(find.text('Copy link'));
+      await tester.tap(find.text('Share'));
       await tester.pumpAndSettle();
 
-      expect(clipboardText, 'https://www.youtube.com/watch?v=aaaaaaaaaaa');
+      await tester.tap(find.text('Copy'));
+      await tester.pumpAndSettle();
+
+      expect(clipboardText, 'https://youtu.be/aaaaaaaaaaa');
       expect(find.text('Link copied'), findsOneWidget);
     });
 

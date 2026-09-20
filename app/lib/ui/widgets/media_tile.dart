@@ -902,13 +902,16 @@ class _MediaTileState extends State<MediaTile> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Flexible(
-                        child: Text(
-                          widget.spec.primaryLine,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: scheme.onSurfaceVariant,
-                            fontSize: 12,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 28.0),
+                          child: Text(
+                            widget.spec.primaryLine,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       ),
@@ -1155,6 +1158,31 @@ class _TileMoreButton extends StatefulWidget {
 
 class _TileMoreButtonState extends State<_TileMoreButton> {
   int? _hovered;
+  final MenuController _menuController = MenuController();
+  ScrollPosition? _scrollPosition;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final newScrollPosition = Scrollable.maybeOf(context)?.position;
+    if (_scrollPosition != newScrollPosition) {
+      _scrollPosition?.removeListener(_onScroll);
+      _scrollPosition = newScrollPosition;
+      _scrollPosition?.addListener(_onScroll);
+    }
+  }
+
+  @override
+  void dispose() {
+    try {
+      _scrollPosition?.removeListener(_onScroll);
+    } catch (_) {}
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_menuController.isOpen) _menuController.close();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1172,6 +1200,7 @@ class _TileMoreButtonState extends State<_TileMoreButton> {
     if (widget.items.isEmpty) return button();
 
     return MenuAnchor(
+      controller: _menuController,
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
         shape: const WidgetStatePropertyAll(
@@ -1179,9 +1208,9 @@ class _TileMoreButtonState extends State<_TileMoreButton> {
         ),
         mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
       ),
-      animated: true,
-      builder: (context, controller, _) =>
-          button(onPressed: () => controller.isOpen ? controller.close() : controller.open()),
+      animated: false,
+      alignmentOffset: const Offset(0, 8),
+      builder: (context, controller, _) => button(onPressed: () => controller.isOpen ? controller.close() : controller.open()),
       menuChildren: [
         for (var i = 0; i < widget.items.length; i++)
           MouseRegion(

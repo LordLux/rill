@@ -119,10 +119,13 @@ class _SubscribeButtonState extends State<SubscribeButton> {
   late SubscriptionNotificationLevel _level = widget.initialNotificationLevel;
   bool _subscribing = false;
 
+  final MenuController _menuController = MenuController();
+  ScrollPosition? _scrollPosition;
+
   /// Driven only by a `MouseRegion`'s own `onEnter`/`onExit` on each menu
   /// item, not by `MenuItemButton`'s built-in `WidgetState.hovered`. The
   /// built-in state stuck once a menu item was hovered and the pointer left
-  /// the menu entirely — `MenuAnchor` moves keyboard focus to whatever item
+  /// the menu entirely - `MenuAnchor` moves keyboard focus to whatever item
   /// the mouse is over, and does not clear it when nothing else takes focus,
   /// so any style keyed off the button's own states (hovered, focused, or
   /// both) kept painting. Tracking hover ourselves, from an event source
@@ -130,6 +133,31 @@ class _SubscribeButtonState extends State<SubscribeButton> {
   /// regardless of which combination of button states caused it.
   SubscriptionNotificationLevel? _hoveredLevel;
   bool _unsubscribeHovered = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final newScrollPosition = Scrollable.maybeOf(context)?.position;
+    if (_scrollPosition != newScrollPosition) {
+      _scrollPosition?.removeListener(_onScroll);
+      _scrollPosition = newScrollPosition;
+      _scrollPosition?.addListener(_onScroll);
+    }
+  }
+
+  @override
+  void dispose() {
+    try {
+      _scrollPosition?.removeListener(_onScroll);
+    } catch (_) {}
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_menuController.isOpen) {
+      _menuController.close();
+    }
+  }
 
   /// Follow a *changed* `initiallySubscribed` from the parent.
   ///
@@ -227,6 +255,7 @@ class _SubscribeButtonState extends State<SubscribeButton> {
     }
 
     return MenuAnchor(
+      controller: _menuController,
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(widget.background ?? scheme.surfaceContainerHighest),
         shape: WidgetStatePropertyAll(const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12)))),

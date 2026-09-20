@@ -102,7 +102,7 @@ class _FeedSkeletonState extends State<FeedSkeleton> with SingleTickerProviderSt
                         columns,
                         (_) => Expanded(
                           child: Padding(
-                            padding: EdgeInsets.only(top: rowIndex == 0 ? 12 : 0),
+                            padding: EdgeInsets.only(top: rowIndex == 0 ? 12 : 0, left: 9.0),
                             child: _SkeletonTile(
                               isWide: widget.isWideLayout,
                               twoLineTitle: random.nextBool(),
@@ -114,7 +114,7 @@ class _FeedSkeletonState extends State<FeedSkeleton> with SingleTickerProviderSt
                       ),
                     );
                     return Padding(
-                      padding: EdgeInsets.only(bottom: rowGap + 8),
+                      padding: EdgeInsets.only(bottom: rowGap + 8, top: rowIndex == 0 ? 4 : 0),
                       child: widget.isWideLayout
                           ? Center(
                               child: ConstrainedBox(
@@ -143,7 +143,7 @@ class _FeedSkeletonState extends State<FeedSkeleton> with SingleTickerProviderSt
 const double _captionBlockHeight = 76.0;
 
 /// A wide (search-layout) row is a fixed-height horizontal tile.
-const double _wideTileHeight = 128.0;
+const double _wideTileHeight = 225.0;
 
 /// Marks the second title line, so a test can tell a one-line tile from a
 /// two-line one without measuring pixels.
@@ -178,7 +178,7 @@ class _SkeletonTile extends StatelessWidget {
     // to read as "surface" in both themes, and `lib/ui` is lint-gated against
     // colour literals for exactly this reason.
     final block = scheme.surfaceContainerHighest;
-    final extra = isWide && twoLineTitle ? 8.0 : 0.0; // Extra space for the second line.
+    final extra = isWide ? 8.0 : 0.0; // Extra space for the second line.
 
     Widget rect(double height) => Container(
       height: height,
@@ -206,28 +206,68 @@ class _SkeletonTile extends StatelessWidget {
       ),
     );
 
+    final meta = [
+      bar(1.0, 14),
+      if (twoLineTitle) ...[
+        const SizedBox(height: 8),
+        bar(secondLineFactor, 14, key: feedSkeletonSecondTitleLineKey),
+      ],
+      const SizedBox(height: 8),
+      // channel name
+      bar(0.25, 12),
+      if (!isMix) ...[
+        const SizedBox(height: 8),
+        // views • age
+        bar(0.45, 12),
+      ],
+    ];
+
+    final wideMeta = [
+      const SizedBox(height: 12),
+      bar(twoLineTitle ? 1.0 : secondLineFactor, 14),
+      if (twoLineTitle) ...[
+        const SizedBox(height: 8),
+        bar(secondLineFactor, 14, key: feedSkeletonSecondTitleLineKey),
+      ],
+      
+      const SizedBox(height: 12),
+      // views • age
+      bar(0.45, 12),
+      
+      // Avatar + channel name
+      const SizedBox(height: 13),
+      Row(
+        children: [
+          // Avatar
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: block,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          // channel name
+          Expanded(child: bar(0.12 + secondLineFactor * 0.2 - 0.1, 12),),
+        ],
+      ),
+      const SizedBox(height: 13),
+      bar(0.85 + secondLineFactor * 0.15, 12),
+    ];
+
     if (isWide) {
       return SizedBox(
         height: _wideTileHeight + extra,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: 200, child: thumbnail),
+            SizedBox(width: 400, child: thumbnail),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  bar(0.9, 16),
-                  if (twoLineTitle) ...[
-                    const SizedBox(height: 6),
-                    bar(secondLineFactor, 16, key: feedSkeletonSecondTitleLineKey),
-                  ],
-                  const SizedBox(height: 10),
-                  bar(0.5, 12),
-                  const SizedBox(height: 8),
-                  bar(0.7, 12),
-                ],
+                children: wideMeta,
               ),
             ),
           ],
@@ -286,19 +326,7 @@ class _SkeletonTile extends StatelessWidget {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      bar(1.0, 14),
-                      if (twoLineTitle) ...[
-                        const SizedBox(height: 8),
-                        bar(secondLineFactor, 14, key: feedSkeletonSecondTitleLineKey),
-                      ],
-                      const SizedBox(height: 8),
-                      // channel name
-                      bar(0.25, 12),
-                      if (!isMix) ...[const SizedBox(height: 8),
-                      // views • age
-                      bar(0.45, 12),]
-                    ],
+                    children: meta,
                   ),
                 ),
                 const SizedBox(width: 4),

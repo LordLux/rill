@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth_controller.dart';
@@ -94,10 +95,10 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
         CircleAvatar(
           radius: _avatarRadius,
           backgroundColor: scheme.surfaceContainerHighest,
-          foregroundImage: auth.accountAvatarUrl == null
+          foregroundImage: auth.accountAvatarUrl == null //
               ? null
               : NetworkImage(auth.accountAvatarUrl!),
-          child: auth.accountAvatarUrl != null
+          child: auth.accountAvatarUrl != null //
               ? null
               : Icon(Icons.person, color: scheme.onSurfaceVariant, size: _avatarRadius * 1.25),
         ),
@@ -135,14 +136,12 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
       child: TitleBarWidgetButton(
         tooltip: auth.isSignedIn
             ? auth.displayName
-            : (auth.status == AuthStatus.degraded
-                ? 'Your session expired. Please sign in again'
-                : 'Log in'),
+            : (auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in'),
         onTap: auth.isBusy
             ? null
             : auth.isSignedIn
-                ? () => _openMenu(auth)
-                : () => showLoginFlow(context),
+            ? () => _openMenu(auth)
+            : () => showLoginFlow(context),
         child: inner,
       ),
     );
@@ -199,11 +198,30 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
   static const Duration _morph = Duration(milliseconds: 180);
 
   /// Root is depth 0; every subpage is depth 1.
-  static int _depthOf(_AccountMenuPage p) =>
-      p == _AccountMenuPage.root ? 0 : 1;
+  static int _depthOf(_AccountMenuPage p) => p == _AccountMenuPage.root ? 0 : 1;
 
   void _go(_AccountMenuPage page) => setState(() => _current = page);
   void _back() => _go(_AccountMenuPage.root);
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    super.dispose();
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
+      widget.onDismiss();
+      return true;
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -259,8 +277,7 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
                 layoutBuilder: (currentChild, previousChildren) => Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    for (final prev in previousChildren)
-                      Positioned(top: 0, left: 0, right: 0, child: prev),
+                    for (final prev in previousChildren) Positioned(top: 0, left: 0, right: 0, child: prev),
                     ?currentChild,
                   ],
                 ),
@@ -364,12 +381,8 @@ class _AccountRootPage extends StatelessWidget {
                 CircleAvatar(
                   radius: 22,
                   backgroundColor: scheme.surfaceContainerHighest,
-                  foregroundImage: auth.accountAvatarUrl == null
-                      ? null
-                      : NetworkImage(auth.accountAvatarUrl!),
-                  child: auth.accountAvatarUrl != null
-                      ? null
-                      : Icon(Icons.person, color: scheme.onSurfaceVariant, size: 28),
+                  foregroundImage: auth.accountAvatarUrl == null ? null : NetworkImage(auth.accountAvatarUrl!),
+                  child: auth.accountAvatarUrl != null ? null : Icon(Icons.person, color: scheme.onSurfaceVariant, size: 28),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -647,8 +660,6 @@ class _AccountMenuDivider extends StatelessWidget {
     color: Theme.of(context).colorScheme.outlineVariant,
   );
 }
-
-
 
 /// Open the login flow.
 ///
