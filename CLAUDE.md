@@ -416,6 +416,26 @@ the answer.
   and make a useless corpus.
 - **Never mix fixtures across capture runs.** Clear the directory first. A stale
   file once produced a completely wrong reading of the live feed.
+- **But a wholesale clear only knows what it owns, and `sidecar/src/fixtures.ts`
+  is where that is declared — added 2026-09-20 (`todo.md` 41, now closed).**
+  Three comment fixtures sat in `fixtures/` for weeks with no stage of
+  `capture.ts` writing them, and `promoteStaging` replaces that directory
+  entirely: one routine `bun run capture` would have deleted all three, and
+  every test guarded by `hasFixture('comments…')` would then have **skipped
+  silently** — the unloadable-test-file trap, one directory over. `fixtures.ts`
+  now declares `CAPTURE_FILES` (what a run writes, each marked required or
+  conditional) and `CARRIED` (what it must preserve, each with the reason it
+  cannot be rebuilt), and the promote **refuses** rather than guesses: on any
+  entry owned by neither, and on any *required* file it failed to produce —
+  because replacing a good copy with nothing is the same loss arriving through
+  the owner instead of past it. Carried entries are copied, not moved, and
+  `prepareStaging` will not clear a staging directory holding one, which is the
+  crash window between the copy and the swap. **The rule that follows: a new
+  ad-hoc capture is declared in `fixtures.ts` or it is not written to
+  `fixtures/`.** Nothing else keeps it. `test/fixtures.test.ts` drives both
+  refusals against real directories and checks the declaration against
+  `capture.ts`'s actual stages, so a stage added without one fails offline
+  rather than a whole capture run later.
 - **Fixtures are one moment.** The home feed's renderer mix shifted measurably
   within 8½ hours. Never assert that a given surface contains a given
   generation; search the corpus for wherever it lives.
@@ -638,7 +658,9 @@ the answer.
   the account in a *known* state and refuses to write unless the raw response
   proves it; its header has the recipe (like a video, subscribe, add to Watch
   Later, like and heart your own comment on your own video, then undo it all).
-  `capture.ts` carries `fixtures/viewer-state/` across instead of deleting it.
+  `capture.ts` carries `fixtures/viewer-state/` across instead of deleting it,
+  because `src/fixtures.ts` declares it `CARRIED` — see the capture note above;
+  that declaration is the only thing standing between it and a recapture.
   The assertions are `viewer-state.test.ts` (raw, local) and `corpus.test.ts`
   (sanitised, runs anywhere). `canWatchLater` is *not* viewer state: it is `true`
   on every tile, anonymous ones included. `architecture.md` F35.

@@ -26,7 +26,7 @@ Nothing here right now.
 
 ## Soon
 
-### 39. Comments: four gaps left after replies, delete and the comment box
+### 39. Comments: five gaps left after replies, delete and the comment box
 
 Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
 a tree that the UI shows flat"). None is a regression; each is a known hole.
@@ -72,6 +72,24 @@ landed 2026-09-20 (`architecture.md` F34).
    expanded threads must not interfere), which holds by construction and is not
    asserted. **Done when:** post, reply and delete take a seam like
    `CommentsSource`, and those cases are asserted.
+7. **One comment fixture is evidence no tool can rebuild.** All four heart
+   states *are* fixtured and asserted — `…_HEARTED_EDITABLE` and
+   `…_UNHEARTED_EDITABLE` (the creator's own view) in
+   `fixtures/viewer-state/comments-{after,before}.json`, plain `…_HEARTED` in
+   `comments-after-anonymous.json` and in `fixtures/comments-viewer-state.json`,
+   plain `…_UNHEARTED` in `comments.json`. The gap is narrower and is about
+   provenance: everything the **state-proven** family holds is the account's own
+   comment on its own video, so *a third party's* comment that the viewer liked,
+   and one hearted as seen by a signed-in non-creator, exist only in
+   `comments-viewer-state.json` — a one-off ad-hoc capture that
+   `capture-viewer-state.ts` deliberately cannot reproduce, since setting that
+   state means liking and un-liking four strangers' comments. It is declared
+   `CARRIED` in `sidecar/src/fixtures.ts` and survives a recapture (item 41,
+   landed 2026-09-20), so nothing is at risk; what is open is that it can be
+   lost and not remade. **Done when:** either a reproducible capture exists for
+   it — which needs a decision about mutating a stranger's comment — or the
+   decision is written next to `CARRIED` that this one stays a one-off and the
+   assertions that depend on it are named there.
 
 **Done when:** each is fixed, or deliberately dropped with the reason written
 next to it.
@@ -228,21 +246,6 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
-
-### 41. The comments fixtures are not in `capture.ts`, so a recapture deletes them
-
-`comments.json`, `comments-replies.json` and `comments-viewer-state.json` sit in
-`sidecar/fixtures/`, but no stage of `capture.ts` writes them — they were
-captured ad hoc — and `promoteStaging` replaces that directory wholesale.
-**Found by reading the code, not by running a recapture** (which would delete
-them): a full `bun run capture` removes all three, and every test guarded by
-`test.if(hasFixture('comments…'))` then skips silently, including the raw
-viewer-state reading in `parser.test.ts`. The committed corpus keeps its own
-assertions, which is why this is not urgent; it is the same trap as an
-unloadable test file. **Done when:** the three are stages of `capture.ts` (the
-replies one needs a thread that has replies; the viewer-state one is now better
-made by `capture-viewer-state.ts`), or they move under `fixtures/viewer-state/`,
-which `capture.ts` already carries across.
 
 ---
 

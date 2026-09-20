@@ -267,6 +267,44 @@ function countMappable(raw: unknown, rendererKey: string): number {
   return count;
 }
 
+/**
+ * How many thumbnail overlays in the raw tree carry `style`.
+ *
+ * A raw oracle for the two tests that used to name a video id. It counts the
+ * *signal*, wherever the capture put it, rather than asserting which fixture a
+ * given video landed in — the mistake that made both of them go red on the
+ * 2026-09-20 recapture for a reason that was not the parser.
+ */
+function countStyle(raw: unknown, style: string): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    const overlay = node['thumbnailOverlayTimeStatusRenderer'];
+    if (overlay && typeof overlay === 'object') {
+      if ((overlay as Record<string, unknown>)['style'] === style) count += 1;
+    }
+    return true;
+  });
+  return count;
+}
+
+/**
+ * How many music notes the raw tree carries — `clientResource.imageName`, the
+ * badge's own icon, which is what `isMusic` is read from. Reached by its own
+ * path rather than through `scanBadges`, so the oracle does not reuse the code
+ * under test.
+ */
+function countMusicBadges(raw: unknown): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    const resource = node['clientResource'];
+    if (resource && typeof resource === 'object') {
+      if ((resource as Record<string, unknown>)['imageName'] === 'MUSIC') count += 1;
+    }
+    return true;
+  });
+  return count;
+}
+
 function idsOf(raw: unknown, rendererKey: string, idKey: string): Set<string> {
   const ids = new Set<string>();
   walk(raw, (node: JsonObject) => {
@@ -753,31 +791,69 @@ describe.if(HAS_CAPTURES)('shorts', () => {
   });
 
   // Task 21 §1: the *other* Shorts shape — an ordinary videoRenderer carrying
-  // a SHORTS-styled duration overlay — is classified, not stripped. By id,
-  // per the task's own mutation-check instruction: a hardcoded `false` would
-  // pass a test that only checked "the field exists".
-  // The fixture moves with the capture, because the Short does: in the Task 21
-  // capture it was `search-artist.json`'s `T0oRfI3PYCU`; re-captured
-  // 2026-09-14 that same video arrives inside a `gridShelfViewModel` of
-  // `shortsLockupViewModel`s (stripped whole, correctly), and the corpus's only
-  // SHORTS-styled `videoRenderer` is this watch-history entry. Checked against
-  // the raw overlay (`"style":"SHORTS"`), not against this parser's output.
-  test('a SHORTS-badged video is flagged isShort, and the badge is not duplicated', () => {
-    const items = parseFeed(history, 'history').items;
-    const short = items.find((item) => item.kind === 'video' && item.id === 'i7Cinf_GUto');
-    expect(short?.kind).toBe('video');
-    if (short?.kind !== 'video') return;
+  // a SHORTS-styled duration overlay — is classified, not stripped.
+  //
+  // **Synthetic, and that is now deliberate.** This used to name a video id,
+  // and the id moved with every capture: `search-artist.json`'s `T0oRfI3PYCU`
+  // in the Task 21 capture, a watch-history entry on 2026-09-14, and on the
+  // 2026-09-20 recapture **nothing at all** — that capture carries Shorts only
+  // as shelves (`shortsLockupViewModel`), which are stripped whole and
+  // correctly, and holds zero SHORTS-styled `videoRenderer`s anywhere. So the
+  // test went red for a reason that was not the parser, which is the failure
+  // CLAUDE.md's "fixtures are one moment" warns about, one level below the
+  // surface it names. A shape the corpus cannot be made to contain on demand
+  // is `premiere.test.ts`'s case, and this is the same answer: assert the
+  // shape inline, and let the corpus prove the *negative* below.
+  //
+  // Mutation-check note, from the task's own instruction: a hardcoded `false`
+  // in the reader is caught here, and a hardcoded `true` by the corpus test
+  // that follows — one of the two alone would miss half of it.
+  test('a SHORTS-badged videoRenderer is flagged isShort, and the badge is not duplicated', () => {
+    const feed = {
+      contents: [
+        {
+          videoRenderer: {
+            videoId: 'shortvid001',
+            title: { runs: [{ text: 'A classified Short' }] },
+            ownerText: { runs: [{ text: 'A Channel' }] },
+            thumbnail: { thumbnails: [{ url: 'https://i.ytimg.com/vi/shortvid001/hq.jpg', width: 480, height: 360 }] },
+            thumbnailOverlays: [
+              { thumbnailOverlayTimeStatusRenderer: { style: 'SHORTS', text: { simpleText: 'SHORTS' } } },
+            ],
+          },
+        },
+      ],
+    };
+    const items = parseFeed(feed, 'synthetic-short').items;
+    expect(items.length).toBe(1);
+    const short = items[0]!;
+    expect(short.kind).toBe('video');
+    if (short.kind !== 'video') return;
     expect(short.isShort).toBe(true);
+    // The fact has a field, so it does not also travel as a label.
     expect(short.badges).not.toContain('SHORTS');
   });
 
-  test.skipIf(!hasFixture('search-artist'))('an ordinary video is not flagged isShort', () => {
-    const raw = fixture('search-artist');
-    const items = parseFeed(raw, 'search-artist').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'MhViuFoLkbs');
-    expect(ordinary?.kind).toBe('video');
-    if (ordinary?.kind !== 'video') return;
-    expect(ordinary.isShort).toBe(false);
+  // The negative, across every video the capture actually holds — which is
+  // what the deleted `an ordinary video is not flagged isShort` was reaching
+  // for with a single id. A `SHORTS` style is a *necessary* condition for the
+  // flag and not a sufficient one: a style inside a stripped shelf has no item
+  // to flag, so this is a bound rather than an equality.
+  test('no video is flagged isShort beyond the SHORTS-styled overlays its fixture holds', () => {
+    let videos = 0;
+    // Collected rather than asserted in the loop, so a failure names the
+    // fixture and the two counts instead of just "expected 3 to be <= 0".
+    const over: Array<{ name: string; flagged: number; styled: number }> = [];
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const styled = countStyle(raw, 'SHORTS');
+      const list = parseFeed(raw, name).items.filter((item) => item.kind === 'video');
+      videos += list.length;
+      const flagged = list.filter((item) => item.isShort).length;
+      if (flagged > styled) over.push({ name, flagged, styled });
+    }
+    expect(over).toEqual([]);
+    // Not vacuous: an empty corpus would satisfy the bound above.
+    expect(videos).toBeGreaterThan(100);
   });
 });
 
@@ -786,22 +862,39 @@ describe.if(HAS_CAPTURES)('shorts', () => {
 // ---------------------------------------------------------------------------
 
 describe.if(HAS_CAPTURES)('music note (per video)', () => {
-  test('a video with a MUSIC-badged thumbnail is flagged isMusic, by id', () => {
-    const items = parseFeed(history, 'history').items;
-    const musicVideo = items.find((item) => item.kind === 'video' && item.id === '7i_nc5GGIsI');
-    expect(musicVideo?.kind).toBe('video');
-    if (musicVideo?.kind !== 'video') return;
-    expect(musicVideo.isMusic).toBe(true);
-  });
+  // Both halves in one pass over the corpus, because both used to name a video
+  // id — `history.json`'s `7i_nc5GGIsI` and `search.json`'s `zW5wpJY1rgQ` —
+  // and both ids were gone from the 2026-09-20 recapture. Which tile carries a
+  // music note is YouTube's choice on the day; that there *are* some, and that
+  // the parser flags exactly those, is the thing worth asserting.
+  //
+  // The oracle is the raw badge (`clientResource.imageName === 'MUSIC'`),
+  // counted by a path of its own rather than through `scanBadges`. A bound and
+  // not an equality, for the same reason as the Shorts test above: on
+  // 2026-09-20 `search-artist.json` held 10 raw music badges and 0 flagged
+  // items, all of them inside content the vocabulary strips whole.
+  test('the music note is read where the raw says it is, and nowhere else', () => {
+    let badges = 0;
+    let flagged = 0;
+    let plain = 0;
+    const over: Array<{ name: string; flagged: number; badges: number }> = [];
 
-  // A classic tile carrying no badge of any kind in the raw response — see
-  // the "flagged neither" test for why it is not a lockup.
-  test('an ordinary video is not flagged isMusic', () => {
-    const items = parseFeed(fixture('search'), 'search').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'zW5wpJY1rgQ');
-    expect(ordinary?.kind).toBe('video');
-    if (ordinary?.kind !== 'video') return;
-    expect(ordinary.isMusic).toBe(false);
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const raws = countMusicBadges(raw);
+      const list = parseFeed(raw, name).items.filter((item) => item.kind === 'video');
+      const music = list.filter((item) => item.isMusic).length;
+      badges += raws;
+      flagged += music;
+      plain += list.length - music;
+      if (music > raws) over.push({ name, flagged: music, badges: raws });
+    }
+
+    expect(over).toEqual([]);
+    // Non-vacuity, and the two classes. A reader hardcoded either way fails one
+    // of these: `true` empties `plain`, `false` empties `flagged`.
+    expect(badges).toBeGreaterThan(0);
+    expect(flagged).toBeGreaterThan(0);
+    expect(plain).toBeGreaterThan(0);
   });
 });
 
@@ -1467,7 +1560,11 @@ describe('video.comments (Task 27)', () => {
     expect(result.items.length).toBeGreaterThan(0);
     expect(result.continuation).toBeString();
     expect(result.chips?.length).toBeGreaterThan(0);
-    expect(result.commentCount).toBe('86,800 Comments');
+    // The shape, not the number. This read `'86,800 Comments'` while the fixture
+    // was a one-off ad-hoc capture; it is a stage of `bun run capture` now
+    // (`todo.md` 41), so a hardcoded count would go red on the next recapture
+    // for a reason that is not the parser.
+    expect(result.commentCount).toMatch(/^[\d,.]+[KMB]? Comments?$/);
 
     for (const item of result.items) {
       expect(validateShape('comment', item)).toEqual([]);
