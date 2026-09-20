@@ -11,8 +11,8 @@
         "content": "Sanitised Comment Text 1"
       },
       "likeCount": "Sanitised Likes 1",
-      "publishedText": "2 weeks ago",
-      "replyCount": 10,
+      "publishedText": "7 years ago",
+      "replyCount": 21,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -28,11 +28,18 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 2"
+        "content": "Sanitised Comment Text 2",
+        "styleRuns": [
+          {
+            "startIndex": 0,
+            "length": 10,
+            "weightLabel": "FONT_WEIGHT_MEDIUM"
+          }
+        ]
       },
       "likeCount": "Sanitised Likes 2",
-      "publishedText": "1 year ago",
-      "replyCount": 16,
+      "publishedText": "7 years ago",
+      "replyCount": 13,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -46,13 +53,13 @@
       "authorAvatarUrl": "https://fake.url/avatar3.jpg",
       "authorChannelId": "chan_003",
       "isUploader": false,
-      "isVerified": false,
+      "isVerified": true,
       "text": {
         "content": "Sanitised Comment Text 3"
       },
       "likeCount": "Sanitised Likes 3",
-      "publishedText": "1 year ago",
-      "replyCount": 9,
+      "publishedText": "2 years ago",
+      "replyCount": 14,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -71,12 +78,12 @@
         "content": "Sanitised Comment Text 4"
       },
       "likeCount": "Sanitised Likes 4",
-      "publishedText": "2 weeks ago",
-      "replyCount": 0,
+      "publishedText": "2 years ago",
+      "replyCount": 2,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": null,
+      "repliesContinuation": "CONTINUATION_TOKEN_004",
       "replyParams": null,
       "deleteParams": null
     },
@@ -88,18 +95,11 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 5",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ]
+        "content": "Sanitised Comment Text 5"
       },
       "likeCount": "Sanitised Likes 5",
-      "publishedText": "6 years ago",
-      "replyCount": 28,
+      "publishedText": "9 years ago",
+      "replyCount": 15,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -118,8 +118,8 @@
         "content": "Sanitised Comment Text 6"
       },
       "likeCount": "Sanitised Likes 6",
-      "publishedText": "2 years ago (edited)",
-      "replyCount": 23,
+      "publishedText": "7 years ago",
+      "replyCount": 30,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -138,8 +138,8 @@
         "content": "Sanitised Comment Text 7"
       },
       "likeCount": "Sanitised Likes 7",
-      "publishedText": "5 years ago",
-      "replyCount": 260,
+      "publishedText": "7 years ago",
+      "replyCount": 17,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -158,12 +158,12 @@
         "content": "Sanitised Comment Text 8"
       },
       "likeCount": "Sanitised Likes 8",
-      "publishedText": "1 month ago",
-      "replyCount": 0,
+      "publishedText": "1 year ago (edited)",
+      "replyCount": 10,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": null,
+      "repliesContinuation": "CONTINUATION_TOKEN_008",
       "replyParams": null,
       "deleteParams": null
     },
@@ -178,7 +178,7 @@
         "content": "Sanitised Comment Text 9"
       },
       "likeCount": "Sanitised Likes 9",
-      "publishedText": "2 years ago",
+      "publishedText": "8 years ago",
       "replyCount": 3,
       "isLiked": false,
       "creatorHearted": false,
@@ -195,27 +195,11 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 10",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ],
-        "commandRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "url": "https://fake.url",
-            "videoId": "vid_001",
-            "startTimeSeconds": 120
-          }
-        ]
+        "content": "Sanitised Comment Text 10"
       },
       "likeCount": "Sanitised Likes 10",
       "publishedText": "7 years ago",
-      "replyCount": 9,
+      "replyCount": 11,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -234,8 +218,8 @@
         "content": "Sanitised Comment Text 11"
       },
       "likeCount": "Sanitised Likes 11",
-      "publishedText": "10 years ago",
-      "replyCount": 85,
+      "publishedText": "7 years ago",
+      "replyCount": 5,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -254,8 +238,8 @@
         "content": "Sanitised Comment Text 12"
       },
       "likeCount": "Sanitised Likes 12",
-      "publishedText": "9 months ago",
-      "replyCount": 3,
+      "publishedText": "3 years ago",
+      "replyCount": 2,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -268,14 +252,14 @@
       "authorName": "Sanitised Author 13",
       "authorAvatarUrl": "https://fake.url/avatar13.jpg",
       "authorChannelId": "chan_013",
-      "isUploader": true,
-      "isVerified": true,
+      "isUploader": false,
+      "isVerified": false,
       "text": {
         "content": "Sanitised Comment Text 13"
       },
       "likeCount": "Sanitised Likes 13",
-      "publishedText": "6 years ago",
-      "replyCount": 394,
+      "publishedText": "5 years ago",
+      "replyCount": 12,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -291,18 +275,11 @@
       "isUploader": false,
       "isVerified": false,
       "text": {
-        "content": "Sanitised Comment Text 14",
-        "styleRuns": [
-          {
-            "startIndex": 0,
-            "length": 10,
-            "weightLabel": "FONT_WEIGHT_MEDIUM"
-          }
-        ]
+        "content": "Sanitised Comment Text 14"
       },
       "likeCount": "Sanitised Likes 14",
-      "publishedText": "6 years ago",
-      "replyCount": 6,
+      "publishedText": "7 years ago",
+      "replyCount": 27,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -321,8 +298,8 @@
         "content": "Sanitised Comment Text 15"
       },
       "likeCount": "Sanitised Likes 15",
-      "publishedText": "7 years ago (edited)",
-      "replyCount": 31,
+      "publishedText": "5 years ago",
+      "replyCount": 6,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -357,12 +334,12 @@
         ]
       },
       "likeCount": "Sanitised Likes 16",
-      "publishedText": "5 months ago",
-      "replyCount": 3,
+      "publishedText": "11 months ago (edited)",
+      "replyCount": 0,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": "CONTINUATION_TOKEN_016",
+      "repliesContinuation": null,
       "replyParams": null,
       "deleteParams": null
     },
@@ -378,7 +355,7 @@
       },
       "likeCount": "Sanitised Likes 17",
       "publishedText": "5 years ago",
-      "replyCount": 13,
+      "replyCount": 4,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -397,8 +374,8 @@
         "content": "Sanitised Comment Text 18"
       },
       "likeCount": "Sanitised Likes 18",
-      "publishedText": "4 years ago",
-      "replyCount": 35,
+      "publishedText": "6 years ago",
+      "replyCount": 6,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -417,8 +394,8 @@
         "content": "Sanitised Comment Text 19"
       },
       "likeCount": "Sanitised Likes 19",
-      "publishedText": "6 years ago",
-      "replyCount": 19,
+      "publishedText": "5 years ago",
+      "replyCount": 26,
       "isLiked": false,
       "creatorHearted": false,
       "isPinned": false,
@@ -437,7 +414,7 @@
         "content": "Sanitised Comment Text 20"
       },
       "likeCount": "Sanitised Likes 20",
-      "publishedText": "13 days ago",
+      "publishedText": "1 year ago",
       "replyCount": 0,
       "isLiked": false,
       "creatorHearted": false,
@@ -462,6 +439,6 @@
       "scope": "feed"
     }
   ],
-  "commentCount": "86,800 Comments",
+  "commentCount": "5,173 Comments",
   "createParams": null
 }

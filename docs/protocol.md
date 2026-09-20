@@ -1609,3 +1609,13 @@ Flutter's `freezed` models.
 Capture fixtures with `parse: false`. Parsed objects are lossy (see F2 in
 `architecture.md`) and make a poor corpus. These fixtures are also the only way
 to meaningfully test tolerant parsing, since the live feed cannot be pinned.
+
+`fixtures/` is replaced wholesale by one run of `bun run capture`, so every
+fixture there needs an owner and `sidecar/src/fixtures.ts` is where ownership is
+declared — `CAPTURE_FILES` for what a run writes, `CARRIED` for what it must
+preserve because another tool made it. The promote refuses on anything in
+neither list, and on any required file the run failed to produce. A fixture
+written into `fixtures/` by hand and left undeclared is a fixture one recapture
+away from gone, and the tests that read it then skip in silence rather than
+fail — which is how three comment fixtures spent a month one command from
+deletion (`todo.md` 41, closed 2026-09-20).
