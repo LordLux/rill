@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 41.** A new item takes it, and the same edit bumps this line.
+**Next number: 42.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -26,12 +26,14 @@ Nothing here right now.
 
 ## Soon
 
-### 39. Comments: five gaps left after replies, delete and the comment box
+### 39. Comments: four gaps left after replies, delete and the comment box
 
 Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
 a tree that the UI shows flat"). None is a regression; each is a known hole.
 Numbers are stable: item 4 (the viewer's like state and the creator's heart)
-landed 2026-09-19 (`architecture.md` F33) and is gone.
+landed 2026-09-19 (`architecture.md` F33) and is gone; so is item 6 (a thread
+keeping its expansion when it scrolls away, and the reply list being lazy),
+landed 2026-09-20 (`architecture.md` F34).
 
 1. **A reply's own "Show more replies" is unreachable.** A reply can carry a
    load-more button of its own (more replies *to that one reply*). The parser
@@ -59,7 +61,9 @@ landed 2026-09-19 (`architecture.md` F33) and is gone.
    through `CommentsSource` (`lib/data/comments_source.dart`), and
    `comments_section_test.dart` covers a re-sort superseding the page in flight
    (`$cancel` plus a generation guard, which the first delivery lacked), leaving
-   mid-load, a change of video, and the like/heart rendering. **Still
+   mid-load, a change of video, the like/heart rendering, and the lazy reply list
+   (a thread's expansion, replies and half-typed reply surviving a scroll away,
+   and a re-sort or a new video forgetting them). **Still
    untested,** because they call the `RpcClient` singleton directly: post, reply
    and delete — including `_postComment`'s guard against landing in another
    video's list — and the rules in a thread's own state: the reply count
@@ -68,25 +72,6 @@ landed 2026-09-19 (`architecture.md` F33) and is gone.
    expanded threads must not interfere), which holds by construction and is not
    asserted. **Done when:** post, reply and delete take a seam like
    `CommentsSource`, and those cases are asserted.
-
-6. **A thread's expansion does not survive scrolling away.** A
-   `CommentThreadWidget` keeps `_expanded`, `_replies` and the reply box's text in
-   its `State`, and `SliverList.builder` disposes a child that leaves the
-   viewport — nothing opts into keep-alive. Measured 2026-09-19 with the real
-   widgets in `lib/probe_comments.dart`, in a release process: expand a thread,
-   scroll a screen's worth away and back, and *"the thread is still expanded:
-   false"* at 20 and 100 replies. (At 500 and 1000 it was still expanded — most
-   likely because a thread that tall never left the viewport entirely; that is
-   an inference, not a measurement.) That the loaded replies and a half-typed
-   reply go with it follows from where they live, `State`, and was not observed.
-   Not yet seen in the running app, and how youtube.com behaves was not checked.
-   **Done when:** an expanded thread, or one holding a reply draft, keeps its
-   state off screen — `AutomaticKeepAliveClientMixin` with `wantKeepAlive` while
-   expanded is the obvious shape, and it turns the eager reply list into a
-   *retained* cost, so re-measure with the probe (`architecture.md` F34). That
-   rewrite is also the place to make the reply list lazy: re-expanding a thread
-   that holds many replies mounts them all in one frame (49 ms at 100 loaded,
-   345 ms at 500), which the memoised rows do not help.
 
 **Done when:** each is fixed, or deliberately dropped with the reason written
 next to it.
