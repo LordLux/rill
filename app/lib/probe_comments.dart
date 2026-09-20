@@ -9,9 +9,14 @@
 ///
 /// It answers the question the spec asked and the first delivery did not:
 /// *what does a long comment list cost in frame times* — the top-level list
-/// (virtualised: a `SliverList.builder`) and a thread's replies, which are a
-/// plain `Column` inside their thread (eager: every loaded reply is built).
-/// Both at the same counts, N = 20 (one page), 100, 500, 1000.
+/// and a thread's replies, both at the same counts, N = 20 (one page), 100, 500,
+/// 1000. Both are rows of one virtualised `SliverList.builder` now; until the
+/// lazy-reply rewrite a thread's replies were a plain `Column` inside their
+/// thread (eager: every loaded reply built on every rebuild), and the numbers
+/// in `architecture.md` F34 for that shape were taken with this same probe.
+///
+/// `RILL_PROBE_PHASES` (default `ABC`) picks phases, e.g. `C` for the click-cost
+/// sweep alone; a warm-up always runs first.
 ///
 /// It mounts the **real** [CommentsSection] — real threads, real reply
 /// controls, real rich-text measuring — over a synthetic [CommentsSource], so no
@@ -220,13 +225,42 @@ Element? _findText(String data) {
   return found;
 }
 
-/// Scrolls the widget showing [data] to the middle of the viewport (a "Show more
-/// replies" button sits below every reply already loaded) and lets it settle.
-Future<void> _reveal(String data) async {
+/// Scrolls until the widget showing [data] exists, then to the middle of the viewport, and
+/// lets it settle. A "Show more replies" button sits below every reply already loaded, and
+/// a lazy list builds only what is near the viewport — so it cannot simply be looked up,
+/// and the first version of this, which could, stopped working when the list became lazy.
+Future<void> _reveal(String data, ScrollController controller) async {
+  controller.jumpTo(0);
+  await SchedulerBinding.instance.endOfFrame;
+  for (var i = 0; i < 600 && _findText(data) == null; i++) {
+    final position = controller.position;
+    if (position.pixels >= position.maxScrollExtent) break;
+    controller.jumpTo(math.min(position.maxScrollExtent, position.pixels + 400));
+    await SchedulerBinding.instance.endOfFrame;
+  }
   final element = _findText(data);
-  if (element == null) throw StateError('no Text("$data") on screen');
+  if (element == null) throw StateError('no Text("$data") found after scrolling the whole list');
   await Scrollable.ensureVisible(element, alignment: 0.5, duration: Duration.zero);
   await SchedulerBinding.instance.endOfFrame;
+}
+
+/// [_reveal], then tap — retrying, because a lazy list re-estimates its extents in the
+/// frame after a jump and can drop the very widget that was just scrolled to before
+/// anything taps it. The look-up and the tap share one synchronous stretch, so once the
+/// widget is found nothing can remove it before the tap lands.
+Future<void> _revealAndTap(String data, ScrollController controller) async {
+  for (var attempt = 0; attempt < 8; attempt++) {
+    try {
+      await _reveal(data, controller);
+    } on StateError {
+      continue;
+    }
+    if (_findText(data) != null) {
+      await _tapText(data);
+      return;
+    }
+  }
+  throw StateError('could not bring Text("$data") on screen to tap it, in 8 tries');
 }
 
 /// A real tap, through the real gesture arena, on the widget showing [data].
@@ -443,12 +477,19 @@ Future<void> _phasePaged(_Rig rig, ImageCache cache, int m, List<int> marks) asy
   var loaded = rig.source.pageSize;
   while (loaded < m) {
     final measured = marks.contains(loaded);
-    await _reveal('Show more replies');
     if (measured) {
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      // Bring it on screen and let the frames from doing so pass, so they are not
+      // billed to the click; then clear and tap, with nothing awaited in between.
+      for (var attempt = 0; attempt < 8; attempt++) {
+        await _reveal('Show more replies', rig.controller);
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        if (_findText('Show more replies') != null) break;
+      }
       _frames.clear();
+      await _tapText('Show more replies');
+    } else {
+      await _revealAndTap('Show more replies', rig.controller);
     }
-    await _tapText('Show more replies');
     await Future<void>.delayed(Duration(milliseconds: measured ? 1600 : 200));
     if (measured) {
       final f = List.of(_frames);
@@ -474,20 +515,29 @@ Future<void> _run(_Rig rig, int port) async {
 
   await _phaseB(rig, cache, 20, report: false); // warm-up, discarded
 
-  _say('--- A. THE TOP-LEVEL LIST: N threads, none expanded (SliverList.builder) ---');
-  for (final n in _counts) {
-    await _phaseA(rig, cache, n);
-  }
-  _say('--- A2. THE WHOLE LIST SCROLLED THROUGH ONCE (what does it leave decoded?) ---');
-  await _phaseSweep(rig, cache, 1000);
+  final phases = Platform.environment['RILL_PROBE_PHASES'] ?? 'ABC';
+  _say('phases: $phases');
 
-  _say("--- B. ONE THREAD'S REPLIES: M replies loaded into its Column, 20 threads around it ---");
-  for (final m in _counts) {
-    await _phaseB(rig, cache, m);
+  if (phases.contains('A')) {
+    _say('--- A. THE TOP-LEVEL LIST: N threads, none expanded (SliverList.builder) ---');
+    for (final n in _counts) {
+      await _phaseA(rig, cache, n);
+    }
+    _say('--- A2. THE WHOLE LIST SCROLLED THROUGH ONCE (what does it leave decoded?) ---');
+    await _phaseSweep(rig, cache, 1000);
   }
 
-  _say('--- C. THE SAME THREAD, LOADED THE WAY THE APP LOADS IT: ~12 replies per click ---');
-  await _phasePaged(rig, cache, 500, const [12, 60, 120, 240, 480]);
+  if (phases.contains('B')) {
+    _say("--- B. ONE THREAD'S REPLIES: M replies loaded at once, 20 threads around it ---");
+    for (final m in _counts) {
+      await _phaseB(rig, cache, m);
+    }
+  }
+
+  if (phases.contains('C')) {
+    _say('--- C. THE SAME THREAD, LOADED THE WAY THE APP LOADS IT: ~12 replies per click ---');
+    await _phasePaged(rig, cache, 500, const [12, 60, 120, 240, 480]);
+  }
 
   _say('===== DONE =====');
 }

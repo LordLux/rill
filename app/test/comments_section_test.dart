@@ -97,6 +97,31 @@ Widget section(FakeCommentsSource source, {String videoId = 'A', String initial 
 /// would also hit the author's name.
 Finder text(String id) => find.textContaining('text of $id', findRichText: true);
 
+/// Thirty threads, the first of which has replies — tall enough that the first one can
+/// be scrolled out of the viewport and its row disposed.
+List<Comment> manyThreads({int firstReplies = 3, String? firstToken = 'rep-t0'}) => [
+      comment('t0', replyCount: firstReplies, repliesContinuation: firstToken, replyParams: 'RP', likeCount: '1'),
+      for (var i = 1; i < 30; i++) comment('t$i'),
+    ];
+
+/// The section with [items] already loaded (the first page answered).
+Future<FakeCommentsSource> pumpLoaded(WidgetTester tester, List<Comment> items) async {
+  final source = FakeCommentsSource();
+  await tester.pumpWidget(section(source));
+  source.issued.single.completer.complete(CommentsResult(items: items));
+  await tester.pump();
+  return source;
+}
+
+Future<void> scrollTo(WidgetTester tester, {required bool bottom}) async {
+  // The list's, which is the outermost: a multi-line TextField (the reply box) brings a Scrollable of its own.
+  final position = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+  position.jumpTo(bottom ? position.maxScrollExtent : 0);
+  await tester.pump();
+}
+
+int builtTiles() => find.byType(CommentTile).evaluate().length;
+
 void main() {
   group('CommentsSection — a re-sort supersedes the page in flight', () {
     /// Page 1 of the "Top" sort is in, and "Show more comments" has been
@@ -283,73 +308,141 @@ void main() {
     });
   });
 
-  group('CommentThreadWidget — replies already loaded are not rebuilt', () {
-    // Any `setState` in a thread — a page of replies arriving, the reply box
-    // opening, a delete — rebuilds it, and it used to hand every loaded reply a
-    // *new* widget each time, so all of them were rebuilt with it: ~0.15 ms per
-    // reply in a release build, 77 ms at 500 replies, every time
-    // (`architecture.md` F34). A reply is immutable once loaded, so the thread
-    // now hands back the instance it built before and the framework skips it.
-    testWidgets('a rebuild of the thread gives each loaded reply the same widget instance', (tester) async {
-      final source = FakeCommentsSource();
-      await tester.pumpWidget(section(source));
-      source.issued.single.completer.complete(
-        CommentsResult(items: [comment('t1', replyCount: 2, repliesContinuation: 'rep-t1', replyParams: 'RP')]),
+  group('the reply list is lazy, and a thread keeps its state when it scrolls away', () {
+    // A thread's replies used to be a plain `Column` inside the thread's row, so all
+    // of them were built the moment it was expanded (345 ms to re-expand 500,
+    // `architecture.md` F34), and a `SliverList` disposes a row that leaves the
+    // viewport, taking the expansion, the loaded replies and a half-typed reply with
+    // it. The replies are rows of the same list now, and their state is the
+    // section's.
+    Future<FakeCommentsSource> expandFirst(WidgetTester tester, {int replies = 3, String? next}) async {
+      final source = await pumpLoaded(tester, manyThreads(firstReplies: replies));
+      await tester.tap(find.text('Show $replies replies'));
+      await tester.pump();
+      source.issued.last.completer.complete(
+        CommentsResult(items: [for (var i = 1; i <= replies; i++) comment('r$i')], continuation: next),
       );
       await tester.pump();
-      await tester.tap(find.text('Show 2 replies'));
-      await tester.pump();
-      source.issued.last.completer.complete(CommentsResult(items: [comment('r1'), comment('r2')]));
-      await tester.pump();
-      expect(text('r2'), findsOneWidget);
+      return source;
+    }
 
-      CommentThreadWidget reply(String id) => tester.widget<CommentThreadWidget>(find.byKey(ValueKey(id)));
-      final before = (reply('r1'), reply('r2'));
+    testWidgets('an expanded thread is still expanded, with its replies and its load-more, after scrolling away and back', (tester) async {
+      final source = await expandFirst(tester, next: 'rep-t0-2');
+      expect(text('r3'), findsOneWidget);
 
-      // Opening the reply box is a setState in the thread; replies have no such button.
-      await tester.tap(find.text('Reply'));
+      await scrollTo(tester, bottom: true);
+      expect(text('r3'), findsNothing, reason: 'the thread is off screen, and its row is gone');
+      await scrollTo(tester, bottom: false);
+
+      expect(find.text('Hide replies'), findsOneWidget);
+      expect([text('r1'), text('r2'), text('r3')].map((f) => f.evaluate().length), [1, 1, 1]);
+      expect(find.text('Show more replies'), findsOneWidget);
+
+      // ...and the next page continues from where it stopped, not from the start.
+      await tester.tap(find.text('Show more replies'));
       await tester.pump();
-
-      expect(identical(reply('r1'), before.$1), isTrue);
-      expect(identical(reply('r2'), before.$2), isTrue);
+      expect(source.issued.last.continuation, 'rep-t0-2');
     });
 
-    testWidgets('a reply page arriving keeps the earlier replies\' instances and adds the new ones', (tester) async {
+    testWidgets('a half-typed reply is still in the box after scrolling away and back', (tester) async {
+      final source = await pumpLoaded(tester, manyThreads());
+      await tester.tap(find.text('Reply').first);
+      await tester.pump();
+      source.issued.last.completer.complete(CommentsResult(items: [comment('r1')]));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'half typed');
+
+      await scrollTo(tester, bottom: true);
+      expect(find.byType(TextField), findsNothing);
+      await scrollTo(tester, bottom: false);
+
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'half typed');
+    });
+
+    testWidgets("'Read more' stays open after scrolling away and back", (tester) async {
+      final long = List.filled(40, 'a very long comment line').join(' ');
+      await pumpLoaded(tester, [
+        Comment(id: 'long', authorName: 'A', authorAvatarUrl: '', text: CommentText(content: long), replyCount: 0),
+        for (var i = 1; i < 30; i++) comment('t$i'),
+      ]);
+      await tester.tap(find.text('Read more'));
+      await tester.pump();
+      expect(find.text('Read less'), findsOneWidget);
+
+      await scrollTo(tester, bottom: true);
+      await scrollTo(tester, bottom: false);
+
+      expect(find.text('Read less'), findsOneWidget);
+    });
+
+    testWidgets('300 loaded replies build a screenful, not 300', (tester) async {
+      await expandFirst(tester, replies: 300);
+
+      expect(text('r1'), findsOneWidget, reason: 'the top of the list is built');
+      expect(text('r300'), findsNothing, reason: 'the bottom is not');
+      expect(builtTiles(), lessThan(40));
+    });
+
+    testWidgets('collapsing and expanding a thread that holds 300 replies again builds a screenful too', (tester) async {
+      await expandFirst(tester, replies: 300);
+
+      await tester.tap(find.text('Hide replies'));
+      await tester.pump();
+      expect(builtTiles(), lessThan(40));
+
+      // The list is complete, so the count is the loaded one, and nothing is refetched.
+      await tester.tap(find.text('Show 300 replies'));
+      await tester.pump();
+
+      expect(text('r1'), findsOneWidget);
+      expect(builtTiles(), lessThan(40));
+    });
+
+    testWidgets('a re-sort forgets every thread\'s replies: the same thread comes back collapsed', (tester) async {
       final source = FakeCommentsSource();
       await tester.pumpWidget(section(source));
-      source.issued.single.completer.complete(
-        CommentsResult(items: [comment('t1', replyCount: 3, repliesContinuation: 'rep-t1')]),
-      );
+      source.issued.single.completer.complete(CommentsResult(items: manyThreads(), chips: sortChips(selected: 'Top')));
       await tester.pump();
       await tester.tap(find.text('Show 3 replies'));
       await tester.pump();
-      source.issued.last.completer.complete(
-        CommentsResult(items: [comment('r1'), comment('r2')], continuation: 'rep-t1-2'),
-      );
+      source.issued.last.completer.complete(CommentsResult(items: [comment('r1')]));
+      await tester.pump();
+      expect(find.text('Hide replies'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Newest'));
+      await tester.pump();
+      source.issued.last.completer.complete(CommentsResult(items: manyThreads(), chips: sortChips(selected: 'Newest')));
       await tester.pump();
 
-      CommentThreadWidget reply(String id) => tester.widget<CommentThreadWidget>(find.byKey(ValueKey(id)));
-      final first = reply('r1');
+      expect(find.text('Show 3 replies'), findsOneWidget, reason: 'the same thread, collapsed again');
+      expect(text('r1'), findsNothing);
+    });
 
-      await tester.tap(find.text('Show more replies'));
+    testWidgets('a different video forgets them too', (tester) async {
+      final source = await pumpLoaded(tester, manyThreads());
+      await tester.tap(find.text('Show 3 replies'));
       await tester.pump();
-      source.issued.last.completer.complete(CommentsResult(items: [comment('r3')]));
+      source.issued.last.completer.complete(CommentsResult(items: [comment('r1')]));
       await tester.pump();
 
-      expect(text('r3'), findsOneWidget);
-      expect(identical(reply('r1'), first), isTrue);
+      await tester.pumpWidget(section(source, videoId: 'B', initial: 'init-B'));
+      source.issued.last.completer.complete(CommentsResult(items: manyThreads()));
+      await tester.pump();
+
+      expect(find.text('Show 3 replies'), findsOneWidget);
+      expect(text('r1'), findsNothing);
     });
   });
 
-  group('CommentThreadWidget — the viewer\'s like and the creator\'s heart', () {
-    Future<void> pumpThread(WidgetTester tester, Comment thread) {
+  group('CommentTile — the viewer\'s like and the creator\'s heart', () {
+    Future<void> pumpTile(WidgetTester tester, Comment tile) {
       return tester.pumpWidget(
         ProviderScope(
           child: MaterialApp(
             home: Scaffold(
               body: Align(
                 alignment: Alignment.topLeft,
-                child: SizedBox(width: 400, child: CommentThreadWidget(thread: thread, videoId: 'A')),
+                child: SizedBox(width: 400, child: CommentTile(comment: tile)),
               ),
             ),
           ),
@@ -358,7 +451,7 @@ void main() {
     }
 
     testWidgets('a comment the viewer liked draws a filled thumb, with its count', (tester) async {
-      await pumpThread(tester, comment('c1', isLiked: true, likeCount: '737'));
+      await pumpTile(tester, comment('c1', isLiked: true, likeCount: '737'));
 
       expect(find.byIcon(Icons.thumb_up), findsOneWidget);
       expect(find.byIcon(Icons.thumb_up_alt_outlined), findsNothing);
@@ -366,22 +459,22 @@ void main() {
     });
 
     testWidgets('a comment the viewer did not like draws an outlined one', (tester) async {
-      await pumpThread(tester, comment('c1', likeCount: '736'));
+      await pumpTile(tester, comment('c1', likeCount: '736'));
 
       expect(find.byIcon(Icons.thumb_up_alt_outlined), findsOneWidget);
       expect(find.byIcon(Icons.thumb_up), findsNothing);
     });
 
     testWidgets('a hearted comment shows the creator\'s heart, and only that one does', (tester) async {
-      await pumpThread(tester, comment('c1', creatorHearted: true));
+      await pumpTile(tester, comment('c1', creatorHearted: true));
       expect(find.byIcon(Icons.favorite), findsOneWidget);
 
-      await pumpThread(tester, comment('c2'));
+      await pumpTile(tester, comment('c2'));
       expect(find.byIcon(Icons.favorite), findsNothing);
     });
 
     testWidgets('a comment can be liked and hearted at once', (tester) async {
-      await pumpThread(tester, comment('c1', isLiked: true, creatorHearted: true));
+      await pumpTile(tester, comment('c1', isLiked: true, creatorHearted: true));
 
       expect(find.byIcon(Icons.thumb_up), findsOneWidget);
       expect(find.byIcon(Icons.favorite), findsOneWidget);

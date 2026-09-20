@@ -164,7 +164,9 @@ Windows process: `lib/probe_task19.dart`, one level up from this directory.
   taken from a live page. The report goes to stdout *and* `RILL_PROBE_OUT`
   (default `%TEMP%\rill-probe-comments.txt`), because a release `rill.exe`'s
   stdout is not the console. Set `RILL_LOG_CAPTURE=0` so the process you start is
-  the one measured, not the launcher.
+  the one measured, not the launcher. `RILL_PROBE_PHASES` (default `ABC`) runs
+  only some phases — `C` alone takes about a minute — after the warm-up that
+  always runs.
 
   Phases: **A** N top-level threads (20/100/500/1000), scrolling and a rebuild
   burst; **A2** one full sweep, for what the image cache is left holding; **B** one
