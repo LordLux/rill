@@ -245,15 +245,15 @@ returned zero renderers, while the *anonymous* view of the same comment, at the
 same moment, advertised 0 and carried no token. The client therefore trusts the
 list it has actually fetched over the count it was told (`comments_section.dart`).
 
-**A comment's like state and the creator's heart are on their own entity, not on the comment — measured 2026-09-19 (`architecture.md` F33).**
-`isLiked` and `creatorHearted` are read from `engagementToolbarStateEntityPayload`
+**A comment's vote and the creator's heart are on their own entity, not on the comment — measured 2026-09-19 (`architecture.md` F33).**
+`myRating` and `creatorHearted` are read from `engagementToolbarStateEntityPayload`
 (`{likeState, heartState}`, reached through the view model's `toolbarStateKey`)
 and from nothing else. The comment entity's own `toolbar` looks as though it
 should carry them and does not: it holds `heartActiveTooltip` (`"❤ by @creator"`)
 on **every** comment, which is the tooltip *for* the hearted state, present
 whether or not there is a heart. Reading it as one marked all 120 comments of a
 six-video sample hearted where the state entity says 4, and the key the parser
-read for `isLiked` was never there, so that was `false` throughout. `likeState`
+read for the viewer's like was never there, so that was `false` throughout. `likeState`
 is the *viewer's* — an anonymous session reads `INDIFFERENT` on every comment —
 while `heartState` is public, with one exception found 2026-09-20 (F35): on a video
 the viewer *owns*, the creator's own view says `TOOLBAR_HEART_STATE_HEARTED_EDITABLE`
@@ -261,6 +261,37 @@ for a comment they hearted and `..._UNHEARTED_EDITABLE` for one they have not,
 because they can toggle it. Both "hearted" values read as `creatorHearted`. `Comment.likeCount`
 follows the state as well: the toolbar ships the count with the viewer's like in
 it and without, and a comment the viewer liked is shown with the first.
+
+**A vote is one field of three, and voting is four server-supplied blobs — measured 2026-09-20/21.**
+`likeState` carries `TOOLBAR_LIKE_STATE_LIKED`, `_DISLIKED` and `_INDIFFERENT`,
+so `Comment.myRating` is `'like' | 'dislike' | 'none'` and not two booleans —
+the same closed set, and for the same reason, as `VideoDetail.myRating`: two
+booleans admit both-true, which YouTube cannot produce. **`_DISLIKED` had never
+appeared in any fixture until 2026-09-21**, because every capture had been taken
+with the account in whatever state it happened to be in; a reader that dropped
+the value would have been indistinguishable from a correct one, since an unvoted
+comment and a disliked one both read `'none'`. It is now held by
+`fixtures/viewer-state/comments-disliked.json`, captured by
+`bun run capture:viewer-state dislike`, which refuses to write unless the raw
+response proves the state — F35's rule, that a viewer-state field is untested
+until a fixture holds the state.
+
+The four transitions ride on the comment as `likeParams`, `unlikeParams`,
+`dislikeParams` and `undislikeParams`, read off
+`engagementToolbarSurfaceEntityPayload` beside `replyParams`/`deleteParams`.
+Each is an opaque blob the *server* supplies for
+`comment/perform_comment_action` — the same endpoint delete uses, differentiated
+only by which blob is sent, exactly as §3.4 predicted. `action.rateComment`
+takes one verbatim rather than a target rating: the client holds the state the
+user is looking at, and the endpoint has no "set rating to X" to translate into.
+**Nothing is constructed**, so the trap that made a *video*'s like/dislike
+`target` shape wrong (copied from a reference implementation, 400s until
+corrected) does not apply here.
+
+**Their presence is not permission.** All four are on an anonymous capture too
+(20 of 20), so a client that enables its buttons because the token exists has
+made the `heartActiveTooltip` mistake in a new place. The session decides, not
+the field.
 
 **What this does and does not show about "shadowbanned" replies.** It shows the
 count lagging the list in a signed-in view after a removal, which is enough to
@@ -765,6 +796,7 @@ the raw shape only (hard invariant 1), not from a fixture in this repo. If
 | `action.postComment` | `{createParams, commentText}` | `{comment}` — the created `Comment`, or `null` if the response carried none |
 | `action.replyToComment` | `{replyParams, commentText}` | `{}` |
 | `action.deleteComment` | `{deleteParams}` | `{}` |
+| `action.rateComment` | `{params}` | `{}` |
 
 All execute against the authenticated `WEB` session.
 

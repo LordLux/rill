@@ -1,13 +1,19 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/comment.dart';
 import '../../domain/feed_item.dart' as domain;
 import '../../data/comments_source.dart';
 import '../../data/rpc/client.dart';
+import '../../theme/tokens.dart';
 import '../auth_controller.dart';
+import '../open_video.dart' show copyToClipboard;
 import '../playback_controller.dart';
 import 'comment_composer.dart';
 
@@ -93,10 +99,10 @@ class _Row {
   final Comment? reply;
 
   Key get key => switch (kind) {
-        _RowKind.thread => ValueKey('t:${thread.id}'),
-        _RowKind.reply => ValueKey('r:${reply!.id}'),
-        _RowKind.footer => ValueKey('f:${thread.id}'),
-      };
+    _RowKind.thread => ValueKey('t:${thread.id}'),
+    _RowKind.reply => ValueKey('r:${reply!.id}'),
+    _RowKind.footer => ValueKey('f:${thread.id}'),
+  };
 }
 
 /// A thread's own avatar plus its column: `avatar (32) + 12` is where a reply's
@@ -134,6 +140,27 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
 
   /// Comments (top-level or replies) with a delete in flight.
   final Set<String> _deleting = {};
+
+  /// A vote is in flight on these, so both buttons are disabled: a second press
+  /// would race the first and the two answers could land out of order.
+  final Set<String> _rating = {};
+
+  /// Why the viewer may not vote, or null when they may. Refreshed in [build].
+  ///
+  /// Held as a field because the rows are built lazily by the sliver, after
+  /// `build` has returned, and a `ref.watch` from there would be a watch during
+  /// layout. **It is not derived from the vote tokens** — those are present on
+  /// anonymous pages too, so a button gated on them would always be enabled and
+  /// always fail (`architecture.md` F33 is the same mistake read off a
+  /// tooltip).
+  ///
+  /// A **degraded** session is excluded as well as an anonymous one, and it is
+  /// worth saying why that is free: `AuthState.isSignedIn` is strictly
+  /// `status == authenticated`, and `degraded` is its own status fed by
+  /// `auth.verify` (hard invariant 5 — `logged_in` is cookie presence, not
+  /// server acceptance). So a cookie YouTube has stopped honouring disables
+  /// these rather than offering a vote that would fail.
+  String? _voteDisabledReason;
 
   /// Comments whose text is expanded past its four lines. Here for the same
   /// reason [_threadStates] is: it is state a row must not lose by scrolling.
@@ -201,6 +228,10 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     _threadStates.clear();
     _deleting.clear();
     _textExpanded.clear();
+    // `_rating` is deliberately *not* cleared, unlike its two neighbours. A
+    // vote in flight is still in flight after a re-sort, and every completion
+    // path removes its own id, so clearing here would only re-enable the
+    // buttons for the rest of that request and let a second press race it.
     for (final state in gone) {
       final request = state.request;
       if (request != null) _source.cancel(request);
@@ -240,24 +271,20 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     final auth = ref.read(authProvider);
     final generation = _generation;
     try {
-      final response = await RpcClient.instance.call('action.postComment', {
-        'createParams': createParams,
-        'commentText': text,
-      });
+      final created = await _source.post(createParams, text);
       // Posted, but to a video this list no longer shows: it must not be put
       // among another video's comments.
       if (!mounted || generation != _generation) return true;
 
-      final created = response is Map ? response['comment'] : null;
-      final posted = created is Map
-          ? Comment.fromJson(Map<String, Object?>.from(created))
-          : Comment(
-              id: 'pending-${DateTime.now().microsecondsSinceEpoch}',
-              authorName: auth.displayName,
-              authorAvatarUrl: auth.accountAvatarUrl ?? '',
-              text: CommentText(content: text),
-              replyCount: 0,
-            );
+      final posted =
+          created ??
+          Comment(
+            id: 'pending-${DateTime.now().microsecondsSinceEpoch}',
+            authorName: auth.displayName,
+            authorAvatarUrl: auth.accountAvatarUrl ?? '',
+            text: CommentText(content: text),
+            replyCount: 0,
+          );
       // The server's own "0 seconds ago" reads as a bug; we know it is new.
       setState(() => _threads.insert(0, posted.copyWith(publishedText: 'Just now')));
       return true;
@@ -457,10 +484,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
 
     setState(() => state.posting = true);
     try {
-      await RpcClient.instance.call('action.replyToComment', {
-        'replyParams': replyParams,
-        'commentText': text,
-      });
+      await _source.reply(replyParams, text);
       if (!mounted || state.discarded) return;
       setState(() {
         state.replies.add(
@@ -514,7 +538,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _deleting.add(comment.id));
     try {
-      await RpcClient.instance.call('action.deleteComment', {'deleteParams': deleteParams});
+      await _source.delete(deleteParams);
       if (!mounted) return;
       setState(() {
         _deleting.remove(comment.id);
@@ -540,6 +564,85 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
       setState(() => _deleting.remove(comment.id));
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
+  }
+
+  /// Vote on a comment, optimistically.
+  ///
+  /// The caller names the *target* rating and this picks the token, because the
+  /// four blobs are transitions (`like`, `unlike`, `dislike`, `undislike`) and
+  /// only this half knows what the current rating is. A press that has no token
+  /// for its transition does nothing rather than guessing — the blobs are
+  /// server-supplied and nothing here can build one.
+  ///
+  /// **The like count is deliberately left alone.** It arrives as a display
+  /// string YouTube has already formatted ("4.8K"), and the sidecar ships the
+  /// variant matching the current state, so the other one is not in hand. The
+  /// repo's rule is that a count is a display string and not parsed; inventing
+  /// "4.8K + 1" would be inventing data. It corrects itself on the next fetch.
+  Future<void> _rate(Comment comment, String target, {Comment? parent}) async {
+    final params = switch ((comment.myRating, target)) {
+      (_, 'like') => comment.likeParams,
+      ('like', 'none') => comment.unlikeParams,
+      (_, 'dislike') => comment.dislikeParams,
+      ('dislike', 'none') => comment.undislikeParams,
+      _ => null,
+    };
+    if (params == null || _rating.contains(comment.id)) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final previous = comment.myRating;
+    setState(() {
+      _rating.add(comment.id);
+      _replaceComment(comment.id, (c) => c.copyWith(myRating: target), parent: parent);
+    });
+
+    try {
+      await _source.rate(params);
+      if (!mounted) return;
+      setState(() => _rating.remove(comment.id));
+    } on Object catch (e) {
+      if (!mounted) return;
+      // Put it back. An optimistic update that fails silently leaves the button
+      // showing a vote the server never recorded, which is worse than no
+      // optimism at all.
+      setState(() {
+        _rating.remove(comment.id);
+        _replaceComment(comment.id, (c) => c.copyWith(myRating: previous), parent: parent);
+      });
+      final message = e is RpcException ? (e.code == 'AUTH_REQUIRED' ? 'Sign in to vote' : e.message) : '$e';
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  /// Swap one comment in place, wherever it lives — a top-level thread or a
+  /// reply held by its thread's state. Both lists are the section's, and a row
+  /// is rebuilt from them, so this is the only way to move a rendered comment.
+  void _replaceComment(String id, Comment Function(Comment) update, {Comment? parent}) {
+    if (parent == null) {
+      final index = _threads.indexWhere((thread) => thread.id == id);
+      if (index != -1) _threads[index] = update(_threads[index]);
+      return;
+    }
+    final replies = _threadStates[parent.id]?.replies;
+    if (replies == null) return;
+    final index = replies.indexWhere((reply) => reply.id == id);
+    if (index != -1) replies[index] = update(replies[index]);
+  }
+
+  /// A link to one comment — `watch?v=<videoId>&lc=<commentId>`, the shape
+  /// `todo.md` 40 measured against youtube.com and the one its stage 1 asks for
+  /// ("a **Copy link** action on every comment"). The `watch?v=` form rather
+  /// than `youtu.be/`: `lc` was measured on that one.
+  ///
+  /// rill cannot yet *open* such a link — that is the rest of item 40 — so for
+  /// now this produces a link that works on youtube.com and will work here once
+  /// the entry point lands. Worth knowing before treating it as round-tripping.
+  void _copyLink(Comment comment) {
+    unawaited(copyToClipboard(
+      context,
+      'https://www.youtube.com/watch?v=${widget.videoId}&lc=${comment.id}',
+      'Link copied to clipboard',
+    ));
   }
 
   void _toggleText(String id) {
@@ -592,6 +695,9 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     final expanded = state?.expanded ?? false;
     final replying = state?.replying ?? false;
     final posting = state?.posting ?? false;
+    final theme = Theme.of(context).colorScheme;
+    
+    const lines = 10;
 
     return Opacity(
       key: ValueKey('t:${thread.id}'),
@@ -603,55 +709,92 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
           deleting: _deleting.contains(thread.id),
           onDelete: () => _confirmDelete(thread),
           onReply: thread.replyParams != null && !replying ? () => _startReply(thread) : null,
+          onRate: _voteDisabledReason == null ? (target) => _rate(thread, target) : null,
+          onCopyLink: () => _copyLink(thread),
+          rating: _rating.contains(thread.id),
+          voteDisabledReason: _voteDisabledReason,
           textExpanded: _textExpanded.contains(thread.id),
           onToggleText: () => _toggleText(thread.id),
           below: [
             if (replying)
               Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Row(
+                padding: const EdgeInsets.only(top: 4.0, left: 16),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: state!.draft,
-                        focusNode: state.focus,
-                        enabled: !posting,
-                        minLines: 1,
-                        maxLines: 4,
-                        style: const TextStyle(fontSize: 14),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          hintText: 'Add a reply...',
-                          border: UnderlineInputBorder(),
-                        ),
-                        onSubmitted: (_) => _submitReply(thread),
+                    Container(
+                      padding: const EdgeInsets.only(top: 6, left: 7, right: 7, bottom: 6),
+                      decoration: BoxDecoration(
+                        color: theme.surfaceContainerHigh.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: const BoxConstraints(minHeight: 32, maxHeight: 25.0 * lines),
+                      child: SilkyScroll(
+                        builder: (context, controller, physics, _) => TextField(
+                            controller: state!.draft,
+                            focusNode: state.focus,
+                            enabled: !posting,
+                            minLines: 1,
+                            maxLines: lines,
+                            scrollController: controller,
+                            scrollPhysics: physics,
+                            style: const TextStyle(fontSize: 14),
+                            decoration: InputDecoration(
+                              hintFadeDuration: Duration(milliseconds: 200),
+                              isDense: true,
+                              hintText: 'Add a reply...', // TODO check for max length
+                              border: UnderlineInputBorder(),
+                            ),
+                            onSubmitted: (_) => _submitReply(thread),
+                          ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: posting ? null : () => _cancelReply(thread),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      onPressed: posting ? null : () => _submitReply(thread),
-                      child: posting
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Reply'),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 32,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),
+                            onPressed: posting ? null : () => _cancelReply(thread),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            onPressed: posting ? null : () => _submitReply(thread),
+                            style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),
+                            child: posting
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Text('Reply'),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
             if (replyCount > 0)
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
                 child: TextButton(
+                  style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),
                   onPressed: () => _toggleReplies(thread),
-                  child: Text(expanded ? 'Hide replies' : 'Show $replyCount replies'),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(width: 4),
+                      Text(expanded ? 'Hide replies' : '$replyCount replies'),
+                      const SizedBox(width: 4),
+                      Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16),
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -675,6 +818,10 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
           comment: reply,
           deleting: deleting,
           onDelete: () => _confirmDelete(reply, parent: thread),
+          onRate: _voteDisabledReason == null ? (target) => _rate(reply, target, parent: thread) : null,
+          onCopyLink: () => _copyLink(reply),
+          rating: _rating.contains(reply.id),
+          voteDisabledReason: _voteDisabledReason,
           textExpanded: _textExpanded.contains(reply.id),
           onToggleText: () => _toggleText(reply.id),
         ),
@@ -733,6 +880,10 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     }
 
     final avatarUrl = ref.watch(authProvider.select((auth) => auth.accountAvatarUrl));
+    final status = ref.watch(authProvider.select((auth) => auth.status));
+    // `signedInActionBlocker` so the watch page's like, subscribe and Watch
+    // Later say this in the same words — one sentence, written once.
+    _voteDisabledReason = signedInActionBlocker(status, 'vote');
     final rows = _flatten();
     final indexByKey = {for (var i = 0; i < rows.length; i++) rows[i].key: i};
 
@@ -838,6 +989,10 @@ class CommentTile extends ConsumerWidget {
     this.deleting = false,
     this.onDelete,
     this.onReply,
+    this.onRate,
+    this.onCopyLink,
+    this.rating = false,
+    this.voteDisabledReason,
     this.textExpanded = false,
     this.onToggleText,
     this.below = const [],
@@ -857,6 +1012,35 @@ class CommentTile extends ConsumerWidget {
   /// nesting), and a signed-out viewer has no token to reply with.
   final VoidCallback? onReply;
 
+  /// Asks for a vote — the *target* rating, not a token. Which of the comment's
+  /// four blobs that becomes is [_CommentsSectionState]'s to decide, because it
+  /// is the half that knows what the current rating is.
+  ///
+  /// Null disables both buttons. **It is not derived from the tokens**: all four
+  /// are present anonymously, so a button enabled by their presence would be a
+  /// button that always fails.
+  final void Function(String rating)? onRate;
+
+  /// A vote on this comment is in flight: both buttons are disabled so a second
+  /// press cannot race the first.
+  final bool rating;
+
+  /// Copies a link to this comment. Built by the section, which is the half
+  /// that knows the video id — `watch?v=<videoId>&lc=<commentId>`, the shape
+  /// `todo.md` 40 measured. Null draws no button.
+  ///
+  /// The comment's *text* is not copied by a button: it is selectable, so it
+  /// goes on the clipboard the way text does everywhere else.
+  final VoidCallback? onCopyLink;
+
+  /// Why the vote buttons are disabled, as the tooltip to show instead of
+  /// "Like"/"Dislike". Null when they are live.
+  ///
+  /// A disabled control that will not say why is the complaint that produced
+  /// this: the viewer cannot tell "you must sign in" from "this is broken", and
+  /// the two need different actions from them.
+  final String? voteDisabledReason;
+
   final bool textExpanded;
   final VoidCallback? onToggleText;
 
@@ -865,95 +1049,266 @@ class CommentTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    return Row(
+    return _HoverScope(
+      builder: (hovering) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        CircleAvatar(
-          // Empty for a comment just posted that the server has not echoed
-          // back (`_postComment`'s stand-in) — `NetworkImage('')` is an image
-          // error, not a blank, so it is left out instead.
-          backgroundImage: comment.authorAvatarUrl.isEmpty ? null : NetworkImage(comment.authorAvatarUrl),
-          onBackgroundImageError: comment.authorAvatarUrl.isEmpty ? null : (_, _) {},
-          radius: 16,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              // Empty for a comment just posted that the server has not echoed
+              // back (`_postComment`'s stand-in) — `NetworkImage('')` is an image
+              // error, not a blank, so it is left out instead.
+              backgroundImage: comment.authorAvatarUrl.isEmpty ? null : NetworkImage(comment.authorAvatarUrl),
+              onBackgroundImageError: comment.authorAvatarUrl.isEmpty ? null : (_, _) {},
+              radius: 16,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        comment.authorName,
+                        style: TextStyle(
+                          fontWeight: comment.isUploader ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 13,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      if (comment.isVerified)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4.0),
+                          child: Icon(Icons.check_circle, size: 12, color: scheme.onSurfaceVariant),
+                        ),
+                      if (comment.publishedText != null) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          comment.publishedText!,
+                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                      if (comment.deleteParams != null) ...[
+                        const Spacer(),
+                        MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 16),
+                            tooltip: 'Delete',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                            onPressed: deleting ? null : onDelete,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  _CommentText(text: comment.text, expanded: textExpanded, onToggle: onToggleText),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(left: 32),
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Text(
-                    comment.authorName,
-                    style: TextStyle(
-                      fontWeight: comment.isUploader ? FontWeight.bold : FontWeight.w500,
-                      fontSize: 13,
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                  if (comment.isVerified)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4.0),
-                      child: Icon(Icons.check_circle, size: 12, color: scheme.onSurfaceVariant),
-                    ),
-                  if (comment.publishedText != null) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      comment.publishedText!,
-                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                    ),
-                  ],
-                  if (comment.deleteParams != null) ...[
-                    const Spacer(),
-                    MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 16),
-                        tooltip: 'Delete',
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                        onPressed: deleting ? null : onDelete,
-                      ),
-                    ),
-                  ],
-                ],
+              // Pressing the active vote clears it, which is what YouTube
+              // does and what the `unlike`/`undislike` tokens exist for.
+              _VoteButton(
+                icon: comment.myRating == 'like' ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
+                tooltip: voteDisabledReason ?? (comment.myRating == 'like' ? 'Remove like' : 'Like'),
+                active: comment.myRating == 'like',
+                onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'like' ? 'none' : 'like'),
+                label: comment.likeCount,
               ),
-              const SizedBox(height: 4),
-              _CommentText(text: comment.text, expanded: textExpanded, onToggle: onToggleText),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(
-                    comment.isLiked ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  if (comment.likeCount != null) Text(comment.likeCount!, style: const TextStyle(fontSize: 12)),
-                  const SizedBox(width: 16),
-                  const Icon(Icons.thumb_down_alt_outlined, size: 14),
-                  if (comment.creatorHearted) ...[
-                    const SizedBox(width: 16),
-                    Icon(Icons.favorite, size: 14, color: scheme.error),
-                  ],
-                  if (onReply != null) ...[
-                    const SizedBox(width: 16),
-                    MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: TextButton(
-                        style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
-                        onPressed: onReply,
-                        child: const Text('Reply', style: TextStyle(fontSize: 12)),
-                      ),
-                    ),
-                  ],
-                ],
+              // const SizedBox(width: 4),
+              // if (comment.likeCount != null) Text(comment.likeCount!, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+              _VoteButton(
+                icon: comment.myRating == 'dislike' ? Icons.thumb_down : Icons.thumb_down_alt_outlined,
+                tooltip: voteDisabledReason ?? (comment.myRating == 'dislike' ? 'Remove dislike' : 'Dislike'),
+                active: comment.myRating == 'dislike',
+                onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'dislike' ? 'none' : 'dislike'),
               ),
-              ...below,
+              if (comment.creatorHearted) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Creator liked this comment', // TODO get creator name from channel info
+                  child: Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Icon(Icons.favorite, size: 14, color: Theme.of(context).tokens.liveBadge),
+                  ),
+                ),
+              ],
+              if (onReply != null) ...[
+                const SizedBox(width: 8),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: TextButton(
+                    style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2), minimumSize: const Size(50, 35)),
+                    onPressed: onReply,
+                    child: const Text('Reply', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+              // Copy, revealed by hovering anywhere on the comment.
+              //
+              // Only this subtree rebuilds when the pointer enters or leaves:
+              // `_HoverScope` hands down a `ValueListenable` rather than
+              // calling `setState` on the tile, so hovering a comment does not
+              // rebuild its avatar, its text or its vote buttons. A tile is
+              // rebuilt often enough already (F34).
+              if (onCopyLink != null) ...[
+                const SizedBox(width: 8),
+                _RevealOnHoverOrFocus(
+                  hovering: hovering,
+                  child: _VoteButton(
+                    icon: Icons.link,
+                    tooltip: 'Copy link to this comment',
+                    active: false,
+                    onPressed: onCopyLink,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
+        Padding(
+          padding: EdgeInsetsGeometry.only(left: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: below,
+          ),
+        ),
       ],
+      ),
+    );
+  }
+}
+
+
+/// Tracks the pointer over its subtree and hands the answer down as a
+/// [ValueListenable], so only what actually depends on hover rebuilds.
+///
+/// `setState` here would rebuild the whole comment — avatar, text, vote
+/// buttons — every time the pointer crossed a row, and a list of comments is a
+/// lot of rows to cross. The notifier lets one `ValueListenableBuilder` deep in
+/// the tree be the only thing that moves.
+///
+/// Hover state is deliberately the one thing a tile may hold: it is transient,
+/// it belongs to the pointer rather than to the viewer, and losing it when a
+/// row scrolls out of the viewport is correct — unlike a thread's expansion or
+/// a half-typed reply, which is why those live on the section (F34).
+
+/// Shows [child] while the pointer is over the comment **or** while it holds
+/// keyboard focus, and hides it otherwise.
+///
+/// **Focus is half of this, and it is the half that makes the control usable
+/// at all.** Measured 2026-09-21, on the real widget rather than assumed:
+///
+/// - `Opacity` at exactly 0 drops its subtree from semantics altogether; a
+///   screen reader does not see the button at all while it is faded out.
+/// - `IgnorePointer(ignoring: true)` keeps the node but strips its **tap
+///   action**, so even where the node survives it cannot be activated.
+/// - Neither stops it taking **focus**: focus does not go through hit testing,
+///   and it is not gated on opacity either.
+///
+/// So hover alone gives the worst pair: Tab lands on a button that is invisible
+/// *and* cannot be pressed. Revealing on focus fixes both at once — it becomes
+/// visible exactly when a keyboard user reaches it, and stops being ignored, so
+/// the tap action comes back.
+///
+/// It remains easy to miss for someone scanning rather than tabbing. That is
+/// inherent to a hover-revealed control, and the reason nothing important
+/// should be put behind one — copying a link is a convenience, and the comment
+/// body is selectable without it.
+class _RevealOnHoverOrFocus extends StatefulWidget {
+  const _RevealOnHoverOrFocus({required this.hovering, required this.child});
+
+  final ValueListenable<bool> hovering;
+  final Widget child;
+
+  @override
+  State<_RevealOnHoverOrFocus> createState() => _RevealOnHoverOrFocusState();
+}
+
+class _RevealOnHoverOrFocusState extends State<_RevealOnHoverOrFocus> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: widget.hovering,
+      builder: (context, hovering, child) {
+        final visible = hovering || _focused;
+        return AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: const Duration(milliseconds: 120),
+          // Invisible and still clickable is worse than absent — the pointer
+          // would find a button nobody can see.
+          child: IgnorePointer(ignoring: !visible, child: child),
+        );
+      },
+      // Outside the builder so it is not rebuilt as the opacity changes; the
+      // `Focus` here reports its descendants' focus, which is the button's.
+      child: Focus(
+        // Guarded: focus can move *while* this is being unmounted — a list row
+        // scrolling out from under a focused button is the ordinary case — and
+        // `setState` on a defunct State throws during teardown. That is F38's
+        // class of bug, and it is the kind that shows up once in twenty runs.
+        onFocusChange: (focused) {
+          if (mounted) setState(() => _focused = focused);
+        },
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _HoverScope extends StatefulWidget {
+  const _HoverScope({required this.builder});
+
+  final Widget Function(ValueListenable<bool> hovering) builder;
+
+  @override
+  State<_HoverScope> createState() => _HoverScopeState();
+}
+
+class _HoverScopeState extends State<_HoverScope> {
+  final _hovering = ValueNotifier(false);
+  bool _disposed = false;
+
+  void _set(bool value) {
+    if (!_disposed) _hovering.value = value;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _hovering.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      // Same guard as the focus one below: `onExit` fires as a row is removed
+      // from under the pointer, and a `ValueNotifier` written after `dispose`
+      // throws. Cheap insurance against a once-in-twenty-runs teardown failure.
+      onEnter: (_) => _set(true),
+      onExit: (_) => _set(false),
+      // `opaque: false` so the region does not swallow hover from the controls
+      // inside it — the vote buttons set their own cursor.
+      opaque: false,
+      child: widget.builder(_hovering),
     );
   }
 }
@@ -1017,10 +1372,17 @@ class _CommentText extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            RichText(
-              text: span,
-              maxLines: expanded ? null : 4,
-              overflow: expanded ? TextOverflow.visible : (isOverflowing ? TextOverflow.ellipsis : TextOverflow.clip),
+            // Selectable, so the body is copied the way text is copied
+            // everywhere else — drag to select, Ctrl+C, or right-click for the
+            // platform menu. `SelectionArea` rather than `SelectableText.rich`
+            // because the span carries `TapGestureRecognizer`s for links and
+            // timestamps, and those keep working under it.
+            SelectionArea(
+              child: RichText(
+                text: span,
+                maxLines: expanded ? null : 4,
+                overflow: expanded ? TextOverflow.visible : (isOverflowing ? TextOverflow.ellipsis : TextOverflow.clip),
+              ),
             ),
             if (isOverflowing)
               MouseRegion(
@@ -1044,6 +1406,52 @@ class _CommentText extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// One vote button — a 14 px glyph in a 28 px tap target.
+///
+/// A widget rather than two inline `IconButton`s because the pair must stay
+/// identical: before this existed they were bare `Icon`s, drawn but not
+/// pressable, and the thumb-down was permanently outlined because nothing read
+/// a dislike at all. Keeping the shape in one place is what stops them drifting
+/// apart again.
+class _VoteButton extends StatelessWidget {
+  const _VoteButton({
+    required this.icon,
+    required this.tooltip,
+    required this.active,
+    required this.onPressed,
+    this.label,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final bool active;
+  final VoidCallback? onPressed;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      icon: label == null
+          ? Icon(icon, size: 14, color: active ? scheme.primary : null)
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: active ? scheme.primary : null),
+                const SizedBox(width: 4),
+                Text(label!, style: TextStyle(fontSize: 12, color: active ? scheme.primary : null)),
+              ],
+            ),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: label == null ? EdgeInsets.symmetric(horizontal: 6, vertical: 2) : EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      constraints: const BoxConstraints(minHeight: 35),
+      onPressed: onPressed,
     );
   }
 }

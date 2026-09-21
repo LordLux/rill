@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../auth_controller.dart';
+import 'shortcut_tooltip.dart';
 
 /// How much of a subscribed channel's upload activity notifies the user —
 /// the three-way bell menu every subscribed channel on YouTube itself
@@ -52,7 +56,7 @@ enum SubscriptionNotificationLevel {
 /// page swapping videos, the artist panel swapping artists) must key it
 /// with something that changes too — e.g. `key: ValueKey(channelId)` — so
 /// Flutter remounts fresh state instead of keeping the previous channel's.
-class SubscribeButton extends StatefulWidget {
+class SubscribeButton extends ConsumerStatefulWidget {
   const SubscribeButton({
     super.key,
     required this.channelId,
@@ -111,10 +115,10 @@ class SubscribeButton extends StatefulWidget {
   final TextStyle? textStyle;
 
   @override
-  State<SubscribeButton> createState() => _SubscribeButtonState();
+  ConsumerState<SubscribeButton> createState() => _SubscribeButtonState();
 }
 
-class _SubscribeButtonState extends State<SubscribeButton> {
+class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
   late bool _subscribed = widget.initiallySubscribed;
   late SubscriptionNotificationLevel _level = widget.initialNotificationLevel;
   bool _subscribing = false;
@@ -225,9 +229,20 @@ class _SubscribeButtonState extends State<SubscribeButton> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
+    // Subscribing needs an account, and a *degraded* session is not one — the
+    // cookie is there and YouTube has stopped honouring it (hard invariant 5),
+    // which looks like being signed in everywhere else. The button used to be
+    // pressable in both states and only said so after the call came back.
+    // `signedInActionBlocker` is the same sentence the watch page's rating and
+    // the comment vote buttons use.
+    final blocked = signedInActionBlocker(
+      ref.watch(authProvider.select((auth) => auth.status)),
+      'subscribe',
+    );
+
     if (!_subscribed) {
-      return FilledButton(
-        onPressed: widget.channelId == null || _subscribing ? null : _subscribe,
+      final button = FilledButton(
+        onPressed: widget.channelId == null || _subscribing || blocked != null ? null : _subscribe,
         style:
             FilledButton.styleFrom(
               backgroundColor: widget.unsubscribedBackground ?? scheme.onSurface,
@@ -252,9 +267,10 @@ class _SubscribeButtonState extends State<SubscribeButton> {
               )
             : const Text('Subscribe'),
       );
+      return blocked == null ? button : ShortcutTooltip(label: blocked, child: button);
     }
 
-    return MenuAnchor(
+    final subscribed = MenuAnchor(
       controller: _menuController,
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(widget.background ?? scheme.surfaceContainerHighest),
@@ -331,5 +347,6 @@ class _SubscribeButtonState extends State<SubscribeButton> {
         ),
       ],
     );
+    return blocked == null ? subscribed : ShortcutTooltip(label: blocked, child: subscribed);
   }
 }

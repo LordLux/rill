@@ -902,16 +902,13 @@ class _MediaTileState extends State<MediaTile> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Flexible(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 28.0),
-                          child: Text(
-                            widget.spec.primaryLine,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: scheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
+                        child: Text(
+                          widget.spec.primaryLine,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 12,
                           ),
                         ),
                       ),

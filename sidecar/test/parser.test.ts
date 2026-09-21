@@ -148,12 +148,16 @@ const SHAPES = {
     likeCount: 'string?',
     publishedText: 'string?',
     replyCount: 'number',
-    isLiked: 'boolean',
+    myRating: 'string',
     creatorHearted: 'boolean',
     isPinned: 'boolean',
     repliesContinuation: 'string?',
     replyParams: 'string?',
     deleteParams: 'string?',
+    likeParams: 'string?',
+    unlikeParams: 'string?',
+    dislikeParams: 'string?',
+    undislikeParams: 'string?',
   },
 } as const;
 
@@ -299,6 +303,26 @@ function countMusicBadges(raw: unknown): number {
     const resource = node['clientResource'];
     if (resource && typeof resource === 'object') {
       if ((resource as Record<string, unknown>)['imageName'] === 'MUSIC') count += 1;
+    }
+    return true;
+  });
+  return count;
+}
+
+/**
+ * How many owner badges of `style` the raw tree carries —
+ * `metadataBadgeRenderer.style`, which is what `scanOwnerBadges` reads.
+ *
+ * The third raw oracle, added for the same reason as the other two: the tests
+ * below named four specific ids from one capture, and an id is the one thing
+ * about a fixture guaranteed not to survive the next one.
+ */
+function countBadgeStyle(raw: unknown, style: string): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    const badge = node['metadataBadgeRenderer'];
+    if (badge && typeof badge === 'object') {
+      if ((badge as Record<string, unknown>)['style'] === style) count += 1;
     }
     return true;
   });
@@ -899,50 +923,92 @@ describe.if(HAS_CAPTURES)('music note (per video)', () => {
 });
 
 describe.if(HAS_CAPTURES)('verified / artist-channel badges', () => {
-  // Search stopped carrying channel tiles at all in the 2026-09-14 capture (0
-  // `channelRenderer`s in either search fixture), so this reads the
-  // subscriptions list. Its raw badge is `BADGE_STYLE_TYPE_VERIFIED_ARTIST`
-  // with no plain `BADGE_STYLE_TYPE_VERIFIED` beside it.
-  test.skipIf(!hasFixture('channels'))('an official artist channel is flagged isArtistChannel, not isVerified', () => {
-    const items = parseFeed(fixture('channels'), 'channels').items;
-    const artist = items.find((item) => item.kind === 'channel' && item.id === 'UCUnHZYgNkPRP2lBIStjdrmA');
-    expect(artist?.kind).toBe('channel');
-    if (artist?.kind !== 'channel') return;
-    expect(artist.isArtistChannel).toBe(true);
-    expect(artist.isVerified).toBe(false);
+  // **Driven by the badge, not by an id.** These four tests used to name
+  // `UCUnHZYgNkPRP2lBIStjdrmA`, `rFZHOHl-L8A`, `mG1aeD7odqk` and
+  // `zW5wpJY1rgQ` — four ids from one capture — and survived the 2026-09-21
+  // recapture only by luck. Its siblings in the shorts and music blocks did
+  // not, and went red for a reason that was not the parser. "Fixtures are one
+  // moment; never assert that a given surface holds a given item" is the rule,
+  // and an id is the sharpest possible way to break it.
+  const ARTIST = 'BADGE_STYLE_TYPE_VERIFIED_ARTIST';
+  const VERIFIED = 'BADGE_STYLE_TYPE_VERIFIED';
+
+  /**
+   * Every item of the corpus that *can* carry an owner badge — a video or a
+   * channel. A mix and a playlist have no such fields at all, which is why this
+   * narrows rather than filtering later: the type says so.
+   */
+  type Badged = Extract<FeedItem, { isVerified: boolean }>;
+  const badged: Badged[] = Object.entries(CORPUS)
+    .flatMap(([name, raw]) => parseFeed(raw, name).items)
+    .filter((item): item is Badged => item.kind === 'video' || item.kind === 'channel');
+
+  test('the corpus carries both badges, on real items', () => {
+    // Non-vacuity first: every bound below is satisfied by an empty corpus.
+    expect(badged.filter((item) => item.isArtistChannel).length).toBeGreaterThan(0);
+    expect(badged.filter((item) => item.isVerified).length).toBeGreaterThan(0);
+    expect(badged.filter((item) => !item.isVerified && !item.isArtistChannel).length).toBeGreaterThan(0);
   });
 
-  test('a video from an official artist channel is flagged isArtistChannel', () => {
-    const search = fixture('search');
-    const items = parseFeed(search, 'search').items;
-    const artistVideo = items.find((item) => item.kind === 'video' && item.id === 'rFZHOHl-L8A');
-    expect(artistVideo?.kind).toBe('video');
-    if (artistVideo?.kind !== 'video') return;
-    expect(artistVideo.isArtistChannel).toBe(true);
-    expect(artistVideo.isVerified).toBe(false);
+  test('nothing is ever both — YouTube ships one badge per channel', () => {
+    // The invariant `VideoItem.isVerified` states in its own doc comment, and
+    // the one a reader that confused the two styles would break. 0 of 630.
+    expect(badged.filter((item) => item.isVerified && item.isArtistChannel)).toEqual([]);
+  });
+
+  test('neither flag is set beyond the badges its fixture actually holds', () => {
+    const over: Array<{ name: string; flag: string; flagged: number; raw: number }> = [];
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const items = parseFeed(raw, name).items.filter(
+        (item): item is Badged => item.kind === 'video' || item.kind === 'channel',
+      );
+      const artist = items.filter((item) => item.isArtistChannel).length;
+      const verified = items.filter((item) => item.isVerified).length;
+      // A bound rather than an equality: a badge inside stripped content, or on
+      // a renderer that produces no item, has nothing to flag (`mix` and
+      // `watch` on 2026-09-21 carried badges and zero flagged items).
+      if (artist > countBadgeStyle(raw, ARTIST)) {
+        over.push({ name, flag: 'isArtistChannel', flagged: artist, raw: countBadgeStyle(raw, ARTIST) });
+      }
+      if (verified > countBadgeStyle(raw, VERIFIED)) {
+        over.push({ name, flag: 'isVerified', flagged: verified, raw: countBadgeStyle(raw, VERIFIED) });
+      }
+    }
+    expect(over).toEqual([]);
+  });
+
+  test('an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    // A *channel* tile, which is a different mapper from a video's.
+    const artists = badged.filter((item) => item.kind === 'channel' && item.isArtistChannel);
+    expect(artists.length).toBeGreaterThan(0);
+    for (const artist of artists) {
+      expect(artist.isVerified).toBe(false);
+    }
+  });
+
+  test('a video from an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    const artistVideos = badged.filter((item) => item.kind === 'video' && item.isArtistChannel);
+    expect(artistVideos.length).toBeGreaterThan(0);
+    for (const video of artistVideos) {
+      expect(video.isVerified).toBe(false);
+    }
   });
 
   test('a video from a plain verified channel is flagged isVerified, not isArtistChannel', () => {
-    const search = fixture('search');
-    const items = parseFeed(search, 'search').items;
-    const verifiedVideo = items.find((item) => item.kind === 'video' && item.id === 'mG1aeD7odqk');
-    expect(verifiedVideo?.kind).toBe('video');
-    if (verifiedVideo?.kind !== 'video') return;
-    expect(verifiedVideo.isVerified).toBe(true);
-    expect(verifiedVideo.isArtistChannel).toBe(false);
+    const verifiedVideos = badged.filter((item) => item.kind === 'video' && item.isVerified);
+    expect(verifiedVideos.length).toBeGreaterThan(0);
+    for (const video of verifiedVideos) {
+      expect(video.isArtistChannel).toBe(false);
+    }
   });
 
   // Deliberately a *classic* tile. A lockup would pass this for the wrong
   // reason: `scanOwnerBadges` reads only `metadataBadgeRenderer`, and a
   // lockup carries its tick as an `attachmentRuns` image on the channel name,
   // so no lockup is ever flagged verified (open defect, CLAUDE.md).
-  test('an unbadged channel/video is flagged neither', () => {
-    const items = parseFeed(fixture('search'), 'search').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'zW5wpJY1rgQ');
-    expect(ordinary?.kind).toBe('video');
-    if (ordinary?.kind !== 'video') return;
-    expect(ordinary.isVerified).toBe(false);
-    expect(ordinary.isArtistChannel).toBe(false);
+  test('an unbadged video is flagged neither', () => {
+    const plain = badged.filter((item) => item.kind === 'video' && !item.isVerified && !item.isArtistChannel);
+    expect(plain.length).toBeGreaterThan(0);
   });
 });
 
@@ -1927,7 +1993,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
       [...comment('a', 'liked', LIKED), ...comment('b', 'hearted', HEARTED), ...comment('c', 'plain', NEITHER)],
     );
     const items = parseComments(raw, 'synthetic').items;
-    expect(items.map((c) => [c.id, c.isLiked])).toEqual([['liked', true], ['hearted', false], ['plain', false]]);
+    expect(items.map((c) => [c.id, c.myRating === 'like'])).toEqual([['liked', true], ['hearted', false], ['plain', false]]);
   });
 
   test('creatorHearted follows the heart state, not the tooltip every comment carries', () => {
@@ -1944,7 +2010,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
   test('a comment can be both liked and hearted', () => {
     const both = { likeState: LIKED.likeState, heartState: HEARTED.heartState };
     const [item] = parseComments(page([thread('a')], comment('a', 'both', both)), 'synthetic').items;
-    expect([item!.isLiked, item!.creatorHearted]).toEqual([true, true]);
+    expect([item!.myRating === 'like', item!.creatorHearted]).toEqual([true, true]);
   });
 
   test("the creator's own view: a heart they gave reads as hearted, one they have not given does not", () => {
@@ -1957,7 +2023,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
     );
     const items = parseComments(raw, 'synthetic').items;
     expect(items.map((c) => [c.id, c.creatorHearted])).toEqual([['given', true], ['not-given', false]]);
-    expect(items.map((c) => [c.id, c.isLiked])).toEqual([['given', true], ['not-given', false]]);
+    expect(items.map((c) => [c.id, c.myRating === 'like'])).toEqual([['given', true], ['not-given', false]]);
   });
 
   test("the count is the viewer's own: with their like in it when they liked the comment", () => {
@@ -1978,7 +2044,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
     const raw = page([thread('a')], comment('a', 'orphan', null));
     const [item] = parseComments(raw, 'synthetic').items;
     expect(item!.id).toBe('orphan');
-    expect([item!.isLiked, item!.creatorHearted]).toEqual([false, false]);
+    expect([item!.myRating === 'like', item!.creatorHearted]).toEqual([false, false]);
     expect(item!.likeCount).toBe('10');
   });
 
@@ -1987,7 +2053,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
       commentThreadRenderer: { commentViewModel: { commentViewModel: { commentKey: 'a' } } },
     };
     const [item] = parseComments(page([noKey], comment('a', 'keyless', LIKED)), 'synthetic').items;
-    expect([item!.isLiked, item!.creatorHearted]).toEqual([false, false]);
+    expect([item!.myRating === 'like', item!.creatorHearted]).toEqual([false, false]);
   });
 
   test('a reply carries its own state, including one nested under another reply', () => {
@@ -1996,7 +2062,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
       [...comment('r1', 'reply-1', NEITHER, 1), ...comment('r2', 'reply-2', LIKED, 2)],
     );
     const items = parseComments(raw, 'synthetic').items;
-    expect(items.map((c) => [c.id, c.isLiked])).toEqual([['reply-1', false], ['reply-2', true]]);
+    expect(items.map((c) => [c.id, c.myRating === 'like'])).toEqual([['reply-1', false], ['reply-2', true]]);
   });
 
   // The dedicated signed-in capture (`fixtures/comments-viewer-state.json`, a
@@ -2025,7 +2091,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
     expect(truth.hearted).toBeGreaterThan(0);
     expect(truth.hearted).toBeLessThan(items.length);
 
-    expect(items.filter((c) => c.isLiked).length).toBe(truth.liked);
+    expect(items.filter((c) => c.myRating === 'like').length).toBe(truth.liked);
     expect(items.filter((c) => c.creatorHearted).length).toBe(truth.hearted);
   });
 
@@ -2034,7 +2100,7 @@ describe("video.comments — the viewer's like and the creator's heart", () => {
     const truth = rawStates(raw);
     const items = parseComments(raw, 'comments').items;
     expect(truth.liked).toBe(0);
-    expect(items.some((c) => c.isLiked)).toBe(false);
+    expect(items.some((c) => c.myRating === 'like')).toBe(false);
     expect(items.filter((c) => c.creatorHearted).length).toBe(truth.hearted);
   });
 });
