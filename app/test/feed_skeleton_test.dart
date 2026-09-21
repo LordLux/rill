@@ -131,19 +131,117 @@ void main() {
         find.byType(SingleChildScrollView),
       );
       expect(scroll.physics, isA<NeverScrollableScrollPhysics>());
-      expect(
+
+      // The skeleton's own subtree is excluded from semantics — asserted on the
+      // widget directly under the pulse, not by counting `ExcludeSemantics` in
+      // the tree: every `Icon` (the dot in a tile's meta line) wraps one of its
+      // own, so a count of exactly one is a property of which glyphs the tiles
+      // happen to draw, not of whether a screen reader can see them.
+      final pulse = tester.widget<FadeTransition>(
         find.descendant(
           of: find.byType(FeedSkeleton),
-          matching: find.byType(ExcludeSemantics),
+          matching: find.byType(FadeTransition),
         ),
-        findsOneWidget,
       );
+      expect(pulse.child, isA<ExcludeSemantics>());
+      expect((pulse.child! as ExcludeSemantics).excluding, isTrue);
     });
 
     testWidgets('disposes its controller without complaint', (tester) async {
       await pumpSkeleton(tester, const Size(1400, 900));
       await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('FeedSkeleton — layout', () {
+    testWidgets('never throws a constraint error, at any size, in either layout',
+        (tester) async {
+      // The "views • age" line was a `Row` of `FractionallySizedBox`es, and a
+      // `Row` gives its non-flex children unbounded width — so each asked for a
+      // fraction of infinity and threw "BoxConstraints forces an infinite
+      // width". Every test above that pumps a skeleton failed on it. A debug
+      // build shows that as a red screen; a release build has no asserts and
+      // lays it out as nonsense, which is why this checks every size and both
+      // layouts rather than trusting that the one the author looks at works.
+      for (final wide in [false, true]) {
+        for (final width in [320.0, 480.0, 700.0, 900.0, 1400.0, 2200.0]) {
+          if (wide && width < 500.0) continue;
+          for (final height in [400.0, 900.0]) {
+            await pumpSkeleton(tester, Size(width, height), wide: wide);
+            expect(
+              tester.takeException(),
+              isNull,
+              reason: '${wide ? 'wide' : 'grid'} layout at ${width}x$height',
+            );
+          }
+        }
+      }
+    });
+  });
+
+  group('FeedSkeleton — one- and two-line titles', () {
+    /// Where every second title line sits, in reading order.
+    List<Offset> secondLines(WidgetTester tester) {
+      final finder = find.byKey(feedSkeletonSecondTitleLineKey);
+      return [
+        for (var i = 0; i < finder.evaluate().length; i++) tester.getTopLeft(finder.at(i)),
+      ];
+    }
+
+    Future<void> pumpSeeded(WidgetTester tester, Size size, {required int seed, bool wide = false}) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: FeedSkeleton(isWideLayout: wide, randomSeed: seed))),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('a skeleton has both kinds of tile, in either layout', (tester) async {
+      // 1 vs 2 lines is the whole point of the randomness: a grid that came out
+      // all one or all the other would look like a template, not a feed.
+      for (final wide in [false, true]) {
+        await pumpSeeded(tester, const Size(1400, 1200), seed: 9, wide: wide);
+        final tiles = tester.widgetList<AspectRatio>(find.byType(AspectRatio)).length;
+        final twoLine = secondLines(tester).length;
+        expect(twoLine, greaterThan(0), reason: '${wide ? 'wide' : 'grid'}: no two-line title at all');
+        expect(twoLine, lessThan(tiles), reason: '${wide ? 'wide' : 'grid'}: no one-line title at all');
+      }
+    });
+
+    testWidgets('the same seed draws the same skeleton, every time', (tester) async {
+      await pumpSeeded(tester, const Size(1400, 1200), seed: 9);
+      final first = secondLines(tester);
+      // A brand-new State, as a second surface or a re-navigation would build.
+      await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+      await pumpSeeded(tester, const Size(1400, 1200), seed: 9);
+      expect(secondLines(tester), first);
+    });
+
+    testWidgets('resizing away and back does not reshuffle it', (tester) async {
+      // What `Random()` in the tile's `build` got wrong: a resize re-runs the
+      // layout builder, every tile rebuilt, and every tile re-rolled — the
+      // placeholder rearranging itself under the user's eyes.
+      const size = Size(1400, 1200);
+      await pumpSeeded(tester, size, seed: 9);
+      final before = secondLines(tester);
+
+      tester.view.physicalSize = const Size(1000, 900);
+      await tester.pump();
+      tester.view.physicalSize = size;
+      await tester.pump();
+
+      expect(secondLines(tester), before);
+    });
+
+    testWidgets('a different seed gives a different skeleton', (tester) async {
+      await pumpSeeded(tester, const Size(1400, 1200), seed: 9);
+      final nine = secondLines(tester);
+      await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+      await pumpSeeded(tester, const Size(1400, 1200), seed: 10);
+      expect(secondLines(tester), isNot(nine));
     });
   });
 }

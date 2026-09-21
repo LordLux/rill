@@ -21,9 +21,11 @@ import {
   addToWatchLater,
   createPlaylist,
   deletePlaylist,
+  parsePlaylistMembership,
   playlistsForVideo,
   removeFromPlaylist,
 } from '../src/actions/playlist.ts';
+import { COMMENT_MAX_LENGTH, deleteComment, postComment, rateComment, replyToComment } from '../src/actions/comments.ts';
 import { dislike, like, removeRating, subscribe, unsubscribe } from '../src/actions/interaction.ts';
 import { hasCode, isRpcError, type RpcError } from '../src/errors.ts';
 import { forgetPlayerResponse } from '../src/innertube/player-response.ts';
@@ -779,12 +781,359 @@ describe('action.subscribe / unsubscribe', () => {
 });
 
 // ---------------------------------------------------------------------------
+// action.postComment / replyToComment / deleteComment
+// ---------------------------------------------------------------------------
+
+describe('action.postComment / replyToComment / deleteComment', () => {
+  /**
+   * A `/comment/create_comment` answer, trimmed to what was measured live on
+   * 2026-09-18: `actionResult` at the top level, the new thread under
+   * `actions[].createCommentAction`, its entities in `frameworkUpdates`, and —
+   * for the author's own comment — a reply token and a Delete menu item on its
+   * toolbar surface.
+   */
+  function createResponse(status = 'STATUS_SUCCEEDED', withThread = true): unknown {
+    return {
+      actionResult: { status },
+      actions: [
+        { runAttestationCommand: { ids: [], engagementType: 'ENGAGEMENT_TYPE_COMMENT_POST' } },
+        ...(withThread
+          ? [
+              {
+                createCommentAction: {
+                  contents: {
+                    commentThreadRenderer: {
+                      commentViewModel: {
+                        commentViewModel: { commentKey: 'new-key', toolbarSurfaceKey: 'new-surface' },
+                      },
+                    },
+                  },
+                },
+              },
+            ]
+          : []),
+      ],
+      frameworkUpdates: {
+        entityBatchUpdate: {
+          mutations: [
+            {
+              payload: {
+                commentEntityPayload: {
+                  key: 'new-key',
+                  properties: {
+                    commentId: 'UgxNewComment',
+                    content: { content: 'hello there' },
+                    publishedTime: '0 seconds ago',
+                    replyLevel: 0,
+                  },
+                  author: { displayName: '@me', avatarThumbnailUrl: 'https://example.com/me.jpg', channelId: 'UCme' },
+                  toolbar: {},
+                },
+              },
+            },
+            {
+              payload: {
+                engagementToolbarSurfaceEntityPayload: {
+                  key: 'new-surface',
+                  replyCommand: {
+                    innertubeCommand: {
+                      createCommentReplyDialogEndpoint: {
+                        dialog: {
+                          commentReplyDialogRenderer: {
+                            replyButton: {
+                              buttonRenderer: {
+                                serviceEndpoint: { createCommentReplyEndpoint: { createReplyParams: 'NEW_REPLY_TOKEN' } },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  menuCommand: {
+                    innertubeCommand: {
+                      menuEndpoint: {
+                        menu: {
+                          menuRenderer: {
+                            items: [
+                              {
+                                menuNavigationItemRenderer: {
+                                  text: { runs: [{ text: 'Delete' }] },
+                                  navigationEndpoint: {
+                                    confirmDialogEndpoint: {
+                                      content: {
+                                        confirmDialogRenderer: {
+                                          confirmButton: {
+                                            buttonRenderer: {
+                                              serviceEndpoint: {
+                                                performCommentActionEndpoint: { action: 'NEW_DELETE_TOKEN' },
+                                              },
+                                            },
+                                          },
+                                        },
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  test('postComment sends createCommentParams and commentText to /comment/create_comment', async () => {
+    const session = stubSession({ '/comment/create_comment': createResponse() });
+    await postComment(session, 'CREATE_TOKEN', 'hello there');
+    expect(session.calls).toEqual([
+      {
+        endpoint: '/comment/create_comment',
+        params: { createCommentParams: 'CREATE_TOKEN', commentText: 'hello there' },
+      },
+    ]);
+  });
+
+  test('postComment answers the created comment — real id, and deletable and repliable at once', async () => {
+    // The reason it answers a `Comment` rather than `{}`: a client that had to
+    // invent a stand-in would have no id and no delete token for it until the
+    // list was refetched.
+    const session = stubSession({ '/comment/create_comment': createResponse() });
+    const { comment } = await postComment(session, 'CREATE_TOKEN', 'hello there');
+    expect(comment?.id).toBe('UgxNewComment');
+    expect(comment?.text.content).toBe('hello there');
+    expect(comment?.authorName).toBe('@me');
+    expect(comment?.deleteParams).toBe('NEW_DELETE_TOKEN');
+    expect(comment?.replyParams).toBe('NEW_REPLY_TOKEN');
+  });
+
+  test('a success that carries no thread is still a success, with no comment to show', async () => {
+    const session = stubSession({ '/comment/create_comment': createResponse('STATUS_SUCCEEDED', false) });
+    await expect(postComment(session, 'CREATE_TOKEN', 'hi')).resolves.toEqual({ comment: null });
+  });
+
+  test('STATUS_FAILED is a failure, not a success', async () => {
+    const session = stubSession({ '/comment/create_comment': createResponse('STATUS_FAILED') });
+    const failure = await postComment(session, 'CREATE_TOKEN', 'hi').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('replyToComment sends createReplyParams and commentText to /comment/create_comment_reply', async () => {
+    const session = stubSession({ '/comment/create_comment_reply': { actionResult: { status: 'STATUS_SUCCEEDED' } } });
+    await replyToComment(session, 'REPLY_TOKEN', 'a reply');
+    expect(session.calls).toEqual([
+      {
+        endpoint: '/comment/create_comment_reply',
+        params: { createReplyParams: 'REPLY_TOKEN', commentText: 'a reply' },
+      },
+    ]);
+  });
+
+  test('replyToComment refuses a STATUS_FAILED', async () => {
+    const session = stubSession({ '/comment/create_comment_reply': { actionResult: { status: 'STATUS_FAILED' } } });
+    const failure = await replyToComment(session, 'REPLY_TOKEN', 'a reply').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('deleteComment sends the action blob to /comment/perform_comment_action', async () => {
+    const session = stubSession({
+      '/comment/perform_comment_action': {
+        actions: [{ removeCommentAction: { commentId: 'x', actionResult: { status: 'STATUS_SUCCEEDED' } } }],
+      },
+    });
+    await deleteComment(session, 'DELETE_TOKEN');
+    expect(session.calls).toEqual([
+      { endpoint: '/comment/perform_comment_action', params: { action: 'DELETE_TOKEN' } },
+    ]);
+  });
+
+  test("deleteComment reads its status from where a delete puts it, and refuses a failure", async () => {
+    // Not `assertSucceeded`'s top-level `status`, and not `actionResult` at the
+    // top level like a create: nested under `removeCommentAction`. A check on
+    // either of the other two places would pass this response.
+    const session = stubSession({
+      '/comment/perform_comment_action': {
+        actions: [{ removeCommentAction: { commentId: 'x', actionResult: { status: 'STATUS_FAILED' } } }],
+      },
+    });
+    const failure = await deleteComment(session, 'DELETE_TOKEN').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('an upstream rejection is UPSTREAM_ERROR for all three', async () => {
+    const session = stubSession({}); // the stub throws for any endpoint it has no answer for
+    for (const run of [
+      () => postComment(session, 'T', 'x'),
+      () => replyToComment(session, 'T', 'x'),
+      () => deleteComment(session, 'T'),
+    ]) {
+      const failure = await run().catch((e: unknown) => e);
+      expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+    }
+  });
+
+  test('no cookie is AUTH_REQUIRED for all three, and never leaves the process', async () => {
+    const session = stubSession({}, false);
+    for (const run of [
+      () => postComment(session, 'T', 'x'),
+      () => replyToComment(session, 'T', 'x'),
+      () => deleteComment(session, 'T'),
+    ]) {
+      const failure = await run().catch((e: unknown) => e);
+      expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+    }
+    expect(session.calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// action.rateComment
+// ---------------------------------------------------------------------------
+
+describe('a comment is at most COMMENT_MAX_LENGTH characters', () => {
+  // Measured 2026-09-21 against `comment/create_comment`: 10,000 is accepted
+  // and 10,001 is refused with an HTTP 4xx. The limit is in no response — the
+  // create box ships no `maxCharacterLimit` — so it is written down here, and
+  // this is what stops it drifting silently if someone "rounds" it.
+  test('the limit is the measured one', () => {
+    expect(COMMENT_MAX_LENGTH).toBe(10000);
+  });
+
+  test('exactly the limit is sent, and one over is refused before any request', async () => {
+    const atLimit = stubSession({ '/comment/create_comment': { actionResult: { status: 'STATUS_SUCCEEDED' } } });
+    await postComment(atLimit, 'T', 'x'.repeat(COMMENT_MAX_LENGTH));
+    expect(atLimit.calls).toHaveLength(1);
+
+    const over = stubSession({ '/comment/create_comment': { actionResult: { status: 'STATUS_SUCCEEDED' } } });
+    const failure = await postComment(over, 'T', 'x'.repeat(COMMENT_MAX_LENGTH + 1)).catch((e: unknown) => e);
+    expect(hasCode(failure, 'BAD_REQUEST')).toBe(true);
+    // The point of checking here rather than letting the edge answer: the
+    // message names the limit and the length, and nothing left the process.
+    expect((failure as RpcError).message).toContain(String(COMMENT_MAX_LENGTH));
+    expect(over.calls).toHaveLength(0);
+  });
+
+  test('a reply is held to the same limit', async () => {
+    const over = stubSession({ '/comment/create_comment_reply': { actionResult: { status: 'STATUS_SUCCEEDED' } } });
+    const failure = await replyToComment(over, 'T', 'x'.repeat(COMMENT_MAX_LENGTH + 1)).catch((e: unknown) => e);
+    expect(hasCode(failure, 'BAD_REQUEST')).toBe(true);
+    expect(over.calls).toHaveLength(0);
+  });
+});
+
+describe('action.rateComment', () => {
+  /**
+   * The real answer, measured 2026-09-21 against a live vote:
+   * `actionResults` is **plural** and a sibling of `actions`, which comes back
+   * empty. Pinned here because the first version of this reader looked for
+   * `actions[0].updateCommentVoteAction.actionResult.status` — a shape inferred
+   * from the `updateCommentVoteAction` that appears in the *surface entity's*
+   * `clientActions`, which is a different thing. It matched nothing, so every
+   * vote read as a success including a rejected one, and no test could see it
+   * because no test held a real response.
+   */
+  const succeeded = { actionResults: [{ status: 'STATUS_SUCCEEDED', feedback: 'FEEDBACK_LIKE' }], actions: [] };
+
+  test('a succeeded vote resolves, and sends the blob verbatim', async () => {
+    const session = stubSession({ '/comment/perform_comment_action': succeeded });
+    await expect(rateComment(session, 'OPAQUE_BLOB')).resolves.toEqual({});
+    // Verbatim: the client picks the transition, so anything this rewrote
+    // would send the wrong one.
+    expect(session.calls[0]!.params).toMatchObject({ action: 'OPAQUE_BLOB' });
+    expect(session.calls[0]!.endpoint).toBe('/comment/perform_comment_action');
+  });
+
+  /**
+   * **This is the regression test for the bug, and it is the one that was
+   * missing.** The live round trips only ever proved four *successes*; the
+   * defect was that a rejection also read as a success, which no amount of
+   * successful voting can catch.
+   *
+   * **Shaped from a real response, not invented.** The measured answer is
+   * `{actionResults: [{status, feedback}], actions: []}` — `actionResults`
+   * plural, a sibling of an empty `actions`. A genuine *rejection* could not be
+   * captured without touching someone else's comment: YouTube answers
+   * `STATUS_SUCCEEDED` even for a like on a comment that has just been deleted
+   * (tried 2026-09-21, on this account's own comment), and answers an HTTP 4xx
+   * for a malformed blob, which never reaches the status check at all. So the
+   * status here is substituted into the real envelope rather than guessed at.
+   */
+  test('a rejected vote is an error, not a silent success', async () => {
+    const session = stubSession({
+      '/comment/perform_comment_action': {
+        actionResults: [{ status: 'STATUS_FAILED', feedback: 'FEEDBACK_LIKE' }],
+        actions: [],
+      },
+    });
+    const failure = await rateComment(session, 'OPAQUE_BLOB').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+    expect((failure as RpcError).message).toContain('STATUS_FAILED');
+  });
+
+  test('the status is read from actionResults, not from actions[]', async () => {
+    // Nails the shape rather than the value. The broken reader looked inside
+    // `actions[0].updateCommentVoteAction.actionResult` — a shape that does
+    // exist, on the *surface entity's* `clientActions`, but not on this
+    // response. A reader still looking there finds nothing here and reports a
+    // rejection as a success, which is exactly what shipped.
+    const session = stubSession({
+      '/comment/perform_comment_action': {
+        actionResults: [{ status: 'STATUS_FAILED' }],
+        actions: [{ updateCommentVoteAction: { actionResult: { status: 'STATUS_SUCCEEDED' } } }],
+      },
+    });
+    const failure = await rateComment(session, 'OPAQUE_BLOB').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('a response with no status at all is allowed through, deliberately', async () => {
+    // Documented rather than incidental: an empty `actionResults` is treated as
+    // a success, the same call `deleteComment` makes. Asserting stricter
+    // behaviour here would be asserting a decision nobody took — and
+    // `assertSucceeded`-style strictness is a known deferred item in CLAUDE.md.
+    const session = stubSession({ '/comment/perform_comment_action': { actionResults: [], actions: [] } });
+    await expect(rateComment(session, 'OPAQUE_BLOB')).resolves.toEqual({});
+  });
+
+  test('an upstream rejection is UPSTREAM_ERROR', async () => {
+    const session = stubSession({});
+    const failure = await rateComment(session, 'OPAQUE_BLOB').catch((e: unknown) => e);
+    expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
+  });
+
+  test('no cookie is AUTH_REQUIRED, and nothing leaves the process', async () => {
+    // The tokens are on anonymous pages too, so this is the only thing standing
+    // between a signed-out viewer and a request that cannot work.
+    const session = stubSession({ '/comment/perform_comment_action': succeeded }, false);
+    const failure = await rateComment(session, 'OPAQUE_BLOB').catch((e: unknown) => e);
+    expect(hasCode(failure, 'AUTH_REQUIRED')).toBe(true);
+    expect(session.calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // playlist.forVideo, action.removeFromPlaylist, playlist.create/delete
 // ---------------------------------------------------------------------------
 
 const PLAYLIST_ID = 'PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 
-/** A `/playlist/get_add_to_playlist` body: one row already containing the video, one not. */
+/**
+ * A `/playlist/get_add_to_playlist` body: one row already containing the video, one not.
+ *
+ * `containsSelectedVideos` is the **string** `"ALL"` / `"NONE"` and the remove
+ * action is `ACTION_REMOVE_VIDEO_BY_VIDEO_ID` — both measured 2026-09-20. This
+ * builder used to send `true`/`false` and `ACTION_REMOVE_VIDEO` with a
+ * `setVideoId`, which are the community library's guesses, and the parser was
+ * written to match them: it passed every test and read every real response wrong.
+ */
 function addToPlaylistBody(): unknown {
   return {
     contents: {
@@ -796,11 +1145,11 @@ function addToPlaylistBody(): unknown {
               playlistId: 'WL',
               title: { simpleText: 'Watch later' },
               privacy: 'PRIVATE',
-              containsSelectedVideos: true,
+              containsSelectedVideos: 'ALL',
               removeFromPlaylistServiceEndpoint: {
                 playlistEditEndpoint: {
                   playlistId: 'WL',
-                  actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+                  actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }],
                 },
               },
             },
@@ -810,7 +1159,7 @@ function addToPlaylistBody(): unknown {
               playlistId: PLAYLIST_ID,
               title: { simpleText: 'My mix tape' },
               privacy: 'PUBLIC',
-              containsSelectedVideos: false,
+              containsSelectedVideos: 'NONE',
               addToPlaylistServiceEndpoint: {
                 playlistEditEndpoint: {
                   playlistId: PLAYLIST_ID,
@@ -847,10 +1196,34 @@ describe('playlist.forVideo', () => {
         expect(other.removeToken).toBeNull();
         expect(JSON.parse(wl.removeToken!)).toEqual({
           playlistId: 'WL',
-          actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+          actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }],
         });
       },
     );
+  });
+
+  test('containsSelectedVideos is a string enum: ALL is in it, NONE is not, and a boolean means nothing', () => {
+    // Measured 2026-09-20 on a signed-in account: `"ALL"` for a video in Watch Later,
+    // `"NONE"` for one that is not. `true` is what the parser used to demand and what
+    // YouTube has never been seen to send — it must not read as membership.
+    const rowsWith = (value: unknown) =>
+      parsePlaylistMembership({
+        playlistAddToOptionRenderer: {
+          playlistId: 'WL',
+          title: { simpleText: 'Watch later' },
+          containsSelectedVideos: value,
+          removeFromPlaylistServiceEndpoint: {
+            playlistEditEndpoint: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }] },
+          },
+        },
+      }).playlists[0]!;
+
+    expect(rowsWith('ALL').containsVideo).toBe(true);
+    expect(rowsWith('ALL').removeToken).not.toBeNull();
+    for (const notMembership of ['NONE', 'SOME', '', true, false, null, undefined]) {
+      expect(rowsWith(notMembership).containsVideo).toBe(false);
+      expect(rowsWith(notMembership).removeToken).toBeNull();
+    }
   });
 
   test('an unrecognised privacy value is null, never guessed', async () => {
@@ -873,7 +1246,7 @@ describe('playlist.forVideo', () => {
 describe('action.removeFromPlaylist', () => {
   const TOKEN = JSON.stringify({
     playlistId: 'WL',
-    actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }],
+    actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }],
   });
 
   test('replays the token verbatim against /browse/edit_playlist', async () => {
@@ -881,7 +1254,7 @@ describe('action.removeFromPlaylist', () => {
     await removeFromPlaylist(session, 'WL', TOKEN);
     expect(session.calls[0]).toEqual({
       endpoint: '/browse/edit_playlist',
-      params: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'WL_SET_VIDEO_ID' }] },
+      params: { playlistId: 'WL', actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: VIDEO_ID }] },
     });
   });
 

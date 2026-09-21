@@ -14,7 +14,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/ui/pages/watch_layout.dart';
-import 'package:silky_scroll/silky_scroll.dart';
 
 /// Counts how many distinct `State` objects were ever created for a slot.
 class _Probe extends StatefulWidget {
@@ -50,14 +49,8 @@ Widget _page({required bool theatre, required double width, required Map<String,
           return WatchLayout(
             geometry: geometry,
             playerSlot: _Probe('player', created),
-            metadataSlot: _Probe('metadata', created),
-            railSlot: _Probe('rail', created),
-            // The page's own scroll view, not the default — the key lookup that
-            // makes a moved child findable lives in the sliver list.
-            scrollView: (children) => SilkyListView(
-              padding: EdgeInsets.zero,
-              children: children,
-            ),
+            metadataSlivers: [SliverToBoxAdapter(child: _Probe('metadata', created))],
+            railSlivers: [SliverToBoxAdapter(child: _Probe('rail', created))],
           );
         },
       ),

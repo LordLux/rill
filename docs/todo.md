@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 37.** A new item takes it, and the same edit bumps this line.
+**Next number: 43.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -25,6 +25,266 @@ Nothing here right now.
 ---
 
 ## Soon
+
+### 39. Comments: four gaps left after replies, delete and the comment box
+
+Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
+a tree that the UI shows flat"). None is a regression; each is a known hole.
+Numbers are stable: item 4 (the viewer's like state and the creator's heart)
+landed 2026-09-19 (`architecture.md` F33) and is gone; so is item 6 (a thread
+keeping its expansion when it scrolls away, and the reply list being lazy),
+landed 2026-09-20 (`architecture.md` F34).
+
+1. ~~**A reply's own "Show more replies" is unreachable.** A reply can carry a
+   load-more button of its own (more replies *to that one reply*). The parser
+   now puts its token on that `Comment.repliesContinuation`, but nothing in the
+   client offers it: a reply's `replyCount` is `""` on the wire, so
+   `comments_section.dart` never shows a toggle for one. Measured: a thread
+   advertising 106 replies pages to 104.~~ Done 2026-09-21: a reply whose token
+   is non-null offers a control loading into the same flat list, and every
+   comment carries a real depth. The 106-reply thread (now advertising 700 replies) pages out to 678 replies, proving the gap is structural (deleted/hidden replies).
+2. **`action.replyToComment` still answers `{}`,** where `action.postComment`
+   answers the created comment. A fresh reply is therefore a local stand-in with
+   no id and no delete token until the list is refetched. **Capture a live
+   `create_comment_reply` response first** — only its action *name*
+   (`createCommentReplyAction`) has been seen, not where the thread sits in it —
+   then parse it the way `createdComment` in `actions/comments.ts` does.
+3. **`video.comments {videoId}` with no continuation returns nothing.** `/next`
+   with a bare `videoId` answers the watch payload, whose comments live behind
+   an engagement-panel continuation; `parseComments` then finds no thread and
+   returns an empty list that reads exactly like "no comments". The app never
+   takes this path (it always sends `commentsContinuation`), so it bites only a
+   caller that does. Filed as a separate task when found; recorded here so it
+   is not lost if that is dismissed.
+5. **The comments widgets are only partly tested.** The page fetch now goes
+   through `CommentsSource` (`lib/data/comments_source.dart`), and
+   `comments_section_test.dart` covers a re-sort superseding the page in flight
+   (`$cancel` plus a generation guard, which the first delivery lacked), leaving
+   mid-load, a change of video, the like/heart rendering, and the lazy reply list
+   (a thread's expansion, replies and half-typed reply surviving a scroll away,
+   and a re-sort or a new video forgetting them). **Still
+   untested,** because they call the `RpcClient` singleton directly: post, reply
+   and delete — including `_postComment`'s guard against landing in another
+   video's list — and the rules in a thread's own state: the reply count
+   trusting a *complete* list, load-once, optimistic reply and delete. Task 27's
+   own "Tests" section also asks for per-thread pagination isolation (two
+   expanded threads must not interfere), which holds by construction and is not
+   asserted. **Done when:** post, reply and delete take a seam like
+   `CommentsSource`, and those cases are asserted.
+
+   **Half of this landed 2026-09-21, and the half that landed is the seam.**
+   `CommentsSource` now carries `post`, `reply`, `delete` and `rate`, so all
+   four writes go through something a test can fake, and the widgets no longer
+   touch `RpcClient.instance` at all. **Only `rate` is asserted through it**:
+   the blob each transition sends, the optimistic flip, the revert on failure,
+   the same on a *reply* (a different list from the threads', held by the
+   thread's state), and the two disabled states. It was done for `rate` first
+   because a vote is the write whose failure is least visible — one that
+   silently does not stick looks exactly like one that did. Post, reply and
+   delete now have the seam and still have no tests, as do the thread-state
+   rules and the pagination isolation above; that is what is left.
+7. **Settled 2026-09-21 — the provenance gap this item described does not
+   exist, and the one-off fixture stays.** The item claimed that *a third
+   party's comment the viewer liked* lived only in the ad-hoc
+   `fixtures/comments-viewer-state.json`, and that remaking it would mean
+   mutating a stranger's comment. Checked against the fixtures rather than
+   assumed: `viewer-state/comments-before.json` and `comments-after.json` each
+   hold **three comments by `@edualvarado5091`** — not the account — that the
+   viewer has liked and hearted, and `comments-disliked.json` holds three more.
+   So that state is in the **state-proven** family already.
+
+   **And the reproducible path was already the one being used.** The account
+   likes and hearts other people's comments *on a video it owns*; the mutation
+   is entirely on the viewer's side, nobody else's content changes, and
+   `capture-viewer-state.ts` captures it every run. Nothing needs inventing.
+
+   **What is genuinely only in the one-off** is a plain
+   `TOOLBAR_HEART_STATE_HEARTED` read in a *signed-in* session — the
+   `…_EDITABLE` variant is what the creator sees, and the plain one otherwise
+   comes from `comments-after-anonymous.json`. F33 established that `heartState`
+   is public and identical in the signed-in and anonymous views, so that
+   combination proves nothing the anonymous capture does not. Its remaining
+   value is breadth: 20 comments from six strangers against the pair's four
+   from one.
+
+   **Decision: it stays a one-off and stays `CARRIED`.** That costs nothing —
+   the declaration is one line and `capture.ts` already carries it — and the
+   stakes are lower than this item assumed, because no assertion depends on it
+   uniquely. `parser.test.ts`'s signed-in state check is the only test that
+   names it, and it is guarded by `hasFixture`. Nothing further to do.
+
+**Done when:** each is fixed, or deliberately dropped with the reason written
+next to it.
+
+### 42. Thread nesting lines in the comments list
+
+youtube.com draws an L-shaped rule from a thread down to each of its replies,
+and a vertical rule continuing past a reply that has children of its own. rill
+draws none: nesting is conveyed by indentation alone (`_replyIndent`, 44 px),
+which at one level reads as a slight offset rather than as structure. The user
+asked for this 2026-09-21 with a reference screenshot of youtube.com's own
+rendering.
+
+**Blocked on real nesting, decided 2026-09-21.** The list is *flat* in two
+senses and both have to be fixed first, or the lines would be drawing a
+fictional tree. (Update 2026-09-21: The structural depth is now provided by the parser and the tree is flat but carries real depth. Next step: implement the visual L-shaped rules in the Flutter app using `Comment.depth`).
+2. **The widget list is flat by design.** F34 turned the section into one
+   `SliverList.builder` over `_flatten()`'s `[thread, reply, reply, …, footer]`
+   rows, so replies build lazily and a scrolled-away row costs nothing. A rule
+   spanning a thread and its replies spans sibling rows that are never all built
+   at once, and no widget owns the span.
+
+(2) is not a bug and must not be undone — the F34 numbers say what owning-the-
+subtree cost (a 500-reply thread took 345 ms to re-expand). (1) is the real
+prerequisite: **`Comment` needs a depth, carried from `replyLevel`, and the
+client needs to keep it.** Do that first, together with item 1 above (a reply's
+own "Show more replies"), which is where deeper nesting first becomes reachable
+at all. Only then is there anything for a line to describe.
+
+**Then, and only then, the drawing.** Two approaches, and the implementer
+picks — neither is prescribed:
+
+- **Per-row, stateless.** Each row paints only its own slice: one vertical
+  segment per ancestor that still has a sibling below it, plus the elbow into
+  its own avatar. Needs only each row's depth and "is this the last child of its
+  parent", both of which `_flatten()` can put on `_Row`. Composes with lazy
+  building for free, because a row that is not built is a row whose slice is off
+  screen anyway. This is the shape the user suggested, and the likelier answer.
+- **One painter behind the list.** A `Stack` with a `CustomPaint` under the
+  sliver, given the rows' laid-out rectangles. Fewer widgets, but it needs
+  geometry the list only knows after layout and has to stay correct while rows
+  are recycled, which is the part that usually goes wrong.
+
+**Done when:** a comment carries a real depth end to end; a thread with replies
+shows a continuous rule from the thread to its last reply and no further, at
+every depth the data actually contains; it survives scrolling a long thread in
+and out of the viewport; the F34 measurements are re-run and the per-frame build
+cost has not moved materially; and it is checked in the running app against the
+reference screenshot, both layouts.
+
+### 40. Deep links to a comment (`&lc=`)
+
+Agreed 2026-09-18, measured, not built. youtube.com opens
+`watch?v=<id>&lc=<commentId>` on that comment and puts a "Highlighted comment"
+badge above it. rill has no deep linking of any kind. **Wanted:** the same badge;
+scroll to the comment; **pause** the just-opened video (whoever follows this link
+came for the comment); pulse the comment's container two or three times.
+
+**Measured (`architecture.md` F32), anonymous, live:**
+
+- The linked token is the plain `commentsContinuation` plus one protobuf field,
+  `#16 = "<commentId>"`, in the nested message at `#6.#4`. A token built that
+  way (decode, append, re-encode with the enclosing lengths recomputed) put the
+  target **first, exactly once**, in a 20-thread page — **no scraping of the
+  watch page**.
+- The badge text arrives as `commentViewModel.commentViewModel.linkedCommentText`
+  = `"Highlighted comment"` (server-supplied, localised).
+- A link to a **reply** (`lc=<parent>.<reply>`) returns the *parent* thread first,
+  with the reply in `replies.commentRepliesRenderer.teaserContents[0]
+  .commentViewModel` (which carries `linkedCommentText`) and **no** `subThreads`
+  — a shape `parseComments` does not read.
+
+**Stage 1 — links to top-level comments:**
+
+1. **Sidecar.** `video.comments {continuation, linkedCommentId}` builds the token
+   and asks `/next`; `Comment.isLinked: boolean` from `linkedCommentText`
+   (restated in all five places `CLAUDE.md` lists, plus the corpus sanitiser).
+   The token is *constructed*, which is exactly the "community references are
+   hypotheses" case — it is verified against a real response, but guard it: if
+   the first thread is not the requested comment, log it and fall back to the
+   ordinary list with no highlight, never a wrong one.
+2. **Entry.** No OS protocol handler (`rill://`, registry) — that is a separate,
+   larger piece. Instead: a pasted YouTube URL with `lc` in the search box
+   (`topbar.dart`, `_submit`) → `openWatch` (`player_shell.dart`) with a stub
+   `VideoItem` carrying the id (the watch page fills the rest from
+   `video.info`); and a **Copy link** action on every comment producing
+   `https://www.youtube.com/watch?v=<videoId>&lc=<commentId>`.
+3. **Client.** Badge above the highlighted thread; pulse its container; pause via
+   `PlaybackController.setPlaying(false)` — but only once the media is open, or
+   the open resumes it; on the narrow layout select the Comments tab first
+   (`_narrowTab`, `watch.dart`).
+4. **Scroll is the risk.** The watch page is a `SilkyCustomScrollView` with only
+   a `PageStorageKey` (`watch_layout.dart`) — no controller — and the comments
+   build lazily far down it, so the target has no `BuildContext` to
+   `ensureVisible` on when the page opens. Needs a controller plumbed through
+   `WatchLayout`, an approximate jump, then a retry until the target mounts.
+   Read `architecture.md` §2.8 (the watch page's sharp edges) first.
+
+**Stage 2 — links to replies:** read `teaserContents`, open the parent thread
+with the linked reply first and highlighted. Until then a reply link should land
+on the parent thread, without the badge.
+
+**Done when:** pasting the example link opens the video **paused**, the comments
+section scrolled to the highlighted comment with its badge, pulsing; Copy link
+round-trips through the paste; a link whose comment no longer exists degrades to
+the ordinary list. Tests: the token builder (mutation-checked, including "field
+absent → target not first"), the parser's `isLinked`, and a widget test for badge
+and pulse. Run the app and say what you saw — both layouts.
+
+### 37. The engine cannot build the semantics tree: `AXTree` update fails, repeatedly
+
+A release run on 2026-09-18 logged **2 146** copies of
+
+```
+[ERROR:flutter/shell/platform/common/accessibility_bridge.cc(114)]
+Failed to update ui::AXTree, error: Nodes left pending by the update: 1312
+```
+
+(`%LOCALAPPDATA%\rill\logs\rill-20260918-055603-68288.log`). The engine
+rejects the whole update, so the accessibility tree it hands Windows stays
+**stale** — a screen reader, Narrator, or any UI automation would read the old
+tree, and the count (1312 pending nodes) says the app sends a large update the
+bridge cannot reconcile, not that one widget is wrong.
+
+**What the log shows.** Nothing until 05:57:49, then bursts that line up with
+opening a video (441 in the first hour, 1 596 in the next, then silence while
+the app sat idle for seven hours). So it follows a real semantics change, not a
+timer. Not reproduced deliberately yet.
+
+**Where to start:**
+
+1. Reproduce with semantics on (a screen reader running, or
+   `SemanticsBinding.instance.ensureSemantics()`), and narrow which surface
+   emits it — the watch page and the feed are the two that change wholesale.
+2. architecture.md §2.8's note (2026-09-18) that `TabBarView` fails on its own with
+   `!semantics.parentDataDirty` is the one semantics problem this repo has
+   already met; check whether this is the same shape.
+3. The app has almost no explicit semantics (three `Semantics`/`ExcludeSemantics`
+   uses, in the two skeletons and the top bar), so the tree is whatever the
+   widget tree implies — worth knowing before adding more.
+
+Related: item 38 is the keyboard half of the same surface.
+
+**Done when:** the cause is known and either fixed or recorded, and a run that
+exercises the watch page and the feed logs no `AXTree` error.
+
+### 38. Give the shell real focus traversal groups
+
+`FocusTraversalGroup` occurs **nowhere** in `app/lib`, and focus is handled ad
+hoc: the search field's own `FocusNode` (`topbar.dart:284`), one `ExcludeFocus`
+around the back arrow (`topbar.dart:80`), and one `autofocus` in the save
+dialog. Tab order is therefore whatever the widget tree happens to be, across a
+shell that has a custom titlebar, a rail, a feed, the player's overlay controls,
+the queue panel and transient overlays (account menu, search suggestions, save
+dialog).
+
+What that costs today, to be confirmed surface by surface rather than assumed:
+
+- **Order:** Tab walks the titlebar, rail and content in tree order, which is
+  not reading order, and the window controls are in that walk.
+- **Traps:** the account menu and the save dialog are overlays; nothing keeps
+  focus inside them, and nothing returns focus to what opened them.
+- **Player:** the controls overlay is focusable while hidden, and space/`k`
+  already go through `shortcuts.dart`, which checks `textEntryHasFocus()` — so
+  focus and the shortcut layer have to agree.
+- **Fullscreen and the miniplayer** change which surface should own focus.
+
+**Do this with item 37**, not separately: both are about the structure the app
+exposes to assistive tech, and a traversal group is also a semantics boundary.
+
+**Done when:** each surface is a deliberate group with a stated order, overlays
+trap and restore focus, and a test walks Tab through the watch page and the
+feed and asserts the order.
 
 ### 33. Playback opens paused while media_kit says it is playing
 

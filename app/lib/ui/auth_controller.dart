@@ -96,6 +96,26 @@ class AuthState {
       Object.hash(status, accountName, accountHandle, accountAvatarUrl, isBusy);
 }
 
+/// Why an action that needs an account is unavailable, or null when it is not.
+///
+/// One function so every surface says the same two things in the same words,
+/// and so that **degraded is never quietly folded into "signed out"**. They need
+/// different actions from the viewer: a signed-out person has to sign in, a
+/// degraded one has to sign in *again* because a cookie YouTube has stopped
+/// honouring looks exactly like being signed in everywhere else. Hard invariant
+/// 5 is the reason the distinction exists at all — `logged_in` is cookie
+/// presence, not server acceptance, so `auth.verify` is what tells them apart.
+///
+/// [verb] completes the sentence: `'vote'`, `'rate videos'`, `'subscribe'`.
+/// Written as a reason rather than a bare "unavailable" because the tooltip is
+/// the only place a disabled control can explain itself.
+String? signedInActionBlocker(AuthStatus status, String verb) => switch (status) {
+      AuthStatus.authenticated => null,
+      AuthStatus.degraded => 'Your session expired. Sign in again to $verb',
+      _ => 'Sign in to $verb',
+    };
+
+
 /// The one place the app decides whether it is signed in.
 ///
 /// Every state it reports was **measured by the sidecar**, never inferred from

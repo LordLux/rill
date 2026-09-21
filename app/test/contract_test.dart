@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/caption_track.dart';
+import 'package:rill/domain/comment.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/domain/video_detail.dart';
 
@@ -49,6 +50,41 @@ const videoDetailKeys = <String>{
   'premiereAtMs',
   'related',
   'relatedContinuation',
+  'commentsContinuation',
+};
+
+/// Every key `Comment` can consume. Hand-written from `lib/domain/comment.dart`.
+///
+/// This group exists because its absence cost something. On 2026-09-21 the
+/// sidecar renamed `isLiked` to `myRating` and added four vote tokens, and this
+/// suite stayed **green**: the generic corpus loop above only reads `chips` and
+/// `items` as `FeedItem`s, so a comments page passed through it untouched. The
+/// model kept a defaulted `isLiked` the sidecar no longer sends and gained none
+/// of the new fields, which at runtime reads as "nobody has voted on anything",
+/// with nothing thrown and nothing logged — the exact drift this file's header
+/// describes.
+const commentKeys = <String>{
+  'id',
+  'authorName',
+  'authorAvatarUrl',
+  'authorChannelId',
+  'isUploader',
+  'isVerified',
+  'text',
+  'likeCount',
+  'publishedText',
+  'replyCount',
+  'depth',
+  'myRating',
+  'creatorHearted',
+  'isPinned',
+  'repliesContinuation',
+  'replyParams',
+  'deleteParams',
+  'likeParams',
+  'unlikeParams',
+  'dislikeParams',
+  'undislikeParams',
 };
 
 /// Every key `CaptionTrack` can consume. Hand-written from
@@ -148,6 +184,64 @@ void main() {
     test('MUTATION: a removed key fails the other direction', () {
       final trimmed = {...payload}..remove('relatedContinuation');
       expect(missingKeys(trimmed, videoDetailKeys), {'relatedContinuation'});
+    });
+  });
+
+  group('Comment, strict-key', () {
+    // Every comments page in the corpus, not one: the viewer-state captures
+    // hold states the ordinary ones do not — a liked comment, a hearted one and
+    // a disliked one — and a field only present on those is exactly the kind
+    // that goes unmirrored.
+    late List<Map<String, dynamic>> comments;
+    late List<String> sources;
+
+    setUp(() {
+      comments = [];
+      sources = [];
+      for (final entity in Directory('../corpus').listSync()) {
+        if (entity is! File || !entity.path.contains('comments')) continue;
+        final raw = jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>;
+        final items = raw['items'] as List<dynamic>? ?? [];
+        for (final item in items) {
+          comments.add(item as Map<String, dynamic>);
+          sources.add(entity.uri.pathSegments.last);
+        }
+      }
+    });
+
+    test('the corpus actually supplied comments to check', () {
+      // Without this the three tests below pass over an empty list, which is
+      // the same unfailable-test problem the file header warns about.
+      expect(comments, isNotEmpty);
+      expect(sources.toSet().length, greaterThan(1));
+    });
+
+    test('every key the sidecar ships maps to a field', () {
+      for (var i = 0; i < comments.length; i++) {
+        expect(unknownKeys(comments[i], commentKeys), isEmpty,
+            reason: '${sources[i]}: the sidecar ships a key Comment has no field for — it is being dropped');
+      }
+    });
+
+    test('every field the model declares is supplied', () {
+      for (var i = 0; i < comments.length; i++) {
+        expect(missingKeys(comments[i], commentKeys), isEmpty,
+            reason: '${sources[i]}: Comment declares a field the sidecar never sends');
+      }
+    });
+
+    test('it round-trips, and the vote survives', () {
+      // `myRating` is the point: it is a closed set of three read off one wire
+      // field, and all three are in the corpus by construction
+      // (`corpus.test.ts` asserts that). A model that dropped it would give
+      // every comment the same value here.
+      final ratings = <String>{};
+      for (final json in comments) {
+        final comment = Comment.fromJson(json);
+        expect(comment.id, isNotEmpty);
+        ratings.add(comment.myRating);
+      }
+      expect(ratings, containsAll(<String>['like', 'dislike', 'none']));
     });
   });
 

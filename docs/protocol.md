@@ -194,7 +194,7 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `captions.list` | `{videoId}` | `{tracks[]}` — §3.8 |
 | `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
-| `video.comments` | `{videoId, continuation?}` | `{items[], continuation?}` |
+| `video.comments` | `{videoId, continuation?}` | `{items[], continuation?, chips?, commentCount, createParams}` — `createParams` is the comment box's submit token, null when the viewer cannot comment |
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
 | `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
 | `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
@@ -206,6 +206,102 @@ in `rpc/server.ts` — calling it answers `Unknown method`. The row stays becaus
 the shape is still the intended one, but it is marked so the table cannot be
 read as a list of things that work. Found while implementing Task 26, which hit
 the same thing with `mix.start`.
+
+#### Comments — Task 27
+
+**`video.comments` is not a dedicated endpoint.** It is just a `/next` call with a continuation token, exactly like every other list continuation. The watch page (`video.info`) carries the first token inside its `comment-item-section`; fetching that token returns the first page of threads and the sorting options. The RPC method `video.comments` handles this conceptually, but underneath it executes `/next`.
+
+**Sort options are chips.** "Top" and "Newest" are tokens the server hands back inside the first page of comments, so they are mapped as `chips[]` on the response and treated exactly like feed chips, rather than client-constructed parameters like search filters. Changing the sort clears the list and requests `/next` using the new chip's token.
+
+**Reply and delete, deferred by Task 27 §5, picked back up and shipped.** Each
+`Comment` now carries `replyParams`/`deleteParams` alongside everything else, and
+`CommentsResult.createParams` is the "Add a comment…" box's own submit token —
+see §3.4 for the request shapes and what was actually measured live.
+
+**A reply list is a tree that the UI shows flat — measured 2026-09-18, and the
+parser got both halves of it wrong until then.** Level-1 replies arrive as the
+list's top-level items; a reply *to* a reply (`replyLevel` 2) arrives nested
+inside its parent's own `replies.commentRepliesRenderer.subThreads`. Two
+consequences, both silent:
+
+- **Nested replies were dropped.** Only top-level items were read, so a thread
+  advertising 2 replies listed 1. `parseComments` now flattens a reply's nested
+  replies, depth-first, into the same list — but only for a comment that is
+  itself a reply, so a main-list thread's inline children are still not spliced
+  in among the top-level comments.
+- **"Show more replies" never appeared.** A reply list's pagination token is a
+  *button* — `button.buttonRenderer.command.continuationCommand.token` — not the
+  `continuationEndpoint` shape a page of threads uses, and only the latter was
+  read. A thread advertising 962 replies listed 5 with no way to load the rest.
+  Both shapes are read now. **Known gap:** a nested reply can carry its *own*
+  "Show more replies" button (more replies to that one reply); its token lands
+  on that `Comment.repliesContinuation`, but nothing in the client offers it yet.
+
+**The advertised count is not the list — and that is YouTube's, not rill's.**
+`Comment.replyCount` is a display string baked into the page it arrived on.
+Measured 2026-09-18 on a comment whose only reply had been removed by someone
+else: the signed-in view still advertised 1 reply and its replies token
+returned zero renderers, while the *anonymous* view of the same comment, at the
+same moment, advertised 0 and carried no token. The client therefore trusts the
+list it has actually fetched over the count it was told (`comments_section.dart`).
+
+**A comment's vote and the creator's heart are on their own entity, not on the comment — measured 2026-09-19 (`architecture.md` F33).**
+`myRating` and `creatorHearted` are read from `engagementToolbarStateEntityPayload`
+(`{likeState, heartState}`, reached through the view model's `toolbarStateKey`)
+and from nothing else. The comment entity's own `toolbar` looks as though it
+should carry them and does not: it holds `heartActiveTooltip` (`"❤ by @creator"`)
+on **every** comment, which is the tooltip *for* the hearted state, present
+whether or not there is a heart. Reading it as one marked all 120 comments of a
+six-video sample hearted where the state entity says 4, and the key the parser
+read for the viewer's like was never there, so that was `false` throughout. `likeState`
+is the *viewer's* — an anonymous session reads `INDIFFERENT` on every comment —
+while `heartState` is public, with one exception found 2026-09-20 (F35): on a video
+the viewer *owns*, the creator's own view says `TOOLBAR_HEART_STATE_HEARTED_EDITABLE`
+for a comment they hearted and `..._UNHEARTED_EDITABLE` for one they have not,
+because they can toggle it. Both "hearted" values read as `creatorHearted`. `Comment.likeCount`
+follows the state as well: the toolbar ships the count with the viewer's like in
+it and without, and a comment the viewer liked is shown with the first.
+
+**A vote is one field of three, and voting is four server-supplied blobs — measured 2026-09-20/21.**
+`likeState` carries `TOOLBAR_LIKE_STATE_LIKED`, `_DISLIKED` and `_INDIFFERENT`,
+so `Comment.myRating` is `'like' | 'dislike' | 'none'` and not two booleans —
+the same closed set, and for the same reason, as `VideoDetail.myRating`: two
+booleans admit both-true, which YouTube cannot produce. **`_DISLIKED` had never
+appeared in any fixture until 2026-09-21**, because every capture had been taken
+with the account in whatever state it happened to be in; a reader that dropped
+the value would have been indistinguishable from a correct one, since an unvoted
+comment and a disliked one both read `'none'`. It is now held by
+`fixtures/viewer-state/comments-disliked.json`, captured by
+`bun run capture:viewer-state dislike`, which refuses to write unless the raw
+response proves the state — F35's rule, that a viewer-state field is untested
+until a fixture holds the state.
+
+The four transitions ride on the comment as `likeParams`, `unlikeParams`,
+`dislikeParams` and `undislikeParams`, read off
+`engagementToolbarSurfaceEntityPayload` beside `replyParams`/`deleteParams`.
+Each is an opaque blob the *server* supplies for
+`comment/perform_comment_action` — the same endpoint delete uses, differentiated
+only by which blob is sent, exactly as §3.4 predicted. `action.rateComment`
+takes one verbatim rather than a target rating: the client holds the state the
+user is looking at, and the endpoint has no "set rating to X" to translate into.
+**Nothing is constructed**, so the trap that made a *video*'s like/dislike
+`target` shape wrong (copied from a reference implementation, 400s until
+corrected) does not apply here.
+
+**Their presence is not permission.** All four are on an anonymous capture too
+(20 of 20), so a client that enables its buttons because the token exists has
+made the `heartActiveTooltip` mistake in a new place. The session decides, not
+the field.
+
+**What this does and does not show about "shadowbanned" replies.** It shows the
+count lagging the list in a signed-in view after a removal, which is enough to
+explain "I deleted my reply and it still says 1 reply" with no hiding involved.
+It does *not* rule hiding out: a reply that YouTube hides from everyone but its
+author while still counting it would also produce "count > list" for a
+non-author. The two are told apart by the **author's own view** — a hidden reply
+is still listed for the account that wrote it, a merely-removed one is not — and
+no such case has been measured. The reply that vanished from the measured
+thread was not this account's, so its author's view was not available.
 
 #### Mixes — Task 26, measured 2026-09-12
 
@@ -623,6 +719,7 @@ interface VideoDetail {
   premiereAtMs: number | null;        // unix ms; null unless it is a premiere
   related: FeedItem[];                // the watch page's rail
   relatedContinuation: string | null; // → video.related
+  commentsContinuation: string | null; // → video.comments
 }
 ```
 
@@ -696,8 +793,59 @@ the raw shape only (hard invariant 1), not from a fixture in this repo. If
 | `action.like` / `action.dislike` | `{videoId}` | `{}` |
 | `action.removeRating` | `{videoId}` | `{}` |
 | `action.subscribe` / `action.unsubscribe` | `{channelId}` | `{}` |
+| `action.postComment` | `{createParams, commentText}` | `{comment}` — the created `Comment`, or `null` if the response carried none |
+| `action.replyToComment` | `{replyParams, commentText}` | `{}` |
+| `action.deleteComment` | `{deleteParams}` | `{}` |
+| `action.rateComment` | `{params}` | `{}` |
 
 All execute against the authenticated `WEB` session.
+
+**`action.postComment`, `action.replyToComment` and `action.deleteComment` —
+added once Task 27 §5's deferral was picked back up, verified live 2026-09-18.**
+`postComment` answers the created comment (parsed from the create response by
+the same `parseComments` every list uses, so it carries a real `id` and the
+author's own `deleteParams`/`replyParams`), where the other two answer `{}` —
+reply is the one still to get the same treatment. All three were checked
+against a real request/response rather than against youtubei.js, which has no
+typed support for either (its `InteractionManager`/`CommentView` cover
+like/dislike/subscribe/translate only; posting a reply goes through a
+dialog-button endpoint whose real `apiUrl` its own code never surfaces, and
+deleting has no method at all — `LuanRT/YouTube.js#744`, open, confirms
+nothing exists there to copy).
+
+- **A reply is a different endpoint from a top-level comment, not the same one
+  with different params.** `comment/create_comment_reply` takes
+  `createReplyParams`, not `createCommentParams`. The two look interchangeable
+  from the outside — same `commentText` field, same general shape — and are not.
+- **Delete has no endpoint of its own.** It reuses `comment/perform_comment_action`
+  — the same call a comment like/dislike makes — differentiated only by a
+  pre-built, opaque `action` string. There is no client-constructed delete
+  request; the string comes from the comment's own data or it doesn't happen.
+- **The opaque params are deterministic, not session-minted — measured
+  2026-09-18.** `CommentsResult.createParams` was byte-identical across three
+  separate sessions, and `Comment.replyParams` is the video id and the parent
+  comment id in a protobuf. An earlier version of this note called them
+  "short-lived" on the strength of one `404 NOT_FOUND` on a reply sent ~15
+  minutes after its token was read; that inference did not survive the data.
+  `NOT_FOUND` names an *entity*, and the parent comment that request targeted
+  could no longer be found in any later listing. A 404 on a reply or delete
+  means "that comment is gone", not "the token expired".
+- **A `STATUS_SUCCEEDED` is not proof a comment is visible.** The create
+  response carries a separate `runAttestationCommand` (BotGuard, asked of a real
+  browser, after the fact) that this process cannot honour and the write does
+  not wait for. Whether skipping it changes what spam filtering does to the
+  comment is **not established**; the only evidence is the 2022 report
+  (`LuanRT/YouTube.js#224`) of successful posts that never appeared.
+- Neither response's success field sits where `action.like`'s does. Reply's is
+  a top-level `{actionResult: {status}}` (matching `comment/create_comment`
+  itself); delete's is one level deeper, `actions[0].removeCommentAction.actionResult.status`.
+- No botguard requirement was found for either, in the same sense none was
+  found for posting a top-level comment (see the comment/create_comment
+  research this followed): both succeeded over a plain authenticated `WEB`
+  session with no attestation field sent. `comment/create_comment` did return
+  a separate, non-blocking `runAttestationCommand` alongside its success —
+  worth a client honouring if it ever runs inside something that can (a real
+  browser can; this sidecar cannot and did not need to for the write to land).
 
 **Task 25 closed the write-only gap this section used to describe.** Before
 this task, nothing here read state back, nothing undid a like or a Watch Later
@@ -754,6 +902,15 @@ outside the sidecar. `playlistId` is required and checked against the token
 rather than trusted from it alone, so a stale token from a previous video's
 dialog cannot edit the wrong playlist silently.
 
+**Measured 2026-09-20 (F35): for Watch Later that endpoint removes by *video* id, not
+by an entry id.** The token was
+`{playlistId: 'WL', actions: [{action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId}]}`,
+and replayed verbatim it removed the video — the first time this path ever ran
+against the real service, because `containsVideo` was always false until then and
+so no row ever carried a token. Whether a playlist that holds the same video twice
+gets an entry-id form instead was not measured; the opaque-token design does not
+depend on the answer.
+
 ### 3.9 Playlists — the save dialog
 
 | Method | Params | Result |
@@ -773,6 +930,14 @@ interface PlaylistMembership {
   removeToken: string | null;        // opaque; hand back to action.removeFromPlaylist. Present only when containsVideo
 }
 ```
+
+**`containsVideo` is read from a string, not a boolean — measured 2026-09-20
+(`architecture.md` F35).** `containsSelectedVideos` is `"ALL"` for a video in that
+playlist and `"NONE"` for one that is not (`"SOME"` exists for a request naming
+several videos and cannot occur here). The parser tested `=== true` for as long as
+this section has existed, so `containsVideo` was `false` for every row of every
+video and `removeToken` was always `null`; the unit test fed it `true`, a value
+YouTube does not send. Anything but `"ALL"` is now "not in it".
 
 **One call answers both halves the save dialog needs** — Task 25 §5 asked for
 "the user's playlists" and, separately, "which playlists already contain this
@@ -1476,3 +1641,13 @@ Flutter's `freezed` models.
 Capture fixtures with `parse: false`. Parsed objects are lossy (see F2 in
 `architecture.md`) and make a poor corpus. These fixtures are also the only way
 to meaningfully test tolerant parsing, since the live feed cannot be pinned.
+
+`fixtures/` is replaced wholesale by one run of `bun run capture`, so every
+fixture there needs an owner and `sidecar/src/fixtures.ts` is where ownership is
+declared — `CAPTURE_FILES` for what a run writes, `CARRIED` for what it must
+preserve because another tool made it. The promote refuses on anything in
+neither list, and on any required file the run failed to produce. A fixture
+written into `fixtures/` by hand and left undeclared is a fixture one recapture
+away from gone, and the tests that read it then skip in silence rather than
+fail — which is how three comment fixtures spent a month one command from
+deletion (`todo.md` 41, closed 2026-09-20).

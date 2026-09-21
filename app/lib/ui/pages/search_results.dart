@@ -83,25 +83,28 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: ScreenValues.contentMaxWidth),
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: _SearchFilterBar(),
+      body: ClipRRect(
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: ScreenValues.contentMaxWidth),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 2.0, left: 8.0),
+                child: _SearchFilterBar(),
+              ),
             ),
-          ),
-          Expanded(
-            child: FeedView(
-              provider: searchProvider,
-              emptyMessage: 'No results for "${widget.query}".',
-              isWideLayout: true,
-              header: artist != null ? ArtistPanelCard(artist: artist) : null,
+            Expanded(
+              child: FeedView(
+                provider: searchProvider,
+                emptyMessage: 'No results for "${widget.query}".',
+                isWideLayout: true,
+                header: artist != null ? ArtistPanelCard(artist: artist) : null,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -165,6 +165,16 @@ function privacyFromRaw(value: string | null): PlaylistPrivacy | null {
  * than by a fixed container path, for the same reason every other parser in
  * this codebase does: the exact wrapping renderer name was not confirmed
  * against a live response either.
+ *
+ * **One field of it has now been measured, and it was wrong** (2026-09-20,
+ * signed in, videos in and out of Watch Later): `containsSelectedVideos` is the
+ * string `"ALL"` or `"NONE"`, not a boolean, so the `=== true` this method used
+ * to test was false for every row of every video — no playlist ever read as
+ * containing the video, and no row ever carried a `removeToken`. The unit test
+ * that "covered" it fed the parser `true`, a value YouTube does not send.
+ * `parsePlaylistMembership` below is the pure half, so a raw capture can be run
+ * through it (`fixtures/viewer-state/`); the rest of the shape is still the
+ * community library's.
  */
 export async function playlistsForVideo(
   session: Session,
@@ -182,6 +192,15 @@ export async function playlistsForVideo(
     );
   }
 
+  return parsePlaylistMembership(raw);
+}
+
+/**
+ * The pure half of {@link playlistsForVideo}: a raw `get_add_to_playlist`
+ * response in, the rows out. Exported so a captured response can be parsed
+ * without a session.
+ */
+export function parsePlaylistMembership(raw: unknown): PlaylistMembershipResult {
   const rows = deepCollect(raw, (node) => isObject(node['playlistAddToOptionRenderer'])).map(
     (node) => node['playlistAddToOptionRenderer'] as JsonObject,
   );
@@ -193,7 +212,10 @@ export async function playlistsForVideo(
     // row nobody can use (hard invariant 4's "skip, never fail the request").
     if (!id) continue;
 
-    const containsVideo = get(row, 'containsSelectedVideos') === true;
+    // `"ALL"` / `"NONE"` — a string enum, measured 2026-09-20. `"SOME"` exists
+    // for a request naming several videos and cannot occur for the one this is
+    // asked about; anything that is not `"ALL"` is "not in it".
+    const containsVideo = str(get(row, 'containsSelectedVideos')) === 'ALL';
     const removeEndpoint = get(row, 'removeFromPlaylistServiceEndpoint', 'playlistEditEndpoint');
     playlists.push({
       id,

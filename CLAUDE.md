@@ -128,6 +128,52 @@ interface ChannelItem { kind: 'channel'; id: string; name: string;
   descriptionSnippet: string | null;
   isVerified: boolean; isArtistChannel: boolean; }
 
+// --- Comments (Task 27) ---
+// Not a FeedItem. Sent over video.comments (which wraps /next with continuation).
+
+interface CommentTextRun { startIndex: number; length: number; }
+interface CommentStyleRun extends CommentTextRun { weightLabel?: string; }
+interface CommentCommandRun extends CommentTextRun {
+  url?: string; videoId?: string; startTimeSeconds?: number;
+}
+interface CommentText {
+  content: string;
+  styleRuns?: CommentStyleRun[];
+  commandRuns?: CommentCommandRun[];
+}
+
+interface Comment {
+  id: string;
+  authorName: string;
+  authorAvatarUrl: string;
+  authorChannelId: string | null;
+  isUploader: boolean;
+  isVerified: boolean;
+  text: CommentText;
+  likeCount: string | null;
+  publishedText: string | null;
+  replyCount: number;
+  depth: number;
+  myRating: 'like' | 'dislike' | 'none';   // one field on the wire, so one field here
+  creatorHearted: boolean;
+  isPinned: boolean;
+  repliesContinuation: string | null;
+  replyParams: string | null;      // opaque; action.replyToComment
+  deleteParams: string | null;     // opaque, own comments only; action.deleteComment
+  likeParams: string | null;       // the four vote transitions; action.rateComment
+  unlikeParams: string | null;     // server-supplied, never constructed
+  dislikeParams: string | null;    // present anonymously too — not permission
+  undislikeParams: string | null;
+}
+
+interface CommentsResult {
+  items: Comment[];
+  continuation: string | null;
+  chips?: Chip[];
+  commentCount: string | null;
+  createParams: string | null;     // opaque; action.postComment. null when the viewer cannot comment
+}
+
 interface Chip {
   label: string;
   token: string;
@@ -236,7 +282,7 @@ that do not exist yet.
   /src/rpc        NDJSON transport
   /fixtures       raw captured responses (parse:false) — the test corpus
 /app              Flutter
-  /lib            main.dart + probe_task19.dart — the only two entrypoints
+  /lib            main.dart + probe_task19.dart, probe_comments.dart — the only entrypoints; the probes are measurements, never wired in
   /lib/domain     freezed models mirroring the DTOs above
   /lib/data       RPC client
   /lib/ui         screens, tiles, player
@@ -264,6 +310,7 @@ cd sidecar && bun test          # parser tests, offline, no network
 cd sidecar && bun run check     # typecheck + lint + tests — run before calling it done
 cd sidecar && bun run test:network  # live decipher tests — real requests, ~24 MB
 cd sidecar && bun run capture   # refresh fixtures (needs YT_COOKIE)
+cd sidecar && bun run capture:viewer-state before|after   # fixtures in a known account state — read its header first
 cd sidecar && bun run build     # the sidecar alone — a release app needs `rill build`, see below
 setup.bat                       # fresh machine: FVM SDK, pub get, codegen, lint gate
 cd app && fvm dart run build_runner build --delete-conflicting-outputs   # codegen — see below
@@ -374,6 +421,26 @@ the answer.
   and make a useless corpus.
 - **Never mix fixtures across capture runs.** Clear the directory first. A stale
   file once produced a completely wrong reading of the live feed.
+- **But a wholesale clear only knows what it owns, and `sidecar/src/fixtures.ts`
+  is where that is declared — added 2026-09-20 (`todo.md` 41, now closed).**
+  Three comment fixtures sat in `fixtures/` for weeks with no stage of
+  `capture.ts` writing them, and `promoteStaging` replaces that directory
+  entirely: one routine `bun run capture` would have deleted all three, and
+  every test guarded by `hasFixture('comments…')` would then have **skipped
+  silently** — the unloadable-test-file trap, one directory over. `fixtures.ts`
+  now declares `CAPTURE_FILES` (what a run writes, each marked required or
+  conditional) and `CARRIED` (what it must preserve, each with the reason it
+  cannot be rebuilt), and the promote **refuses** rather than guesses: on any
+  entry owned by neither, and on any *required* file it failed to produce —
+  because replacing a good copy with nothing is the same loss arriving through
+  the owner instead of past it. Carried entries are copied, not moved, and
+  `prepareStaging` will not clear a staging directory holding one, which is the
+  crash window between the copy and the swap. **The rule that follows: a new
+  ad-hoc capture is declared in `fixtures.ts` or it is not written to
+  `fixtures/`.** Nothing else keeps it. `test/fixtures.test.ts` drives both
+  refusals against real directories and checks the declaration against
+  `capture.ts`'s actual stages, so a stage added without one fails offline
+  rather than a whole capture run later.
 - **Fixtures are one moment.** The home feed's renderer mix shifted measurably
   within 8½ hours. Never assert that a given surface contains a given
   generation; search the corpus for wherever it lives.
@@ -565,6 +632,43 @@ the answer.
   tail; anchor absent after a server re-seed) that an empty `items[]` would
   conflate. **`isInfinite` is `true` on every mix, including curated ones that
   run out after ~51 items** — never branch on it.
+- **A reply list is a tree the UI shows flat, and its count is a snapshot —
+  Task 27, measured 2026-09-18.** A reply-to-a-reply (`replyLevel` 2) nests in
+  its parent's `subThreads`; "Show more replies" is a *button*-shaped
+  continuation, not the `continuationEndpoint` a page of threads uses; and
+  `Comment.replyCount` lags removals — a signed-in view kept advertising a reply
+  the anonymous view already said was gone. The parser dropped all three until
+  then: a thread advertising 962 replies listed 5, with no way to continue.
+  `parseComments` now flattens nested replies (only a reply's own children, never
+  a top-level thread's inline ones) and reads both token shapes; the client trusts
+  the list it has *completely* fetched over the count it was told. `protocol.md`
+  §3.3 and `architecture.md` F30 have the shapes. Still open: a reply's own
+  "Show more replies" is unreachable (`todo.md` 39).
+- **A comment's like and heart are on a different entity than the comment —
+  Task 27, measured 2026-09-19.** `isLiked` and `creatorHearted` come from
+  `engagementToolbarStateEntityPayload` (via the view model's `toolbarStateKey`)
+  and nothing else. The comment's own `toolbar` has `heartActiveTooltip` on
+  **every** comment — the tooltip *for* a heart, not evidence of one — and
+  reading it marked 120 of 120 comments hearted where 4 were. `likeCount` is the
+  viewer's variant (`likeCountLiked` once they liked it). **`heartState` has two
+  "hearted" values**: the creator's own view of a video they own says
+  `..._HEARTED_EDITABLE`, and the first version of this read only the plain one.
+  `architecture.md` F33, F35.
+- **A viewer-state field is untested until a fixture holds the state —
+  measured 2026-09-20.** `creatorHearted`, `isLiked` and
+  `PlaylistMembership.containsVideo` were each wrong with an all-green suite,
+  because every fixture was captured with the account in whatever state it
+  happened to be in, and none held a liked comment, a hearted one, or a video in
+  Watch Later. `bun run capture:viewer-state <before|after>` captures a pair with
+  the account in a *known* state and refuses to write unless the raw response
+  proves it; its header has the recipe (like a video, subscribe, add to Watch
+  Later, like and heart your own comment on your own video, then undo it all).
+  `capture.ts` carries `fixtures/viewer-state/` across instead of deleting it,
+  because `src/fixtures.ts` declares it `CARRIED` — see the capture note above;
+  that declaration is the only thing standing between it and a recapture.
+  The assertions are `viewer-state.test.ts` (raw, local) and `corpus.test.ts`
+  (sanitised, runs anywhere). `canWatchLater` is *not* viewer state: it is `true`
+  on every tile, anonymous ones included. `architecture.md` F35.
 - **A release `rill.exe` is two processes, and the first one is the log.**
   In a Release build the process you start is a launcher: it starts a second
   `rill.exe` with stdout/stderr on a pipe and writes every line, redacted and
@@ -593,6 +697,5 @@ dated observations, not permanent properties.
 
 ## Deferred items
 
-- `MediaTile.onMore` is never wired up, so every 3-dot menu button on media tiles is disabled.
 - `ShortcutTooltip`'s plain tooltips show with no delay (the layout-crash risk described in architecture.md §2.8).
 - `deletePlaylist` does not assert that the delete actually succeeded (`assertSucceeded`).

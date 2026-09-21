@@ -503,6 +503,12 @@ async function handleRequest(request: RpcRequest) {
       const { getRelated } = await import('../video/info.ts');
       const result = await getRelated(await videoDeps(), { videoId, continuation });
       emitResponse(id, result);
+    } else if (method === 'video.comments') {
+      const videoId = optionalString(params, 'videoId', 'video.comments');
+      const continuation = optionalString(params, 'continuation', 'video.comments');
+      const { getComments } = await import('../video/info.ts');
+      const result = await getComments(await getBrowseSession(), { videoId, continuation });
+      emitResponse(id, result);
     } else if (method === 'mix.start') {
       // `playlistId`, not `videoId` — §3.3's old signature could not name
       // which of a video's several mixes was meant. `videoId` is the optional
@@ -574,6 +580,31 @@ async function handleRequest(request: RpcRequest) {
       const videoId = requireString(params, 'videoId', 'action.removeRating');
       const { removeRating } = await import('../actions/interaction.ts');
       const result = await removeRating(await getBrowseSession(), videoId);
+      emitResponse(id, result);
+    } else if (method === 'action.postComment') {
+      const createParams = requireString(params, 'createParams', 'action.postComment');
+      const commentText = requireString(params, 'commentText', 'action.postComment');
+      const { postComment } = await import('../actions/comments.ts');
+      const result = await postComment(await getBrowseSession(), createParams, commentText);
+      emitResponse(id, result);
+    } else if (method === 'action.replyToComment') {
+      const replyParams = requireString(params, 'replyParams', 'action.replyToComment');
+      const commentText = requireString(params, 'commentText', 'action.replyToComment');
+      const { replyToComment } = await import('../actions/comments.ts');
+      const result = await replyToComment(await getBrowseSession(), replyParams, commentText);
+      emitResponse(id, result);
+    } else if (method === 'action.deleteComment') {
+      const deleteParams = requireString(params, 'deleteParams', 'action.deleteComment');
+      const { deleteComment } = await import('../actions/comments.ts');
+      const result = await deleteComment(await getBrowseSession(), deleteParams);
+      emitResponse(id, result);
+    } else if (method === 'action.rateComment') {
+      // One of the comment's four server-supplied vote blobs, verbatim — the
+      // client picks which transition it wants, because it is the one holding
+      // the state the user is looking at.
+      const voteParams = requireString(params, 'params', 'action.rateComment');
+      const { rateComment } = await import('../actions/comments.ts');
+      const result = await rateComment(await getBrowseSession(), voteParams);
       emitResponse(id, result);
     } else if (method === 'action.subscribe') {
       const channelId = requireString(params, 'channelId', 'action.subscribe');

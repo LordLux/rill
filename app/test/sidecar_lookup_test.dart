@@ -10,6 +10,8 @@
 /// *not* have.
 library;
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 
@@ -78,4 +80,69 @@ void main() {
       expect(probed, lessThanOrEqualTo(9));
     });
   });
+
+  group('repoSidecarSrc — the stale-sidecar detector looks at the right source', () {
+    late Directory tmp;
+
+    setUp(() => tmp = Directory.systemTemp.createTempSync('rill-stale-'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    Directory make(String path) => Directory('${tmp.path}/$path')..createSync(recursive: true);
+
+    test('finds the checkout it is run from', () {
+      make('repo/sidecar/src');
+      make('repo/.git');
+
+      expect(RpcClient.repoSidecarSrc('${tmp.path}/repo')?.path,
+          '${tmp.path}/repo/sidecar/src'.replaceAll('/', Platform.pathSeparator == r'\' ? '/' : '/'));
+    });
+
+    test('walks up to it from a build output inside the checkout', () {
+      // The case the trap actually takes: a release build run from
+      // `app/build/windows/x64/runner/Release/`, inside the repository.
+      make('repo/sidecar/src');
+      make('repo/.git');
+      final release = make('repo/app/build/windows/x64/runner/Release');
+
+      expect(RpcClient.repoSidecarSrc(release.path), isNotNull);
+    });
+
+    test('ignores a bundled sidecar/src with no checkout above it', () {
+      // **The discrimination that makes this worth having.** A release bundle
+      // carries its own `sidecar/src`, and it is exactly as stale as the binary
+      // beside it — comparing the two would always agree and never warn, which
+      // is how the trap hides. Only a real checkout counts.
+      final bundle = make('bundle/sidecar/src');
+
+      expect(RpcClient.repoSidecarSrc(bundle.parent.parent.path), isNull);
+    });
+
+    test('a shipped app with nothing above it finds nothing, and says nothing', () {
+      expect(RpcClient.repoSidecarSrc(make('elsewhere').path), isNull);
+    });
+  });
+
+
+  test('client.dart imports no Flutter, because a plain Dart VM runs it', () {
+    // `test/orphan_test_helper.dart` imports `data/rpc/client.dart` and runs on
+    // the plain Dart VM, which has no `dart:ui`. A single
+    // `package:flutter/foundation.dart` import — added 2026-09-21 for
+    // `kDebugMode`, removed the same day — made that helper fail to *compile*,
+    // and the orphan test then failed with "Helper should print SIDECAR_PID"
+    // behind two hundred lines of framework errors. Same shape as CLAUDE.md's
+    // `animated_vector_gen` trap: a package re-exports `dart:ui` and drags the
+    // framework into a host that has none.
+    //
+    // One line here instead of that. Use the `assert` trick for debug-mode
+    // detection, not `kDebugMode`.
+    final source = File('lib/data/rpc/client.dart').readAsStringSync();
+    final flutterImports = RegExp(r"^import 'package:flutter/.*$", multiLine: true)
+        .allMatches(source)
+        .map((m) => m.group(0))
+        .toList();
+
+    expect(flutterImports, isEmpty,
+        reason: 'client.dart runs on the plain Dart VM via orphan_test_helper.dart');
+  });
+
 }
