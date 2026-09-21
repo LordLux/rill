@@ -144,3 +144,27 @@ export async function getRelated(
   const result = parseFeed(root, 'video.related');
   return { items: result.items, continuation: result.continuation };
 }
+
+import { parseComments } from '../parser/comments.ts';
+import type { CommentsResult } from '../types.ts';
+
+/**
+ * `video.comments` — the comments section or its continuation/sort/replies.
+ *
+ * Uses the same `/next` endpoint as related tiles and mixes.
+ */
+export async function getComments(
+  session: Session,
+  params: { videoId?: string | null; continuation?: string | null },
+): Promise<CommentsResult> {
+  const { videoId, continuation } = params;
+  if (!videoId && !continuation) {
+    throw new Error('video.comments requires videoId or continuation');
+  }
+
+  const raw = continuation
+    ? await session.execute('/next', { continuation })
+    : await session.execute('/next', { videoId: videoId! });
+
+  return parseComments(raw, 'video.comments');
+}

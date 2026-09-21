@@ -51,6 +51,7 @@ class RillTokens extends ThemeExtension<RillTokens> {
   /// [scrim]'s pure black, deliberately — `artist_panel_test.dart` pins it.
   final Color onPaleTint;
 
+  /// The red for the "LIVE" badge on a live stream or the red for a Heart
   final Color liveBadge;
 
   /// The close button's hover fill. Pressed applies alpha at the call site.

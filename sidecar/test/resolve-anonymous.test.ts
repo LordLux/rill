@@ -42,7 +42,7 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * The two places a cookie may be attached to a session, and why each is allowed.
+ * The three places a cookie may be attached to a session, and why each is allowed.
  *
  * Anything else is a bug this test exists to name.
  */
@@ -55,6 +55,11 @@ const COOKIE_ALLOWED = new Map<string, string>([
     'capture.ts',
     'the offline fixture-capture tool; not a request path, and it needs the ' +
       'personalised feed it is capturing',
+  ],
+  [
+    'capture-viewer-state.ts',
+    'the other offline capture tool, for the same reason: never on a request path, ' +
+      'and it needs the signed-in viewer whose state it is capturing',
   ],
 ]);
 
@@ -85,7 +90,7 @@ describe('the resolution path is anonymous', () => {
     expect(calls.map((c) => c.file)).toContain('rpc/server.ts');
   });
 
-  test('only the browse session and the capture tool pass a cookie', () => {
+  test('only the browse session and the capture tools pass a cookie', () => {
     const withCookie = calls.filter((c) => /\bcookie\b/.test(c.args)).map((c) => c.file);
     const unexpected = withCookie.filter((file) => !COOKIE_ALLOWED.has(file));
     expect(

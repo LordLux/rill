@@ -147,6 +147,39 @@ Windows process: `lib/probe_task19.dart`, one level up from this directory.
   `flutter build windows --release` (default target) afterward to put the real
   app back before testing anything else there.
 
+- **`../lib/probe_comments.dart`** — what a long comment list costs in frame
+  times (Task 27 §6). A real release process, because `flutter test` is JIT and
+  has no raster thread:
+
+  ```bash
+  cd app
+  fvm flutter build windows --release -t lib/probe_comments.dart
+  .\build\windows\x64\runner\Release\rill.exe    # drives itself; ~8 minutes; exits when done
+  ```
+
+  **Overwrites `build/windows/x64/runner/Release/`** like the Task 19 probe, so
+  `rill build` afterwards. It mounts the **real** `CommentsSection` over a
+  synthetic `CommentsSource` (no sidecar, no network), with avatars served from a
+  loopback HTTP server as real 88 px `NetworkImage` decodes and comment lengths
+  taken from a live page. The report goes to stdout *and* `RILL_PROBE_OUT`
+  (default `%TEMP%\rill-probe-comments.txt`), because a release `rill.exe`'s
+  stdout is not the console. Set `RILL_LOG_CAPTURE=0` so the process you start is
+  the one measured, not the launcher. `RILL_PROBE_PHASES` (default `ABC`) runs
+  only some phases — `C` alone takes about a minute — after the warm-up that
+  always runs.
+
+  Phases: **A** N top-level threads (20/100/500/1000), scrolling and a rebuild
+  burst; **A2** one full sweep, for what the image cache is left holding; **B** one
+  thread with M replies (20/100/500/1000) built in a single page — expand,
+  rebuild with the thread on screen, scroll, collapse and re-expand; **C** the
+  same thread loaded the way the app loads it, ~12 replies per click, reporting
+  the click's worst build frame against how many replies are already loaded. It
+  throws the first expand away (shaders and first-use paths, otherwise billed to
+  whichever M runs first) and prints whether the thread is actually in the tree
+  for each rebuild — the first draft of B did not check, and at M ≤ 100 the thread
+  had scrolled out of the viewport, so it measured nothing. `architecture.md` F34
+  has the numbers.
+
 - **`../lib/ui/player/libass_probe.dart`** — a static counters/timings sink
   `probe_task19.dart` reads. On its own it measures nothing: `libass_layer.dart`
   is not instrumented (the shipping file is byte-identical to HEAD). The

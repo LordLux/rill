@@ -16,7 +16,7 @@ import { parseFeed, parsePlayer, parseVideoDetail } from '../src/parser/index.ts
 import { logger, resetUnknownRenderers, unknownRendererCounts } from '../src/log.ts';
 import { countTiles } from '../src/innertube/session.ts';
 import { isPublishedText, isViewCountText } from '../src/parser/text.ts';
-import { walk, type JsonObject } from '../src/parser/tree.ts';
+import { get, walk, type JsonObject } from '../src/parser/tree.ts';
 import { firstChannelOrderViolation } from '../src/parser/channel-order.ts';
 import type { FeedItem } from '../src/types.ts';
 
@@ -116,43 +116,97 @@ const SHAPES = {
     isVerified: 'boolean',
     isArtistChannel: 'boolean',
   },
+  commentTextRun: {
+    startIndex: 'number',
+    length: 'number',
+  },
+  commentStyleRun: {
+    startIndex: 'number',
+    length: 'number',
+    weightLabel: 'string?',
+  },
+  commentCommandRun: {
+    startIndex: 'number',
+    length: 'number',
+    url: 'string?',
+    videoId: 'string?',
+    startTimeSeconds: 'number?',
+  },
+  commentText: {
+    content: 'string',
+    styleRuns: 'object[]?',
+    commandRuns: 'object[]?',
+  },
+  comment: {
+    id: 'string',
+    authorName: 'string',
+    authorAvatarUrl: 'string',
+    authorChannelId: 'string?',
+    isUploader: 'boolean',
+    isVerified: 'boolean',
+    text: 'object',
+    likeCount: 'string?',
+    publishedText: 'string?',
+    replyCount: 'number',
+    depth: 'number',
+    myRating: 'string',
+    creatorHearted: 'boolean',
+    isPinned: 'boolean',
+    repliesContinuation: 'string?',
+    replyParams: 'string?',
+    deleteParams: 'string?',
+    likeParams: 'string?',
+    unlikeParams: 'string?',
+    dislikeParams: 'string?',
+    undislikeParams: 'string?',
+  },
 } as const;
 
-function validateItem(item: FeedItem): string[] {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic shape validator, deliberately untyped input
+function validateShape(name: keyof typeof SHAPES, item: any, allowKind = false): string[] {
   const problems: string[] = [];
-  const shape = SHAPES[item.kind];
-  if (!shape) return [`unknown kind '${(item as { kind: string }).kind}'`];
+  const shape = SHAPES[name];
+  const expected = new Set([...Object.keys(shape)]);
+  if (allowKind) expected.add('kind');
 
-  const record = item as unknown as Record<string, unknown>;
-  const expected = new Set(['kind', ...Object.keys(shape)]);
-
-  for (const key of Object.keys(record)) {
-    if (!expected.has(key)) problems.push(`${item.kind}.${key}: not in the DTO`);
+  for (const key of Object.keys(item)) {
+    if (!expected.has(key)) problems.push(`${name}.${key}: not in the DTO`);
   }
 
   for (const [key, spec] of Object.entries(shape)) {
-    const value = record[key];
+    const value = item[key];
     if (value === undefined) {
-      problems.push(`${item.kind}.${key}: undefined (must be a value or null)`);
+      problems.push(`${name}.${key}: undefined (must be a value or null)`);
       continue;
     }
     const optional = spec.endsWith('?');
     const base = optional ? spec.slice(0, -1) : spec;
     if (value === null) {
-      if (!optional) problems.push(`${item.kind}.${key}: null but not nullable`);
+      if (!optional) problems.push(`${name}.${key}: null but not nullable`);
       continue;
     }
     if (base === 'string[]') {
       if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
-        problems.push(`${item.kind}.${key}: expected string[]`);
+        problems.push(`${name}.${key}: expected string[]`);
+      }
+      continue;
+    }
+    if (base === 'object[]') {
+      if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'object' || entry === null)) {
+        problems.push(`${name}.${key}: expected object[]`);
       }
       continue;
     }
     if (typeof value !== base) {
-      problems.push(`${item.kind}.${key}: expected ${base}, got ${typeof value}`);
+      problems.push(`${name}.${key}: expected ${base}, got ${typeof value}`);
     }
   }
   return problems;
+}
+
+function validateItem(item: FeedItem): string[] {
+  if (!SHAPES[item.kind as keyof typeof SHAPES]) return [`unknown kind '${(item as { kind: string }).kind}'`];
+  return validateShape(item.kind as keyof typeof SHAPES, item, true);
 }
 
 /**
@@ -213,6 +267,64 @@ function countMappable(raw: unknown, rendererKey: string): number {
   let count = 0;
   walk(raw, (node: JsonObject) => {
     if (Object.hasOwn(node, rendererKey) && !isAdShell(node[rendererKey])) count += 1;
+    return true;
+  });
+  return count;
+}
+
+/**
+ * How many thumbnail overlays in the raw tree carry `style`.
+ *
+ * A raw oracle for the two tests that used to name a video id. It counts the
+ * *signal*, wherever the capture put it, rather than asserting which fixture a
+ * given video landed in — the mistake that made both of them go red on the
+ * 2026-09-20 recapture for a reason that was not the parser.
+ */
+function countStyle(raw: unknown, style: string): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    const overlay = node['thumbnailOverlayTimeStatusRenderer'];
+    if (overlay && typeof overlay === 'object') {
+      if ((overlay as Record<string, unknown>)['style'] === style) count += 1;
+    }
+    return true;
+  });
+  return count;
+}
+
+/**
+ * How many music notes the raw tree carries — `clientResource.imageName`, the
+ * badge's own icon, which is what `isMusic` is read from. Reached by its own
+ * path rather than through `scanBadges`, so the oracle does not reuse the code
+ * under test.
+ */
+function countMusicBadges(raw: unknown): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    const resource = node['clientResource'];
+    if (resource && typeof resource === 'object') {
+      if ((resource as Record<string, unknown>)['imageName'] === 'MUSIC') count += 1;
+    }
+    return true;
+  });
+  return count;
+}
+
+/**
+ * How many owner badges of `style` the raw tree carries —
+ * `metadataBadgeRenderer.style`, which is what `scanOwnerBadges` reads.
+ *
+ * The third raw oracle, added for the same reason as the other two: the tests
+ * below named four specific ids from one capture, and an id is the one thing
+ * about a fixture guaranteed not to survive the next one.
+ */
+function countBadgeStyle(raw: unknown, style: string): number {
+  let count = 0;
+  walk(raw, (node: JsonObject) => {
+    const badge = node['metadataBadgeRenderer'];
+    if (badge && typeof badge === 'object') {
+      if ((badge as Record<string, unknown>)['style'] === style) count += 1;
+    }
     return true;
   });
   return count;
@@ -704,31 +816,69 @@ describe.if(HAS_CAPTURES)('shorts', () => {
   });
 
   // Task 21 §1: the *other* Shorts shape — an ordinary videoRenderer carrying
-  // a SHORTS-styled duration overlay — is classified, not stripped. By id,
-  // per the task's own mutation-check instruction: a hardcoded `false` would
-  // pass a test that only checked "the field exists".
-  // The fixture moves with the capture, because the Short does: in the Task 21
-  // capture it was `search-artist.json`'s `T0oRfI3PYCU`; re-captured
-  // 2026-09-14 that same video arrives inside a `gridShelfViewModel` of
-  // `shortsLockupViewModel`s (stripped whole, correctly), and the corpus's only
-  // SHORTS-styled `videoRenderer` is this watch-history entry. Checked against
-  // the raw overlay (`"style":"SHORTS"`), not against this parser's output.
-  test('a SHORTS-badged video is flagged isShort, and the badge is not duplicated', () => {
-    const items = parseFeed(history, 'history').items;
-    const short = items.find((item) => item.kind === 'video' && item.id === 'i7Cinf_GUto');
-    expect(short?.kind).toBe('video');
-    if (short?.kind !== 'video') return;
+  // a SHORTS-styled duration overlay — is classified, not stripped.
+  //
+  // **Synthetic, and that is now deliberate.** This used to name a video id,
+  // and the id moved with every capture: `search-artist.json`'s `T0oRfI3PYCU`
+  // in the Task 21 capture, a watch-history entry on 2026-09-14, and on the
+  // 2026-09-20 recapture **nothing at all** — that capture carries Shorts only
+  // as shelves (`shortsLockupViewModel`), which are stripped whole and
+  // correctly, and holds zero SHORTS-styled `videoRenderer`s anywhere. So the
+  // test went red for a reason that was not the parser, which is the failure
+  // CLAUDE.md's "fixtures are one moment" warns about, one level below the
+  // surface it names. A shape the corpus cannot be made to contain on demand
+  // is `premiere.test.ts`'s case, and this is the same answer: assert the
+  // shape inline, and let the corpus prove the *negative* below.
+  //
+  // Mutation-check note, from the task's own instruction: a hardcoded `false`
+  // in the reader is caught here, and a hardcoded `true` by the corpus test
+  // that follows — one of the two alone would miss half of it.
+  test('a SHORTS-badged videoRenderer is flagged isShort, and the badge is not duplicated', () => {
+    const feed = {
+      contents: [
+        {
+          videoRenderer: {
+            videoId: 'shortvid001',
+            title: { runs: [{ text: 'A classified Short' }] },
+            ownerText: { runs: [{ text: 'A Channel' }] },
+            thumbnail: { thumbnails: [{ url: 'https://i.ytimg.com/vi/shortvid001/hq.jpg', width: 480, height: 360 }] },
+            thumbnailOverlays: [
+              { thumbnailOverlayTimeStatusRenderer: { style: 'SHORTS', text: { simpleText: 'SHORTS' } } },
+            ],
+          },
+        },
+      ],
+    };
+    const items = parseFeed(feed, 'synthetic-short').items;
+    expect(items.length).toBe(1);
+    const short = items[0]!;
+    expect(short.kind).toBe('video');
+    if (short.kind !== 'video') return;
     expect(short.isShort).toBe(true);
+    // The fact has a field, so it does not also travel as a label.
     expect(short.badges).not.toContain('SHORTS');
   });
 
-  test.skipIf(!hasFixture('search-artist'))('an ordinary video is not flagged isShort', () => {
-    const raw = fixture('search-artist');
-    const items = parseFeed(raw, 'search-artist').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'MhViuFoLkbs');
-    expect(ordinary?.kind).toBe('video');
-    if (ordinary?.kind !== 'video') return;
-    expect(ordinary.isShort).toBe(false);
+  // The negative, across every video the capture actually holds — which is
+  // what the deleted `an ordinary video is not flagged isShort` was reaching
+  // for with a single id. A `SHORTS` style is a *necessary* condition for the
+  // flag and not a sufficient one: a style inside a stripped shelf has no item
+  // to flag, so this is a bound rather than an equality.
+  test('no video is flagged isShort beyond the SHORTS-styled overlays its fixture holds', () => {
+    let videos = 0;
+    // Collected rather than asserted in the loop, so a failure names the
+    // fixture and the two counts instead of just "expected 3 to be <= 0".
+    const over: Array<{ name: string; flagged: number; styled: number }> = [];
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const styled = countStyle(raw, 'SHORTS');
+      const list = parseFeed(raw, name).items.filter((item) => item.kind === 'video');
+      videos += list.length;
+      const flagged = list.filter((item) => item.isShort).length;
+      if (flagged > styled) over.push({ name, flagged, styled });
+    }
+    expect(over).toEqual([]);
+    // Not vacuous: an empty corpus would satisfy the bound above.
+    expect(videos).toBeGreaterThan(100);
   });
 });
 
@@ -737,70 +887,129 @@ describe.if(HAS_CAPTURES)('shorts', () => {
 // ---------------------------------------------------------------------------
 
 describe.if(HAS_CAPTURES)('music note (per video)', () => {
-  test('a video with a MUSIC-badged thumbnail is flagged isMusic, by id', () => {
-    const items = parseFeed(history, 'history').items;
-    const musicVideo = items.find((item) => item.kind === 'video' && item.id === '7i_nc5GGIsI');
-    expect(musicVideo?.kind).toBe('video');
-    if (musicVideo?.kind !== 'video') return;
-    expect(musicVideo.isMusic).toBe(true);
-  });
+  // Both halves in one pass over the corpus, because both used to name a video
+  // id — `history.json`'s `7i_nc5GGIsI` and `search.json`'s `zW5wpJY1rgQ` —
+  // and both ids were gone from the 2026-09-20 recapture. Which tile carries a
+  // music note is YouTube's choice on the day; that there *are* some, and that
+  // the parser flags exactly those, is the thing worth asserting.
+  //
+  // The oracle is the raw badge (`clientResource.imageName === 'MUSIC'`),
+  // counted by a path of its own rather than through `scanBadges`. A bound and
+  // not an equality, for the same reason as the Shorts test above: on
+  // 2026-09-20 `search-artist.json` held 10 raw music badges and 0 flagged
+  // items, all of them inside content the vocabulary strips whole.
+  test('the music note is read where the raw says it is, and nowhere else', () => {
+    let badges = 0;
+    let flagged = 0;
+    let plain = 0;
+    const over: Array<{ name: string; flagged: number; badges: number }> = [];
 
-  // A classic tile carrying no badge of any kind in the raw response — see
-  // the "flagged neither" test for why it is not a lockup.
-  test('an ordinary video is not flagged isMusic', () => {
-    const items = parseFeed(fixture('search'), 'search').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'zW5wpJY1rgQ');
-    expect(ordinary?.kind).toBe('video');
-    if (ordinary?.kind !== 'video') return;
-    expect(ordinary.isMusic).toBe(false);
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const raws = countMusicBadges(raw);
+      const list = parseFeed(raw, name).items.filter((item) => item.kind === 'video');
+      const music = list.filter((item) => item.isMusic).length;
+      badges += raws;
+      flagged += music;
+      plain += list.length - music;
+      if (music > raws) over.push({ name, flagged: music, badges: raws });
+    }
+
+    expect(over).toEqual([]);
+    // Non-vacuity, and the two classes. A reader hardcoded either way fails one
+    // of these: `true` empties `plain`, `false` empties `flagged`.
+    expect(badges).toBeGreaterThan(0);
+    expect(flagged).toBeGreaterThan(0);
+    expect(plain).toBeGreaterThan(0);
   });
 });
 
 describe.if(HAS_CAPTURES)('verified / artist-channel badges', () => {
-  // Search stopped carrying channel tiles at all in the 2026-09-14 capture (0
-  // `channelRenderer`s in either search fixture), so this reads the
-  // subscriptions list. Its raw badge is `BADGE_STYLE_TYPE_VERIFIED_ARTIST`
-  // with no plain `BADGE_STYLE_TYPE_VERIFIED` beside it.
-  test.skipIf(!hasFixture('channels'))('an official artist channel is flagged isArtistChannel, not isVerified', () => {
-    const items = parseFeed(fixture('channels'), 'channels').items;
-    const artist = items.find((item) => item.kind === 'channel' && item.id === 'UCUnHZYgNkPRP2lBIStjdrmA');
-    expect(artist?.kind).toBe('channel');
-    if (artist?.kind !== 'channel') return;
-    expect(artist.isArtistChannel).toBe(true);
-    expect(artist.isVerified).toBe(false);
+  // **Driven by the badge, not by an id.** These four tests used to name
+  // `UCUnHZYgNkPRP2lBIStjdrmA`, `rFZHOHl-L8A`, `mG1aeD7odqk` and
+  // `zW5wpJY1rgQ` — four ids from one capture — and survived the 2026-09-21
+  // recapture only by luck. Its siblings in the shorts and music blocks did
+  // not, and went red for a reason that was not the parser. "Fixtures are one
+  // moment; never assert that a given surface holds a given item" is the rule,
+  // and an id is the sharpest possible way to break it.
+  const ARTIST = 'BADGE_STYLE_TYPE_VERIFIED_ARTIST';
+  const VERIFIED = 'BADGE_STYLE_TYPE_VERIFIED';
+
+  /**
+   * Every item of the corpus that *can* carry an owner badge — a video or a
+   * channel. A mix and a playlist have no such fields at all, which is why this
+   * narrows rather than filtering later: the type says so.
+   */
+  type Badged = Extract<FeedItem, { isVerified: boolean }>;
+  const badged: Badged[] = Object.entries(CORPUS)
+    .flatMap(([name, raw]) => parseFeed(raw, name).items)
+    .filter((item): item is Badged => item.kind === 'video' || item.kind === 'channel');
+
+  test('the corpus carries both badges, on real items', () => {
+    // Non-vacuity first: every bound below is satisfied by an empty corpus.
+    expect(badged.filter((item) => item.isArtistChannel).length).toBeGreaterThan(0);
+    expect(badged.filter((item) => item.isVerified).length).toBeGreaterThan(0);
+    expect(badged.filter((item) => !item.isVerified && !item.isArtistChannel).length).toBeGreaterThan(0);
   });
 
-  test('a video from an official artist channel is flagged isArtistChannel', () => {
-    const search = fixture('search');
-    const items = parseFeed(search, 'search').items;
-    const artistVideo = items.find((item) => item.kind === 'video' && item.id === 'rFZHOHl-L8A');
-    expect(artistVideo?.kind).toBe('video');
-    if (artistVideo?.kind !== 'video') return;
-    expect(artistVideo.isArtistChannel).toBe(true);
-    expect(artistVideo.isVerified).toBe(false);
+  test('nothing is ever both — YouTube ships one badge per channel', () => {
+    // The invariant `VideoItem.isVerified` states in its own doc comment, and
+    // the one a reader that confused the two styles would break. 0 of 630.
+    expect(badged.filter((item) => item.isVerified && item.isArtistChannel)).toEqual([]);
+  });
+
+  test('neither flag is set beyond the badges its fixture actually holds', () => {
+    const over: Array<{ name: string; flag: string; flagged: number; raw: number }> = [];
+    for (const [name, raw] of Object.entries(CORPUS)) {
+      const items = parseFeed(raw, name).items.filter(
+        (item): item is Badged => item.kind === 'video' || item.kind === 'channel',
+      );
+      const artist = items.filter((item) => item.isArtistChannel).length;
+      const verified = items.filter((item) => item.isVerified).length;
+      // A bound rather than an equality: a badge inside stripped content, or on
+      // a renderer that produces no item, has nothing to flag (`mix` and
+      // `watch` on 2026-09-21 carried badges and zero flagged items).
+      if (artist > countBadgeStyle(raw, ARTIST)) {
+        over.push({ name, flag: 'isArtistChannel', flagged: artist, raw: countBadgeStyle(raw, ARTIST) });
+      }
+      if (verified > countBadgeStyle(raw, VERIFIED)) {
+        over.push({ name, flag: 'isVerified', flagged: verified, raw: countBadgeStyle(raw, VERIFIED) });
+      }
+    }
+    expect(over).toEqual([]);
+  });
+
+  test('an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    // A *channel* tile, which is a different mapper from a video's.
+    const artists = badged.filter((item) => item.kind === 'channel' && item.isArtistChannel);
+    expect(artists.length).toBeGreaterThan(0);
+    for (const artist of artists) {
+      expect(artist.isVerified).toBe(false);
+    }
+  });
+
+  test('a video from an official artist channel is flagged isArtistChannel, not isVerified', () => {
+    const artistVideos = badged.filter((item) => item.kind === 'video' && item.isArtistChannel);
+    expect(artistVideos.length).toBeGreaterThan(0);
+    for (const video of artistVideos) {
+      expect(video.isVerified).toBe(false);
+    }
   });
 
   test('a video from a plain verified channel is flagged isVerified, not isArtistChannel', () => {
-    const search = fixture('search');
-    const items = parseFeed(search, 'search').items;
-    const verifiedVideo = items.find((item) => item.kind === 'video' && item.id === 'mG1aeD7odqk');
-    expect(verifiedVideo?.kind).toBe('video');
-    if (verifiedVideo?.kind !== 'video') return;
-    expect(verifiedVideo.isVerified).toBe(true);
-    expect(verifiedVideo.isArtistChannel).toBe(false);
+    const verifiedVideos = badged.filter((item) => item.kind === 'video' && item.isVerified);
+    expect(verifiedVideos.length).toBeGreaterThan(0);
+    for (const video of verifiedVideos) {
+      expect(video.isArtistChannel).toBe(false);
+    }
   });
 
   // Deliberately a *classic* tile. A lockup would pass this for the wrong
   // reason: `scanOwnerBadges` reads only `metadataBadgeRenderer`, and a
   // lockup carries its tick as an `attachmentRuns` image on the channel name,
   // so no lockup is ever flagged verified (open defect, CLAUDE.md).
-  test('an unbadged channel/video is flagged neither', () => {
-    const items = parseFeed(fixture('search'), 'search').items;
-    const ordinary = items.find((item) => item.kind === 'video' && item.id === 'zW5wpJY1rgQ');
-    expect(ordinary?.kind).toBe('video');
-    if (ordinary?.kind !== 'video') return;
-    expect(ordinary.isVerified).toBe(false);
-    expect(ordinary.isArtistChannel).toBe(false);
+  test('an unbadged video is flagged neither', () => {
+    const plain = badged.filter((item) => item.kind === 'video' && !item.isVerified && !item.isArtistChannel);
+    expect(plain.length).toBeGreaterThan(0);
   });
 });
 
@@ -1409,6 +1618,496 @@ describe.if(HAS_CAPTURES)('parseVideoDetail', () => {
   });
 });
 
+import { parseComments } from '../src/parser/comments.ts';
+describe('video.comments (Task 27)', () => {
+  test.if(hasFixture('comments'))('parses comments from a /next response', () => {
+    const raw = fixture('comments');
+    const result = parseComments(raw, 'comments');
+    
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.continuation).toBeString();
+    expect(result.chips?.length).toBeGreaterThan(0);
+    // The shape, not the number. This read `'86,800 Comments'` while the fixture
+    // was a one-off ad-hoc capture; it is a stage of `bun run capture` now
+    // (`todo.md` 41), so a hardcoded count would go red on the next recapture
+    // for a reason that is not the parser.
+    expect(result.commentCount).toMatch(/^[\d,.]+[KMB]? Comments?$/);
+
+    for (const item of result.items) {
+      expect(validateShape('comment', item)).toEqual([]);
+    }
+  });
+
+  test.if(hasFixture('comments-replies'))('parses comment replies', () => {
+    const raw = fixture('comments-replies');
+    const result = parseComments(raw, 'comments-replies');
+
+    expect(result.items.length).toBeGreaterThan(0);
+    // Replies might not have chips
+
+    for (const item of result.items) {
+      expect(validateShape('comment', item)).toEqual([]);
+    }
+  });
+
+  // Synthetic rather than fixture-based: `sidecar/fixtures/comments.json` was
+  // captured anonymously (no session), so every real comment in it carries no
+  // reply/delete commands at all — it cannot exercise the populated case.
+  // Shape verified live 2026-09-18 against an authenticated session.
+  function threadWithSurfaceEntity(surfaceEntityPayload: Record<string, unknown> | null) {
+    const mutations: unknown[] = [
+      {
+        payload: {
+          commentEntityPayload: {
+            key: 'comment-key',
+            properties: { commentId: 'UgxTest', content: { content: 'hi' } },
+            author: { displayName: 'Someone', avatarThumbnailUrl: 'https://example.com/a.jpg' },
+            toolbar: {},
+          },
+        },
+      },
+    ];
+    if (surfaceEntityPayload) {
+      mutations.push({ payload: { engagementToolbarSurfaceEntityPayload: { key: 'surface-key', ...surfaceEntityPayload } } });
+    }
+    return {
+      frameworkUpdates: { entityBatchUpdate: { mutations } },
+      onResponseReceivedEndpoints: [
+        {
+          reloadContinuationItemsCommand: {
+            continuationItems: [
+              {
+                commentThreadRenderer: {
+                  commentViewModel: {
+                    commentViewModel: { commentKey: 'comment-key', toolbarSurfaceKey: 'surface-key' },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+  }
+
+  test('extracts replyParams and deleteParams when the toolbar surface carries them', () => {
+    const raw = threadWithSurfaceEntity({
+      replyCommand: {
+        innertubeCommand: {
+          createCommentReplyDialogEndpoint: {
+            dialog: {
+              commentReplyDialogRenderer: {
+                replyButton: {
+                  buttonRenderer: {
+                    serviceEndpoint: { createCommentReplyEndpoint: { createReplyParams: 'REPLY_TOKEN' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      menuCommand: {
+        innertubeCommand: {
+          menuEndpoint: {
+            menu: {
+              menuRenderer: {
+                items: [
+                  {
+                    menuNavigationItemRenderer: {
+                      text: { runs: [{ text: 'Delete' }] },
+                      navigationEndpoint: {
+                        confirmDialogEndpoint: {
+                          content: {
+                            confirmDialogRenderer: {
+                              confirmButton: {
+                                buttonRenderer: {
+                                  serviceEndpoint: { performCommentActionEndpoint: { action: 'DELETE_TOKEN' } },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = parseComments(raw, 'synthetic');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.replyParams).toBe('REPLY_TOKEN');
+    expect(result.items[0]?.deleteParams).toBe('DELETE_TOKEN');
+  });
+
+  test('leaves replyParams and deleteParams null for an anonymous viewer', () => {
+    // No engagementToolbarSurfaceEntityPayload at all — the anonymous shape,
+    // matching sidecar/fixtures/comments.json's real create-box behaviour
+    // (a prepareAccountCommand instead of a real endpoint).
+    const raw = threadWithSurfaceEntity(null);
+    const result = parseComments(raw, 'synthetic');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.replyParams).toBeNull();
+    expect(result.items[0]?.deleteParams).toBeNull();
+  });
+
+  test('leaves deleteParams null when the menu has no Delete item (not the viewer\'s own comment)', () => {
+    const raw = threadWithSurfaceEntity({
+      replyCommand: {
+        innertubeCommand: {
+          createCommentReplyDialogEndpoint: {
+            dialog: {
+              commentReplyDialogRenderer: {
+                replyButton: {
+                  buttonRenderer: {
+                    serviceEndpoint: { createCommentReplyEndpoint: { createReplyParams: 'REPLY_TOKEN' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      menuCommand: {
+        innertubeCommand: {
+          menuEndpoint: {
+            menu: { menuRenderer: { items: [{ menuNavigationItemRenderer: { text: { runs: [{ text: 'Report' }] } } }] } },
+          },
+        },
+      },
+    });
+
+    const result = parseComments(raw, 'synthetic');
+    expect(result.items[0]?.replyParams).toBe('REPLY_TOKEN');
+    expect(result.items[0]?.deleteParams).toBeNull();
+  });
+});
+
+// The reply tree, the reply list's load-more button, and the comment box's
+// token — all measured live 2026-09-18 (`protocol.md` §3.3, "A reply list is a
+// tree that the UI shows flat"), and all built here from the real shapes rather
+// than from a fixture: the checked-in comment fixtures are anonymous and
+// shallow, so none of them contains a nested reply, a load-more button or a
+// signed-in comment box. Each test below fails against the parser as it stood
+// before that measurement.
+describe('video.comments — reply tree, pagination and the comment box', () => {
+  /** A comment entity plus the (empty) toolbar-surface entity its view model points at. */
+  function commentEntities(key: string, id: string, replyLevel: number): unknown[] {
+    return [
+      {
+        payload: {
+          commentEntityPayload: {
+            key,
+            properties: { commentId: id, content: { content: `text of ${id}` }, replyLevel },
+            author: { displayName: `Author of ${id}`, avatarThumbnailUrl: 'https://example.com/a.jpg' },
+            toolbar: {},
+          },
+        },
+      },
+      { payload: { engagementToolbarSurfaceEntityPayload: { key: `${key}-surface` } } },
+    ];
+  }
+
+  function thread(key: string, subThreads: unknown[] = []): unknown {
+    return {
+      commentThreadRenderer: {
+        commentViewModel: { commentViewModel: { commentKey: key, toolbarSurfaceKey: `${key}-surface` } },
+        ...(subThreads.length ? { replies: { commentRepliesRenderer: { subThreads } } } : {}),
+      },
+    };
+  }
+
+  function page(items: unknown[], mutations: unknown[]): unknown {
+    return {
+      frameworkUpdates: { entityBatchUpdate: { mutations } },
+      onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: items } }],
+    };
+  }
+
+  /** The "Show more replies" control: a button, not a `continuationEndpoint`. */
+  function moreRepliesButton(token: string): unknown {
+    return {
+      continuationItemRenderer: {
+        button: { buttonRenderer: { command: { continuationCommand: { token } } } },
+      },
+    };
+  }
+
+  test('a reply nested inside a reply is listed, after its parent', () => {
+    const raw = page(
+      [thread('r1', [thread('r2')])],
+      [...commentEntities('r1', 'reply-1', 1), ...commentEntities('r2', 'reply-2', 2)],
+    );
+    // The advertised count for such a thread is 2; the parser used to list 1.
+    expect(parseComments(raw, 'synthetic').items.map((c) => c.id)).toEqual(['reply-1', 'reply-2']);
+  });
+
+  test('replies nested more than one level down are all listed, depth-first', () => {
+    const raw = page(
+      [thread('r1', [thread('r2', [thread('r3')]), thread('r4')]), thread('r5')],
+      [
+        ...commentEntities('r1', 'reply-1', 1),
+        ...commentEntities('r2', 'reply-2', 2),
+        ...commentEntities('r3', 'reply-3', 3),
+        ...commentEntities('r4', 'reply-4', 2),
+        ...commentEntities('r5', 'reply-5', 1),
+      ],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => c.id)).toEqual([
+      'reply-1', 'reply-2', 'reply-3', 'reply-4', 'reply-5',
+    ]);
+    expect(items.map((c) => c.depth)).toEqual([1, 2, 3, 2, 1]);
+  });
+
+  test("a top-level comment's inline replies are not spliced into the main list", () => {
+    // The flattening is for a reply's own children only. Done for a level-0
+    // thread it would put replies among the top-level comments.
+    const raw = page(
+      [thread('t1', [thread('r1')])],
+      [...commentEntities('t1', 'top-1', 0), ...commentEntities('r1', 'reply-1', 1)],
+    );
+    expect(parseComments(raw, 'synthetic').items.map((c) => c.id)).toEqual(['top-1']);
+  });
+
+  test("a reply list's load-more token is read from the button shape", () => {
+    // 962 advertised replies, 5 listed, no way to load more — the token was
+    // there the whole time, in a shape nothing read.
+    const raw = page(
+      [thread('r1'), moreRepliesButton('MORE_REPLIES')],
+      commentEntities('r1', 'reply-1', 1),
+    );
+    expect(parseComments(raw, 'synthetic').continuation).toBe('MORE_REPLIES');
+  });
+
+  test('a page of threads still reads its continuationEndpoint token', () => {
+    const raw = page(
+      [
+        thread('t1'),
+        { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'MORE_THREADS' } } } },
+      ],
+      commentEntities('t1', 'top-1', 0),
+    );
+    expect(parseComments(raw, 'synthetic').continuation).toBe('MORE_THREADS');
+  });
+
+  test("a thread's replies token can be the button shape too", () => {
+    const raw = page([thread('t1', [moreRepliesButton('OPEN_REPLIES')])], commentEntities('t1', 'top-1', 0));
+    expect(parseComments(raw, 'synthetic').items[0]?.repliesContinuation).toBe('OPEN_REPLIES');
+  });
+
+  describe('createParams', () => {
+    const header = (createRenderer: unknown): unknown => ({
+      commentsHeaderRenderer: { countText: { runs: [{ text: '4 Comments' }] }, createRenderer },
+    });
+    const signedIn = {
+      commentSimpleboxRenderer: {
+        submitButton: {
+          buttonRenderer: {
+            serviceEndpoint: { createCommentEndpoint: { createCommentParams: 'CREATE_TOKEN' } },
+          },
+        },
+      },
+    };
+    // What the anonymous fixture actually holds: a sign-in prompt, no endpoint.
+    const anonymous = {
+      commentSimpleboxRenderer: { prepareAccountEndpoint: { modalEndpoint: {} } },
+    };
+
+    test('is read off the comment box for a signed-in viewer', () => {
+      expect(parseComments(page([header(signedIn)], []), 'synthetic').createParams).toBe('CREATE_TOKEN');
+    });
+
+    test('is null for an anonymous viewer, whose box is a sign-in prompt', () => {
+      expect(parseComments(page([header(anonymous)], []), 'synthetic').createParams).toBeNull();
+    });
+
+    test('is null on a page with no header — a continuation carries none', () => {
+      const raw = page([thread('t1')], commentEntities('t1', 'top-1', 0));
+      expect(parseComments(raw, 'synthetic').createParams).toBeNull();
+    });
+  });
+});
+
+describe("video.comments — the viewer's like and the creator's heart", () => {
+  type State = { likeState?: string; heartState?: string };
+  const LIKED = { likeState: 'TOOLBAR_LIKE_STATE_LIKED', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED' };
+  const HEARTED = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_HEARTED' };
+  const NEITHER = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED' };
+  // The creator's own view of their own video's comments (measured 2026-09-20): the same
+  // two facts, under different names — `_EDITABLE` because the creator can toggle the heart.
+  const CREATOR_HEARTED = { likeState: 'TOOLBAR_LIKE_STATE_LIKED', heartState: 'TOOLBAR_HEART_STATE_HEARTED_EDITABLE' };
+  const CREATOR_UNHEARTED = { likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT', heartState: 'TOOLBAR_HEART_STATE_UNHEARTED_EDITABLE' };
+
+  /**
+   * A comment entity shaped like a real toolbar — including the two things the
+   * old parser misread. `heartActiveTooltip` is on **every** comment, hearted or
+   * not (measured 2026-09-19, 120 of 120), and the count ships twice, with the
+   * viewer's like in it and without. `state: null` leaves the state entity out.
+   */
+  function comment(key: string, id: string, state: State | null, replyLevel = 0): unknown[] {
+    const out: unknown[] = [
+      {
+        payload: {
+          commentEntityPayload: {
+            key,
+            properties: { commentId: id, content: { content: `text of ${id}` }, replyLevel },
+            author: { displayName: `Author of ${id}`, avatarThumbnailUrl: 'https://example.com/a.jpg' },
+            toolbar: {
+              likeCountLiked: '11',
+              likeCountNotliked: '10',
+              likeCountA11y: '10 likes',
+              heartActiveTooltip: '❤ by @creator',
+            },
+          },
+        },
+      },
+    ];
+    if (state) out.push({ payload: { engagementToolbarStateEntityPayload: { key: `${key}-state`, ...state } } });
+    return out;
+  }
+
+  function thread(key: string, subThreads: unknown[] = []): unknown {
+    return {
+      commentThreadRenderer: {
+        commentViewModel: {
+          commentViewModel: { commentKey: key, toolbarStateKey: `${key}-state` },
+        },
+        ...(subThreads.length ? { replies: { commentRepliesRenderer: { subThreads } } } : {}),
+      },
+    };
+  }
+
+  function page(items: unknown[], mutations: unknown[]): unknown {
+    return {
+      frameworkUpdates: { entityBatchUpdate: { mutations } },
+      onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: items } }],
+    };
+  }
+
+  test('a comment the viewer liked is isLiked, and the others are not', () => {
+    const raw = page(
+      [thread('a'), thread('b'), thread('c')],
+      [...comment('a', 'liked', LIKED), ...comment('b', 'hearted', HEARTED), ...comment('c', 'plain', NEITHER)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.myRating === 'like'])).toEqual([['liked', true], ['hearted', false], ['plain', false]]);
+  });
+
+  test('creatorHearted follows the heart state, not the tooltip every comment carries', () => {
+    // All three carry `heartActiveTooltip`; exactly one is hearted. The
+    // tooltip-based reading reported all three — measured live as 120 of 120.
+    const raw = page(
+      [thread('a'), thread('b'), thread('c')],
+      [...comment('a', 'liked', LIKED), ...comment('b', 'hearted', HEARTED), ...comment('c', 'plain', NEITHER)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.creatorHearted])).toEqual([['liked', false], ['hearted', true], ['plain', false]]);
+  });
+
+  test('a comment can be both liked and hearted', () => {
+    const both = { likeState: LIKED.likeState, heartState: HEARTED.heartState };
+    const [item] = parseComments(page([thread('a')], comment('a', 'both', both)), 'synthetic').items;
+    expect([item!.myRating === 'like', item!.creatorHearted]).toEqual([true, true]);
+  });
+
+  test("the creator's own view: a heart they gave reads as hearted, one they have not given does not", () => {
+    // The first version compared `heartState` to the plain `..._HEARTED` and so read
+    // every comment the creator had hearted as un-hearted, on their own video. It was
+    // checked on six videos, all seen as a non-creator, and never met this value.
+    const raw = page(
+      [thread('a'), thread('b')],
+      [...comment('a', 'given', CREATOR_HEARTED), ...comment('b', 'not-given', CREATOR_UNHEARTED)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.creatorHearted])).toEqual([['given', true], ['not-given', false]]);
+    expect(items.map((c) => [c.id, c.myRating === 'like'])).toEqual([['given', true], ['not-given', false]]);
+  });
+
+  test("the count is the viewer's own: with their like in it when they liked the comment", () => {
+    // A liked comment: `likeCountLiked` 11 / `likeCountNotliked` 10 — the shape
+    // measured 2026-09-19 (737 / 736, a11y "737 likes"). Shipping the un-liked
+    // one showed a comment you liked one like short, beside a filled thumb.
+    const raw = page(
+      [thread('a'), thread('b')],
+      [...comment('a', 'liked', LIKED), ...comment('b', 'plain', NEITHER)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => c.likeCount)).toEqual(['11', '10']);
+  });
+
+  test('a comment with no state entity is neither liked nor hearted, and is still shipped', () => {
+    // The view model names a state key the batch does not hold. Not a reason to
+    // drop the comment (CLAUDE.md, "still ship the item"): the answer is false.
+    const raw = page([thread('a')], comment('a', 'orphan', null));
+    const [item] = parseComments(raw, 'synthetic').items;
+    expect(item!.id).toBe('orphan');
+    expect([item!.myRating === 'like', item!.creatorHearted]).toEqual([false, false]);
+    expect(item!.likeCount).toBe('10');
+  });
+
+  test('a view model with no toolbarStateKey at all reads the same way', () => {
+    const noKey = {
+      commentThreadRenderer: { commentViewModel: { commentViewModel: { commentKey: 'a' } } },
+    };
+    const [item] = parseComments(page([noKey], comment('a', 'keyless', LIKED)), 'synthetic').items;
+    expect([item!.myRating === 'like', item!.creatorHearted]).toEqual([false, false]);
+  });
+
+  test('a reply carries its own state, including one nested under another reply', () => {
+    const raw = page(
+      [thread('r1', [thread('r2')])],
+      [...comment('r1', 'reply-1', NEITHER, 1), ...comment('r2', 'reply-2', LIKED, 2)],
+    );
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => [c.id, c.myRating === 'like'])).toEqual([['reply-1', false], ['reply-2', true]]);
+  });
+
+  // The dedicated signed-in capture (`fixtures/comments-viewer-state.json`, a
+  // page with liked and hearted comments in it). What it must hold is computed
+  // from the raw entities here, not written down, so a recapture on another
+  // video or day cannot make this pass or fail for a reason that is not the parser.
+  function rawStates(raw: unknown): { liked: number; hearted: number } {
+    let liked = 0;
+    let hearted = 0;
+    const mutations = get(raw, 'frameworkUpdates', 'entityBatchUpdate', 'mutations');
+    for (const m of Array.isArray(mutations) ? mutations : []) {
+      const state = get(m, 'payload', 'engagementToolbarStateEntityPayload');
+      if (get(state, 'likeState') === 'TOOLBAR_LIKE_STATE_LIKED') liked++;
+      if (get(state, 'heartState') === 'TOOLBAR_HEART_STATE_HEARTED') hearted++;
+    }
+    return { liked, hearted };
+  }
+
+  test.if(hasFixture('comments-viewer-state'))('a real signed-in page reads the states its entities hold', () => {
+    const raw = fixture('comments-viewer-state');
+    const truth = rawStates(raw);
+    const items = parseComments(raw, 'comments-viewer-state').items;
+
+    // The capture is only a control if the states are actually in it.
+    expect(truth.liked).toBeGreaterThan(0);
+    expect(truth.hearted).toBeGreaterThan(0);
+    expect(truth.hearted).toBeLessThan(items.length);
+
+    expect(items.filter((c) => c.myRating === 'like').length).toBe(truth.liked);
+    expect(items.filter((c) => c.creatorHearted).length).toBe(truth.hearted);
+  });
+
+  test.if(hasFixture('comments'))('an anonymous page never reads as liked, and hearts are not universal', () => {
+    const raw = fixture('comments');
+    const truth = rawStates(raw);
+    const items = parseComments(raw, 'comments').items;
+    expect(truth.liked).toBe(0);
+    expect(items.some((c) => c.myRating === 'like')).toBe(false);
+    expect(items.filter((c) => c.creatorHearted).length).toBe(truth.hearted);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Any other fixture the capture run produced
 // ---------------------------------------------------------------------------
@@ -1436,3 +2135,4 @@ describe.if(HAS_CAPTURES)('captured corpus', () => {
     expect(result.items.length).toBeGreaterThan(0);
   });
 });
+

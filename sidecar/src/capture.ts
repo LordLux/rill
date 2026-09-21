@@ -17,15 +17,24 @@
  * Every capture is independent: one failing endpoint is recorded in the manifest
  * and the rest continue. A degraded session, however, aborts the whole run —
  * fixtures captured through an empty shell are worse than no fixtures.
+ *
+ * Clearing wholesale is only safe because this run knows what it owns. It does
+ * not delete a file it cannot account for, and it does not delete a file it
+ * failed to replace: `fixtures.ts` declares both sides and this script refuses
+ * rather than guesses. See `todo.md` 41 for the three fixtures that sat here
+ * owned by nothing.
  */
 
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { logger, logUnknownRendererSummary } from './log.ts';
 import { createSession, playerPayload, verifyAuth, type Session } from './innertube/session.ts';
 import { parseFeed } from './parser/index.ts';
+import { parseComments } from './parser/comments.ts';
+import { parseVideoDetail } from './parser/video.ts';
+import { CARRIED, CAPTURE_FILES, lostFixtures, unownedEntries } from './fixtures.ts';
 
 const log = logger('capture');
 
@@ -64,6 +73,16 @@ interface ManifestEntry {
 
 const manifest: ManifestEntry[] = [];
 
+/** Every entry of a directory, or `[]` when it does not exist. */
+async function listDir(path: string): Promise<string[]> {
+  try {
+    return await readdir(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
 async function capture(
   name: string,
   endpoint: string,
@@ -71,6 +90,13 @@ async function capture(
   run: () => Promise<unknown>,
   client = 'WEB',
 ): Promise<unknown> {
+  // Outside the try on purpose: an undeclared stage is a programming error, not
+  // a failed endpoint, and recording it as one would hide it. Without this the
+  // mistake surfaces a whole run later, as the *next* run refusing to promote
+  // over the file this one left behind.
+  if (!CAPTURE_FILES.some((file) => file.name === `${name}.json`)) {
+    throw new Error(`capture('${name}') is not declared in src/fixtures.ts — add it there first`);
+  }
   const capturedAt = new Date().toISOString();
   try {
     const raw = await run();
@@ -102,21 +128,77 @@ async function capture(
   }
 }
 
-/** Fresh staging directory. Never mix runs. */
-async function prepareStaging(): Promise<void> {
-  await rm(STAGING, { recursive: true, force: true });
-  await mkdir(STAGING, { recursive: true });
+/**
+ * Fresh staging directory. Never mix runs. Answers `false` when it refused,
+ * having said why — the caller exits.
+ *
+ * The one thing it will not delete is a carried entry. `promoteStaging` copies
+ * those in before the swap, so a run that dies in that window leaves the only
+ * copy here — and clearing staging on the next run would finish the job. That
+ * is the failure this guard exists for; it cannot be reached by a run that
+ * completed.
+ */
+export async function prepareStaging(staging = STAGING): Promise<boolean> {
+  const stranded = (await listDir(staging)).filter((entry) => CARRIED.includes(entry));
+  if (stranded.length > 0) {
+    log.error(`fixtures.partial/ holds carried fixtures: ${stranded.join(', ')}`);
+    log.error('A previous run died mid-promote and this may be the only copy.');
+    log.error('Move them back into fixtures/ yourself, then re-run. Nothing was deleted.');
+    return false;
+  }
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
+  return true;
 }
 
 /**
  * Replace `fixtures/` with this run, wholesale. A stale file left behind from an
  * earlier run once produced a completely wrong reading of the live feed, so the
  * old directory goes in its entirety — no merging, ever.
+ *
+ * "Wholesale" is bounded by `fixtures.ts`: this refuses to delete anything it
+ * cannot account for, and anything required that it failed to replace. Carried
+ * entries are **copied** rather than moved, so until the swap the originals are
+ * still where they were.
+ *
+ * Answers `false` when it refused, having said why, and having changed nothing.
+ * Returning rather than exiting is what makes the destructive path testable
+ * against real directories instead of reasoned about.
  */
-async function promoteStaging(): Promise<void> {
-  await rm(FIXTURES, { recursive: true, force: true });
-  await rename(STAGING, FIXTURES);
+export async function promoteStaging(fixtures = FIXTURES, staging = STAGING): Promise<boolean> {
+  const live = await listDir(fixtures);
+
+  const unowned = unownedEntries(live);
+  if (unowned.length > 0) {
+    log.error(
+      `refusing to replace fixtures/: ${unowned.length} entr${unowned.length === 1 ? 'y' : 'ies'} owned by nothing`,
+    );
+    for (const entry of unowned) log.error(`  ${entry}`);
+    log.error('This run is intact in fixtures.partial/ and fixtures/ is untouched.');
+    log.error('Declare each one in src/fixtures.ts — as a capture stage or as carried —');
+    log.error("or delete it deliberately and re-run. Deleting is not this script's to do.");
+    return false;
+  }
+
+  const lost = lostFixtures(live, await listDir(staging));
+  if (lost.length > 0) {
+    log.error(`refusing to replace fixtures/: this run did not produce ${lost.join(', ')}`);
+    log.error('Promoting would delete a good copy and put nothing in its place.');
+    log.error('The manifest above says why each failed. Re-run, or delete the stale file');
+    log.error('deliberately if the stage is genuinely gone.');
+    return false;
+  }
+
+  for (const entry of CARRIED) {
+    if (!live.includes(entry)) continue;
+    await cp(join(fixtures, entry), join(staging, entry), { recursive: true });
+    log.info(`carried ${entry} across`);
+  }
+
+  await rm(fixtures, { recursive: true, force: true });
+  await rename(staging, fixtures);
   log.info('fixtures/ replaced with this run');
+  return true;
 }
 
 /** First id of a given kind in a parsed feed, so captures chain off real data. */
@@ -146,7 +228,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  await prepareStaging();
+  if (!(await prepareStaging())) process.exit(1);
 
   // --- Feeds ---------------------------------------------------------------
   const home = await capture('home', '/browse', { browseId: 'FEwhat_to_watch' }, () =>
@@ -248,6 +330,51 @@ async function main(): Promise<void> {
     session.execute('/next', { videoId: PLAYER_VIDEO }),
   );
 
+  // --- Comments ------------------------------------------------------------
+  // Both were captured ad hoc and lived here owned by nothing until `todo.md`
+  // 41. Chained off live data like the playlist and mix stages above, for the
+  // same reason: a hardcoded comment id rots.
+  //
+  // **Anonymous on purpose, and it is not an oversight.** `comments.json` is the
+  // negative control for the viewer's like state — an anonymous page reads
+  // `INDIFFERENT` on every comment (F33), which is what makes a liked one
+  // anywhere else evidence of something. The signed-in counterpart is
+  // `comments-viewer-state.json`, which this run carries across rather than
+  // writes; `src/fixtures.ts` says why it cannot write it.
+  const anonymousWeb = await createSession({ clientType: 'WEB' });
+  const anonymousWatch = await anonymousWeb.execute('/next', { videoId: PLAYER_VIDEO });
+  const commentsToken = parseVideoDetail(anonymousWatch, 'capture').commentsContinuation;
+
+  let commentsRaw: unknown = null;
+  if (commentsToken) {
+    commentsRaw = await capture(
+      'comments',
+      '/next',
+      { videoId: PLAYER_VIDEO, continuation: '<comments token>' },
+      () => anonymousWeb.execute('/next', { continuation: commentsToken }),
+    );
+  } else {
+    log.error(`no comments continuation on ${PLAYER_VIDEO} — comments fixtures will be missing`);
+  }
+
+  // A thread with replies. `repliesContinuation` is the load-more token, which
+  // is button-shaped on a reply and endpoint-shaped on a thread (F30) —
+  // `parseComments` reads both, so this does not care which it got.
+  const repliesToken = commentsRaw
+    ? (parseComments(commentsRaw, 'capture').items.find((item) => item.repliesContinuation)
+        ?.repliesContinuation ?? null)
+    : null;
+  if (repliesToken) {
+    await capture(
+      'comments-replies',
+      '/next',
+      { videoId: PLAYER_VIDEO, continuation: '<replies token>' },
+      () => anonymousWeb.execute('/next', { continuation: repliesToken }),
+    );
+  } else if (commentsRaw) {
+    log.error('no thread on the first comments page has replies — comments-replies will be missing');
+  }
+
   // --- Player responses ----------------------------------------------------
   // Two clients, two independent calls (§2.3). WEB is expected to come back
   // SABR-only (F3) — capturing it anyway is the point: it is the fixture that
@@ -304,6 +431,17 @@ async function main(): Promise<void> {
     const name = entry.file.replace(/\.json$/, '');
     try {
       const raw = JSON.parse(await readFile(join(STAGING, entry.file), 'utf8'));
+      // A comments page is not a feed. Running `parseFeed` over one reports zero
+      // items and fills the unknown-renderer summary with comment renderers,
+      // which reads as a vocabulary gap and is not one.
+      if (name.startsWith('comments')) {
+        const { items, continuation } = parseComments(raw, name);
+        log.info(
+          `${name.padEnd(20)} ${String(items.length).padStart(4)} comments  ` +
+            `continuation=${continuation ? 'yes' : 'no'}`,
+        );
+        continue;
+      }
       const { items, chips, continuation } = parseFeed(raw, name);
       log.info(
         `${name.padEnd(20)} ${String(items.length).padStart(4)} items  ` +
@@ -317,7 +455,10 @@ async function main(): Promise<void> {
 
   logUnknownRendererSummary();
 
-  await promoteStaging();
+  if (!(await promoteStaging())) process.exit(1);
 }
 
-await main();
+// Guarded so the test can import `prepareStaging` / `promoteStaging` and drive
+// them against temporary directories. Without it, importing this module runs a
+// live capture — which is the very thing under test.
+if (import.meta.main) await main();

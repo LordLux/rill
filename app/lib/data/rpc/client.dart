@@ -89,6 +89,114 @@ class RpcClient {
         Directory.current.path;
   }
 
+
+  /// Debug mode, without importing Flutter.
+  ///
+  /// **`client.dart` must not import `package:flutter/…`, and this is the line
+  /// that proves it.** `test/orphan_test_helper.dart` imports this file and runs
+  /// on the plain Dart VM, which has no `dart:ui`; a `package:flutter/foundation`
+  /// import for `kDebugMode` therefore made that helper fail to *compile*, and
+  /// the orphan test failed with "Helper should print SIDECAR_PID" — a message
+  /// that points nowhere near the cause. Same shape as the `animated_vector_gen`
+  /// trap in CLAUDE.md: a package re-exports `dart:ui` and drags the framework
+  /// into a host that has none.
+  ///
+  /// The assert trick is the standard Flutter-free equivalent: the assignment
+  /// runs only when asserts are enabled, which is exactly debug.
+  static bool get _isDebugBuild {
+    var debug = false;
+    assert(debug = true);
+    return debug;
+  }
+
+  /// Says so, loudly, when the running sidecar predates the source on disk.
+  ///
+  /// **This trap has fired seven times and cost a whole measurement run once**
+  /// — the F20 bucket-rate reading was taken against a binary 17 minutes older
+  /// than the fix it was supposed to be measuring, and reported the rate as
+  /// having dropped. CLAUDE.md has warned about it in three places for months;
+  /// prose has not stopped it, because the failure is silent and looks like a
+  /// result rather than like a mistake.
+  ///
+  /// **Why mtime rather than a build identifier in `event.ready`.** Both were
+  /// considered; mtime is what catches the cases this repo has actually hit:
+  ///
+  /// - **A git SHA plus a dirty flag does not work here at all.** This tree is
+  ///   dirty during essentially all development, and every case we have hit was
+  ///   an edit-rebuild-forget cycle *within* one dirty state. The SHA and the
+  ///   flag are identical before and after such an edit, so the identifier
+  ///   cannot distinguish "built before my change" from "built after" — which
+  ///   is the only question being asked.
+  /// - **A content hash of `sidecar/src` at build time works**, but needs a
+  ///   build-step change, a generated file, and the same hash implemented twice
+  ///   (TypeScript and Dart) to be comparable. It buys nothing over mtime for
+  ///   any case in the record.
+  /// - **mtime catches all seven**, needs no protocol change, and the number it
+  ///   compares was already being logged one line above.
+  ///
+  /// The comparison is against the **repository's** `sidecar/src`, found by
+  /// walking up from the running root — not against the source beside the
+  /// binary. In a release bundle those are *both* stale copies and agree with
+  /// each other, which is exactly how the trap hides. A shipped app with no
+  /// repository above it finds nothing and says nothing.
+  ///
+  /// Known false positive: a fresh `git checkout` or clone stamps sources with
+  /// the current time, so the first run after one can warn about a binary that
+  /// is fine. Rebuilding is the remedy either way, so the cost is a rebuild
+  /// nobody needed rather than a wrong measurement.
+  void _warnIfStale(File compiled, String root) {
+    if (!_isDebugBuild) return;
+    try {
+      final src = repoSidecarSrc(root);
+      if (src == null) return;
+
+      final builtAt = compiled.statSync().modified;
+      DateTime? newest;
+      String? newestPath;
+      for (final entry in src.listSync(recursive: true)) {
+        if (entry is! File || !entry.path.endsWith('.ts')) continue;
+        final at = entry.statSync().modified;
+        if (newest == null || at.isAfter(newest)) {
+          newest = at;
+          newestPath = entry.path;
+        }
+      }
+      if (newest == null || !newest.isAfter(builtAt)) return;
+
+      final behind = newest.difference(builtAt);
+      stderr.writeln('');
+      stderr.writeln('!!! rill: THE SIDECAR IS STALE -- it is older than its source.');
+      stderr.writeln('    running: ${compiled.path}');
+      stderr.writeln('      built: ${builtAt.toIso8601String()}');
+      stderr.writeln('     newest: $newestPath');
+      stderr.writeln('             ${newest.toIso8601String()}  (${behind.inMinutes} min newer)');
+      stderr.writeln('    Anything measured now describes the OLD sidecar. Run `rill build`.');
+      stderr.writeln('');
+    } on FileSystemException {
+      // A diagnostic must never be the thing that breaks a launch.
+    }
+  }
+
+  /// The repository's own `sidecar/src`, walking up from [root], or null when
+  /// this is a shipped app rather than a checkout.
+  ///
+  /// [root] itself is tried first so a debug run — where the running root *is*
+  /// the repository — needs no walk at all.
+  @visibleForTesting
+  static Directory? repoSidecarSrc(String root) {
+    var dir = Directory(root);
+    for (var i = 0; i < 10; i++) {
+      final src = Directory('${dir.path}/sidecar/src');
+      // `.git` distinguishes the checkout from a bundled copy, which also has a
+      // `sidecar/src` beside it and is equally stale.
+      if (src.existsSync() && Directory('${dir.path}/.git').existsSync()) return src;
+      final parent = dir.parent;
+      if (parent.path == dir.path) return null;
+      dir = parent;
+    }
+    return null;
+  }
+
   /// The compiled sidecar, or null when this checkout has not been built.
   ///
   /// `bun run src/main.ts` transpiles the whole module graph — youtubei.js
@@ -177,6 +285,7 @@ class RpcClient {
       if (compiled != null) {
         final at = compiled.statSync().modified.toIso8601String();
         stderr.writeln('rill: sidecar $executable (built $at)');
+        _warnIfStale(compiled, root);
       } else {
         stderr.writeln('rill: sidecar via bun, from $root (no dist/ build)');
       }

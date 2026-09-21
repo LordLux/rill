@@ -96,47 +96,44 @@ class _WatchSkeletonState extends ConsumerState<WatchSkeleton>
                 geometry: geometry,
                 playerSlot: _Block(radius: theatre ? 0 : 12),
                 theatreBackground: theatre ? Theme.of(context).tokens.scrim : null,
-                metadataSlot: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const _MetaBlock(),
-                      // Collapsed to one column: the queue and the related list
-                      // move under the metadata, exactly as the real page moves
-                      // them.
-                      if (!geometry.isTwoColumn) ...[
-                        const SizedBox(height: 24),
-                        const _QueueBlock(maxHeight: 400),
-                        const SizedBox(height: 24),
-                        const _RelatedBlock(asGrid: true),
-                      ],
-                    ],
-                  ),
-                ),
-                railSlot: Padding(
-                  padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _QueueBlock(
-                        maxHeight: geometry.playerHeight,
-                        randomSeed: item.hashCode,
+                metadataSlivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const _MetaBlock(),
+                          if (!geometry.isTwoColumn) ...[
+                            const SizedBox(height: 24),
+                            const _QueueBlock(maxHeight: 400),
+                            const SizedBox(height: 24),
+                            const _RelatedBlock(asGrid: true),
+                          ],
+                        ],
                       ),
-                      const SizedBox(height: 24),
-                      const _RelatedBlock(),
-                    ],
+                    ),
                   ),
-                ),
-                // Never scrollable. It is a placeholder, and letting it scroll
-                // would let a user drag it about as though it were content.
-                scrollView: (children) => SingleChildScrollView(
-                  physics: const NeverScrollableScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: children,
+                ],
+                railSlivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(8, theatre ? 8 : 2, 16, 32),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _QueueBlock(
+                            maxHeight: geometry.playerHeight,
+                            randomSeed: item.hashCode,
+                          ),
+                          const SizedBox(height: 24),
+                          const _RelatedBlock(),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                ],
+                scrollable: false,
               );
             },
           ),

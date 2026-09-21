@@ -111,7 +111,10 @@ class _FeedViewState extends ConsumerState<FeedView> {
       children: [
         if (state.chips.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8.0, left: 8.0),
+            padding: const EdgeInsets.only(
+              // bottom: 8.0,
+              left: 8.0,
+            ),
             child: SizedBox(
               height: 36,
               child: SilkyListView.builder(
@@ -243,9 +246,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
     // worked — and a grid-shaped placeholder answers "did that do anything?"
     // where a centred spinner does not. It shares its geometry with the real
     // grid below, so nothing reflows when the items arrive.
-    if (isEmpty && state.isLoading) {
-      return FeedSkeleton(isWideLayout: widget.isWideLayout);
-    }
+    if (isEmpty && state.isLoading) return FeedSkeleton(isWideLayout: widget.isWideLayout);
 
     // A load that finished, found nothing, and is none of the above — a real
     // "no results" rather than a degraded or anonymous session. Search is the
@@ -418,12 +419,14 @@ class _FeedViewState extends ConsumerState<FeedView> {
                                   onTap: tapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
+                                  menu: menuForTile(context, ref, feedItem, spec),
                                 )
                               : MediaTile(
                                   spec: spec,
                                   onTap: tapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
+                                  menu: menuForTile(context, ref, feedItem, spec),
                                 ))
                         : feedItem.maybeMap(
                             channel: (c) => widget.isWideLayout //
@@ -591,6 +594,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                           onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
+                          menu: menuForTile(context, ref, item, spec),
                         ),
                       ),
                     );
@@ -674,6 +678,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                           onTap: tapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
+                          menu: menuForTile(context, ref, item, spec),
                         ),
                       ),
                     );

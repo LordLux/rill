@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/rpc/client.dart';
@@ -8,6 +9,8 @@ import '../domain/feed_item.dart';
 import 'playback_controller.dart';
 import 'player_shell.dart';
 import 'queue_controller.dart';
+import 'widgets/save_dialog.dart';
+import 'widgets/share_dialog.dart';
 
 /// What a tile tap means, per kind (task §6).
 ///
@@ -144,6 +147,97 @@ void queueFromTile(WidgetRef ref, FeedItem item) {
   final video = watchTargetFor(item);
   if (video == null) return;
   ref.read(queueProvider.notifier).addToQueue(video);
+}
+
+/// One entry of a tile's 3-dot menu.
+class TileMenuItem {
+  const TileMenuItem({required this.icon, required this.label, this.onPressed});
+
+  final IconData icon;
+  final String label;
+
+  /// Null draws the entry disabled — present but not pressable — for an action
+  /// this tile does not offer, so the menu keeps the same shape from tile to tile.
+  final VoidCallback? onPressed;
+}
+
+/// The URL a tile shares, or null for a kind with none.
+///
+/// A mix is `watch?v=<seed>&list=<RD…>` when it has a seed and the bare playlist
+/// otherwise — the same two shapes youtube.com hands out for one.
+String? tileLinkFor(FeedItem item) {
+  return item.map(
+    video: (v) => 'https://www.youtube.com/watch?v=${v.id}',
+    mix: (m) => m.seedVideoId == null
+        ? 'https://www.youtube.com/playlist?list=${m.id}'
+        : 'https://www.youtube.com/watch?v=${m.seedVideoId}&list=${m.id}',
+    playlist: (p) => 'https://www.youtube.com/playlist?list=${p.id}',
+    channel: (_) => null,
+    unknown: (_) => null,
+  );
+}
+
+/// The entries of a tile's 3-dot menu (`MediaTile.menu`).
+///
+/// `MediaTile.onMore` was wired to nothing from the day it was added (the
+/// b2549cb review), so every 3-dot button in the app was drawn disabled. Each
+/// entry here is a thing the app already does — the two hover buttons, the save
+/// dialog Task 25 §5 said this menu opens, and a link — so nothing in it is a
+/// stub. The two hover buttons hide when a tile cannot offer them; here they are
+/// disabled instead, which is the same fact without a menu that reshuffles.
+///
+/// Only a video has anything to save or queue: a mix and a playlist are not
+/// videos (`watchTargetFor`), so they get the link alone. A kind with no link
+/// either gets an empty list and the button stays disabled.
+List<TileMenuItem> tileMenuFor(
+  BuildContext context,
+  WidgetRef ref,
+  FeedItem item, {
+  required bool canWatchLater,
+  required bool canAddToQueue,
+}) {
+  final link = tileLinkFor(item);
+  if (link == null) return const [];
+
+  final shareVideo = TileMenuItem(
+    icon: Icons.link,
+    label: 'Copy link',
+    onPressed: () => unawaited(copyToClipboard(context, link, 'Link copied to clipboard')),
+  );
+  
+
+  final video = watchTargetFor(item);
+  if (video == null) return [shareVideo];
+
+  return [
+    TileMenuItem(
+      icon: Icons.playlist_play,
+      label: 'Add to queue',
+      onPressed: canAddToQueue ? () => queueFromTile(ref, item) : null,
+    ),
+    TileMenuItem(
+      icon: Icons.schedule,
+      label: 'Save to Watch Later',
+      onPressed: canWatchLater ? () => unawaited(addToWatchLater(context, item)) : null,
+    ),
+    TileMenuItem(
+      icon: Icons.playlist_add,
+      label: 'Save to playlist…',
+      onPressed: () => unawaited(showSaveDialog(context, video.id)),
+    ),
+    TileMenuItem(
+      icon: Icons.reply,
+      label: 'Share',
+      onPressed: () => unawaited(showShareDialog(context, video)),
+    ),
+  ];
+}
+
+/// Puts [text] on the clipboard and says so.
+Future<void> copyToClipboard(BuildContext context, String text, String said) async {
+  final messenger = ScaffoldMessenger.of(context);
+  await Clipboard.setData(ClipboardData(text: text));
+  messenger.showSnackBar(SnackBar(content: Text(said)));
 }
 
 /// The tile's Watch Later button. Shared rather than duplicated per surface —

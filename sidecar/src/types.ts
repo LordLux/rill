@@ -355,6 +355,16 @@ export interface VideoDetail {
   /** Sidebar / up-next tiles, already flattened to the same DTOs as any feed. */
   related: FeedItem[];
   relatedContinuation: string | null;
+  /**
+   * The continuation token for the first page of comments, read from the watch
+   * page's own `comment-item-section`.
+   *
+   * Null when comments are disabled, unavailable (e.g. made for kids), or when
+   * the video is age-restricted and the session is anonymous. A missing section
+   * in a successfully parsed page is the only signal YouTube sends for "disabled",
+   * so this being null *is* that signal.
+   */
+  commentsContinuation: string | null;
 }
 
 /**
@@ -648,6 +658,132 @@ export interface PlayerResult {
 }
 
 // ---------------------------------------------------------------------------
+// Comments (Task 27)
+// ---------------------------------------------------------------------------
+
+export interface CommentTextRun {
+  startIndex: number;
+  length: number;
+}
+
+export interface CommentStyleRun extends CommentTextRun {
+  weightLabel?: string;
+}
+
+export interface CommentCommandRun extends CommentTextRun {
+  url?: string;
+  videoId?: string;
+  startTimeSeconds?: number;
+}
+
+export interface CommentText {
+  content: string;
+  styleRuns?: CommentStyleRun[];
+  commandRuns?: CommentCommandRun[];
+}
+
+export interface Comment {
+  id: string;
+  authorName: string;
+  authorAvatarUrl: string;
+  authorChannelId: string | null;
+  isUploader: boolean;
+  isVerified: boolean;
+  text: CommentText;
+  /**
+   * The count as this viewer sees it — a comment they liked carries the count
+   * *with* their like in it. A display string ("737", "4.8M"), not parsed.
+   */
+  likeCount: string | null;
+  publishedText: string | null;
+  replyCount: number;
+  /** Structural nesting level: 0 for top-level, 1 for direct replies, 2+ for nested. */
+  depth: number;
+  /**
+   * This viewer's vote on the comment — `'none'` when anonymous, always.
+   *
+   * A closed set rather than `isLiked`/`isDisliked`, for the reason {@link
+   * VideoDetail.myRating} gives: two booleans admit both-true, a state YouTube
+   * cannot produce, so the type should not admit it either. It is also the
+   * shape the wire has — all three come off one field,
+   * `engagementToolbarStateEntityPayload.likeState`
+   * (`TOOLBAR_LIKE_STATE_LIKED` / `_DISLIKED` / `_INDIFFERENT`).
+   *
+   * `'dislike'` was unobserved until 2026-09-21 and is now held by
+   * `fixtures/viewer-state/comments-disliked.json`
+   * (`capture:viewer-state dislike`). Before that fixture existed a reader
+   * that never returned `'dislike'` would have looked exactly like a comment
+   * nobody had voted on — F35's rule, that a viewer-state field is untested
+   * until a fixture holds the state.
+   *
+   * Written out rather than aliased, and deliberately the same three values as
+   * {@link VideoDetail.myRating}, so a client has one rating model and not two.
+   */
+  myRating: 'like' | 'dislike' | 'none';
+  /**
+   * The video's creator hearted this comment. Public: the same in an anonymous
+   * and a signed-in view. Read from the state entity, never inferred from a
+   * tooltip — `parser/comments.ts` has what that cost.
+   */
+  creatorHearted: boolean;
+  isPinned: boolean;
+  repliesContinuation: string | null;
+  /**
+   * Opaque token for `action.replyToComment`. `null` when the viewer cannot
+   * reply — not signed in, same rule as the top-level create box carrying a
+   * `prepareAccountCommand` instead of a real endpoint. Verified live
+   * 2026-09-18: the real request is `comment/create_comment_reply`, a
+   * distinct endpoint from top-level posting, not a variant of it.
+   */
+  replyParams: string | null;
+  /**
+   * Opaque token for `action.deleteComment`. `null` unless the viewer is this
+   * comment's own author — the field simply doesn't exist in the response
+   * otherwise, there is no separate "am I the author" flag to read instead.
+   * Verified live 2026-09-18: delete reuses `comment/perform_comment_action`,
+   * the same endpoint a comment like/dislike goes over, differentiated only
+   * by which pre-built opaque `action` blob is sent.
+   */
+  deleteParams: string | null;
+  /**
+   * The four vote transitions, each a **server-supplied** opaque blob for
+   * `action.rateComment` — `comment/perform_comment_action` again, exactly as
+   * `deleteParams` above predicted. The client sends whichever one matches the
+   * transition it wants rather than building anything, so there is no token
+   * shape here to get wrong: measured 2026-09-20, all four present on 20 of 20
+   * comments of a signed-in page.
+   *
+   * **A non-null value is not permission to vote.** All four are present on an
+   * anonymous capture too, so a button enabled because the token exists is the
+   * `heartActiveTooltip` mistake again (F33). Gate on the session, not on these.
+   *
+   * `null` only when the surface entity is missing entirely.
+   */
+  likeParams: string | null;
+  unlikeParams: string | null;
+  dislikeParams: string | null;
+  undislikeParams: string | null;
+}
+
+export interface CommentsResult {
+  items: Comment[];
+  continuation: string | null;
+  chips?: Chip[];
+  commentCount: string | null;
+  /**
+   * Opaque token for `action.postComment` — the "Add a comment…" box's own
+   * submit endpoint, off the same header that carries the sort chips.
+   *
+   * `null` when the viewer cannot comment: an anonymous session is handed a
+   * sign-in prompt in that slot instead of an endpoint. Also `null` on every
+   * page but the first (a continuation carries no header), so a client keeps
+   * the last non-null one rather than overwriting it — the same rule it already
+   * follows for `chips` and `commentCount`.
+   */
+  createParams: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Lists
 // ---------------------------------------------------------------------------
 
@@ -853,3 +989,4 @@ export interface AuthStatus {
   accountHandle: string | null;
   accountAvatarUrl: string | null;
 }
+

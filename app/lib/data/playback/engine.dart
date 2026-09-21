@@ -309,6 +309,7 @@ class MediaKitEngine implements PlaybackEngine {
     }
     try {
       await (_player.platform as NativePlayer).setProperty('stream-lavf-o', value);
+      await (_player.platform as NativePlayer).setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     } on Object {
       // media_kit discards mpv's return code anyway (F15), so a throw here is
       // the binding failing, not mpv refusing. Nothing this app does depends on

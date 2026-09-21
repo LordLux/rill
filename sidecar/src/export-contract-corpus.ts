@@ -3,9 +3,11 @@ import { spawnSync } from 'node:child_process';
 import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parsePlaylistMembership } from './actions/playlist.ts';
+import { parseComments } from './parser/comments.ts';
 import { parseFeed } from './parser/feed.ts';
 import { parseVideoDetail } from './parser/video.ts';
-import type { ArtistPanel, Chip, FeedItem, VideoDetail } from './types.ts';
+import type { ArtistPanel, Chip, CommentsResult, FeedItem, PlaylistMembershipResult, VideoDetail } from './types.ts';
 import { logger } from './log.ts';
 
 const log = logger('corpus');
@@ -143,6 +145,7 @@ function sanitiseVideoDetail(detail: VideoDetail): VideoDetail {
     likeText: detail.likeText === null ? null : 'Sanitised Likes 1',
     related: detail.related.map(sanitiseItem),
     relatedContinuation: sanitiseContinuation(detail.relatedContinuation, 0),
+    commentsContinuation: sanitiseContinuation(detail.commentsContinuation, 1),
   };
 }
 
@@ -176,6 +179,114 @@ function sanitiseArtistPanel(panel: ArtistPanel): ArtistPanel {
   };
 }
 
+import type { Comment, CommentText } from './types.ts';
+
+function sanitiseCommentText(text: CommentText, index: number): CommentText {
+  return {
+    content: `Sanitised Comment Text ${index + 1}`,
+    styleRuns: text.styleRuns ? [{ startIndex: 0, length: 10, weightLabel: 'FONT_WEIGHT_MEDIUM' }] : undefined,
+    commandRuns: text.commandRuns ? [{ startIndex: 0, length: 10, url: 'https://fake.url', videoId: 'vid_001', startTimeSeconds: 120 }] : undefined,
+  };
+}
+
+function sanitiseComment(comment: Comment, index: number): Comment {
+  const seq = String(index + 1).padStart(3, '0');
+  return {
+    ...comment,
+    id: `cmt_${seq}`,
+    authorName: `Sanitised Author ${index + 1}`,
+    authorAvatarUrl: `https://fake.url/avatar${index + 1}.jpg`,
+    authorChannelId: comment.authorChannelId ? `chan_${seq}` : null,
+    text: sanitiseCommentText(comment.text, index),
+    likeCount: comment.likeCount ? `Sanitised Likes ${index + 1}` : null,
+    repliesContinuation: comment.repliesContinuation ? `CONTINUATION_TOKEN_${seq}` : null,
+    replyParams: comment.replyParams ? 'REPLY_PARAMS' : null,
+    deleteParams: comment.deleteParams ? 'DELETE_PARAMS' : null,
+    // The vote blobs carry the comment id, the video id and the account's
+    // channel id in a protobuf, so none of them can travel. Presence is kept
+    // because the corpus asserts on it; the value is not.
+    // Prefixed `COMMENT_` for a reason worth keeping: the first version used
+    // `LIKE_PARAMS`, which is eleven characters of `[A-Za-z0-9_]` — exactly a
+    // video id's shape — and `corpus.test.ts`'s forbidden-shape layer flagged
+    // all twenty of them as a leaked video id. A placeholder has to be
+    // unmistakably a placeholder.
+    likeParams: comment.likeParams ? 'COMMENT_LIKE_PARAMS' : null,
+    unlikeParams: comment.unlikeParams ? 'COMMENT_UNLIKE_PARAMS' : null,
+    dislikeParams: comment.dislikeParams ? 'COMMENT_DISLIKE_PARAMS' : null,
+    undislikeParams: comment.undislikeParams ? 'COMMENT_UNDISLIKE_PARAMS' : null,
+    // `myRating` rides through untouched — it is a closed set of three, not
+    // identity. That it survives the sanitiser is the whole reason the corpus
+    // can assert on it.
+  };
+}
+
+/** One comments page, sanitised — a single rule for the top-level fixtures and the viewer-state pair. */
+function sanitiseCommentsResult(parsed: CommentsResult, continuationIndex: number) {
+  return {
+    ...parsed,
+    chips: parsed.chips?.map(sanitiseChip()),
+    items: parsed.items.map(sanitiseComment),
+    continuation: sanitiseContinuation(parsed.continuation, continuationIndex),
+    createParams: parsed.createParams ? 'CREATE_PARAMS' : null,
+  };
+}
+
+/**
+ * The save dialog's rows, sanitised. Every playlist id and title is the
+ * account's own and is replaced; `WL` survives because it is the fixed public id
+ * of Watch Later, not identity, and the contract tests need to find that row.
+ * `removeToken` names a real video id and playlist, so it is a placeholder.
+ */
+function sanitiseMembership(result: PlaylistMembershipResult): PlaylistMembershipResult {
+  return {
+    // Watch Later and the first three others: the number of playlists an account has,
+    // and how many of them are private, are the account's own and say more about it
+    // than any test needs. (The capture this was taken from had 38.)
+    playlists: result.playlists.slice(0, 4).map((row, index) => ({
+      ...row,
+      id: row.id === 'WL' ? 'WL' : `list_${String(index + 1).padStart(3, '0')}`,
+      title: `Sanitised Title ${index + 1}`,
+      removeToken: row.removeToken === null ? null : 'REMOVE_TOKEN',
+    })),
+  };
+}
+
+/**
+ * The pair of captures taken with the account in *known* states
+ * (`capture-viewer-state.ts`), as sanitised corpus files the contract tests can
+ * assert against on a checkout that has no fixtures. Named `viewer-state-*` and
+ * indexed on their own so adding them renumbers nothing that was already here.
+ * A machine without `fixtures/viewer-state/` leaves the committed files alone.
+ */
+async function exportViewerState(): Promise<void> {
+  const dir = join(FIXTURES, 'viewer-state');
+  let present: string[];
+  try {
+    present = await readdir(dir);
+  } catch {
+    log.info('no fixtures/viewer-state/ on this machine — its corpus files are left as committed');
+    return;
+  }
+  const load = async (file: string): Promise<unknown> => JSON.parse(await readFile(join(dir, file), 'utf8'));
+  const write = (name: string, value: unknown) =>
+    writeFile(join(CORPUS, `viewer-state-${name}.json`), JSON.stringify(value, null, 2), 'utf8');
+
+  for (const phase of ['before', 'after', 'disliked']) {
+    if (!present.includes(`watch-${phase}.json`)) continue;
+    const detail = parseVideoDetail(await load(`watch-${phase}.json`), `viewer-state-${phase}`);
+    await write(`video-detail-${phase}`, sanitiseVideoDetail(detail));
+  }
+  for (const phase of ['before', 'after']) {
+    if (!present.includes(`membership-${phase}.json`)) continue;
+    await write(`membership-${phase}`, sanitiseMembership(parsePlaylistMembership(await load(`membership-${phase}.json`))));
+  }
+  for (const [index, name] of ['comments-before', 'comments-after', 'comments-after-anonymous', 'comments-disliked'].entries()) {
+    if (!present.includes(`${name}.json`)) continue;
+    await write(name, sanitiseCommentsResult(parseComments(await load(`${name}.json`), `viewer-state-${name}`), 40 + index));
+  }
+  log.info('exported the viewer-state corpus files');
+}
+
 async function main() {
   await mkdir(CORPUS, { recursive: true });
   const files = (await readdir(FIXTURES)).filter(
@@ -185,6 +296,14 @@ async function main() {
   for (const [fileIndex, file] of files.entries()) {
     const name = file.replace(/\.json$/, '');
     const raw = JSON.parse(await readFile(join(FIXTURES, file), 'utf8'));
+
+    if (file.startsWith('comments')) {
+      const result = sanitiseCommentsResult(parseComments(raw, name), fileIndex);
+      await writeFile(join(CORPUS, file), JSON.stringify(result, null, 2), 'utf8');
+      log.info(`exported sanitised ${file}`);
+      continue;
+    }
+
     const parsed = parseFeed(raw, name);
 
     const result = {
@@ -214,6 +333,7 @@ async function main() {
           channelAvatarUrl: 'https://fake.url/avatar1.jpg',
           related: detail.related.map(sanitiseItem),
           relatedContinuation: sanitiseContinuation(detail.relatedContinuation, fileIndex),
+          commentsContinuation: sanitiseContinuation(detail.commentsContinuation, fileIndex + 1),
         };
         await writeFile(join(CORPUS, 'video-detail.json'), JSON.stringify(sanitisedDetail, null, 2), 'utf8');
         log.info(`exported sanitised video-detail.json`);
@@ -234,6 +354,8 @@ async function main() {
     );
     log.info('exported sanitised video-detail.json');
   }
+
+  await exportViewerState();
 
   audit();
 }

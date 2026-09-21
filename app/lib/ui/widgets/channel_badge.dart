@@ -51,12 +51,15 @@ class ChannelBadge extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final asset = isArtistChannel ? 'assets/icons/verified_artist.svg' : 'assets/icons/verified.svg';
     
-    final icon = SvgPicture.asset(
-      asset,
-      width: size,
-      height: size,
-      // ignore: deprecated_member_use
-      color: scheme.onSurfaceVariant,
+    final icon = Tooltip(
+      message: isArtistChannel ? 'Verified artist channel' : 'Verified channel',
+      child: SvgPicture.asset(
+        asset,
+        width: size,
+        height: size,
+        // ignore: deprecated_member_use
+        color: scheme.onSurfaceVariant,
+      ),
     );
 
     if (paddingLeft > 0) {

@@ -784,7 +784,7 @@ class _QualityPage extends ConsumerWidget {
 /// first time they were written separately, and a menu whose rows sit at three
 /// different insets depending on which page you are on is a menu that looks
 /// broken without anything being wrong.
-class _MenuBody extends StatelessWidget {
+class _MenuBody extends StatefulWidget {
   const _MenuBody({
     super.key,
     this.header,
@@ -795,6 +795,32 @@ class _MenuBody extends StatelessWidget {
   final Widget? header;
   final List<Widget> children;
   final EdgeInsetsGeometry _padding;
+
+  @override
+  State<_MenuBody> createState() => _MenuBodyState();
+}
+
+class _MenuBodyState extends State<_MenuBody> {
+  late final ScrollController _controller;
+  late final PageStorageBucket _bucket;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = ScrollController(keepScrollOffset: false);
+    // silky_scroll forces keepScrollOffset to true under the hood, making
+    // the ScrollController(keepScrollOffset: false) alone insufficient.
+    // By providing a completely isolated PageStorageBucket, we guarantee
+    // this menu cannot accidentally restore a scroll offset from the
+    // watch page's bucket, which was the root cause of the crash.
+    _bucket = PageStorageBucket();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -827,7 +853,7 @@ class _MenuBody extends StatelessWidget {
             // header pinned *inside* one is a sliver and a stack of extra
             // machinery; a header that is simply not in the scrollable cannot
             // scroll away.
-            ?header,
+            if (widget.header != null) widget.header!,
             Flexible(
               // **The `Silky…` prefix is the whole fix** for a wheel over the
               // menu also scrolling the page: only a `SilkyScroll` joins the
@@ -838,17 +864,21 @@ class _MenuBody extends StatelessWidget {
               // handles a vertical wheel in its own `Listener` and only
               // registers there for horizontal ownership — so it silently
               // half-works, which is why the attempt is recorded.
-              child: SilkySingleChildScrollView(
-                // The breathing room at both ends of every list: 12 here plus a
-                // row's own 10 puts the first and last line 22 off the panel
-                // edge. It is inside the scrollable rather than around it, so a
-                // long ladder scrolls *through* the gap instead of stopping
-                // short of one.
-                padding: _padding,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: children,
+              child: PageStorage(
+                bucket: _bucket,
+                child: SilkySingleChildScrollView(
+                  controller: _controller,
+                  // The breathing room at both ends of every list: 12 here plus a
+                  // row's own 10 puts the first and last line 22 off the panel
+                  // edge. It is inside the scrollable rather than around it, so a
+                  // long ladder scrolls *through* the gap instead of stopping
+                  // short of one.
+                  padding: widget._padding,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: widget.children,
+                  ),
                 ),
               ),
             ),
