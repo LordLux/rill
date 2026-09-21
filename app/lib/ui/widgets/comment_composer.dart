@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../data/comments_source.dart' show kCommentMaxLength;
+
 /// The "Add a comment…" box under the comment count.
 ///
 /// **Knows nothing about RPC or the account.** The avatar and the post are
@@ -98,6 +100,27 @@ class _CommentComposerState extends State<CommentComposer> {
                 enabled: !_posting,
                 minLines: 1,
                 maxLines: 6,
+                // YouTube refuses 10,001 characters outright (measured
+                // 2026-09-21, `COMMENT_MAX_LENGTH` in the sidecar). Enforced
+                // here so a long comment stops growing while it is being
+                // written, rather than being refused after the send — losing a
+                // wall of text to a 400 is the failure worth preventing. The
+                // sidecar checks too: this field is not the only caller.
+                maxLength: kCommentMaxLength,
+                // The counter is noise for the length of a normal comment, so
+                // it appears only once one is close enough for it to matter.
+                buildCounter: (context, {required currentLength, required isFocused, maxLength}) =>
+                    currentLength < kCommentMaxLength - 500
+                        ? null
+                        : Text(
+                            '$currentLength / $maxLength',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: currentLength >= kCommentMaxLength
+                                  ? Theme.of(context).colorScheme.error
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
                 textInputAction: TextInputAction.newline,
                 style: const TextStyle(fontSize: 14),
                 decoration: const InputDecoration(

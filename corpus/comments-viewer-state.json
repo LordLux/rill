@@ -13,12 +13,16 @@
       "likeCount": "Sanitised Likes 1",
       "publishedText": "1 year ago",
       "replyCount": 962,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": true,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_001",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_002",
@@ -33,12 +37,16 @@
       "likeCount": "Sanitised Likes 2",
       "publishedText": "1 month ago",
       "replyCount": 106,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_002",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_003",
@@ -53,12 +61,16 @@
       "likeCount": "Sanitised Likes 3",
       "publishedText": "1 month ago",
       "replyCount": 248,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_003",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_004",
@@ -73,12 +85,16 @@
       "likeCount": "Sanitised Likes 4",
       "publishedText": "6 years ago",
       "replyCount": 695,
-      "isLiked": true,
+      "myRating": "like",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_004",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_005",
@@ -93,12 +109,16 @@
       "likeCount": "Sanitised Likes 5",
       "publishedText": "16 hours ago",
       "replyCount": 1,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_005",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_006",
@@ -113,12 +133,16 @@
       "likeCount": "Sanitised Likes 6",
       "publishedText": "1 month ago",
       "replyCount": 50,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_006",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_007",
@@ -133,12 +157,16 @@
       "likeCount": "Sanitised Likes 7",
       "publishedText": "1 month ago",
       "replyCount": 40,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_007",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_008",
@@ -153,12 +181,16 @@
       "likeCount": "Sanitised Likes 8",
       "publishedText": "6 years ago",
       "replyCount": 653,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_008",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_009",
@@ -173,12 +205,16 @@
       "likeCount": "Sanitised Likes 9",
       "publishedText": "2 days ago",
       "replyCount": 23,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_009",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_010",
@@ -193,12 +229,16 @@
       "likeCount": "Sanitised Likes 10",
       "publishedText": "6 years ago (edited)",
       "replyCount": 542,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_010",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_011",
@@ -213,12 +253,16 @@
       "likeCount": "Sanitised Likes 11",
       "publishedText": "7 years ago",
       "replyCount": 580,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_011",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_012",
@@ -233,12 +277,16 @@
       "likeCount": "Sanitised Likes 12",
       "publishedText": "1 month ago",
       "replyCount": 48,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_012",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_013",
@@ -253,12 +301,16 @@
       "likeCount": "Sanitised Likes 13",
       "publishedText": "1 day ago (edited)",
       "replyCount": 1,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_013",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_014",
@@ -273,12 +325,16 @@
       "likeCount": "Sanitised Likes 14",
       "publishedText": "6 years ago",
       "replyCount": 962,
-      "isLiked": true,
+      "myRating": "like",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_014",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_015",
@@ -293,12 +349,16 @@
       "likeCount": "Sanitised Likes 15",
       "publishedText": "1 month ago",
       "replyCount": 66,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_015",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_016",
@@ -313,12 +373,16 @@
       "likeCount": "Sanitised Likes 16",
       "publishedText": "7 months ago",
       "replyCount": 867,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_016",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_017",
@@ -333,12 +397,16 @@
       "likeCount": "Sanitised Likes 17",
       "publishedText": "4 days ago",
       "replyCount": 20,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_017",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_018",
@@ -353,12 +421,16 @@
       "likeCount": "Sanitised Likes 18",
       "publishedText": "6 years ago",
       "replyCount": 855,
-      "isLiked": true,
+      "myRating": "like",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_018",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_019",
@@ -373,12 +445,16 @@
       "likeCount": "Sanitised Likes 19",
       "publishedText": "1 month ago",
       "replyCount": 17,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_019",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     },
     {
       "id": "cmt_020",
@@ -400,12 +476,16 @@
       "likeCount": "Sanitised Likes 20",
       "publishedText": "6 years ago (edited)",
       "replyCount": 933,
-      "isLiked": true,
+      "myRating": "like",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_020",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
     }
   ],
   "continuation": "CONTINUATION_TOKEN_3",

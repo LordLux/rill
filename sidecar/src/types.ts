@@ -697,8 +697,27 @@ export interface Comment {
   likeCount: string | null;
   publishedText: string | null;
   replyCount: number;
-  /** The signed-in viewer liked this comment. Always `false` when anonymous. */
-  isLiked: boolean;
+  /**
+   * This viewer's vote on the comment — `'none'` when anonymous, always.
+   *
+   * A closed set rather than `isLiked`/`isDisliked`, for the reason {@link
+   * VideoDetail.myRating} gives: two booleans admit both-true, a state YouTube
+   * cannot produce, so the type should not admit it either. It is also the
+   * shape the wire has — all three come off one field,
+   * `engagementToolbarStateEntityPayload.likeState`
+   * (`TOOLBAR_LIKE_STATE_LIKED` / `_DISLIKED` / `_INDIFFERENT`).
+   *
+   * `'dislike'` was unobserved until 2026-09-21 and is now held by
+   * `fixtures/viewer-state/comments-disliked.json`
+   * (`capture:viewer-state dislike`). Before that fixture existed a reader
+   * that never returned `'dislike'` would have looked exactly like a comment
+   * nobody had voted on — F35's rule, that a viewer-state field is untested
+   * until a fixture holds the state.
+   *
+   * Written out rather than aliased, and deliberately the same three values as
+   * {@link VideoDetail.myRating}, so a client has one rating model and not two.
+   */
+  myRating: 'like' | 'dislike' | 'none';
   /**
    * The video's creator hearted this comment. Public: the same in an anonymous
    * and a signed-in view. Read from the state entity, never inferred from a
@@ -724,6 +743,24 @@ export interface Comment {
    * by which pre-built opaque `action` blob is sent.
    */
   deleteParams: string | null;
+  /**
+   * The four vote transitions, each a **server-supplied** opaque blob for
+   * `action.rateComment` — `comment/perform_comment_action` again, exactly as
+   * `deleteParams` above predicted. The client sends whichever one matches the
+   * transition it wants rather than building anything, so there is no token
+   * shape here to get wrong: measured 2026-09-20, all four present on 20 of 20
+   * comments of a signed-in page.
+   *
+   * **A non-null value is not permission to vote.** All four are present on an
+   * anonymous capture too, so a button enabled because the token exists is the
+   * `heartActiveTooltip` mistake again (F33). Gate on the session, not on these.
+   *
+   * `null` only when the surface entity is missing entirely.
+   */
+  likeParams: string | null;
+  unlikeParams: string | null;
+  dislikeParams: string | null;
+  undislikeParams: string | null;
 }
 
 export interface CommentsResult {

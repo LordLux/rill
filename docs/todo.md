@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 42.** A new item takes it, and the same edit bumps this line.
+**Next number: 43.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -26,7 +26,7 @@ Nothing here right now.
 
 ## Soon
 
-### 39. Comments: five gaps left after replies, delete and the comment box
+### 39. Comments: four gaps left after replies, delete and the comment box
 
 Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is
 a tree that the UI shows flat"). None is a regression; each is a known hole.
@@ -72,27 +72,100 @@ landed 2026-09-20 (`architecture.md` F34).
    expanded threads must not interfere), which holds by construction and is not
    asserted. **Done when:** post, reply and delete take a seam like
    `CommentsSource`, and those cases are asserted.
-7. **One comment fixture is evidence no tool can rebuild.** All four heart
-   states *are* fixtured and asserted — `…_HEARTED_EDITABLE` and
-   `…_UNHEARTED_EDITABLE` (the creator's own view) in
-   `fixtures/viewer-state/comments-{after,before}.json`, plain `…_HEARTED` in
-   `comments-after-anonymous.json` and in `fixtures/comments-viewer-state.json`,
-   plain `…_UNHEARTED` in `comments.json`. The gap is narrower and is about
-   provenance: everything the **state-proven** family holds is the account's own
-   comment on its own video, so *a third party's* comment that the viewer liked,
-   and one hearted as seen by a signed-in non-creator, exist only in
-   `comments-viewer-state.json` — a one-off ad-hoc capture that
-   `capture-viewer-state.ts` deliberately cannot reproduce, since setting that
-   state means liking and un-liking four strangers' comments. It is declared
-   `CARRIED` in `sidecar/src/fixtures.ts` and survives a recapture (item 41,
-   landed 2026-09-20), so nothing is at risk; what is open is that it can be
-   lost and not remade. **Done when:** either a reproducible capture exists for
-   it — which needs a decision about mutating a stranger's comment — or the
-   decision is written next to `CARRIED` that this one stays a one-off and the
-   assertions that depend on it are named there.
+
+   **Half of this landed 2026-09-21, and the half that landed is the seam.**
+   `CommentsSource` now carries `post`, `reply`, `delete` and `rate`, so all
+   four writes go through something a test can fake, and the widgets no longer
+   touch `RpcClient.instance` at all. **Only `rate` is asserted through it**:
+   the blob each transition sends, the optimistic flip, the revert on failure,
+   the same on a *reply* (a different list from the threads', held by the
+   thread's state), and the two disabled states. It was done for `rate` first
+   because a vote is the write whose failure is least visible — one that
+   silently does not stick looks exactly like one that did. Post, reply and
+   delete now have the seam and still have no tests, as do the thread-state
+   rules and the pagination isolation above; that is what is left.
+7. **Settled 2026-09-21 — the provenance gap this item described does not
+   exist, and the one-off fixture stays.** The item claimed that *a third
+   party's comment the viewer liked* lived only in the ad-hoc
+   `fixtures/comments-viewer-state.json`, and that remaking it would mean
+   mutating a stranger's comment. Checked against the fixtures rather than
+   assumed: `viewer-state/comments-before.json` and `comments-after.json` each
+   hold **three comments by `@edualvarado5091`** — not the account — that the
+   viewer has liked and hearted, and `comments-disliked.json` holds three more.
+   So that state is in the **state-proven** family already.
+
+   **And the reproducible path was already the one being used.** The account
+   likes and hearts other people's comments *on a video it owns*; the mutation
+   is entirely on the viewer's side, nobody else's content changes, and
+   `capture-viewer-state.ts` captures it every run. Nothing needs inventing.
+
+   **What is genuinely only in the one-off** is a plain
+   `TOOLBAR_HEART_STATE_HEARTED` read in a *signed-in* session — the
+   `…_EDITABLE` variant is what the creator sees, and the plain one otherwise
+   comes from `comments-after-anonymous.json`. F33 established that `heartState`
+   is public and identical in the signed-in and anonymous views, so that
+   combination proves nothing the anonymous capture does not. Its remaining
+   value is breadth: 20 comments from six strangers against the pair's four
+   from one.
+
+   **Decision: it stays a one-off and stays `CARRIED`.** That costs nothing —
+   the declaration is one line and `capture.ts` already carries it — and the
+   stakes are lower than this item assumed, because no assertion depends on it
+   uniquely. `parser.test.ts`'s signed-in state check is the only test that
+   names it, and it is guarded by `hasFixture`. Nothing further to do.
 
 **Done when:** each is fixed, or deliberately dropped with the reason written
 next to it.
+
+### 42. Thread nesting lines in the comments list
+
+youtube.com draws an L-shaped rule from a thread down to each of its replies,
+and a vertical rule continuing past a reply that has children of its own. rill
+draws none: nesting is conveyed by indentation alone (`_replyIndent`, 44 px),
+which at one level reads as a slight offset rather than as structure. The user
+asked for this 2026-09-21 with a reference screenshot of youtube.com's own
+rendering.
+
+**Blocked on real nesting, decided 2026-09-21.** The list is *flat* in two
+senses and both have to be fixed first, or the lines would be drawing a
+structure the app does not have:
+
+1. **The parser flattens.** `parseComments` folds a reply's own children into
+   the same list (F30), so a `replyLevel` 2 reply arrives indistinguishable from
+   a level 1 one. Nothing downstream knows a depth, so nothing can draw one.
+2. **The widget list is flat by design.** F34 turned the section into one
+   `SliverList.builder` over `_flatten()`'s `[thread, reply, reply, …, footer]`
+   rows, so replies build lazily and a scrolled-away row costs nothing. A rule
+   spanning a thread and its replies spans sibling rows that are never all built
+   at once, and no widget owns the span.
+
+(2) is not a bug and must not be undone — the F34 numbers say what owning-the-
+subtree cost (a 500-reply thread took 345 ms to re-expand). (1) is the real
+prerequisite: **`Comment` needs a depth, carried from `replyLevel`, and the
+client needs to keep it.** Do that first, together with item 1 above (a reply's
+own "Show more replies"), which is where deeper nesting first becomes reachable
+at all. Only then is there anything for a line to describe.
+
+**Then, and only then, the drawing.** Two approaches, and the implementer
+picks — neither is prescribed:
+
+- **Per-row, stateless.** Each row paints only its own slice: one vertical
+  segment per ancestor that still has a sibling below it, plus the elbow into
+  its own avatar. Needs only each row's depth and "is this the last child of its
+  parent", both of which `_flatten()` can put on `_Row`. Composes with lazy
+  building for free, because a row that is not built is a row whose slice is off
+  screen anyway. This is the shape the user suggested, and the likelier answer.
+- **One painter behind the list.** A `Stack` with a `CustomPaint` under the
+  sliver, given the rows' laid-out rectangles. Fewer widgets, but it needs
+  geometry the list only knows after layout and has to stay correct while rows
+  are recycled, which is the part that usually goes wrong.
+
+**Done when:** a comment carries a real depth end to end; a thread with replies
+shows a continuous rule from the thread to its last reply and no further, at
+every depth the data actually contains; it survives scrolling a long thread in
+and out of the viewport; the F34 measurements are re-run and the per-frame build
+cost has not moved materially; and it is checked in the running app against the
+reference screenshot, both layouts.
 
 ### 40. Deep links to a comment (`&lc=`)
 

@@ -11,12 +11,12 @@
         "content": "Sanitised Comment Text 1"
       },
       "likeCount": "Sanitised Likes 1",
-      "publishedText": "8 years ago",
-      "replyCount": 6,
-      "myRating": "none",
+      "publishedText": "5 minutes ago",
+      "replyCount": 0,
+      "myRating": "dislike",
       "creatorHearted": false,
       "isPinned": false,
-      "repliesContinuation": "CONTINUATION_TOKEN_001",
+      "repliesContinuation": null,
       "replyParams": "REPLY_PARAMS",
       "deleteParams": "DELETE_PARAMS",
       "likeParams": "COMMENT_LIKE_PARAMS",
@@ -29,20 +29,20 @@
       "authorName": "Sanitised Author 2",
       "authorAvatarUrl": "https://fake.url/avatar2.jpg",
       "authorChannelId": "chan_002",
-      "isUploader": false,
+      "isUploader": true,
       "isVerified": false,
       "text": {
         "content": "Sanitised Comment Text 2"
       },
       "likeCount": "Sanitised Likes 2",
-      "publishedText": "8 years ago (edited)",
-      "replyCount": 0,
+      "publishedText": "8 years ago",
+      "replyCount": 7,
       "myRating": "like",
       "creatorHearted": true,
       "isPinned": false,
-      "repliesContinuation": null,
+      "repliesContinuation": "CONTINUATION_TOKEN_002",
       "replyParams": "REPLY_PARAMS",
-      "deleteParams": null,
+      "deleteParams": "DELETE_PARAMS",
       "likeParams": "COMMENT_LIKE_PARAMS",
       "unlikeParams": "COMMENT_UNLIKE_PARAMS",
       "dislikeParams": "COMMENT_DISLIKE_PARAMS",
@@ -83,6 +83,30 @@
         "content": "Sanitised Comment Text 4"
       },
       "likeCount": "Sanitised Likes 4",
+      "publishedText": "8 years ago (edited)",
+      "replyCount": 0,
+      "myRating": "like",
+      "creatorHearted": true,
+      "isPinned": false,
+      "repliesContinuation": null,
+      "replyParams": "REPLY_PARAMS",
+      "deleteParams": null,
+      "likeParams": "COMMENT_LIKE_PARAMS",
+      "unlikeParams": "COMMENT_UNLIKE_PARAMS",
+      "dislikeParams": "COMMENT_DISLIKE_PARAMS",
+      "undislikeParams": "COMMENT_UNDISLIKE_PARAMS"
+    },
+    {
+      "id": "cmt_005",
+      "authorName": "Sanitised Author 5",
+      "authorAvatarUrl": "https://fake.url/avatar5.jpg",
+      "authorChannelId": "chan_005",
+      "isUploader": false,
+      "isVerified": false,
+      "text": {
+        "content": "Sanitised Comment Text 5"
+      },
+      "likeCount": "Sanitised Likes 5",
       "publishedText": "8 years ago",
       "replyCount": 0,
       "myRating": "like",
@@ -112,6 +136,6 @@
       "scope": "feed"
     }
   ],
-  "commentCount": "10 Comments",
+  "commentCount": "12 Comments",
   "createParams": "CREATE_PARAMS"
 }

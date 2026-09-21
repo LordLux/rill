@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/auth_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
@@ -65,6 +66,15 @@ Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.pumpAndSettle();
 }
 
+/// The auth state the harness builds with. Authenticated unless a test says
+/// otherwise, because that is what nearly every case here is about.
+AuthStatus _authStatus = AuthStatus.authenticated;
+
+class _SignedIn extends AuthController {
+  @override
+  AuthState build() => AuthState(status: _authStatus, accountHandle: '@tester');
+}
+
 void main() {
   setUpAll(() async {
     await RpcClient.instance.killForTestAndWait();
@@ -75,6 +85,7 @@ void main() {
   tearDownAll(() => RpcClient.instance.killForTestAndWait());
 
   setUp(() async {
+    _authStatus = AuthStatus.authenticated;
     await RpcClient.instance.call('test.reset', {});
     engine = FakeEngine();
     _containerDisposed = false;
@@ -82,6 +93,12 @@ void main() {
       overrides: [
         playbackEngineProvider.overrideWithValue(engine),
         windowChromeProvider.overrideWithValue(NoWindowChrome()),
+        // Rating and Watch Later need an account: they are disabled, with a
+        // tooltip saying why, for a signed-out *or degraded* viewer. Before
+        // that gate these were pressable signed out — the call came back
+        // AUTH_REQUIRED and the optimistic state reverted under a toast — so
+        // this harness never had to say who was watching.
+        authProvider.overrideWith(_SignedIn.new),
       ],
     );
     container.read(playbackProvider);
@@ -102,6 +119,54 @@ void main() {
     await tester.pump();
     await settleReal(tester);
   }
+
+  group('an account is required, and the control says which kind of "no"', () {
+    // These were pressable signed out until 2026-09-21: the optimistic rating
+    // applied, `action.like` came back AUTH_REQUIRED, and it reverted under a
+    // toast — a control that looks available, acts, then undoes itself. The
+    // tooltip is the only place a disabled control can explain itself, so the
+    // two blocked states get different sentences: a degraded session looks
+    // signed in everywhere else (hard invariant 5).
+    Future<List<String>> tooltipsAfterOpen(WidgetTester tester, AuthStatus status) async {
+      _authStatus = status;
+      await open(tester, 'vid-1');
+      return tester
+          .widgetList<Tooltip>(find.byType(Tooltip))
+          .map((t) => t.message)
+          .whereType<String>()
+          .toList();
+    }
+
+    testWidgets('signed out, rating and Watch Later say to sign in', (tester) async {
+      final tips = await tooltipsAfterOpen(tester, AuthStatus.anonymous);
+
+      expect(tips, contains('Sign in to rate videos'));
+      expect(tips, contains('Sign in to save videos'));
+      expect(tips.where((t) => t == 'Like' || t == 'Dislike'), isEmpty,
+          reason: 'the ordinary labels are replaced, not shown alongside');
+
+      disposeContainer();
+    });
+
+    testWidgets('degraded, they say the session expired instead', (tester) async {
+      final tips = await tooltipsAfterOpen(tester, AuthStatus.degraded);
+
+      expect(tips, contains('Your session expired. Sign in again to rate videos'));
+      expect(tips, contains('Your session expired. Sign in again to save videos'));
+
+      disposeContainer();
+    });
+
+    testWidgets('signed in, the ordinary labels are back and nothing is blocked', (tester) async {
+      final tips = await tooltipsAfterOpen(tester, AuthStatus.authenticated);
+
+      expect(tips, contains('Like'));
+      expect(tips.where((t) => t.contains('Sign in')), isEmpty);
+
+      disposeContainer();
+    });
+  });
+
 
   group('like / dislike', () {
     testWidgets('liking a video fills the thumbs-up icon', (tester) async {

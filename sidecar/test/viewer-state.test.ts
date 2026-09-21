@@ -95,21 +95,52 @@ describe("viewer state — a comment's like and heart", () => {
   test.if(has('comments-before.json') && has('manifest.json'))('before: the own comment is neither liked nor hearted', () => {
     const own = ownComment('comments-before.json');
     expect(own).toBeDefined();
-    expect([own!.isLiked, own!.creatorHearted]).toEqual([false, false]);
+    expect([own!.myRating === 'like', own!.creatorHearted]).toEqual([false, false]);
     expect(own!.deleteParams).not.toBeNull();
   });
 
   test.if(has('comments-after.json') && has('manifest.json'))('after: the creator sees it liked and hearted', () => {
     const own = ownComment('comments-after.json');
-    expect([own!.isLiked, own!.creatorHearted]).toEqual([true, true]);
+    expect([own!.myRating === 'like', own!.creatorHearted]).toEqual([true, true]);
   });
 
   test.if(has('comments-after-anonymous.json') && has('manifest.json'))(
     "after, anyone else: hearted (the heart is public), not liked (the like is the viewer's), and not deletable",
     () => {
       const own = ownComment('comments-after-anonymous.json');
-      expect([own!.isLiked, own!.creatorHearted]).toEqual([false, true]);
+      expect([own!.myRating === 'like', own!.creatorHearted]).toEqual([false, true]);
       expect(own!.deleteParams).toBeNull();
+    },
+  );
+
+  // The dislike axis — its own capture phase (`capture:viewer-state dislike`),
+  // because a dislike has nothing to do with the before/after pair's video
+  // rating, subscription and Watch Later.
+  //
+  // This is the assertion the field exists for. `TOOLBAR_LIKE_STATE_DISLIKED`
+  // had never appeared in any fixture until 2026-09-21, so a reader that never
+  // returned `'dislike'` would have been indistinguishable from a correct one:
+  // an unvoted comment and a disliked one both read `'none'`, with nothing
+  // thrown and nothing logged. That is F35's rule stated as a test.
+  test.if(has('comments-disliked.json') && has('manifest.json'))(
+    'dislike: the parser reports exactly the comments the capture proved were disliked',
+    () => {
+      // The oracle is the manifest, which `captureDislike` wrote from its own
+      // read of the raw response rather than from the parser under test.
+      const expected = (manifest() as unknown as { dislikedCommentIds?: string[] }).dislikedCommentIds ?? [];
+      expect(expected.length).toBeGreaterThan(0);
+
+      const items = parseComments(load('comments-disliked.json'), 'viewer-state').items;
+      expect(items.filter((c) => c.myRating === 'dislike').map((c) => c.id).sort()).toEqual([...expected].sort());
+
+      // Not a page that reads disliked throughout — the same control the heart
+      // has, and the one that catches a reader hardcoded the other way.
+      expect(items.length).toBeGreaterThan(expected.length);
+      // A dislike is not a like. The two come off one field, so a reader that
+      // mapped the new value onto the old one would pass everything above.
+      for (const id of expected) {
+        expect(items.find((c) => c.id === id)!.myRating).not.toBe('like');
+      }
     },
   );
 

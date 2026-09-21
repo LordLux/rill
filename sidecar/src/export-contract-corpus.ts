@@ -202,6 +202,21 @@ function sanitiseComment(comment: Comment, index: number): Comment {
     repliesContinuation: comment.repliesContinuation ? `CONTINUATION_TOKEN_${seq}` : null,
     replyParams: comment.replyParams ? 'REPLY_PARAMS' : null,
     deleteParams: comment.deleteParams ? 'DELETE_PARAMS' : null,
+    // The vote blobs carry the comment id, the video id and the account's
+    // channel id in a protobuf, so none of them can travel. Presence is kept
+    // because the corpus asserts on it; the value is not.
+    // Prefixed `COMMENT_` for a reason worth keeping: the first version used
+    // `LIKE_PARAMS`, which is eleven characters of `[A-Za-z0-9_]` — exactly a
+    // video id's shape — and `corpus.test.ts`'s forbidden-shape layer flagged
+    // all twenty of them as a leaked video id. A placeholder has to be
+    // unmistakably a placeholder.
+    likeParams: comment.likeParams ? 'COMMENT_LIKE_PARAMS' : null,
+    unlikeParams: comment.unlikeParams ? 'COMMENT_UNLIKE_PARAMS' : null,
+    dislikeParams: comment.dislikeParams ? 'COMMENT_DISLIKE_PARAMS' : null,
+    undislikeParams: comment.undislikeParams ? 'COMMENT_UNDISLIKE_PARAMS' : null,
+    // `myRating` rides through untouched — it is a closed set of three, not
+    // identity. That it survives the sanitiser is the whole reason the corpus
+    // can assert on it.
   };
 }
 
@@ -265,7 +280,7 @@ async function exportViewerState(): Promise<void> {
     if (!present.includes(`membership-${phase}.json`)) continue;
     await write(`membership-${phase}`, sanitiseMembership(parsePlaylistMembership(await load(`membership-${phase}.json`))));
   }
-  for (const [index, name] of ['comments-before', 'comments-after', 'comments-after-anonymous'].entries()) {
+  for (const [index, name] of ['comments-before', 'comments-after', 'comments-after-anonymous', 'comments-disliked'].entries()) {
     if (!present.includes(`${name}.json`)) continue;
     await write(name, sanitiseCommentsResult(parseComments(await load(`${name}.json`), `viewer-state-${name}`), 40 + index));
   }

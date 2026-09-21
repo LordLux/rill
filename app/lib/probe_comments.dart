@@ -99,7 +99,9 @@ Comment _comment(String id, int seed, int port, {int replyCount = 0, String? rep
     replyCount: replyCount,
     isVerified: random.nextInt(10) == 0,
     creatorHearted: random.nextInt(20) == 0,
-    isLiked: random.nextInt(8) == 0,
+    // A spread of all three, so a measurement run draws both filled glyphs as
+    // a real page would rather than only the outlined pair.
+    myRating: switch (random.nextInt(8)) { 0 => 'like', 1 => 'dislike', _ => 'none' },
     repliesContinuation: repliesContinuation,
   );
 }
@@ -161,6 +163,23 @@ class _SyntheticSource implements CommentsSource {
 
   @override
   void cancel(int id) {}
+
+  // The probe measures build and frame cost, never the network, so the writes
+  // answer instantly and change nothing. They exist because `CommentsSource`
+  // grew them (`todo.md` 39.5) — a synthetic source has to satisfy the same
+  // interface the real widgets talk to, or the thing being measured is not the
+  // real widget.
+  @override
+  Future<Comment?> post(String createParams, String text) async => null;
+
+  @override
+  Future<void> reply(String replyParams, String text) async {}
+
+  @override
+  Future<void> delete(String deleteParams) async {}
+
+  @override
+  Future<void> rate(String params) async {}
 }
 
 Future<Uint8List> _avatarPng() async {

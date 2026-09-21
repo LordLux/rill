@@ -162,6 +162,10 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // as `startParams`.
   replyParams: /^REPLY_PARAMS$/,
   deleteParams: /^DELETE_PARAMS$/,
+  likeParams: /^COMMENT_LIKE_PARAMS$/,
+  unlikeParams: /^COMMENT_UNLIKE_PARAMS$/,
+  dislikeParams: /^COMMENT_DISLIKE_PARAMS$/,
+  undislikeParams: /^COMMENT_UNDISLIKE_PARAMS$/,
   // The comment box's own submit token. Real ones encode the video id in
   // base64, which layer 1's forbidden-shape list would flag on its own.
   createParams: /^CREATE_PARAMS$/,
@@ -431,18 +435,48 @@ describe('corpus sanitisation', () => {
 // comment ever exported, `isLiked` for none, because no fixture had a liked
 // comment in it to disagree. `comments-viewer-state.json` is that comment.
 describe('comment corpus — viewer state', () => {
-  type CommentDoc = { items: { isLiked: boolean; creatorHearted: boolean }[] };
+  type CommentDoc = { items: { myRating: string; creatorHearted: boolean }[] };
   const pages = corpus.filter((d) => d.name.startsWith('comments')).map((d) => d.value as CommentDoc);
   const all = pages.flatMap((p) => p.items);
 
   test('the comment corpus can see a liked comment and a hearted one', () => {
-    expect(all.some((c) => c.isLiked)).toBe(true);
+    expect(all.some((c) => c.myRating === 'like')).toBe(true);
     expect(all.some((c) => c.creatorHearted)).toBe(true);
+  });
+
+  // `myRating` is a closed set of three read off one wire field, so all three
+  // have to be *in* the corpus or the reader is only partly tested. `'dislike'`
+  // was missing until 2026-09-21 — every fixture had been captured with the
+  // account in whatever state it happened to be in, and none had ever held a
+  // disliked comment, so a reader that dropped the value entirely would have
+  // been green. The viewer-state pair covers the other two.
+  test('the comment corpus holds every rating the field can take', () => {
+    // Every comments page in the corpus, the `viewer-state-*` ones included —
+    // `pages` above deliberately does not reach them (see the heart test
+    // below), and the disliked capture is one of them.
+    const everyComment = corpus
+      .filter((d) => d.name.includes('comments'))
+      .flatMap((d) => (d.value as CommentDoc).items);
+    const seen = new Set(everyComment.map((c) => c.myRating));
+    expect([...seen].sort()).toEqual(['dislike', 'like', 'none']);
+  });
+
+  test('no page of comments is disliked throughout', () => {
+    // The control that catches the mirror of the heart bug: a reader mapping
+    // every comment to `'dislike'` would satisfy the test above on its own.
+    for (const page of pages.filter((p) => p.items.length > 3)) {
+      expect(page.items.every((c) => c.myRating === 'dislike')).toBe(false);
+    }
   });
 
   test('a creator heart is not universal — no page of comments is hearted throughout', () => {
     // The old reading marked every comment on every page. A creator hearting
     // *every* comment on a page of 20 is not a thing a person does.
+    //
+    // Deliberately over `pages` and not every comments page in the corpus: the
+    // `viewer-state-*` captures are the account's *own* video, where it really
+    // has hearted all four comments, so a genuinely-all-hearted page exists and
+    // widening this would fail on real data.
     for (const page of pages.filter((p) => p.items.length > 3)) {
       expect(page.items.every((c) => c.creatorHearted)).toBe(false);
     }
@@ -497,7 +531,7 @@ describe('viewer-state corpus — the account states the parsers must report', (
   });
 
   describe("comments: the viewer's like and the creator's heart", () => {
-    type C = { isLiked: boolean; creatorHearted: boolean; deleteParams: string | null };
+    type C = { myRating: string; creatorHearted: boolean; deleteParams: string | null };
     const page = (name: string): C[] => doc<{ items: C[] }>(name).items;
     const count = (items: C[], f: (c: C) => boolean) => items.filter(f).length;
 
@@ -509,8 +543,8 @@ describe('viewer-state corpus — the account states the parsers must report', (
       expect(before.length).toBeGreaterThan(1);
       const own = before.filter((c) => c.deleteParams !== null);
       expect(own).toHaveLength(1);
-      expect([own[0]!.isLiked, own[0]!.creatorHearted]).toEqual([false, false]);
-      expect(count(before, (c) => c.isLiked)).toBe(before.length - 1);
+      expect([own[0]!.myRating === 'like', own[0]!.creatorHearted]).toEqual([false, false]);
+      expect(count(before, (c) => c.myRating === 'like')).toBe(before.length - 1);
       expect(count(before, (c) => c.creatorHearted)).toBe(before.length - 1);
     });
 
@@ -518,9 +552,9 @@ describe('viewer-state corpus — the account states the parsers must report', (
       const before = page('comments-before');
       const after = page('comments-after');
       expect(after).toHaveLength(before.length);
-      expect(count(after, (c) => c.isLiked)).toBe(after.length);
+      expect(count(after, (c) => c.myRating === 'like')).toBe(after.length);
       expect(count(after, (c) => c.creatorHearted)).toBe(after.length);
-      const changed = after.filter((c, i) => c.isLiked !== before[i]!.isLiked || c.creatorHearted !== before[i]!.creatorHearted);
+      const changed = after.filter((c, i) => c.myRating !== before[i]!.myRating || c.creatorHearted !== before[i]!.creatorHearted);
       expect(changed).toHaveLength(1);
       expect(changed[0]!.deleteParams).not.toBeNull();
     });
@@ -531,7 +565,7 @@ describe('viewer-state corpus — the account states the parsers must report', (
       const anonymous = page('comments-after-anonymous');
       expect(anonymous.length).toBeGreaterThan(1);
       expect(count(anonymous, (c) => c.creatorHearted)).toBe(anonymous.length);
-      expect(count(anonymous, (c) => c.isLiked)).toBe(0);
+      expect(count(anonymous, (c) => c.myRating === 'like')).toBe(0);
       expect(count(anonymous, (c) => c.deleteParams !== null)).toBe(0);
     });
   });

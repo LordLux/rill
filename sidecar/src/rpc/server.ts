@@ -598,6 +598,14 @@ async function handleRequest(request: RpcRequest) {
       const { deleteComment } = await import('../actions/comments.ts');
       const result = await deleteComment(await getBrowseSession(), deleteParams);
       emitResponse(id, result);
+    } else if (method === 'action.rateComment') {
+      // One of the comment's four server-supplied vote blobs, verbatim — the
+      // client picks which transition it wants, because it is the one holding
+      // the state the user is looking at.
+      const voteParams = requireString(params, 'params', 'action.rateComment');
+      const { rateComment } = await import('../actions/comments.ts');
+      const result = await rateComment(await getBrowseSession(), voteParams);
+      emitResponse(id, result);
     } else if (method === 'action.subscribe') {
       const channelId = requireString(params, 'channelId', 'action.subscribe');
       const { subscribe } = await import('../actions/interaction.ts');

@@ -98,12 +98,39 @@ function createdComment(response: unknown): Comment | null {
   return null;
 }
 
+
+/**
+ * YouTube's comment length limit, **measured 2026-09-21** rather than taken
+ * from documentation: 10,000 characters is accepted and 10,001 is refused
+ * outright by `comment/create_comment` with an HTTP 4xx.
+ *
+ * It is not in the response anywhere — the create box ships no
+ * `maxCharacterLimit` or equivalent — so the only way to know it is to ask, and
+ * the only way to keep knowing it is to write it down.
+ *
+ * Checked here rather than only in the client because the client is not the
+ * only caller of the RPC, and because a refusal that names the limit is worth
+ * more than a bare 400 from the edge. The client checks too, so a viewer is
+ * stopped while typing instead of after pressing send.
+ */
+export const COMMENT_MAX_LENGTH = 10000;
+
+/** Refuses a comment YouTube will refuse anyway, with a message that says why. */
+function requireLength(text: string, method: string): void {
+  if (text.length <= COMMENT_MAX_LENGTH) return;
+  throw new RpcError(
+    'BAD_REQUEST',
+    `${method}: a comment is at most ${COMMENT_MAX_LENGTH} characters; this one is ${text.length}`,
+  );
+}
+
 export async function postComment(
   session: Session,
   createParams: string,
   commentText: string,
 ): Promise<{ comment: Comment | null }> {
   requireCookie(session, 'action.postComment');
+  requireLength(commentText, 'action.postComment');
 
   let response: unknown;
   try {
@@ -132,6 +159,7 @@ export async function replyToComment(
   commentText: string,
 ): Promise<Record<string, never>> {
   requireCookie(session, 'action.replyToComment');
+  requireLength(commentText, 'action.replyToComment');
 
   let response: unknown;
   try {
@@ -169,5 +197,61 @@ export async function deleteComment(
     throw new RpcError('UPSTREAM_ERROR', `action.deleteComment: YouTube answered ${status}`);
   }
   log.info('deleted a comment');
+  return {};
+}
+
+/**
+ * `action.rateComment` — like, unlike, dislike or undislike a comment.
+ *
+ * **The caller sends a blob, not an intent.** `params` is one of the four
+ * server-supplied tokens on {@link Comment} (`likeParams`, `unlikeParams`,
+ * `dislikeParams`, `undislikeParams`), handed back verbatim. This function
+ * deliberately does not take a target rating and pick the token itself: that
+ * would mean holding a second copy of the state machine here, out of step with
+ * whatever the client is actually showing, and the endpoint has no notion of
+ * "set rating to X" to translate into anyway.
+ *
+ * It reuses `comment/perform_comment_action` — the same endpoint as delete,
+ * differentiated only by which blob is sent, exactly as that function's own
+ * note predicted. So there is no new request shape here to get wrong, which is
+ * the whole reason this was cheap: the `target` shape for a *video*'s
+ * like/dislike came from a reference implementation and produced 400s until it
+ * was corrected against a real response (`CLAUDE.md`). These blobs come off the
+ * response itself.
+ *
+ * Measured 2026-09-20: all four are present on 20 of 20 comments of a signed-in
+ * page — **and on an anonymous one too**, so their presence is not evidence the
+ * viewer may vote. `requireCookie` is what actually enforces that, here as
+ * everywhere else.
+ */
+export async function rateComment(
+  session: Session,
+  params: string,
+): Promise<Record<string, never>> {
+  requireCookie(session, 'action.rateComment');
+
+  let response: unknown;
+  try {
+    response = await session.execute('/comment/perform_comment_action', { action: params });
+  } catch (error) {
+    throw new RpcError('UPSTREAM_ERROR', `action.rateComment: ${messageOf(error)}`);
+  }
+
+  // `actionResults` — **plural**, and a sibling of `actions` rather than nested
+  // inside one: `[{status: 'STATUS_SUCCEEDED', feedback: 'FEEDBACK_LIKE'}]`.
+  // Measured 2026-09-21 off a real vote; `actions` comes back empty.
+  //
+  // The first version of this read `actions[0].updateCommentVoteAction
+  // .actionResult.status`, inferred from the `updateCommentVoteAction` that
+  // appears in the *surface entity's* `clientActions` — a plausible shape that
+  // is not this endpoint's. It matched nothing, so `status` was always `null`
+  // and every vote, including a rejected one, was reported as a success. That
+  // is the "community references are hypotheses" rule biting on a shape I
+  // inferred from a neighbouring field rather than read off the response.
+  const status = str(get(response, 'actionResults', '0', 'status'));
+  if (status !== null && status !== 'STATUS_SUCCEEDED') {
+    throw new RpcError('UPSTREAM_ERROR', `action.rateComment: YouTube answered ${status}`);
+  }
+  log.info('rated a comment');
   return {};
 }

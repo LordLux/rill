@@ -13,12 +13,16 @@
       "likeCount": "Sanitised Likes 1",
       "publishedText": "8 years ago (edited)",
       "replyCount": 0,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": true,
       "isPinned": false,
       "repliesContinuation": null,
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_002",
@@ -33,12 +37,16 @@
       "likeCount": "Sanitised Likes 2",
       "publishedText": "8 years ago (edited)",
       "replyCount": 0,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": true,
       "isPinned": false,
       "repliesContinuation": null,
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_003",
@@ -53,12 +61,16 @@
       "likeCount": "Sanitised Likes 3",
       "publishedText": "8 years ago",
       "replyCount": 6,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": true,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_003",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_004",
@@ -73,12 +85,16 @@
       "likeCount": "Sanitised Likes 4",
       "publishedText": "8 years ago",
       "replyCount": 0,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": true,
       "isPinned": false,
       "repliesContinuation": null,
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     }
   ],
   "continuation": null,

@@ -13,12 +13,16 @@
       "likeCount": "Sanitised Likes 1",
       "publishedText": "7 years ago",
       "replyCount": 21,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_001",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_002",
@@ -40,12 +44,16 @@
       "likeCount": "Sanitised Likes 2",
       "publishedText": "7 years ago",
       "replyCount": 13,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_002",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_003",
@@ -60,12 +68,16 @@
       "likeCount": "Sanitised Likes 3",
       "publishedText": "2 years ago",
       "replyCount": 14,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_003",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_004",
@@ -80,12 +92,16 @@
       "likeCount": "Sanitised Likes 4",
       "publishedText": "2 years ago",
       "replyCount": 2,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_004",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_005",
@@ -100,12 +116,16 @@
       "likeCount": "Sanitised Likes 5",
       "publishedText": "9 years ago",
       "replyCount": 15,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_005",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_006",
@@ -120,12 +140,16 @@
       "likeCount": "Sanitised Likes 6",
       "publishedText": "7 years ago",
       "replyCount": 30,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_006",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_007",
@@ -140,12 +164,16 @@
       "likeCount": "Sanitised Likes 7",
       "publishedText": "7 years ago",
       "replyCount": 17,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_007",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_008",
@@ -160,12 +188,16 @@
       "likeCount": "Sanitised Likes 8",
       "publishedText": "1 year ago (edited)",
       "replyCount": 10,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_008",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_009",
@@ -180,12 +212,16 @@
       "likeCount": "Sanitised Likes 9",
       "publishedText": "8 years ago",
       "replyCount": 3,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_009",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_010",
@@ -200,12 +236,16 @@
       "likeCount": "Sanitised Likes 10",
       "publishedText": "7 years ago",
       "replyCount": 11,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_010",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_011",
@@ -220,12 +260,16 @@
       "likeCount": "Sanitised Likes 11",
       "publishedText": "7 years ago",
       "replyCount": 5,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_011",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_012",
@@ -240,12 +284,16 @@
       "likeCount": "Sanitised Likes 12",
       "publishedText": "3 years ago",
       "replyCount": 2,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_012",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_013",
@@ -260,12 +308,16 @@
       "likeCount": "Sanitised Likes 13",
       "publishedText": "5 years ago",
       "replyCount": 12,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_013",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_014",
@@ -280,12 +332,16 @@
       "likeCount": "Sanitised Likes 14",
       "publishedText": "7 years ago",
       "replyCount": 27,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_014",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_015",
@@ -300,12 +356,16 @@
       "likeCount": "Sanitised Likes 15",
       "publishedText": "5 years ago",
       "replyCount": 6,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_015",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_016",
@@ -336,12 +396,16 @@
       "likeCount": "Sanitised Likes 16",
       "publishedText": "11 months ago (edited)",
       "replyCount": 0,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": null,
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_017",
@@ -356,12 +420,16 @@
       "likeCount": "Sanitised Likes 17",
       "publishedText": "5 years ago",
       "replyCount": 4,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_017",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_018",
@@ -376,12 +444,16 @@
       "likeCount": "Sanitised Likes 18",
       "publishedText": "6 years ago",
       "replyCount": 6,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_018",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_019",
@@ -396,12 +468,16 @@
       "likeCount": "Sanitised Likes 19",
       "publishedText": "5 years ago",
       "replyCount": 26,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": "CONTINUATION_TOKEN_019",
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     },
     {
       "id": "cmt_020",
@@ -416,12 +492,16 @@
       "likeCount": "Sanitised Likes 20",
       "publishedText": "1 year ago",
       "replyCount": 0,
-      "isLiked": false,
+      "myRating": "none",
       "creatorHearted": false,
       "isPinned": false,
       "repliesContinuation": null,
       "replyParams": null,
-      "deleteParams": null
+      "deleteParams": null,
+      "likeParams": null,
+      "unlikeParams": null,
+      "dislikeParams": null,
+      "undislikeParams": null
     }
   ],
   "continuation": "CONTINUATION_TOKEN_4",

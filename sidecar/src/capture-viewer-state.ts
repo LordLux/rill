@@ -41,6 +41,14 @@
  *   3. Undo step 2, so the account is where it started. (Liking and hearting are
  *      an on/off pair, and the own comment is a comment you wrote.)
  *
+ * **The dislike axis is its own phase** and is not part of that pair — see
+ * `captureDislike`. Dislike one *top-level* comment on
+ * `YT_VIEWER_COMMENT_VIDEO`, leave it, and run
+ * `bun run capture:viewer-state dislike`. It is separate because a dislike has
+ * nothing to do with the video rating, the subscription or Watch Later, and
+ * folding it in would mean rebuilding the whole after-state to re-prove one
+ * vote.
+ *
  * The rill app does the video, subscribe and Watch Later steps itself; liking
  * and hearting a comment are done on youtube.com. Each run retries for `--wait`
  * seconds (default 60) because a write takes a few seconds to show in a read.
@@ -170,6 +178,76 @@ function rawCommentStates(page: unknown): Map<string, CommentState> {
 
 const isLiked = (s: CommentState | undefined) => s?.likeState === 'TOOLBAR_LIKE_STATE_LIKED';
 const isHearted = (s: CommentState | undefined) => s?.heartState?.startsWith('TOOLBAR_HEART_STATE_HEARTED') ?? false;
+const isDisliked = (s: CommentState | undefined) => s?.likeState === 'TOOLBAR_LIKE_STATE_DISLIKED';
+
+/**
+ * The dislike axis — `bun run capture:viewer-state dislike`.
+ *
+ * **A phase of its own, not a leg of the before/after pair.** A comment's
+ * dislike is independent of everything that pair holds, so folding it in would
+ * mean putting the account through the entire after-state — rate the video,
+ * subscribe, add to Watch Later — to capture one comment's vote, and taking the
+ * pair again every time the dislike needed re-proving. `watch-disliked.json` is
+ * the same kind of thing for a video's rating.
+ *
+ * **The recipe:** dislike **one top-level comment** on `YT_VIEWER_COMMENT_VIDEO`
+ * and leave it there. A *reply* will not do — this captures the top-level
+ * comments page, and a disliked reply sits several pages into a replies
+ * continuation where nothing here would see it.
+ *
+ * Measured 2026-09-21, live: a disliked comment reads
+ * `TOOLBAR_LIKE_STATE_DISLIKED` on `engagementToolbarStateEntityPayload
+ * .likeState` — the same field that carries `…_LIKED` and `…_INDIFFERENT`, so
+ * the three are a closed set and `Comment.myRating` maps onto it directly
+ * rather than needing a second boolean. Verified against the raw response by
+ * `rawCommentStates`, which reads its own path rather than the parser under
+ * test.
+ */
+async function captureDislike(session: Session, commentVideo: string, waitSeconds: number): Promise<void> {
+  const deadline = Date.now() + waitSeconds * 1000;
+  for (;;) {
+    const page = await commentsPage(session, commentVideo);
+    const states = page ? rawCommentStates(page) : new Map<string, CommentState>();
+    const disliked = [...states].filter(([, state]) => isDisliked(state)).map(([id]) => id);
+
+    if (page && disliked.length > 0) {
+      await mkdir(OUT, { recursive: true });
+      await writeFile(join(OUT, 'comments-disliked.json'), JSON.stringify(page), 'utf8');
+
+      let manifest: Record<string, unknown> = {};
+      try {
+        manifest = JSON.parse(await readFile(join(OUT, 'manifest.json'), 'utf8')) as Record<string, unknown>;
+      } catch {
+        // first run
+      }
+      const phases = (manifest['phases'] as Record<string, unknown> | undefined) ?? {};
+      phases['dislike'] = {
+        capturedAt: new Date().toISOString(),
+        facts: { dislikedCommentIds: disliked, commentsOnPage: states.size },
+      };
+      await writeFile(
+        join(OUT, 'manifest.json'),
+        JSON.stringify({ ...manifest, commentVideo, dislikedCommentIds: disliked, phases }, null, 2),
+        'utf8',
+      );
+      log.info(
+        `captured the "dislike" state to fixtures/viewer-state/ — ${disliked.length} of ${states.size} comments disliked: ${disliked.join(', ')}`,
+      );
+      return;
+    }
+
+    const reason = !page
+      ? 'the comment video has no comments page (are comments on?)'
+      : `no comment on the first page of ${commentVideo} is disliked (${states.size} seen)`;
+    if (Date.now() >= deadline) {
+      log.error(`${reason}, so nothing was written.`);
+      log.error('Dislike one TOP-LEVEL comment there and leave it — a reply is not on this page.');
+      process.exit(1);
+    }
+    log.warn(`${reason}; retrying in 5 s`);
+    await sleep(5000);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Capture
@@ -286,8 +364,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
   const phase = process.argv[2];
-  if (phase !== 'before' && phase !== 'after') {
-    log.error('usage: bun run capture:viewer-state <before|after> [--wait <seconds>]');
+  if (phase !== 'before' && phase !== 'after' && phase !== 'dislike') {
+    log.error('usage: bun run capture:viewer-state <before|after|dislike> [--wait <seconds>]');
+    log.error('  before/after  the paired capture — see this file\'s header for the recipe');
+    log.error('  dislike       one top-level comment disliked on YT_VIEWER_COMMENT_VIDEO');
     process.exit(2);
   }
   const waitFlag = process.argv.indexOf('--wait');
@@ -304,6 +384,18 @@ async function main(): Promise<void> {
   if (!commentVideo) log.warn('YT_VIEWER_COMMENT_VIDEO is not set — the comment half is skipped');
 
   const session = await createSession({ clientType: 'WEB', cookie });
+
+  // The dislike axis stands alone and needs neither the anonymous session nor
+  // the watch/membership captures the pair takes.
+  if (phase === 'dislike') {
+    if (!commentVideo) {
+      log.error('YT_VIEWER_COMMENT_VIDEO is not set — there is no video to read a disliked comment on');
+      process.exit(2);
+    }
+    await captureDislike(session, commentVideo, waitSeconds);
+    return;
+  }
+
   const anonymous = await createSession({ clientType: 'WEB' });
 
   let manifest: Record<string, unknown> = {};

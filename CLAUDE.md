@@ -153,12 +153,16 @@ interface Comment {
   likeCount: string | null;
   publishedText: string | null;
   replyCount: number;
-  isLiked: boolean;
+  myRating: 'like' | 'dislike' | 'none';   // one field on the wire, so one field here
   creatorHearted: boolean;
   isPinned: boolean;
   repliesContinuation: string | null;
   replyParams: string | null;      // opaque; action.replyToComment
   deleteParams: string | null;     // opaque, own comments only; action.deleteComment
+  likeParams: string | null;       // the four vote transitions; action.rateComment
+  unlikeParams: string | null;     // server-supplied, never constructed
+  dislikeParams: string | null;    // present anonymously too — not permission
+  undislikeParams: string | null;
 }
 
 interface CommentsResult {

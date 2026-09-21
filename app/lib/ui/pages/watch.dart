@@ -16,6 +16,7 @@ import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
 import '../player_shell.dart' show currentRouteProvider, watchRouteName;
+import '../auth_controller.dart';
 import '../playback_controller.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
@@ -228,8 +229,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                         videoId: item.id,
                         initialContinuation: detail.commentsContinuation!,
                       ),
-                    if (detail != null && detail.commentsContinuation == null)
-                      _commentsDisabledSliver(scheme),
+                    if (detail != null && detail.commentsContinuation == null) _commentsDisabledSliver(item, scheme),
                   ] else ...[
                     // Fixed max height and collapsible on its own (queue_panel.dart),
                     // so it never creates the kind of scroll wall the tab switch
@@ -284,8 +284,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                           videoId: item.id,
                           initialContinuation: detail.commentsContinuation!,
                         ),
-                      if (detail != null && detail.commentsContinuation == null)
-                        _commentsDisabledSliver(scheme),
+                      if (detail != null && detail.commentsContinuation == null) _commentsDisabledSliver(item, scheme),
                     ],
                   ],
                 ],
@@ -313,7 +312,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
 
   /// Shared between the two-column rail and the narrow layout's Comments tab
   /// — the "turned off" state doesn't depend on which one is showing it.
-  Widget _commentsDisabledSliver(ColorScheme scheme) {
+  Widget _commentsDisabledSliver(VideoItem item, ColorScheme scheme) {
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.only(bottom: 24, left: 16),
@@ -321,7 +320,17 @@ class _WatchPageState extends ConsumerState<WatchPage> {
           textAlign: TextAlign.center,
           text: TextSpan(
             children: [
-              TextSpan(text: 'Comments are turned off.', style: TextStyle(color: scheme.onSurfaceVariant)),
+              // TODO only show if NOT live
+              if (item.isLive)
+                TextSpan(
+                  text: 'Comments are not available. This is a live stream.',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                )
+              else
+                TextSpan(
+                  text: 'Comments are turned off.',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
               // Clickable link to YouTube's help center for more information about comments being turned off.
               TextSpan(
                 text: ' Learn more',
@@ -1105,6 +1114,16 @@ class _ActionsState extends ConsumerState<_Actions> {
     final rating = ref.watch(ratingActionsProvider.select((actions) => actions[item.id])) ?? detail?.myRating ?? VideoRating.none;
     final inWatchLater = ref.watch(watchLaterActionsProvider.select((actions) => actions[item.id])) ?? (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ?? false);
 
+    // Why the account-requiring controls below are disabled, or null when they
+    // are live. These used to be pressable signed out: the optimistic rating
+    // applied, the call came back `AUTH_REQUIRED`, and it reverted under a
+    // toast — a control that looks available, does something, then undoes it.
+    // A disabled control with a reason is the better shape, and it is the same
+    // sentence the comment vote buttons use.
+    final authStatus = ref.watch(authProvider.select((auth) => auth.status));
+    final cannotRate = signedInActionBlocker(authStatus, 'rate videos');
+    final cannotSave = signedInActionBlocker(authStatus, 'save videos');
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -1136,12 +1155,12 @@ class _ActionsState extends ConsumerState<_Actions> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ShortcutTooltip(
-                label: rating == VideoRating.like ? 'Remove like' : 'Like',
+                label: cannotRate ?? (rating == VideoRating.like ? 'Remove like' : 'Like'),
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    mouseCursor: _ratingBusy ? SystemMouseCursors.basic : SystemMouseCursors.click,
-                    onTap: _ratingBusy ? null : () => _setRating(VideoRating.like),
+                    mouseCursor: _ratingBusy || cannotRate != null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                    onTap: _ratingBusy || cannotRate != null ? null : () => _setRating(VideoRating.like),
                     borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
                     child: Padding(
                       padding: const EdgeInsets.only(left: 16, right: 12, top: 8, bottom: 8),
@@ -1165,12 +1184,12 @@ class _ActionsState extends ConsumerState<_Actions> {
               ),
               Container(width: 1, height: 18, color: scheme.outlineVariant.withValues(alpha: 0.5)),
               ShortcutTooltip(
-                label: rating == VideoRating.dislike ? 'Remove dislike' : 'Dislike',
+                label: cannotRate ?? (rating == VideoRating.dislike ? 'Remove dislike' : 'Dislike'),
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    mouseCursor: _ratingBusy ? SystemMouseCursors.basic : SystemMouseCursors.click,
-                    onTap: _ratingBusy ? null : () => _setRating(VideoRating.dislike),
+                    mouseCursor: _ratingBusy || cannotRate != null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                    onTap: _ratingBusy || cannotRate != null ? null : () => _setRating(VideoRating.dislike),
                     borderRadius: const BorderRadius.horizontal(right: Radius.circular(18)),
                     child: Padding(
                       padding: const EdgeInsets.only(left: 12, right: 16, top: 8, bottom: 8),
@@ -1200,26 +1219,26 @@ class _ActionsState extends ConsumerState<_Actions> {
 
         // Playlist
         ShortcutTooltip(
-          label: 'Save to playlist',
+          label: cannotSave ?? 'Save to playlist',
           child: _ActionChip(
             icon: Icons.playlist_add,
             activeIcon: Icons.playlist_add_check,
             activeLabel: 'Save',
             active: _sheet == _OpenSheet.save,
-            onTap: _openSave,
+            onTap: cannotSave != null ? null : _openSave,
           ),
         ),
 
         // Watch Later
         ShortcutTooltip(
-          label: inWatchLater ? 'Remove from Watch Later' : 'Watch Later',
+          label: cannotSave ?? (inWatchLater ? 'Remove from Watch Later' : 'Watch Later'),
           child: _ActionChip(
             icon: Icons.schedule,
             activeIcon: Icons.check,
             activeLabel: 'Watch Later',
             active: inWatchLater && !_watchLaterSettled,
             marked: inWatchLater && _watchLaterSettled,
-            onTap: () => _tapWatchLater(inWatchLater),
+            onTap: cannotSave != null ? null : () => _tapWatchLater(inWatchLater),
           ),
         ),
 

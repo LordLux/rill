@@ -100,10 +100,16 @@ void main() {
   });
 
   group('SubscribeButton follows a changed value', () {
-    Widget harness(bool subscribed) => MaterialApp(
-          theme: buildRillTheme(kDefaultAccent),
-          home: Scaffold(
-            body: Center(child: SubscribeButton(channelId: 'chan', initiallySubscribed: subscribed)),
+    // The button gates itself on auth now — subscribing needs an account, and a
+    // degraded session is not one — so it needs a scope to read, and one that
+    // says authenticated or every pill here renders disabled.
+    Widget harness(bool subscribed) => ProviderScope(
+          overrides: [authProvider.overrideWith(_FakeAuth.new)],
+          child: MaterialApp(
+            theme: buildRillTheme(kDefaultAccent),
+            home: Scaffold(
+              body: Center(child: SubscribeButton(channelId: 'chan', initiallySubscribed: subscribed)),
+            ),
           ),
         );
 

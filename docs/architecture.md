@@ -9,7 +9,47 @@ findings" was measured, not assumed.
 
 | F37 | **`FractionallySizedBox` inside an unconstrained `Row` throws an infinite width constraint exception.** A flex container like `Row` gives non-flex children unbounded horizontal space. A fractional box asks for a percentage of infinity, resulting in a layout crash. Fixed in `feed_skeleton.dart` by wrapping the fractional bar in an `Expanded` widget. A circular avatar `Container` there was also given a fixed `width` to prevent layout assertion failures. | Measured 2026-09-20 via `flutter test` which red-screened on `feed_skeleton_test.dart`'s matrix of screen widths. |
 
+**The guard names its failures now, and the first thing it named was a
+regression rather than the flake — 2026-09-21.** Within minutes of the change
+it reported `rpc_client_test.dart: killing the Flutter process leaves no
+orphaned sidecar`, which turned out to be **0/8 in isolation, not flaky at
+all**: a `package:flutter/foundation.dart` import added to
+`data/rpc/client.dart` for `kDebugMode` had broken
+`test/orphan_test_helper.dart`, which imports that file and runs on the plain
+Dart VM where `dart:ui` does not exist. The helper failed to *compile* and the
+test failed with `Helper should print SIDECAR_PID` behind two hundred lines of
+framework errors — a message pointing nowhere near the cause. Same shape as the
+`animated_vector_gen` trap: a package re-exports `dart:ui` and drags the
+framework into a host that has none. Fixed with the `assert` trick, and
+`sidecar_lookup_test.dart` now asserts in one line that `client.dart` imports no
+Flutter. **The orphan test is not the original flake**: 5/5 after the fix and
+4/4 under contention.
+
+**F38, chased again 2026-09-21 and not reproduced — and the guard was the
+reason it could not be.** One `rill check` reported `680 tests, 1 not passing`
+and an immediate re-run reported 0, with nothing changed between. The failure
+could not be named, because `test_suite_guard.dart` counted failures and
+printed only the **count** — "1 not passing" was the whole of the output. It now
+names each one (suite plus test name, and says explicitly when the failure is a
+synthesised load/`setUpAll`/`tearDownAll` rather than a test's own), so the next
+occurrence is diagnosable in one line instead of by bisection. Not reproduced in
+**nine** runs afterwards: three of `flutter test`, four of the guard, and two of
+the guard under deliberate CPU contention (two concurrent `bun test` runs),
+contention being the obvious suspect since F19 records machine load moving
+timings here by 30×. F38's own `try`/`catch` is still in place in
+`subscribe_button.dart` and `media_tile.dart`, and a sweep of every other
+`removeListener` in `app/lib` found none with the same exposure — the remaining
+two (`comment_composer.dart`, `topbar.dart`) remove listeners from objects they
+own and dispose themselves. So: cause still unknown, the instrument that would
+identify it is fixed, and the standing advice is to read the guard's named
+output rather than re-run until green. Two *new* instances of the same class
+were found by inspection in that sweep and guarded before they could bite — a
+`setState` in a `Focus.onFocusChange` and a `ValueNotifier` written from a
+`MouseRegion.onExit`, both of which fire while a list row is being unmounted.
+
 | F38 | **The Flutter test framework's tear-down sequence disposes `ScrollPosition`s before the widgets that observe them.** A widget's `dispose()` that unconditionally calls `_scrollPosition?.removeListener()` will crash the entire test suite during `(tearDownAll)` if the position was unmounted first, because the framework throws an assertion. Fixed in `subscribe_button.dart` and `media_tile.dart` by wrapping the listener removal in a `try-catch` block. | Measured 2026-09-20 during flaky suite failures (e.g. `player_shell_test.dart` crashing post-test). |
+
+| F39 | **A comment's vote is one field of three and four server-supplied blobs; the client's own model was the part that drifted.** `engagementToolbarStateEntityPayload.likeState` carries `TOOLBAR_LIKE_STATE_LIKED`, `_DISLIKED` and `_INDIFFERENT` — a closed set on one field — so `Comment.myRating` replaces `isLiked` for the reason `VideoDetail.myRating` already had: two booleans admit liked-and-disliked, which YouTube cannot produce. Voting needs no constructed token: `engagementToolbarSurfaceEntityPayload` ships `likeCommand`, `unlikeCommand`, `dislikeCommand` and `undislikeCommand`, each an opaque blob for `comment/perform_comment_action` — the same endpoint as delete, exactly as `types.ts` predicted — so the trap that made a *video*'s like/dislike `target` shape wrong does not apply. **Their presence is not permission:** all four are on anonymous pages too, the `heartActiveTooltip` mistake (F33) in a new place, so the buttons gate on `auth.isSignedIn`. **`_DISLIKED` had never been in a fixture**, so a reader that dropped it was indistinguishable from a correct one — an unvoted comment and a disliked one both read `'none'`. `capture:viewer-state dislike` is its own phase, because a dislike is independent of the before/after pair and folding it in would mean rebuilding the whole after-state to re-prove one vote. **And the app gate stayed green across the rename**: `contract_test.dart` had strict-key groups for `VideoDetail` and `CaptionTrack` only, and its generic corpus loop reads `items` as `FeedItem`s, so a comments page passed through untouched — the model kept a defaulted `isLiked` the sidecar no longer sent, which at runtime reads as "nobody has voted on anything". `Comment` has a group now. | Measured 2026-09-20/21, signed in. Four blobs on 20 of 20 comments of a signed-in page and 20 of 20 of an anonymous one. `_DISLIKED` found by paging a thread's replies to a comment the account had disliked; the top-level capture is `fixtures/viewer-state/comments-disliked.json` (1 of 5), asserted against the capture manifest as oracle. All four transitions driven live through `rateComment` as two round trips — `unlike`→`like` and `undislike`→`dislike` — each verified by re-reading the page, ending with **zero account drift**. The two thumbs had been bare `Icon`s, drawn but not pressable, on every comment in the app; the thumb-down was a hardcoded outline. Widget tests mutation-checked (3). |
 
 ---
 
@@ -736,6 +776,37 @@ tab its independent scroll position and `CommentsSection`'s fetched state —
 switching away and back re-fetches — which is an accepted tradeoff against a
 combination that does not work at all. If Flutter fixes this, `TabBarView` is
 worth revisiting for the state-preservation win alone.
+
+
+#### A control that needs an account is disabled and says why — decided 2026-09-21
+
+Every action-gated control in the app reads one function,
+`signedInActionBlocker(status, verb)` in `ui/auth_controller.dart`, which
+answers the *reason* it is unavailable or null. The watch page's like and
+dislike, Save to playlist, Watch Later, the subscribe pill and a comment's two
+vote buttons all use it, and each shows that reason as its `ShortcutTooltip`
+label in place of the ordinary one.
+
+**What it replaced:** those controls were pressable signed out. The optimistic
+state applied, the call came back `AUTH_REQUIRED`, and it reverted under a
+toast — a control that looks available, acts, and then undoes itself. The
+comment vote buttons would have been the worst case, because a vote that
+silently does not stick looks exactly like one that did.
+
+**Degraded is not folded into "signed out", and that is the point of having a
+function rather than a boolean.** `AuthState.isSignedIn` is strictly
+`status == authenticated`, and `degraded` is its own status fed by
+`auth.verify` — hard invariant 5, since `logged_in` is cookie presence rather
+than server acceptance. The two need different actions from the viewer: one has
+to sign in, the other has to sign in *again*, and a degraded session looks
+signed in on every other surface. So the sentences differ ("Sign in to vote" /
+"Your session expired. Sign in again to vote") and the wording matches the
+account button's own badge.
+
+**Not gated on the tokens the action needs.** A comment's four vote blobs are
+present on anonymous pages too, so a button enabled by their presence would be
+enabled always and fail always — F33's mistake (a tooltip read as state) in a
+new place. The session decides.
 
 ### 2.9 Captions render through libass, not Flutter
 

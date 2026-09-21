@@ -57,9 +57,50 @@ function parseCommentText(contentObj: any): CommentText {
 function extractSurfaceCommands(
   store: EntityStore,
   surfaceKey: string | null | undefined,
-): { replyParams: string | null; deleteParams: string | null } {
+): {
+  replyParams: string | null;
+  deleteParams: string | null;
+  likeParams: string | null;
+  unlikeParams: string | null;
+  dislikeParams: string | null;
+  undislikeParams: string | null;
+} {
   const surface = store.get<any>(surfaceKey);
-  if (!surface) return { replyParams: null, deleteParams: null };
+  const none = {
+    replyParams: null,
+    deleteParams: null,
+    likeParams: null,
+    unlikeParams: null,
+    dislikeParams: null,
+    undislikeParams: null,
+  };
+  if (!surface) return none;
+
+  /**
+   * The four vote transitions, each a **server-supplied** opaque blob for
+   * `comment/perform_comment_action` — the same endpoint delete goes over,
+   * differentiated only by which blob is sent. Measured 2026-09-20 on a
+   * signed-in page: `likeCommand`, `unlikeCommand`, `dislikeCommand` and
+   * `undislikeCommand`, all four present on 20 of 20 comments.
+   *
+   * Nothing here is constructed, which is the point — CLAUDE.md's "community
+   * references are hypotheses" trap does not apply to a blob the server handed
+   * us for this exact transition. The like/dislike `target` shape that produced
+   * 400s was built from a reference; these are not.
+   *
+   * **Their presence is not permission.** All four are on the *anonymous*
+   * capture too (`fixtures/comments.json`, 20 of 20), so a client that enables
+   * its buttons because the blob exists has made the `heartActiveTooltip`
+   * mistake again — that tooltip is on every comment and reading it marked 120
+   * of 120 comments hearted. Whether this viewer may vote is a question about
+   * the session, not about this field.
+   */
+  const voteParams = (command: string): string | null => {
+    const action = get(
+      surface, command, 'innertubeCommand', 'performCommentActionEndpoint', 'action',
+    );
+    return typeof action === 'string' ? action : null;
+  };
 
   const replyParams = get(
     surface,
@@ -88,6 +129,10 @@ function extractSurfaceCommands(
   return {
     replyParams: typeof replyParams === 'string' ? replyParams : null,
     deleteParams,
+    likeParams: voteParams('likeCommand'),
+    unlikeParams: voteParams('unlikeCommand'),
+    dislikeParams: voteParams('dislikeCommand'),
+    undislikeParams: voteParams('undislikeCommand'),
   };
 }
 
@@ -129,13 +174,36 @@ function extractSurfaceCommands(
 function extractToolbarState(
   store: EntityStore,
   stateKey: string | null | undefined,
-): { isLiked: boolean; creatorHearted: boolean } {
+): { myRating: Comment['myRating']; creatorHearted: boolean } {
   const state = store.get<any>(stateKey);
   return {
-    isLiked: state?.likeState === 'TOOLBAR_LIKE_STATE_LIKED',
+    myRating: ratingFrom(state?.likeState),
     creatorHearted:
       typeof state?.heartState === 'string' && state.heartState.startsWith('TOOLBAR_HEART_STATE_HEARTED'),
   };
+}
+
+/**
+ * `likeState` is a closed set of three on one field, so the DTO is an enum and
+ * not two booleans — `isLiked`/`isDisliked` would admit both-true, a state
+ * YouTube cannot produce (the same reasoning `VideoDetail.myRating` carries).
+ *
+ * `TOOLBAR_LIKE_STATE_DISLIKED` measured live 2026-09-21, on a comment the
+ * signed-in account had disliked; the corpus holds it as
+ * `fixtures/viewer-state/comments-disliked.json`, captured by
+ * `capture:viewer-state dislike`, which refuses to write unless the raw
+ * response proves the state. Until that capture existed the value had never
+ * been seen, and this function returning `'none'` for it would have been
+ * invisible — a disliked comment reads exactly like an unrated one.
+ *
+ * An unknown value is `'none'` rather than a throw: hard invariant 4 applies to
+ * a field as much as to a renderer, and a new fifth state must not cost the
+ * comment.
+ */
+function ratingFrom(likeState: unknown): Comment['myRating'] {
+  if (likeState === 'TOOLBAR_LIKE_STATE_LIKED') return 'like';
+  if (likeState === 'TOOLBAR_LIKE_STATE_DISLIKED') return 'dislike';
+  return 'none';
 }
 
 /**
@@ -208,15 +276,16 @@ export function parseComments(root: any, context: string): CommentsResult {
       replyCount = parseInt(entity.toolbar.replyCount.replace(/\D/g, ''), 10) || 0;
     }
 
-    const { replyParams, deleteParams } = extractSurfaceCommands(store, vm.toolbarSurfaceKey);
-    const { isLiked, creatorHearted } = extractToolbarState(store, vm.toolbarStateKey);
+    const surface = extractSurfaceCommands(store, vm.toolbarSurfaceKey);
+    const { myRating, creatorHearted } = extractToolbarState(store, vm.toolbarStateKey);
 
     // The toolbar ships the count twice — with the viewer's like in it and
     // without — and `likeCountA11y` follows whichever one the state selects
     // (measured 2026-09-19: a liked comment read `likeCountLiked` 737,
     // `likeCountNotliked` 736, a11y "737 likes"). Always shipping the un-liked
     // one showed a comment you liked one like short, next to a filled thumb.
-    const likeCount = isLiked ? entity.toolbar?.likeCountLiked : entity.toolbar?.likeCountNotliked;
+    const likeCount =
+      myRating === 'like' ? entity.toolbar?.likeCountLiked : entity.toolbar?.likeCountNotliked;
 
     items.push({
       id: props.commentId || '',
@@ -229,12 +298,16 @@ export function parseComments(root: any, context: string): CommentsResult {
       likeCount: likeCount || null,
       publishedText: props.publishedTime || null,
       replyCount: replyCount,
-      isLiked,
+      myRating,
       creatorHearted,
       isPinned: !!props.pinnedText,
       repliesContinuation: replyToken,
-      replyParams,
-      deleteParams,
+      replyParams: surface.replyParams,
+      deleteParams: surface.deleteParams,
+      likeParams: surface.likeParams,
+      unlikeParams: surface.unlikeParams,
+      dislikeParams: surface.dislikeParams,
+      undislikeParams: surface.undislikeParams,
     });
 
     if (Number(props.replyLevel) >= 1) {
