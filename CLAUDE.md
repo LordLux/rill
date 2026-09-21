@@ -153,6 +153,7 @@ interface Comment {
   likeCount: string | null;
   publishedText: string | null;
   replyCount: number;
+  depth: number;
   myRating: 'like' | 'dislike' | 'none';   // one field on the wire, so one field here
   creatorHearted: boolean;
   isPinned: boolean;

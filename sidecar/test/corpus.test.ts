@@ -74,6 +74,7 @@ const KEEP_REAL = new Set([
   'badges',
   'weightLabel',
   'commentCount',
+  'depth',
 ]);
 
 /**

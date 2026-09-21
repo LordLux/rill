@@ -39,7 +39,7 @@ class CommentsSection extends ConsumerStatefulWidget {
 /// half-typed reply went with it: scroll a thread away and back and it was
 /// collapsed with its replies gone (measured 2026-09-19, `architecture.md` F34).
 /// State that must outlive a row cannot live in one.
-class _ThreadState {
+class _CommentState {
   final List<Comment> replies = [];
 
   /// The "Show more replies" token, or null once the list is complete.
@@ -135,8 +135,8 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   int _generation = 0;
   int? _inFlight;
 
-  /// Per-thread reply state, by the thread's comment id — see [_ThreadState].
-  final Map<String, _ThreadState> _threadStates = {};
+  /// Per-thread reply state, by the thread's comment id — see [_CommentState].
+  final Map<String, _CommentState> _commentStates = {};
 
   /// Comments (top-level or replies) with a delete in flight.
   final Set<String> _deleting = {};
@@ -163,7 +163,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   String? _voteDisabledReason;
 
   /// Comments whose text is expanded past its four lines. Here for the same
-  /// reason [_threadStates] is: it is state a row must not lose by scrolling.
+  /// reason [_commentStates] is: it is state a row must not lose by scrolling.
   final Set<String> _textExpanded = {};
 
   @override
@@ -186,7 +186,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     _cancelInFlight();
     // The rows are already unmounted (children go before their parent), so the
     // controllers they held can go now, not a frame later.
-    for (final state in _threadStates.values) {
+    for (final state in _commentStates.values) {
       final request = state.request;
       if (request != null) _source.cancel(request);
       state.discarded = true;
@@ -205,7 +205,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     _generation++;
     _cancelInFlight();
     _threads.clear();
-    _forgetThreads();
+    _forgetComments();
     _chips = null;
     _commentCount = null;
     _createParams = null;
@@ -223,9 +223,9 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   }
 
   /// Drops every thread's reply state: the list it belonged to is gone.
-  void _forgetThreads() {
-    final gone = _threadStates.values.toList();
-    _threadStates.clear();
+  void _forgetComments() {
+    final gone = _commentStates.values.toList();
+    _commentStates.clear();
     _deleting.clear();
     _textExpanded.clear();
     // `_rating` is deliberately *not* cleared, unlike its two neighbours. A
@@ -242,7 +242,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
 
   /// The reply boxes that hold these controllers are still in the tree until the
   /// frame that removes them has built.
-  void _disposeAfterFrame(List<_ThreadState> states) {
+  void _disposeAfterFrame(List<_CommentState> states) {
     if (states.isEmpty) return;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       for (final state in states) {
@@ -322,7 +322,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
       _error = false;
       if (refresh) {
         _threads.clear();
-        _forgetThreads();
+        _forgetComments();
       }
     });
 
@@ -367,7 +367,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   // Replies
   // ---------------------------------------------------------------------------
 
-  _ThreadState _stateOf(Comment thread) => _threadStates.putIfAbsent(thread.id, _ThreadState.new);
+  _CommentState _stateOf(Comment comment) => _commentStates.putIfAbsent(comment.id, _CommentState.new);
 
   /// How many replies to say a thread has.
   ///
@@ -379,21 +379,21 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   /// Only complete, though. While a "Show more replies" token remains the list is
   /// a prefix, and its length would report 10 for a 962-reply thread.
   int _replyCountFor(Comment thread) {
-    final state = _threadStates[thread.id];
+    final state = _commentStates[thread.id];
     if (state == null) return thread.replyCount;
     final listIsComplete = state.loadedOnce && state.continuation == null;
     final advertisedOrLoaded = thread.replyCount > state.replies.length ? thread.replyCount : state.replies.length;
     return listIsComplete ? state.replies.length : advertisedOrLoaded;
   }
 
-  void _toggleReplies(Comment thread) {
-    final state = _stateOf(thread);
+  void _toggleReplies(Comment comment) {
+    final state = _stateOf(comment);
     if (state.expanded) {
       setState(() => state.expanded = false);
       return;
     }
     setState(() => state.expanded = true);
-    _loadRepliesOnce(thread);
+    _loadRepliesOnce(comment);
   }
 
   /// The auto-load every expand path shares: fetch the first page exactly
@@ -402,16 +402,16 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   /// stale-count/empty-result mismatch this method exists to avoid. "Show more
   /// replies" is unaffected: that button calls [_loadReplies] directly, and
   /// genuine pagination still has a real `continuation` to follow.
-  void _loadRepliesOnce(Comment thread) {
-    final state = _stateOf(thread);
+  void _loadRepliesOnce(Comment comment) {
+    final state = _stateOf(comment);
     if (state.loadedOnce || state.loading) return;
-    if (thread.replyCount > 0) _loadReplies(thread);
+    if (comment.replyCount > 0 || comment.repliesContinuation != null) _loadReplies(comment);
   }
 
-  Future<void> _loadReplies(Comment thread) async {
-    final state = _stateOf(thread);
+  Future<void> _loadReplies(Comment comment) async {
+    final state = _stateOf(comment);
     if (state.loading) return;
-    final token = thread.repliesContinuation;
+    final token = comment.repliesContinuation;
     if (token == null) return;
 
     if (!mounted) return;
@@ -494,6 +494,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
             authorAvatarUrl: auth.accountAvatarUrl ?? '',
             text: CommentText(content: text),
             replyCount: 0,
+            depth: thread.depth + 1,
             publishedText: 'Just now',
           ),
         );
@@ -544,7 +545,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
         _deleting.remove(comment.id);
         if (parent == null) {
           _threads.removeWhere((thread) => thread.id == comment.id);
-          final gone = _threadStates.remove(comment.id);
+          final gone = _commentStates.remove(comment.id);
           if (gone != null) {
             final request = gone.request;
             if (request != null) _source.cancel(request);
@@ -552,7 +553,14 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
             _disposeAfterFrame([gone]);
           }
         } else {
-          _threadStates[parent.id]?.replies.removeWhere((reply) => reply.id == comment.id);
+          _commentStates[parent.id]?.replies.removeWhere((reply) => reply.id == comment.id);
+          final gone = _commentStates.remove(comment.id);
+          if (gone != null) {
+            final request = gone.request;
+            if (request != null) _source.cancel(request);
+            gone.discarded = true;
+            _disposeAfterFrame([gone]);
+          }
         }
       });
     } on RpcException catch (e) {
@@ -623,7 +631,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
       if (index != -1) _threads[index] = update(_threads[index]);
       return;
     }
-    final replies = _threadStates[parent.id]?.replies;
+    final replies = _commentStates[parent.id]?.replies;
     if (replies == null) return;
     final index = replies.indexWhere((reply) => reply.id == id);
     if (index != -1) replies[index] = update(replies[index]);
@@ -665,14 +673,20 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     final rows = <_Row>[];
     for (final thread in _threads) {
       rows.add(_Row(_RowKind.thread, thread));
-      final state = _threadStates[thread.id];
-      if (state == null || !state.expanded) continue;
-      for (final reply in state.replies) {
-        rows.add(_Row(_RowKind.reply, thread, reply));
+      
+      void walk(Comment parent) {
+        final state = _commentStates[parent.id];
+        if (state == null || !state.expanded) return;
+        for (final child in state.replies) {
+          rows.add(_Row(_RowKind.reply, thread, child));
+          walk(child);
+        }
+        if (state.loading || state.error || state.continuation != null) {
+          rows.add(_Row(_RowKind.footer, thread, parent));
+        }
       }
-      if (state.loading || state.error || state.continuation != null) {
-        rows.add(_Row(_RowKind.footer, thread));
-      }
+      
+      walk(thread);
     }
     return rows;
   }
@@ -685,12 +699,12 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     return switch (row.kind) {
       _RowKind.thread => _threadRow(row.thread, endsBlock),
       _RowKind.reply => _replyRow(row.thread, row.reply!, endsBlock),
-      _RowKind.footer => _footerRow(row.thread),
+      _RowKind.footer => _footerRow(row.reply ?? row.thread),
     };
   }
 
   Widget _threadRow(Comment thread, bool endsBlock) {
-    final state = _threadStates[thread.id];
+    final state = _commentStates[thread.id];
     final replyCount = _replyCountFor(thread);
     final expanded = state?.expanded ?? false;
     final replying = state?.replying ?? false;
@@ -790,7 +804,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const SizedBox(width: 4),
-                      Text(expanded ? 'Hide replies' : '$replyCount replies'),
+                      Text(expanded ? 'Hide replies' : (replyCount > 0 ? '$replyCount replies' : 'Show replies')),
                       const SizedBox(width: 4),
                       Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16),
                     ],
@@ -805,6 +819,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
 
   Widget _replyRow(Comment thread, Comment reply, bool endsBlock) {
     final deleting = _deleting.contains(reply.id);
+    final safeDepth = reply.depth > 3 ? 3 : reply.depth;
     return Opacity(
       key: ValueKey('r:${reply.id}'),
       // A reply under a thread being deleted goes down with it, as it did when it
@@ -813,7 +828,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
       child: Padding(
         // 12 above, the reply's own 16 below, and — after the block's last row —
         // the 16 the thread used to put around all of it.
-        padding: EdgeInsets.only(left: _replyIndent, top: 12.0, bottom: endsBlock ? 32.0 : 16.0),
+        padding: EdgeInsets.only(left: _replyIndent * safeDepth, top: 12.0, bottom: endsBlock ? 32.0 : 16.0),
         child: CommentTile(
           comment: reply,
           deleting: deleting,
@@ -829,8 +844,8 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     );
   }
 
-  Widget _footerRow(Comment thread) {
-    final state = _threadStates[thread.id]!;
+  Widget _footerRow(Comment parent) {
+    final state = _commentStates[parent.id]!;
     final Widget content;
     if (state.loading) {
       content = const Padding(
@@ -843,7 +858,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: TextButton(
-            onPressed: () => _loadReplies(thread),
+            onPressed: () => _loadReplies(parent),
             child: const Text('Tap to retry'),
           ),
         ),
@@ -854,17 +869,17 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: TextButton(
-            onPressed: () => _loadReplies(thread),
+            onPressed: () => _loadReplies(parent),
             child: const Text('Show more replies'),
           ),
         ),
       );
     }
     return Opacity(
-      key: ValueKey('f:${thread.id}'),
-      opacity: _deleting.contains(thread.id) ? 0.5 : 1.0,
+      key: ValueKey('f:${parent.id}'),
+      opacity: _deleting.contains(parent.id) ? 0.5 : 1.0,
       child: Padding(
-        padding: const EdgeInsets.only(left: _replyIndent, bottom: 16.0),
+        padding: EdgeInsets.only(left: _replyIndent * (parent.depth == 0 ? 1 : parent.depth + 1), bottom: 16.0),
         child: Align(alignment: Alignment.centerLeft, child: content),
       ),
     );

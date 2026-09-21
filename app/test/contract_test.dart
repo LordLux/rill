@@ -74,6 +74,7 @@ const commentKeys = <String>{
   'likeCount',
   'publishedText',
   'replyCount',
+  'depth',
   'myRating',
   'creatorHearted',
   'isPinned',

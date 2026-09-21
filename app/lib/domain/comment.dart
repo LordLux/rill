@@ -67,6 +67,7 @@ abstract class Comment with _$Comment {
     String? likeCount,
     String? publishedText,
     required int replyCount,
+      @Default(0) int depth,
 
     /// This viewer's vote — `'like'`, `'dislike'` or `'none'`, and `'none'`
     /// whenever anonymous.

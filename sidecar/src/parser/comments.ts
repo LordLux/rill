@@ -298,6 +298,7 @@ export function parseComments(root: any, context: string): CommentsResult {
       likeCount: likeCount || null,
       publishedText: props.publishedTime || null,
       replyCount: replyCount,
+      depth: Number(props.replyLevel) || 0,
       myRating,
       creatorHearted,
       isPinned: !!props.pinnedText,

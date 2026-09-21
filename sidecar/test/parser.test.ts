@@ -148,6 +148,7 @@ const SHAPES = {
     likeCount: 'string?',
     publishedText: 'string?',
     replyCount: 'number',
+    depth: 'number',
     myRating: 'string',
     creatorHearted: 'boolean',
     isPinned: 'boolean',
@@ -1857,9 +1858,11 @@ describe('video.comments — reply tree, pagination and the comment box', () => 
         ...commentEntities('r5', 'reply-5', 1),
       ],
     );
-    expect(parseComments(raw, 'synthetic').items.map((c) => c.id)).toEqual([
+    const items = parseComments(raw, 'synthetic').items;
+    expect(items.map((c) => c.id)).toEqual([
       'reply-1', 'reply-2', 'reply-3', 'reply-4', 'reply-5',
     ]);
+    expect(items.map((c) => c.depth)).toEqual([1, 2, 3, 2, 1]);
   });
 
   test("a top-level comment's inline replies are not spliced into the main list", () => {
@@ -2132,3 +2135,4 @@ describe.if(HAS_CAPTURES)('captured corpus', () => {
     expect(result.items.length).toBeGreaterThan(0);
   });
 });
+
