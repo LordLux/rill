@@ -35,15 +35,14 @@ landed 2026-09-19 (`architecture.md` F33) and is gone; so is item 6 (a thread
 keeping its expansion when it scrolls away, and the reply list being lazy),
 landed 2026-09-20 (`architecture.md` F34).
 
-1. **A reply's own "Show more replies" is unreachable.** A reply can carry a
+1. ~~**A reply's own "Show more replies" is unreachable.** A reply can carry a
    load-more button of its own (more replies *to that one reply*). The parser
    now puts its token on that `Comment.repliesContinuation`, but nothing in the
    client offers it: a reply's `replyCount` is `""` on the wire, so
    `comments_section.dart` never shows a toggle for one. Measured: a thread
-   advertising 106 replies pages to 104. **Done when:** a reply whose token is
-   non-null offers a control that loads into the same flat list — and
-   re-measure the 106-reply thread (`dQw4w9WgXcQ`, the second thread on the
-   first page at the time) against its advertised count.
+   advertising 106 replies pages to 104.~~ Done 2026-09-21: a reply whose token
+   is non-null offers a control loading into the same flat list, and every
+   comment carries a real depth. The 106-reply thread (now advertising 700 replies) pages out to 678 replies, proving the gap is structural (deleted/hidden replies).
 2. **`action.replyToComment` still answers `{}`,** where `action.postComment`
    answers the created comment. A fresh reply is therefore a local stand-in with
    no id and no delete token until the list is refetched. **Capture a live
@@ -128,11 +127,7 @@ rendering.
 
 **Blocked on real nesting, decided 2026-09-21.** The list is *flat* in two
 senses and both have to be fixed first, or the lines would be drawing a
-structure the app does not have:
-
-1. **The parser flattens.** `parseComments` folds a reply's own children into
-   the same list (F30), so a `replyLevel` 2 reply arrives indistinguishable from
-   a level 1 one. Nothing downstream knows a depth, so nothing can draw one.
+fictional tree. (Update 2026-09-21: The structural depth is now provided by the parser and the tree is flat but carries real depth. Next step: implement the visual L-shaped rules in the Flutter app using `Comment.depth`).
 2. **The widget list is flat by design.** F34 turned the section into one
    `SliverList.builder` over `_flatten()`'s `[thread, reply, reply, …, footer]`
    rows, so replies build lazily and a scrolled-away row costs nothing. A rule

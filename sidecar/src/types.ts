@@ -697,6 +697,8 @@ export interface Comment {
   likeCount: string | null;
   publishedText: string | null;
   replyCount: number;
+  /** Structural nesting level: 0 for top-level, 1 for direct replies, 2+ for nested. */
+  depth: number;
   /**
    * This viewer's vote on the comment — `'none'` when anonymous, always.
    *
@@ -987,3 +989,4 @@ export interface AuthStatus {
   accountHandle: string | null;
   accountAvatarUrl: string | null;
 }
+
