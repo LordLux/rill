@@ -67,6 +67,14 @@ Future<void> main(List<String> args) async {
 
   final suitePaths = <int, String>{};
   final testsPerSuite = <int, int>{};
+  /// Test id -> "<suite>: <name>". Kept so a failure can be *named*.
+  ///
+  /// It could not be, until 2026-09-21. The guard counted failures and printed
+  /// only the count, so "1 not passing" was the whole of what anyone got — and
+  /// a run that fails once and passes on a re-run is then impossible to tell
+  /// from a real regression without bisecting by hand. That is how one got
+  /// waved through as "pre-existing, unrelated" in this repo before.
+  final testNames = <int, String>{};
   final failures = <String>[];
   var sawAnyEvent = false;
 
@@ -105,9 +113,23 @@ Future<void> main(List<String> args) async {
           continue;
         }
         testsPerSuite[suiteId] = (testsPerSuite[suiteId] ?? 0) + 1;
+        final testId = test?['id'] as int?;
+        if (testId != null) {
+          final suite = suitePaths[suiteId] ?? 'suite $suiteId';
+          testNames[testId] = '$suite: $name';
+        }
       case 'testDone':
         if (decoded['result'] != 'success' && decoded['hidden'] != true) {
-          failures.add('${decoded['testID']}');
+          final id = decoded['testID'] as int?;
+          failures.add(
+            testNames[id] ??
+                // A synthesised test (a load, a setUpAll, a tearDownAll) has no
+                // `testStart` this guard recorded, because those are skipped
+                // above. Naming it as such is still far better than an id: a
+                // failure here is a teardown problem, not a test's own.
+                'unnamed test $id (a load, setUpAll or tearDownAll — '
+                    'result: ${decoded['result']})',
+          );
         }
     }
   }
@@ -133,6 +155,14 @@ Future<void> main(List<String> args) async {
     'test_suite_guard: ${suitePaths.length} suites, $total tests, '
     '${failures.length} not passing.',
   );
+
+  if (failures.isNotEmpty) {
+    stderr.writeln('');
+    stderr.writeln('test_suite_guard: not passing:');
+    for (final failure in failures) {
+      stderr.writeln('  $failure');
+    }
+  }
 
   if (empty.isNotEmpty) {
     stderr.writeln('');
