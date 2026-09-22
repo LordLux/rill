@@ -63,6 +63,7 @@ class PlaybackState {
     this.sessionId,
     this.isLoading = false,
     this.isSwitchingQuality = false,
+    this.isRestoringVideo = false,
     this.hold,
     this.error,
     this.errorCode,
@@ -86,6 +87,22 @@ class PlaybackState {
   /// A quality change in flight. Distinct from [isLoading] because it must not
   /// draw the "opening a video" spinner over a video that is already playing.
   final bool isSwitchingQuality;
+
+  /// Leaving audio-only, with no picture yet.
+  ///
+  /// **`vid=no` is not a pause, it is a teardown.** Measured 2026-09-22: it
+  /// drops the demuxer cache to zero (36 MB and ~30 minutes of read-ahead, to
+  /// `total-bytes: 0`) and stops reading the video stream entirely. Coming back
+  /// is therefore a cold refetch and re-decode, not a resume — observed between
+  /// half a second and ten. Until this shipped the surface just sat black for
+  /// that whole time, which reads as a broken video rather than as a wait.
+  ///
+  /// Distinct from [isSwitchingQuality]: that one holds an opaque cover over
+  /// the surface, which here would replace the artwork the viewer is already
+  /// looking at with a black rectangle. This only raises the spinner, and only
+  /// once the spinner's own grace delay has passed, so the fast case shows
+  /// nothing at all.
+  final bool isRestoringVideo;
 
   /// Where the video is while the engine cannot say — see [PlaybackHold].
   ///
@@ -152,6 +169,7 @@ class PlaybackState {
     Object? sessionId = _unchanged,
     bool? isLoading,
     bool? isSwitchingQuality,
+    bool? isRestoringVideo,
     Object? hold = _unchanged,
     Object? error = _unchanged,
     Object? errorCode = _unchanged,
@@ -168,6 +186,7 @@ class PlaybackState {
       sessionId: identical(sessionId, _unchanged) ? this.sessionId : sessionId as String?,
       isLoading: isLoading ?? this.isLoading,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
+      isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
       // *cleared* when the switch finishes, and `??` cannot clear anything.
       hold: identical(hold, _unchanged) ? this.hold : hold as PlaybackHold?,
@@ -220,6 +239,12 @@ class PlaybackController extends Notifier<PlaybackState> {
   PlaybackEngine get _engine => ref.read(playbackEngineProvider);
 
   int _generation = 0;
+
+  /// Bumped by every audio-only toggle, so a restore that is still waiting for
+  /// a picture can tell it has been superseded. Separate from [_generation],
+  /// which tracks the *media* — toggling the mode does not open anything.
+  int _audioModeToggle = 0;
+
   Timer? _reportTimer;
   final List<StreamSubscription<Object?>> _subscriptions = [];
   String? _preloadedVideoId;
@@ -267,11 +292,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
     ref.listen(audioModeProvider, (previous, next) {
       if (previous != next && state.source != null && state.variant != null) {
-        // Toggle the video track on/off without reopening the media. This keeps
-        // the demuxer, the cache and the position intact — no seek, no duration
-        // wait, no picture wait — so the transition is instant in both
-        // directions instead of the 6+ second cold reopen switchQuality caused.
-        unawaited(_engine.setVideoTrack(!next));
+        unawaited(_applyAudioMode(next));
       }
     });
 
@@ -730,6 +751,66 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (!_disposed && generation == _generation) {
         state = state.copyWith(isSwitchingQuality: false, hold: null);
       }
+    }
+  }
+
+  /// Turn the video track off or on for audio-only, without reopening.
+  ///
+  /// Toggling `vid` keeps the position and the audio stream undisturbed, which
+  /// is why §2.4 chose it over reopening the media. **The two directions are
+  /// not symmetric, though, and §2.4 used to claim they were.** Dropping the
+  /// track is immediate. Restoring it is a cold refetch — see
+  /// [PlaybackState.isRestoringVideo] — so it gets a spinner and the other
+  /// direction does not.
+  Future<void> _applyAudioMode(bool audioOnly) async {
+    final token = ++_audioModeToggle;
+    final generation = _generation;
+
+    if (audioOnly) {
+      // Nothing to wait for, and nothing to look at either: the artwork is
+      // already over the surface. Also clears a restore this toggle overtook,
+      // so a fast off-on-off cannot leave the spinner up.
+      if (state.isRestoringVideo) state = state.copyWith(isRestoringVideo: false);
+      await _engine.setVideoTrack(false);
+      return;
+    }
+
+    state = state.copyWith(isRestoringVideo: true);
+    try {
+      await _engine.setVideoTrack(true);
+      await _waitForVideoTrack(token);
+    } finally {
+      // Not if a newer toggle owns the flag — it is responsible for clearing
+      // its own, and this one must not clear it out from under it.
+      if (!_disposed && generation == _generation && token == _audioModeToggle) {
+        state = state.copyWith(isRestoringVideo: false);
+      }
+    }
+  }
+
+  /// Wait until mpv is decoding a picture again.
+  ///
+  /// `widthStream` is the signal because it is null until the first frame is
+  /// decoded — the only thing that separates "the call was issued" from "there
+  /// is something to look at". `setVideoTrack` itself returns in ~30 ms
+  /// (measured), so waiting on it would put the spinner up and take it down
+  /// again before the picture arrives.
+  Future<void> _waitForVideoTrack(int token) async {
+    if ((_engine.width ?? 0) > 0) {
+      // Width outlived `vid=no`, so it cannot say when the picture is back and
+      // waiting on it would hang until the timeout. Said out loud rather than
+      // silently skipped: it would leave the spinner permanently dead.
+      stderr.writeln('rill: leaving audio-only with width already set — no picture signal');
+      return;
+    }
+    try {
+      await _engine.widthStream
+          .firstWhere((width) => _disposed || token != _audioModeToggle || (width ?? 0) > 0)
+          .timeout(const Duration(seconds: 25));
+    } on Object {
+      // Bounded on purpose: a spinner that never comes down is worse than one
+      // that gives up on a picture that was never coming.
+      stderr.writeln('rill: no picture after leaving audio-only — clearing the spinner');
     }
   }
 

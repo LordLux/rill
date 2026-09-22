@@ -371,21 +371,54 @@ The reverse direction (video → audio) appeared fast (~100 ms) only because
 opening a single audio URL skips most of those steps.
 
 The fix is to **always open the video URL** and toggle mpv's `vid` property:
-`vid=no` disables video decoding (the demuxer still reads and audio keeps
-playing), `vid=auto` re-enables it. Both directions are now instant because
-the demuxer, the cache and the playback position are undisturbed. `vid` is
-present in the shipped `libmpv-2.dll`'s string table (the same scan hard
-invariant 8 requires), and the `setProperty` call is the same write binding
-`stream-lavf-o` already uses — not a `getProperty` read, so hard invariant 9
-does not apply.
+`vid=no` stops video, `vid=auto` re-enables it. The playback position and the
+audio stream are undisturbed either way, which is what makes this better than
+reopening. `vid` is present in the shipped `libmpv-2.dll`'s string table (the
+same scan hard invariant 8 requires), and the `setProperty` call is the same
+write binding `stream-lavf-o` already uses — not a `getProperty` read, so hard
+invariant 9 does not apply.
 
-Three consequences:
+**Two sentences here used to be wrong, and were corrected 2026-09-22 by
+measuring rather than reasoning.** They said `vid=no` left the demuxer reading,
+and that both directions were therefore instant. Neither is true. `vid=no` is a
+teardown: sampled through `demuxer-cache-state` across two 120 s phases either
+side of the toggle, the video cache goes from 33.97 MB and ~1782 s of
+read-ahead to `total-bytes: 0`, `fw-bytes: 0`, `cache-duration: 0`, and
+`stream-pos` freezes to the byte (427,790) for the whole phase while `time-pos`
+keeps advancing in real time. The harness is
+`app/lib/ui/player/audio_mode_probe.dart`.
+
+Two things follow from that, and they point opposite ways:
+
+- **It does save bandwidth**, not just CPU — the premise of the feature holds.
+  Measured on the real app over 242 s each, CPU fell from 11.8% to 5.3% of one
+  core. The saving scales with the video's bitrate.
+- **The directions are not symmetric.** Dropping the track is immediate;
+  restoring it is a *cold refetch and re-decode*, observed between half a
+  second and ten. So leaving audio-only raises
+  `PlaybackState.isRestoringVideo`, held until `widthStream` reports a decoded
+  frame, which feeds the control bar's existing busy spinner — and its grace
+  delay means the fast case still shows nothing. Entering audio-only raises
+  nothing, because there is nothing to wait for.
+
+**Do not re-derive any of this from network totals.** Windows' per-process I/O
+counters do not see mpv's socket reads at all (10 KB of process I/O against
+1.2 MB at the NIC over the same 20 s), and the system-wide NIC total carried
+several times more background traffic than the signal — read alone it gives
+the opposite answer, which is exactly what it did here before the probe
+settled it.
+
+Consequences:
 - `engine.open` no longer takes an `audioOnly` parameter. Audio-only is a
   rendering concern, not a media-loading concern.
 - The `audioModeProvider` listener in `PlaybackController` calls
-  `engine.setVideoTrack(!audioOnly)` instead of `switchQuality(force: true)`.
+  `_applyAudioMode`, which toggles the track and, in the restore direction
+  only, waits for a picture.
 - A quality switch (which reopens the media) resets `vid` to `auto`; the
   controller re-applies `vid=no` afterwards if audio-only is still active.
+- Because the cache is dropped rather than paused, bytes already buffered when
+  the mode is enabled are **wasted** — up to the 32 MiB cap. Enabling
+  audio-only at open avoids that; toggling mid-playback cannot.
 
 ### 2.5 Authentication and the silent-degradation problem
 

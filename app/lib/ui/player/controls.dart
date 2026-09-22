@@ -1044,7 +1044,10 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
 
   bool _busy() {
     final playback = ref.read(playbackProvider);
-    return _buffering || playback.isSwitchingQuality || playback.isLoading;
+    return _buffering ||
+        playback.isSwitchingQuality ||
+        playback.isLoading ||
+        playback.isRestoringVideo;
   }
 
   @override
@@ -1052,7 +1055,9 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     // Watched as well as read, so a switch starting or ending drives this even
     // though it arrives through Riverpod rather than through the stream above.
     ref.listen(
-      playbackProvider.select((p) => p.isSwitchingQuality || p.isLoading),
+      playbackProvider.select(
+        (p) => p.isSwitchingQuality || p.isLoading || p.isRestoringVideo,
+      ),
       (_, _) => _update(),
     );
 

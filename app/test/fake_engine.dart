@@ -182,6 +182,14 @@ class FakeEngine implements PlaybackEngine {
   @override
   Future<void> setVideoTrack(bool enabled) async {
     videoTrackEnabled = enabled;
+    // Models `vid=no`: mpv stops decoding, so the dimensions it reports go
+    // away and do not come back until the first frame after re-enabling.
+    // Putting them back is the test's job, because that gap *is* the wait
+    // being modelled — measured at between half a second and ten.
+    if (!enabled) {
+      setWidth(null);
+      setHeight(null);
+    }
   }
 
   @override
