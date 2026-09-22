@@ -122,6 +122,20 @@ abstract class PlaybackEngine {
   /// on screen while the real caption is being dragged.
   Stream<String?> get subtitleTextStream;
 
+  /// Enable or disable mpv's video track without reopening the media.
+  ///
+  /// **This is what makes Audio-Only → Video instant.** The old approach opened
+  /// the audio URL as the primary media in audio-only mode, which meant
+  /// switching back to video required a full `engine.open` — a cold reopen
+  /// costing 6+ seconds (seek, duration wait, picture wait). Toggling `vid`
+  /// instead keeps the demuxer, the cache and the position intact; mpv simply
+  /// stops or starts decoding video frames.
+  ///
+  /// `vid=auto` re-enables; `vid=no` disables. Both are mpv properties that
+  /// the shipped v0.36.0-403 build supports (F12/F15 confirmed `vid` in the
+  /// string table).
+  Future<void> setVideoTrack(bool enabled);
+
   /// [retainSubtitle] puts the attached track back after the media reopens.
   ///
   /// A quality switch reopens the media (F19) and mpv drops external subtitle
@@ -474,10 +488,27 @@ class MediaKitEngine implements PlaybackEngine {
     }
 
     await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+    
     // After the audio, not before: both go through `sub-add`/`audio-add` against
     // a freshly loaded file, and attaching a subtitle to a file whose duration is
     // not known yet is the same race the audio wait above exists for.
     if (retained != null) await setSubtitle(retained);
+  }
+
+  /// Toggle mpv's video track on or off — see [PlaybackEngine.setVideoTrack].
+  ///
+  /// `vid=auto` lets mpv select the best video track (the only one on a
+  /// single-file open). `vid=no` disables video decoding entirely — the demuxer
+  /// still reads and the audio track keeps playing, but no frames are decoded
+  /// or composited, saving CPU and letting the texture go blank.
+  ///
+  /// **This is a property write, not an `mpv_command`.** Same binding as
+  /// `setProperty('stream-lavf-o', …)` in [_setStreamOptions], and the same
+  /// reason invariant 9 does not apply: it writes one value and reads nothing.
+  @override
+  Future<void> setVideoTrack(bool enabled) async {
+    trace?.call('setVideoTrack enabled=$enabled');
+    await (_player.platform as NativePlayer).setProperty('vid', enabled ? 'auto' : 'no');
   }
 
   @override

@@ -17,6 +17,7 @@ import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/playback_source.dart';
 import '../widgets/silky_scroll_absorber.dart';
 import '../../domain/caption_style.dart';
+import '../audio_mode_controller.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 
@@ -469,6 +470,20 @@ class _RootPage extends ConsumerWidget {
         SizedBox(height: 3),
         Divider(height: 9, indent: 14, endIndent: 14, color: scheme.outlineVariant),
         SizedBox(height: 2),
+        Consumer(
+          builder: (context, ref, _) {
+            final isAudioOnly = ref.watch(audioModeProvider);
+            return _MenuRow(
+              icon: isAudioOnly ? Icons.headset : Icons.headset_off,
+              label: 'Audio Only',
+              trailing: Switch(
+                value: isAudioOnly,
+                onChanged: (val) => ref.read(audioModeProvider.notifier).setMode(val),
+              ),
+              onTap: () => ref.read(audioModeProvider.notifier).toggle(),
+            );
+          },
+        ),
         for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );

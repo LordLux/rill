@@ -362,6 +362,31 @@ client reopens the media on the existing player and seeks back — no
 watch. It costs a visible stall (median 4.1 s to the picture moving, worst 12 s),
 which is the measurement that keeps automatic frame-drop stepping out of scope.
 
+**Audio-only mode toggles `vid`, it does not reopen the media — decided
+2026-09-22.** The first implementation opened the audio URL as the primary
+media in audio-only mode (`isAudioOnly ? variant.audioUrl : variant.videoUrl`),
+which meant switching back to video was a cold reopen: duration wait, audio
+attach, seek, picture wait — the full `switchQuality` path, measured at 6+ s.
+The reverse direction (video → audio) appeared fast (~100 ms) only because
+opening a single audio URL skips most of those steps.
+
+The fix is to **always open the video URL** and toggle mpv's `vid` property:
+`vid=no` disables video decoding (the demuxer still reads and audio keeps
+playing), `vid=auto` re-enables it. Both directions are now instant because
+the demuxer, the cache and the playback position are undisturbed. `vid` is
+present in the shipped `libmpv-2.dll`'s string table (the same scan hard
+invariant 8 requires), and the `setProperty` call is the same write binding
+`stream-lavf-o` already uses — not a `getProperty` read, so hard invariant 9
+does not apply.
+
+Three consequences:
+- `engine.open` no longer takes an `audioOnly` parameter. Audio-only is a
+  rendering concern, not a media-loading concern.
+- The `audioModeProvider` listener in `PlaybackController` calls
+  `engine.setVideoTrack(!audioOnly)` instead of `switchQuality(force: true)`.
+- A quality switch (which reopens the media) resets `vid` to `auto`; the
+  controller re-applies `vid=no` afterwards if audio-only is still active.
+
 ### 2.5 Authentication and the silent-degradation problem
 
 Cookie auth is the only option: OAuth device-code no longer works against
