@@ -7,6 +7,7 @@ import 'audio_mode_controller.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
 import 'player/audio_art_surface.dart';
+import 'player/audio_backdrop.dart';
 import 'player/controls.dart';
 import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
@@ -412,7 +413,7 @@ class _FullscreenPlayer extends ConsumerWidget {
                 // With `vid=no` the texture decodes nothing, so this branch is
                 // the difference between the artwork and a black screen.
                 if (ref.watch(audioModeProvider))
-                  AudioArtSurface(thumbnailUrl: ref.watch(playbackProvider).item?.thumbnailUrl)
+                  AudioBackdrop(imageUrl: ref.watch(playbackProvider).item?.thumbnailUrl)
                 else
                   engine.videoSurface(),
                 PlayerControls(engine: engine),

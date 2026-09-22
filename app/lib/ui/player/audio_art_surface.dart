@@ -16,6 +16,7 @@ class AudioArtSurface extends StatelessWidget {
     required this.thumbnailUrl,
     this.scrim = true,
     this.iconSize = 64,
+    this.decodeWidth,
   });
 
   final String? thumbnailUrl;
@@ -25,6 +26,14 @@ class AudioArtSurface extends StatelessWidget {
   final bool scrim;
 
   final double iconSize;
+
+  /// Decode the image at this width instead of its natural one.
+  ///
+  /// For [AudioBackdrop], which blurs its copy: decoding a 1280-wide poster to
+  /// paint it at sigma 40 is work thrown away, and the downscale *is* most of
+  /// the blur. It also caps the cost of a surface that stays on screen for a
+  /// whole album. Left null anywhere the image is shown sharp.
+  final int? decodeWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +57,12 @@ class AudioArtSurface extends StatelessWidget {
         // no `errorBuilder`, so a thumbnail that fails to load left an empty
         // box with nothing to fall back to. Every other thumbnail in the app
         // is loaded this way.
-        Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback),
+        Image.network(
+          url,
+          fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
+          errorBuilder: (_, _, _) => fallback,
+        ),
         if (scrim) DecoratedBox(decoration: BoxDecoration(color: theme.tokens.scrim.withValues(alpha: 0.6))),
       ],
     );
