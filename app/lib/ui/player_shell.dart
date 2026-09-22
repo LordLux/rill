@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/feed_item.dart';
 import '../theme/tokens.dart';
+import 'audio_mode_controller.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
+import 'player/audio_art_surface.dart';
 import 'player/controls.dart';
 import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
@@ -285,7 +287,7 @@ class PlayerShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen(smtcControllerProvider, (_, __) {});
+    ref.listen(smtcControllerProvider, (_, _) {});
     final playback = ref.watch(playbackProvider);
     final onWatchPage = ref.watch(currentRouteProvider) == watchRouteName;
     final view = ref.watch(playerViewProvider);
@@ -317,6 +319,12 @@ class PlayerShell extends ConsumerWidget {
             // The only caption renderer (§2.9). It hides mpv's own on mount, so
             // nothing here has to keep `sub-visibility` in step with a toggle.
             //
+            // **Not mounted in audio-only.** It renders through libass in
+            // Flutter rather than through mpv, so `vid=no` does not suppress
+            // it: with captions left on, it kept drawing them over the artwork
+            // while `controls.dart` hid the CC button that would have turned
+            // them off.
+            //
             // **Clipped below the page's own TopBar when not fullscreen.** The
             // caption paints last in this Stack — above everything, including
             // `page_wrapper.dart`'s `Scaffold(appBar: TopBar(...))` — and
@@ -344,6 +352,7 @@ class PlayerShell extends ConsumerWidget {
             // child's, while handing the child its own unconstrained (0..∞)
             // constraints — restoring exactly the free sizing `LayerLinkFollower`
             // had before this clip existed, with the clip still applied.
+            if (!ref.watch(audioModeProvider))
             Positioned.fill(
               child: ClipRect(
                 clipper: _BelowTopBarClipper(
@@ -400,7 +409,12 @@ class _FullscreenPlayer extends ConsumerWidget {
             builder: (context) => Stack(
               fit: StackFit.expand,
               children: [
-                engine.videoSurface(),
+                // With `vid=no` the texture decodes nothing, so this branch is
+                // the difference between the artwork and a black screen.
+                if (ref.watch(audioModeProvider))
+                  AudioArtSurface(thumbnailUrl: ref.watch(playbackProvider).item?.thumbnailUrl)
+                else
+                  engine.videoSurface(),
                 PlayerControls(engine: engine),
               ],
             ),
@@ -443,7 +457,9 @@ class MiniPlayer extends ConsumerWidget {
                     height: 54,
                     child: ColoredBox(
                       color: theme.tokens.scrim,
-                      child: engine.videoSurface(),
+                      child: ref.watch(audioModeProvider)
+                          ? AudioArtSurface(thumbnailUrl: item.thumbnailUrl, scrim: false, iconSize: 24)
+                          : engine.videoSurface(),
                     ),
                   ),
                   const SizedBox(width: 12),
