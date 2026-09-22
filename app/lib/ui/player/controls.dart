@@ -35,6 +35,7 @@ import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
+import '../audio_mode_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
 import '../widgets/shortcut_tooltip.dart';
@@ -321,7 +322,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // plays one real frame from position zero before the seek back
             // lands, and that flash is what reads as broken. Held until the
             // position returns, above the video and below the bar.
-            if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality))) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
+            if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)) && !ref.watch(audioModeProvider)) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
             // The click surface, beneath the bar so the bar's own buttons win
             // the hit test and its background absorbs rather than falls through.
             GestureDetector(
@@ -546,6 +547,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
     final captions = ref.watch(captionsProvider);
+    final isAudioOnly = ref.watch(audioModeProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -658,7 +660,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // other control here that reports state rather than action is
                   // theatre, and for the same reason: "on" is the fact worth
                   // reading at a glance.
-                  if (captions.hasTracks)
+                  if (captions.hasTracks && !isAudioOnly)
                     KeyedSubtree(
                       key: captionsButtonAnchorKey,
                       child: _buildHoverable(
@@ -679,30 +681,24 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         ),
                       ),
                     ),
-                  // **Quality, then the gear** — specific before general. It is
-                  // the one picker anybody changes mid-video, so a row two taps
-                  // deep inside the settings menu was the wrong depth for it.
-                  //
-                  // `KeyedSubtree` because each button needs two keys: the
-                  // `ValueKey` the tests find it by, and the `GlobalKey` the
-                  // click-outside measures it by. See `settingsMenuAnchorKey`.
-                  KeyedSubtree(
-                    key: qualityButtonAnchorKey,
-                    child: _buildHoverable(
-                      _MenuButton(
-                        key: playerQualityButtonKey,
-                        icon: Icons.hd_outlined,
-                        label: 'Quality',
-                        busy: playback.isSwitchingQuality,
-                        open: ref.watch(
-                          playerMenuProvider.select(
-                            (menu) => menu.open && menu.page == SettingsPage.quality,
+                  if (!isAudioOnly)
+                    KeyedSubtree(
+                      key: qualityButtonAnchorKey,
+                      child: _buildHoverable(
+                        _MenuButton(
+                          key: playerQualityButtonKey,
+                          icon: Icons.hd_outlined,
+                          label: 'Quality',
+                          busy: playback.isSwitchingQuality,
+                          open: ref.watch(
+                            playerMenuProvider.select(
+                              (menu) => menu.open && menu.page == SettingsPage.quality,
+                            ),
                           ),
+                          onPressed: playback.variants.isEmpty ? null : _toggleQuality,
                         ),
-                        onPressed: playback.variants.isEmpty ? null : _toggleQuality,
                       ),
                     ),
-                  ),
                   KeyedSubtree(
                     key: settingsMenuAnchorKey,
                     child: _buildHoverable(
@@ -710,10 +706,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         key: playerSettingsButtonKey,
                         icon: Icons.settings,
                         label: 'Settings',
-                        // The two pages that are *not* the gear's, named rather
-                        // than `!= quality`: adding the captions page to that
-                        // test would have lit the gear up whenever the caption
-                        // panel was open, which reads as two menus at once.
                         open: ref.watch(
                           playerMenuProvider.select(
                             (menu) => menu.open && _isGearPage(menu.page),
@@ -735,13 +727,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       },
                     ),
                   ),
-                  // **State, not action — and only this one.** Every other icon
-                  // here says what pressing it does; this one says which mode
-                  // the player is in, because "theatre" has no familiar glyph
-                  // and an icon nobody recognises is better as a status than as
-                  // an instruction. Fullscreen keeps action semantics next to
-                  // it: `fullscreen_exit` is legible as a verb in a way the
-                  // crop icons are not.
                   _buildHoverable(
                     _ControlIcon(
                       iconKey: playerTheatreKey,

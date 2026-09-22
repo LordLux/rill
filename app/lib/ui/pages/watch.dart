@@ -16,12 +16,14 @@ import '../../theme/tokens.dart';
 import '../open_video.dart';
 import '../page_wrapper.dart';
 import '../player_shell.dart' show currentRouteProvider, watchRouteName;
+import '../audio_mode_controller.dart';
 import '../auth_controller.dart';
 import '../playback_controller.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
+import '../../data/playback/engine.dart';
 import '../widgets/adaptive_meta_row.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/media_tile.dart';
@@ -500,6 +502,50 @@ class _PlayerSurface extends ConsumerWidget {
   /// controls and scrim full-width.
   final double? actualAspectRatio;
 
+  Widget _buildSurface(bool fullscreen, bool isAudioOnly, PlaybackState playback, bool isTopWatchPage, PlaybackEngine engine, ColorScheme scheme) {
+    if (fullscreen) return const SizedBox.shrink();
+
+    if (isAudioOnly) {
+      final item = playback.item;
+      final content = item != null && item.thumbnailUrl.isNotEmpty
+          ? Container(
+              decoration: BoxDecoration(
+                image: DecorationImage(
+                  image: NetworkImage(item.thumbnailUrl),
+                  fit: BoxFit.cover,
+                ),
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6)),
+              ),
+            )
+          : Center(
+              child: Icon(Icons.music_note, size: 64, color: scheme.onSurfaceVariant.withValues(alpha: 0.5)),
+            );
+
+      if (playback.variant != null && playback.variant!.audioUrl == null) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            content,
+            Positioned(
+              top: 24,
+              right: 24,
+              child: Tooltip(
+                message: 'Audio-only stream unavailable.\nConsuming video bandwidth.',
+                child: Icon(Icons.warning_amber_rounded, color: scheme.error, size: 28, semanticLabel: 'Audio-only stream unavailable'),
+              ),
+            ),
+          ],
+        );
+      }
+
+      return content;
+    }
+
+    return isTopWatchPage ? engine.videoSurface() : engine.videoWidget();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -513,6 +559,7 @@ class _PlayerSurface extends ConsumerWidget {
     // members-only flag — see [isMembersOnlyFailure].
     final item = playback.item;
     final detail = item == null ? null : ref.watch(videoInfoProvider(item.id)).value;
+    final isAudioOnly = ref.watch(audioModeProvider);
 
     final content = ColoredBox(
       color: theme.tokens.scrim,
@@ -524,7 +571,7 @@ class _PlayerSurface extends ConsumerWidget {
           // used to disagree for exactly one frame on the transition *into*
           // this page. We AND them together so only the top-most WatchPage
           // claims the surface, but it still waits for the provider to catch up.
-          if (!fullscreen) isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
+          _buildSurface(fullscreen, isAudioOnly, playback, isTopWatchPage, engine, scheme),
 
           if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           // Neither of the first two is a failure, so neither gets the failure

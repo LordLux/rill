@@ -176,6 +176,14 @@ class FakeEngine implements PlaybackEngine {
     if (retained != null) await setSubtitle(retained);
   }
 
+  /// Track whether video track was toggled, for test assertions.
+  bool videoTrackEnabled = true;
+
+  @override
+  Future<void> setVideoTrack(bool enabled) async {
+    videoTrackEnabled = enabled;
+  }
+
   @override
   Future<void> play() async => setPlaying(true);
   @override

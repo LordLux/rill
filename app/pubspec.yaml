@@ -38,7 +38,7 @@ dependencies:
   flutter_inappwebview: 6.1.5
   flutter_secure_storage: 9.2.4
   bitsdojo_window: ^0.1.6
-
+  flutter_media_session: ^3.0.5
 dev_dependencies:
   flutter_test:
     sdk: flutter

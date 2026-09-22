@@ -78,6 +78,7 @@ class Harness {
       : backend = FakeBackend(source: source, resolveError: resolveError) {
     preview = HoverPreview(
       shell: shell,
+      isAudioOnly: () => false,
       engineFactory: () {
         engineBuilds++;
         return engine;

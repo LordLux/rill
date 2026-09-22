@@ -646,11 +646,13 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   /// now this produces a link that works on youtube.com and will work here once
   /// the entry point lands. Worth knowing before treating it as round-tripping.
   void _copyLink(Comment comment) {
-    unawaited(copyToClipboard(
-      context,
-      'https://www.youtube.com/watch?v=${widget.videoId}&lc=${comment.id}',
-      'Link copied to clipboard',
-    ));
+    unawaited(
+      copyToClipboard(
+        context,
+        'https://www.youtube.com/watch?v=${widget.videoId}&lc=${comment.id}',
+        'Link copied to clipboard',
+      ),
+    );
   }
 
   void _toggleText(String id) {
@@ -671,22 +673,22 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   /// frame (345 ms measured), and a thread's expansion could not outlive its row.
   List<_Row> _flatten() {
     final rows = <_Row>[];
+
+    void walk(Comment parent, Comment thread) {
+      final state = _commentStates[parent.id];
+      if (state == null || !state.expanded) return;
+      for (final child in state.replies) {
+        rows.add(_Row(_RowKind.reply, thread, child));
+        walk(child, thread);
+      }
+      if (state.loading || state.error || state.continuation != null) {
+        rows.add(_Row(_RowKind.footer, thread, parent));
+      }
+    }
+
     for (final thread in _threads) {
       rows.add(_Row(_RowKind.thread, thread));
-      
-      void walk(Comment parent) {
-        final state = _commentStates[parent.id];
-        if (state == null || !state.expanded) return;
-        for (final child in state.replies) {
-          rows.add(_Row(_RowKind.reply, thread, child));
-          walk(child);
-        }
-        if (state.loading || state.error || state.continuation != null) {
-          rows.add(_Row(_RowKind.footer, thread, parent));
-        }
-      }
-      
-      walk(thread);
+      walk(thread, thread);
     }
     return rows;
   }
@@ -710,7 +712,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     final replying = state?.replying ?? false;
     final posting = state?.posting ?? false;
     final theme = Theme.of(context).colorScheme;
-    
+
     const lines = 10;
 
     return Opacity(
@@ -746,22 +748,22 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
                       constraints: const BoxConstraints(minHeight: 32, maxHeight: 25.0 * lines),
                       child: SilkyScroll(
                         builder: (context, controller, physics, _) => TextField(
-                            controller: state!.draft,
-                            focusNode: state.focus,
-                            enabled: !posting,
-                            minLines: 1,
-                            maxLines: lines,
-                            scrollController: controller,
-                            scrollPhysics: physics,
-                            style: const TextStyle(fontSize: 14),
-                            decoration: InputDecoration(
-                              hintFadeDuration: Duration(milliseconds: 200),
-                              isDense: true,
-                              hintText: 'Add a reply...', // TODO check for max length
-                              border: UnderlineInputBorder(),
-                            ),
-                            onSubmitted: (_) => _submitReply(thread),
+                          controller: state!.draft,
+                          focusNode: state.focus,
+                          enabled: !posting,
+                          minLines: 1,
+                          maxLines: lines,
+                          scrollController: controller,
+                          scrollPhysics: physics,
+                          style: const TextStyle(fontSize: 14),
+                          decoration: const InputDecoration(
+                            hintFadeDuration: Duration(milliseconds: 200),
+                            isDense: true,
+                            hintText: 'Add a reply...', // TODO check for max length
+                            border: UnderlineInputBorder(),
                           ),
+                          onSubmitted: (_) => _submitReply(thread),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1066,149 +1068,148 @@ class CommentTile extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     return _HoverScope(
       builder: (hovering) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              // Empty for a comment just posted that the server has not echoed
-              // back (`_postComment`'s stand-in) — `NetworkImage('')` is an image
-              // error, not a blank, so it is left out instead.
-              backgroundImage: comment.authorAvatarUrl.isEmpty ? null : NetworkImage(comment.authorAvatarUrl),
-              onBackgroundImageError: comment.authorAvatarUrl.isEmpty ? null : (_, _) {},
-              radius: 16,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        comment.authorName,
-                        style: TextStyle(
-                          fontWeight: comment.isUploader ? FontWeight.bold : FontWeight.w500,
-                          fontSize: 13,
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                      if (comment.isVerified)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4.0),
-                          child: Icon(Icons.check_circle, size: 12, color: scheme.onSurfaceVariant),
-                        ),
-                      if (comment.publishedText != null) ...[
-                        const SizedBox(width: 8),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                // Empty for a comment just posted that the server has not echoed
+                // back (`_postComment`'s stand-in) — `NetworkImage('')` is an image
+                // error, not a blank, so it is left out instead.
+                backgroundImage: comment.authorAvatarUrl.isEmpty ? null : NetworkImage(comment.authorAvatarUrl),
+                onBackgroundImageError: comment.authorAvatarUrl.isEmpty ? null : (_, _) {},
+                radius: 16,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
                         Text(
-                          comment.publishedText!,
-                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                        ),
-                      ],
-                      if (comment.deleteParams != null) ...[
-                        const Spacer(),
-                        MouseRegion(
-                          cursor: SystemMouseCursors.click,
-                          child: IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 16),
-                            tooltip: 'Delete',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                            onPressed: deleting ? null : onDelete,
+                          comment.authorName,
+                          style: TextStyle(
+                            fontWeight: comment.isUploader ? FontWeight.bold : FontWeight.w500,
+                            fontSize: 13,
+                            color: scheme.onSurface,
                           ),
                         ),
+                        if (comment.isVerified)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4.0),
+                            child: Icon(Icons.check_circle, size: 12, color: scheme.onSurfaceVariant),
+                          ),
+                        if (comment.publishedText != null) ...[
+                          const SizedBox(width: 8),
+                          SelectableText(
+                            comment.publishedText!,
+                            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                        if (comment.deleteParams != null) ...[
+                          const Spacer(),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 16),
+                              tooltip: 'Delete',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              onPressed: deleting ? null : onDelete,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  _CommentText(text: comment.text, expanded: textExpanded, onToggle: onToggleText),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Padding(
-          padding: const EdgeInsets.only(left: 32),
-          child: Row(
-            children: [
-              // Pressing the active vote clears it, which is what YouTube
-              // does and what the `unlike`/`undislike` tokens exist for.
-              _VoteButton(
-                icon: comment.myRating == 'like' ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
-                tooltip: voteDisabledReason ?? (comment.myRating == 'like' ? 'Remove like' : 'Like'),
-                active: comment.myRating == 'like',
-                onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'like' ? 'none' : 'like'),
-                label: comment.likeCount,
-              ),
-              // const SizedBox(width: 4),
-              // if (comment.likeCount != null) Text(comment.likeCount!, style: const TextStyle(fontSize: 12)),
-              const SizedBox(width: 4),
-              _VoteButton(
-                icon: comment.myRating == 'dislike' ? Icons.thumb_down : Icons.thumb_down_alt_outlined,
-                tooltip: voteDisabledReason ?? (comment.myRating == 'dislike' ? 'Remove dislike' : 'Dislike'),
-                active: comment.myRating == 'dislike',
-                onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'dislike' ? 'none' : 'dislike'),
-              ),
-              if (comment.creatorHearted) ...[
-                const SizedBox(width: 4),
-                Tooltip(
-                  message: 'Creator liked this comment', // TODO get creator name from channel info
-                  child: Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(Icons.favorite, size: 14, color: Theme.of(context).tokens.liveBadge),
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    _CommentText(text: comment.text, expanded: textExpanded, onToggle: onToggleText),
+                  ],
                 ),
-              ],
-              if (onReply != null) ...[
-                const SizedBox(width: 8),
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: TextButton(
-                    style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2), minimumSize: const Size(50, 35)),
-                    onPressed: onReply,
-                    child: const Text('Reply', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ],
-              // Copy, revealed by hovering anywhere on the comment.
-              //
-              // Only this subtree rebuilds when the pointer enters or leaves:
-              // `_HoverScope` hands down a `ValueListenable` rather than
-              // calling `setState` on the tile, so hovering a comment does not
-              // rebuild its avatar, its text or its vote buttons. A tile is
-              // rebuilt often enough already (F34).
-              if (onCopyLink != null) ...[
-                const SizedBox(width: 8),
-                _RevealOnHoverOrFocus(
-                  hovering: hovering,
-                  child: _VoteButton(
-                    icon: Icons.link,
-                    tooltip: 'Copy link to this comment',
-                    active: false,
-                    onPressed: onCopyLink,
-                  ),
-                ),
-              ],
+              ),
             ],
           ),
-        ),
-        Padding(
-          padding: EdgeInsetsGeometry.only(left: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: below,
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: Row(
+              children: [
+                // Pressing the active vote clears it, which is what YouTube
+                // does and what the `unlike`/`undislike` tokens exist for.
+                _VoteButton(
+                  icon: comment.myRating == 'like' ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
+                  tooltip: voteDisabledReason ?? (comment.myRating == 'like' ? 'Remove like' : 'Like'),
+                  active: comment.myRating == 'like',
+                  onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'like' ? 'none' : 'like'),
+                  label: comment.likeCount,
+                ),
+                // const SizedBox(width: 4),
+                // if (comment.likeCount != null) Text(comment.likeCount!, style: const TextStyle(fontSize: 12)),
+                const SizedBox(width: 4),
+                _VoteButton(
+                  icon: comment.myRating == 'dislike' ? Icons.thumb_down : Icons.thumb_down_alt_outlined,
+                  tooltip: voteDisabledReason ?? (comment.myRating == 'dislike' ? 'Remove dislike' : 'Dislike'),
+                  active: comment.myRating == 'dislike',
+                  onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'dislike' ? 'none' : 'dislike'),
+                ),
+                if (comment.creatorHearted) ...[
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: 'Creator liked this comment', // TODO get creator name from channel info
+                    child: Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(Icons.favorite, size: 14, color: Theme.of(context).tokens.liveBadge),
+                    ),
+                  ),
+                ],
+                if (onReply != null) ...[
+                  const SizedBox(width: 8),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: TextButton(
+                      style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2), minimumSize: const Size(50, 35)),
+                      onPressed: onReply,
+                      child: const Text('Reply', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ],
+                // Copy, revealed by hovering anywhere on the comment.
+                //
+                // Only this subtree rebuilds when the pointer enters or leaves:
+                // `_HoverScope` hands down a `ValueListenable` rather than
+                // calling `setState` on the tile, so hovering a comment does not
+                // rebuild its avatar, its text or its vote buttons. A tile is
+                // rebuilt often enough already (F34).
+                if (onCopyLink != null) ...[
+                  const SizedBox(width: 8),
+                  _RevealOnHoverOrFocus(
+                    hovering: hovering,
+                    child: _VoteButton(
+                      icon: Icons.link,
+                      tooltip: 'Copy link to this comment',
+                      active: false,
+                      onPressed: onCopyLink,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
-      ],
+          Padding(
+            padding: EdgeInsetsGeometry.only(left: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: below,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
-
 
 /// Tracks the pointer over its subtree and hands the answer down as a
 /// [ValueListenable], so only what actually depends on hover rebuilds.

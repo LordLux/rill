@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/widgets.dart';
 import 'package:meta/meta.dart';
 
 import '../data/playback/engine.dart';
 import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
 import '../domain/playback_source.dart';
+import 'audio_mode_controller.dart';
 import 'queue_controller.dart';
 
 /// The engine, as a provider so tests can put a fake in its place.
@@ -263,6 +265,16 @@ class PlaybackController extends Notifier<PlaybackState> {
       }),
     ]);
 
+    ref.listen(audioModeProvider, (previous, next) {
+      if (previous != next && state.source != null && state.variant != null) {
+        // Toggle the video track on/off without reopening the media. This keeps
+        // the demuxer, the cache and the position intact — no seek, no duration
+        // wait, no picture wait — so the transition is instant in both
+        // directions instead of the 6+ second cold reopen switchQuality caused.
+        unawaited(_engine.setVideoTrack(!next));
+      }
+    });
+
     // One place decides what plays. Every caller moves the queue's cursor.
     //
     // Keyed on the queue's `version`, which increments *only* when the playhead
@@ -349,9 +361,16 @@ class PlaybackController extends Notifier<PlaybackState> {
         await _failOpen('No playable stream for this video.', RpcRetryMode.user);
         return;
       }
-
+      
       await _engine.open(variant, isLive: source.durationMs == null);
       if (generation != _generation || _disposed) return;
+
+      // Re-read after the await: the user may have toggled audio-only while the
+      // engine was loading, and the listener is guarded out (state.source is
+      // still null), so only a fresh read picks up the current intent.
+      if (ref.read(audioModeProvider)) {
+        await _engine.setVideoTrack(false);
+      }
 
       state = state.copyWith(
         source: source,
@@ -638,8 +657,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// **`isSwitchingQuality` stays true until the picture is back**, not until
   /// the calls are issued: F19 measured those at 306–743 ms against a median
   /// 4.1 s. It is what holds the black cover over the surface.
-  Future<void> switchQuality(PlaybackVariant variant) async {
-    if (state.variant == variant) return;
+  Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false}) async {
+    if (!force && state.variant == variant) return;
     // **Incremented, not merely read.** Two picks in quick succession — 1080 then
     // 720 — otherwise captured the *same* generation, so neither guard fired and
     // both ran `engine.open` against the same player, racing over which stream
@@ -653,10 +672,11 @@ class PlaybackController extends Notifier<PlaybackState> {
     final position = engine.position;
     final wasPlaying = engine.playing;
     final started = DateTime.now();
+    final isAudioOnly = ref.read(audioModeProvider);
 
     state = state.copyWith(
       variant: variant,
-      isSwitchingQuality: true,
+      isSwitchingQuality: !hideCover,
       // Set *before* the reopen, not after: `engine.open` resets the position
       // **and the duration** to zero on its way in, and anything watching would
       // paint both.
@@ -670,6 +690,10 @@ class PlaybackController extends Notifier<PlaybackState> {
       // file, instead of racing the load from out here.
       await engine.open(variant, play: wasPlaying, retainSubtitle: true, isLive: state.source?.durationMs == null);
       if (generation != _generation || _disposed) return;
+
+      // A quality switch reopens the media, which resets vid to auto. If
+      // audio-only is active, turn the video track back off.
+      if (ref.read(audioModeProvider)) await engine.setVideoTrack(false);
 
       // **Subscribed before the seek is issued**: `positionStream` is a
       // broadcast stream, so attaching afterwards misses the seek's own event
