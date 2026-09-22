@@ -672,7 +672,6 @@ class PlaybackController extends Notifier<PlaybackState> {
     final position = engine.position;
     final wasPlaying = engine.playing;
     final started = DateTime.now();
-    final isAudioOnly = ref.read(audioModeProvider);
 
     state = state.copyWith(
       variant: variant,

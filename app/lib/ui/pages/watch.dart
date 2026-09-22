@@ -19,6 +19,7 @@ import '../player_shell.dart' show currentRouteProvider, watchRouteName;
 import '../audio_mode_controller.dart';
 import '../auth_controller.dart';
 import '../playback_controller.dart';
+import '../player/audio_art_surface.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
@@ -507,21 +508,7 @@ class _PlayerSurface extends ConsumerWidget {
 
     if (isAudioOnly) {
       final item = playback.item;
-      final content = item != null && item.thumbnailUrl.isNotEmpty
-          ? Container(
-              decoration: BoxDecoration(
-                image: DecorationImage(
-                  image: NetworkImage(item.thumbnailUrl),
-                  fit: BoxFit.cover,
-                ),
-              ),
-              child: DecoratedBox(
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6)),
-              ),
-            )
-          : Center(
-              child: Icon(Icons.music_note, size: 64, color: scheme.onSurfaceVariant.withValues(alpha: 0.5)),
-            );
+      final content = AudioArtSurface(thumbnailUrl: item?.thumbnailUrl);
 
       if (playback.variant != null && playback.variant!.audioUrl == null) {
         return Stack(
