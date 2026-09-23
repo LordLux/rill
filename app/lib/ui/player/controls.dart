@@ -53,7 +53,7 @@ export 'settings_menu.dart' show describeVariant, distinctQualities;
 /// — `LibassLayer` needs it too, and that is the file with no reason to import
 /// this one. Re-exported so existing callers (this file's own tests included)
 /// do not need to know it moved.
-export '../../domain/player_controls_visibility.dart' show playerControlsBarKey;
+export '../../domain/player_controls_visibility.dart' show playerControlsBarKey, playerControlsVisibleProvider;
 
 /// How long the pointer must be still before the controls go away.
 const Duration autoHideDelay = Duration(seconds: 1);
@@ -325,6 +325,11 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)) && !ref.watch(audioModeProvider)) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
             // The click surface, beneath the bar so the bar's own buttons win
             // the hit test and its background absorbs rather than falls through.
+            // Kept in audio-only too. It was gated off to let the music
+            // layout's buttons be clicked, which did not work — the opaque
+            // `MouseRegion` above it was the real blocker — and the gate cost
+            // tap-to-pause and double-click-to-fullscreen for nothing. The
+            // layout now sits above this instead.
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _onTap,
@@ -527,7 +532,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         ),
                         child: Material(
                           type: MaterialType.transparency,
-                          child: _isVertical ? _buildVerticalBar(context) : _buildBar(context),
+                          child: _isVertical ? _buildVerticalBar(context) : (ref.watch(audioModeProvider) ? _buildAudioBar(context) : _buildBar(context)),
                         ),
                       ),
                     ),
@@ -737,6 +742,107 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       onPressed: () {
                         _wake();
                         ref.read(playerViewProvider.notifier).toggleTheatre();
+                      },
+                    ),
+                  ),
+                  _buildHoverable(
+                    _ControlIcon(
+                      iconKey: playerFullscreenKey,
+                      icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                      label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                      action: PlayerAction.fullscreen,
+                      onPressed: () {
+                        _wake();
+                        ref.read(playerViewProvider.notifier).toggleFullscreen();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    ).withScrimForeground(tokens);
+  }
+
+  Widget _buildAudioBar(BuildContext context) {
+    final tokens = Theme.of(context).tokens;
+    final view = ref.watch(playerViewProvider);
+    final playback = ref.watch(playbackProvider);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildHoverable(
+          _Scrubber(
+            key: playerScrubberKey,
+            engine: widget.engine,
+            dragging: _dragging,
+            hold: playback.hold,
+            source: playback.source,
+            audioOnly: true,
+            onDrag: (value) {
+              setState(() => _dragging = value);
+              _wake();
+            },
+            onDragEnd: (value) {
+              setState(() => _dragging = null);
+              unawaited(
+                ref.read(playbackProvider.notifier).seek(Duration(milliseconds: value.round())),
+              );
+              _restartHideTimer();
+            },
+          ),
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 640;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+              child: Row(
+                children: [
+                  _buildHoverable(
+                    _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _Clock(
+                        engine: widget.engine,
+                        dragging: _dragging,
+                        hold: playback.hold,
+                        source: playback.source,
+                      ),
+                    ),
+                  ),
+                  KeyedSubtree(
+                    key: settingsMenuAnchorKey,
+                    child: _buildHoverable(
+                      _MenuButton(
+                        key: playerSettingsButtonKey,
+                        icon: Icons.settings,
+                        label: 'Settings',
+                        open: ref.watch(
+                          playerMenuProvider.select(
+                            (menu) => menu.open && _isGearPage(menu.page),
+                          ),
+                        ),
+                        onPressed: _toggleMenu,
+                      ),
+                    ),
+                  ),
+                  _buildHoverable(
+                    _ControlIcon(
+                      iconKey: playerMiniPlayerKey,
+                      icon: Icons.branding_watermark_outlined,
+                      label: 'Miniplayer',
+                      action: PlayerAction.miniPlayer,
+                      onPressed: () {
+                        _wake();
+                        toMiniPlayer(ref);
                       },
                     ),
                   ),

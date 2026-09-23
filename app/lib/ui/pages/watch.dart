@@ -20,6 +20,7 @@ import '../audio_mode_controller.dart';
 import '../auth_controller.dart';
 import '../playback_controller.dart';
 import '../player/audio_backdrop.dart';
+import '../player/audio_mode_view.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
 import '../queue_controller.dart';
@@ -178,7 +179,10 @@ class _WatchPageState extends ConsumerState<WatchPage> {
         builder: (context, constraints) {
           final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
           final detail = info.value;
-          final actualAspectRatio = ref.watch(_aspectRatioProvider).value ?? (ScreenValues.normalAspectRatio);
+          final isAudioOnly = ref.watch(audioModeProvider);
+          final actualAspectRatio = isAudioOnly 
+              ? ScreenValues.normalAspectRatio 
+              : (ref.watch(_aspectRatioProvider).value ?? ScreenValues.normalAspectRatio);
           final queueHasItems = ref.watch(queueProvider.select((q) => q.items.length > 1));
           final theme = Theme.of(context);
           final scheme = theme.colorScheme;
@@ -509,14 +513,13 @@ class _PlayerSurface extends ConsumerWidget {
     // **The surface stays mounted in audio-only too.** The artwork fades over
     // it rather than replacing it, so the texture keeps decoding underneath and
     // the crossfade never costs a remount.
-    final muxedOnly =
-        isAudioOnly && playback.variant != null && playback.variant!.audioUrl == null;
+    final muxedOnly = isAudioOnly && playback.variant != null && playback.variant!.audioUrl == null;
 
     return Stack(
       fit: StackFit.expand,
       children: [
         isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
-        // Held through the restore as well — see [AudioArtOverlay].
+        // Held through the restore as well — see [AudioArtOverlay]
         AudioArtOverlay(
           show: isAudioOnly || playback.isRestoringVideo,
           // Poster first: the tile's own thumbnail is whatever the surface
@@ -524,6 +527,8 @@ class _PlayerSurface extends ConsumerWidget {
           // (F40). Null is ordinary, so the tile's is the fallback.
           imageUrl: playback.source?.posterUrl ?? playback.item?.thumbnailUrl,
         ),
+
+
         if (muxedOnly)
           Positioned(
             top: 24,
@@ -568,9 +573,19 @@ class _PlayerSurface extends ConsumerWidget {
           // Neither of the first two is a failure, so neither gets the failure
           // screen — a members-only video is working exactly as its channel
           // intends, the same way a premiere is.
-          if (playback.isUpcoming) _PremiereSlate(playback: playback) else if (isMembersOnlyFailure(playback, detail)) _MembersOnlySlate(playback: playback) else if (playback.error != null) _Unavailable(playback: playback),
+          if (playback.isUpcoming) _PremiereSlate(playback: playback)
+          else if (isMembersOnlyFailure(playback, detail)) _MembersOnlySlate(playback: playback)
+          else if (playback.error != null) _Unavailable(playback: playback),
 
           if (playback.error == null && !playback.isLoading && !fullscreen && isTopWatchPage) PlayerControls(engine: engine, actualAspectRatio: ratio),
+
+          // **Above `PlayerControls`, not below it.** That overlay is rooted in
+          // an opaque `MouseRegion`, whose hit test claims the whole player
+          // whether or not a child was hit — so anything under it is
+          // unclickable. Its own root defers to its children, so empty space
+          // here still falls through to the click surface below and
+          // tap-to-pause keeps working.
+          if (isAudioOnly) const AudioModeView(showQueue: false),
         ],
       ),
     );
