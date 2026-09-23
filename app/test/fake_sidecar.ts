@@ -356,6 +356,9 @@ rl.on('line', (line) => {
           myRating: ratings[videoId] === 'LIKE' ? 'like' : ratings[videoId] === 'DISLIKE' ? 'dislike' : 'none',
           isSubscribed: false,
           badges: [],
+          // Empty is the ordinary answer — most videos carry no attribution,
+          // so the default payload is the no-music case on purpose.
+          music: [],
           // Structural, from `BADGE_STYLE_TYPE_MEMBERS_ONLY` — true for both
           // members ids, including the one whose *error* the sidecar could not
           // classify.

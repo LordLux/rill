@@ -13,6 +13,7 @@
 
 import type { FeedItem, VideoDetail } from '../types.ts';
 import { parseFeed } from './feed.ts';
+import { parseMusicTracks } from './music.ts';
 import { premiereStartMs } from './premiere.ts';
 import {
   bestImageUrl,
@@ -197,6 +198,9 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     isVerified: ownerBadges.isVerified,
     isArtistChannel: ownerBadges.isArtistChannel,
     badges: [...new Set(badges)],
+    // Off `engagementPanels`, which nothing else in this parser reads — see
+    // `parser/music.ts`. Empty for most videos, and that is an answer.
+    music: parseMusicTracks(body),
     isMembersOnly,
     // Deep-searched for the same reason the tiles are: the watch page hangs this
     // off a different renderer depending on generation, and no premiere is in

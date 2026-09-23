@@ -519,7 +519,10 @@ class _PlayerSurface extends ConsumerWidget {
         // Held through the restore as well — see [AudioArtOverlay].
         AudioArtOverlay(
           show: isAudioOnly || playback.isRestoringVideo,
-          imageUrl: playback.item?.thumbnailUrl,
+          // Poster first: the tile's own thumbnail is whatever the surface
+          // that listed it shipped, which on the related rail is 480x360
+          // (F40). Null is ordinary, so the tile's is the fallback.
+          imageUrl: playback.source?.posterUrl ?? playback.item?.thumbnailUrl,
         ),
         if (muxedOnly)
           Positioned(
