@@ -7,48 +7,49 @@ import 'package:media_kit/media_kit.dart';
 import 'package:rill/data/playback/engine.dart';
 import 'package:rill/domain/playback_source.dart';
 
-/// Measures what `vid=no` actually costs — task 28 §1.
+/// Measures what `vid=no` actually costs, and what says when it is over.
 ///
-/// The question this exists to answer is whether `vid=no` stops the **video
-/// HTTP fetch** or only the decode. That cannot be measured from outside the
-/// process: Windows' per-process I/O counters do not see mpv's socket reads
-/// (measured 2026-09-22 — 10 KB of process I/O against 1.2 MB at the NIC over
-/// the same 20 s), and the NIC total is system-wide. mpv's own demuxer byte
-/// counters are the only instrument with correct attribution.
+/// **§1 — does it stop the fetch or only the decode?** Answered 2026-09-22: the
+/// fetch. `total-bytes` goes to 0 and `stream-pos` freezes. That cannot be
+/// measured from outside the process — Windows' per-process I/O counters do not
+/// see mpv's socket reads (10 KB of process I/O against 1.2 MB at the NIC over
+/// the same 20 s), and the NIC total is system-wide and noisier than the signal.
+///
+/// **The restore direction — which property says the picture is back?**
+/// `width` does not: measured 2026-09-23, it survives `vid=no` entirely, so
+/// waiting on it returns instantly and a spinner keyed to it never appears.
+/// That is what this third phase is for. It re-enables the track and samples
+/// every candidate once a second, so the one that actually flips — and how long
+/// the viewer waits for it — is read off the table rather than assumed.
 ///
 /// It must run against a **real adaptive pair** — a separate video URL with an
-/// audio URL attached alongside — because that is the shape the question is
-/// about. A single muxed URL cannot answer it: there is no separate video
-/// stream to stop fetching. Signed URLs come from `playback.open`, written to
-/// the JSON file below; they expire in hours, so re-fetch before each run.
+/// audio URL attached — because that is the shape the question is about. Signed
+/// URLs come from `playback.open` into the JSON below; they expire in hours.
 ///
 /// Never wired into the app. See `app/test/README.md`.
 const String kVariantPath = 'M:/Projects/rill/sidecar/scratch/probe-variant.json';
 const String kOutPath = 'M:/Projects/rill/sidecar/scratch/probe-audio-bytes.csv';
 
-/// Long enough for mpv's read-ahead to reach steady state before each phase is
-/// scored, so a phase measures streaming rather than the cache filling.
-const Duration kSettle = Duration(seconds: 20);
-const Duration kPhase = Duration(seconds: 120);
-const Duration kEvery = Duration(seconds: 10);
+const Duration kSettle = Duration(seconds: 15);
+const Duration kVideoPhase = Duration(seconds: 5);
+const Duration kAudioPhase = Duration(seconds: 20);
 
-/// Sampled every tick. Whichever of these libmpv answers is the one used —
-/// `demuxer-cache-state` is a MAP, and sub-property access through `/` is not
-/// guaranteed across builds, so the whole map is captured as a fallback.
+/// Generous: the whole point is to catch a restore that takes ten seconds.
+const Duration kRestorePhase = Duration(seconds: 60);
+const Duration kEvery = Duration(seconds: 1);
+
+/// Every candidate for "there is a picture again", sampled together so they can
+/// be compared against each other on one timeline.
 const List<String> kProps = [
   'vid',
-  'time-pos',
-  'stream-pos',
-  'cache-speed',
-  'demuxer-cache-duration',
+  'width',
+  'dwidth',
+  'vo-configured',
   'video-bitrate',
-  'audio-bitrate',
-  // Read whole. The `demuxer-cache-state/total-bytes` sub-property path
-  // returned empty against this build (measured 2026-09-22), so the map is
-  // captured and parsed here instead. `raw-input-rate` inside it is the
-  // bytes-per-second actually coming off the network, which is the number
-  // task 28 §1 is asking for.
-  'demuxer-cache-state',
+  'estimated-vf-fps',
+  'frame-drop-count',
+  'paused-for-cache',
+  'demuxer-cache-duration',
 ];
 
 void main() async {
@@ -82,8 +83,9 @@ Future<void> _run(MediaKitEngine engine) async {
 
   try {
     final spec = jsonDecode(await File(kVariantPath).readAsString()) as Map<String, dynamic>;
-    log('# videoId=${spec['videoId']} ${spec['height']}p itag=${spec['itag']}');
-    log('# audioUrl=${spec['audioUrl'] == null ? 'NULL (muxed - cannot answer the question)' : 'present'}');
+    log('# videoId=${spec['videoId']} ${spec['height']}p itag=${spec['itag']} '
+        'durationMs=${spec['durationMs']}');
+    log('# audioUrl=${spec['audioUrl'] == null ? 'NULL (muxed)' : 'present'}');
 
     await engine.open(
       PlaybackVariant(
@@ -99,7 +101,9 @@ Future<void> _run(MediaKitEngine engine) async {
     log('# opened, settling ${kSettle.inSeconds}s');
     await Future<void>.delayed(kSettle);
 
-    log('phase,elapsed_s,${kProps.join(",")}');
+    // `engineWidth` is media_kit's own cached value — the one the app actually
+    // reads. `rect` is the VideoController's, which drives the texture.
+    log('phase,ms,engineWidth,rect,${kProps.join(",")}');
 
     Future<void> sample(String phase, Stopwatch clock) async {
       final values = <String>[];
@@ -110,25 +114,35 @@ Future<void> _run(MediaKitEngine engine) async {
           values.add('ERR');
         }
       }
-      log('$phase,${clock.elapsedMilliseconds ~/ 1000},${values.join(",")}');
+      final rect = engine.videoController.rect.value;
+      final rectText = rect == null ? 'null' : '${rect.width.toInt()}x${rect.height.toInt()}';
+      log('$phase,${clock.elapsedMilliseconds},${engine.width},$rectText,${values.join(",")}');
     }
 
-    for (final phase in ['video', 'audio-only']) {
-      if (phase == 'audio-only') {
-        log('# setVideoTrack(false)');
-        final sw = Stopwatch()..start();
-        await engine.setVideoTrack(false);
-        sw.stop();
-        log('# vid=no applied in ${sw.elapsedMilliseconds}ms');
-        await Future<void>.delayed(const Duration(seconds: 5));
-      }
+    Future<void> phase(String name, Duration length) async {
       final clock = Stopwatch()..start();
-      while (clock.elapsed < kPhase) {
-        await sample(phase, clock);
+      while (clock.elapsed < length) {
+        await sample(name, clock);
         await Future<void>.delayed(kEvery);
       }
       clock.stop();
     }
+
+    await phase('video', kVideoPhase);
+
+    var sw = Stopwatch()..start();
+    await engine.setVideoTrack(false);
+    sw.stop();
+    log('# setVideoTrack(false) returned in ${sw.elapsedMilliseconds}ms');
+    await phase('audio-only', kAudioPhase);
+
+    // The measurement that matters: ms is time since the call was issued, so
+    // whichever column changes first — and when — is the answer.
+    sw = Stopwatch()..start();
+    await engine.setVideoTrack(true);
+    sw.stop();
+    log('# setVideoTrack(true) returned in ${sw.elapsedMilliseconds}ms');
+    await phase('restore', kRestorePhase);
 
     log('# done');
   } catch (e, st) {
