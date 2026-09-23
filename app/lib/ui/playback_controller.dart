@@ -261,6 +261,15 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// The volume to come back to when unmuting. Null until something is muted.
   double? _volumeBeforeMute;
 
+  /// The grace period before deciding a stream that is allegedly playing at 0:00
+  /// is actually dead and needs a reopen.
+  ///
+  /// Mutable only so tests do not have to sleep 5 seconds.
+  @visibleForTesting
+  static Duration stallGrace = const Duration(seconds: 5);
+
+  Timer? _stallWatchdogTimer;
+
   @visibleForTesting
   int? get preferredHeight => _preferredHeight;
 
@@ -281,9 +290,19 @@ class PlaybackController extends Notifier<PlaybackState> {
       engine.completedStream.listen((completed) {
         if (completed) unawaited(_onCompleted());
       }),
+      engine.positionStream.listen((position) {
+        if (position > Duration.zero) {
+          _stallWatchdogTimer?.cancel();
+          _stallWatchdogTimer = null;
+        }
+      }),
       // A state change is half of what §3.5 means by cadence. Filtered, because
       // media_kit emits `playing` again on things that are not transitions.
       engine.playingStream.listen((playing) {
+        if (!playing) {
+          _stallWatchdogTimer?.cancel();
+          _stallWatchdogTimer = null;
+        }
         if (_lastReportedPlaying == playing) return;
         _lastReportedPlaying = playing;
         unawaited(_report(playing ? 'playing' : 'paused'));
@@ -322,6 +341,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     ref.onDispose(() {
       _disposed = true;
       _reportTimer?.cancel();
+      _stallWatchdogTimer?.cancel();
       for (final subscription in _subscriptions) {
         unawaited(subscription.cancel());
       }
@@ -337,6 +357,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// slower one must not open its video over the newer one's.
   Future<void> open(VideoItem item) async {
     final generation = ++_generation;
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = null;
     // A pending resume belongs to one video. Dropped the moment a different one
     // opens — otherwise an open superseded before it resolved (a quick tap on
     // something else during an undo) returns at its generation check without
@@ -419,6 +441,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       unawaited(_report('playing'));
       _reportTimer?.cancel();
       _reportTimer = Timer.periodic(reportInterval, (_) => unawaited(_report(null)));
+
+      _armStallWatchdog(generation, variant);
     } on RpcException catch (e) {
       if (generation != _generation || _disposed) return;
       await _failOpen(e.message, e.retry, code: e.code);
@@ -427,6 +451,45 @@ class PlaybackController extends Notifier<PlaybackState> {
       // Not an envelope — a bug on this side. `user` is the honest reading:
       // nothing will fix itself, but letting the user try again costs nothing.
       await _failOpen(e.toString(), RpcRetryMode.user);
+    }
+  }
+
+  void _armStallWatchdog(int generation, PlaybackVariant variant) {
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = Timer(stallGrace, () {
+      if (_disposed || generation != _generation) return;
+      if (_engine.position > Duration.zero || !_engine.playing || state.error != null || state.isUpcoming) return;
+
+      stderr.writeln('rill: stream never started after ${stallGrace.inMilliseconds}ms, reopening');
+      unawaited(_reopenStalled(generation, variant));
+    });
+  }
+
+  Future<void> _reopenStalled(int generation, PlaybackVariant variant) async {
+    try {
+      await _engine.open(
+        variant,
+        play: true,
+        retainSubtitle: true,
+        isLive: state.source?.durationMs == null,
+      );
+      if (_disposed || generation != _generation) return;
+
+      _stallWatchdogTimer = Timer(stallGrace, () {
+        if (_disposed || generation != _generation) return;
+        if (_engine.position > Duration.zero || !_engine.playing || state.error != null || state.isUpcoming) return;
+
+        stderr.writeln('rill: reopen did not start either — giving up');
+        unawaited(_failOpen('Stream stalled and would not play.', RpcRetryMode.user));
+      });
+    } on Object catch (e) {
+      if (_disposed || generation != _generation) return;
+      // The detail goes to stderr, not to the screen. An engine failure can
+      // quote what it was opening, and what it was opening is a signed URL —
+      // the one thing `redact.ts` exists to keep out of a message someone
+      // might screenshot.
+      stderr.writeln('rill: stalled-stream reopen threw: $e');
+      unawaited(_failOpen('Stream stalled and would not play.', RpcRetryMode.user));
     }
   }
 
@@ -693,6 +756,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     // won and both clearing the cover on the way out. Claiming a generation makes
     // the newer pick supersede the older one, exactly as it does in `open`.
     final generation = ++_generation;
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = null;
     final engine = _engine;
 
     _preferredHeight = variant.height;
