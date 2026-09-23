@@ -60,7 +60,7 @@ bool isMembersOnlyFailure(PlaybackState playback, VideoDetail? detail) {
 /// own prose on the error message ("Premieres in 9 days"). One of the two is
 /// always present, which is why this need not wait on `video.info` to draw.
 class PremiereSlate extends ConsumerWidget {
-  const PremiereSlate({required this.playback});
+  const PremiereSlate({super.key, required this.playback});
 
   final PlaybackState playback;
 
@@ -162,7 +162,7 @@ class PremiereSlate extends ConsumerWidget {
 /// need to join" would be a guess, and wrong for exactly the paying members it
 /// would insult.
 class MembersOnlySlate extends ConsumerWidget {
-  const MembersOnlySlate({required this.playback});
+  const MembersOnlySlate({super.key, required this.playback});
 
   final PlaybackState playback;
 
@@ -276,7 +276,7 @@ class MembersOnlySlate extends ConsumerWidget {
 }
 
 class UnavailableSlate extends ConsumerWidget {
-  const UnavailableSlate({required this.playback});
+  const UnavailableSlate({super.key, required this.playback});
 
   final PlaybackState playback;
 
@@ -331,9 +331,10 @@ class UnavailableSlate extends ConsumerWidget {
 }
 
 class PlayerSlates extends ConsumerWidget {
-  const PlayerSlates({super.key, this.showQueue = false});
+  const PlayerSlates({super.key, this.showQueue = false, this.injectMaterial = false});
 
   final bool showQueue;
+  final bool injectMaterial;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -345,7 +346,7 @@ class PlayerSlates extends ConsumerWidget {
         : ref.watch(videoInfoProvider(item.id));
     final detail = detailAsync?.value;
 
-    return Stack(
+    final stack = Stack(
       fit: StackFit.expand,
       children: [
         if (isAudioOnly) AudioModeView(showQueue: showQueue),
@@ -357,5 +358,7 @@ class PlayerSlates extends ConsumerWidget {
           UnavailableSlate(playback: playback),
       ],
     );
+
+    return injectMaterial ? Material(child: stack) : stack;
   }
 }

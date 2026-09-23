@@ -421,7 +421,7 @@ class _FullscreenPlayer extends ConsumerWidget {
                 ),
                 PlayerControls(
                   engine: engine,
-                  child: const PlayerSlates(showQueue: true),
+                  child: const PlayerSlates(showQueue: true, injectMaterial: true),
                 ),
               ],
             ),

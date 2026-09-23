@@ -338,6 +338,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               onTap: _onTap,
               child: const SizedBox.expand(),
             ),
+            if (widget.child != null) widget.child!,
             // Above the click surface so it paints over the cover, but
             // pointer-transparent — a spinner that swallowed the click to
             // play/pause would take the control away exactly when the player is
@@ -352,7 +353,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               key: const ValueKey('player-busy'),
               child: _BusySpinner(engine: widget.engine, onBusyChanged: _onBusyChanged),
             ),
-            if (widget.child != null) widget.child!,
             // **Mounted unconditionally now that it fades.** The `if` used to
             // be here, and an `if` cannot animate an exit: the panel was gone
             // from the tree on the same frame it was told to close, with nothing
@@ -384,7 +384,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // The fullscreen header: what is playing, since fullscreen hides the
             // page that would otherwise say. Fades with the bar rather than on
             // its own timer — one visibility, so they cannot disagree.
-            if (ref.watch(playerViewProvider.select((view) => view.fullscreen)))
+            if (ref.watch(playerViewProvider.select((view) => view.fullscreen)) && !ref.watch(audioModeProvider))
               Positioned(
                 key: const ValueKey('player-header'),
                 left: 0,
