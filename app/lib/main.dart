@@ -81,11 +81,13 @@ Future<void> main() async {
 
   final drawerOpen = await readDrawerOpen();
   final audioMode = await readAudioMode();
+  final hideQueue = await readHideQueue();
 
   final container = ProviderContainer(
     overrides: [
       playbackEngineProvider.overrideWithValue(engine),
       audioModeProvider.overrideWith(() => AudioModeController(initial: audioMode)),
+      hideQueueProvider.overrideWith(() => HideQueueController(initial: hideQueue)),
       drawerStateProvider.overrideWith(() => DrawerStateController(initial: drawerOpen)),
     ],
   );

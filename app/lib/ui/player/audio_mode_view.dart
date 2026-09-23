@@ -8,6 +8,7 @@ import '../../domain/video_detail.dart';
 import '../../theme/tokens.dart';
 import '../playback_controller.dart';
 import '../queue_controller.dart';
+import '../audio_mode_controller.dart';
 import '../video_info.dart';
 import '../widgets/queue_panel.dart';
 import '../pages/watch_layout.dart' show computeWatchGeometry;
@@ -27,12 +28,12 @@ class AudioModeView extends ConsumerStatefulWidget {
 class _AudioModeViewState extends ConsumerState<AudioModeView> {
   bool _forceThumbnail = false;
   String? _lastItemId;
-  bool _hideQueue = false;
 
   @override
   Widget build(BuildContext context) {
     final playback = ref.watch(playbackProvider);
     final item = playback.item;
+    final hideQueue = ref.watch(hideQueueProvider);
     if (item == null) return const SizedBox.shrink();
 
     if (_lastItemId != item.id) {
@@ -221,7 +222,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
 
             AnimatedPositioned(
               duration: const Duration(milliseconds: 300),
-              right: _hideQueue ? -geometry.railWidth : 0,
+              right: hideQueue ? -geometry.railWidth : 0,
               curve: Curves.easeInOutCubic,
               top: 0,
               bottom: 0,
@@ -244,7 +245,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                               border: borderFinal,
                               borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
                             ),
-                            width: _hideQueue ? 30 : 30,
+                            width: hideQueue ? 30 : 30,
                             height: 60,
                             child: Material(
                               color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -252,9 +253,9 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                               child: InkWell(
                                 mouseCursor: SystemMouseCursors.click,
                                 borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                                onTap: () => setState(() => _hideQueue = !_hideQueue),
+                                onTap: () => ref.read(hideQueueProvider.notifier).toggle(),
                                 child: Icon(
-                                  _hideQueue ? Icons.chevron_left : Icons.chevron_right,
+                                  hideQueue ? Icons.chevron_left : Icons.chevron_right,
                                   color: Theme.of(context).tokens.onScrim.withValues(alpha: 0.7),
                                 ),
                               ),
@@ -289,7 +290,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                                 borderRadius: BorderRadius.horizontal(
                                   left: Radius.circular(12),
                                 ),
-                                onCollapse: () => setState(() => _hideQueue = true),
+                                onCollapse: () => ref.read(hideQueueProvider.notifier).setMode(true),
                               ),
                             ),
                           );
