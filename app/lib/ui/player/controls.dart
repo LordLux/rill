@@ -95,10 +95,11 @@ const Key playerTheatreKey = ValueKey('player-theatre');
 const Key playerFullscreenKey = ValueKey('player-fullscreen');
 
 class PlayerControls extends ConsumerStatefulWidget {
-  const PlayerControls({super.key, required this.engine, this.actualAspectRatio});
+  const PlayerControls({super.key, required this.engine, this.actualAspectRatio, this.child});
 
   final PlaybackEngine engine;
   final double? actualAspectRatio;
+  final Widget? child;
 
   @override
   ConsumerState<PlayerControls> createState() => _PlayerControlsState();
@@ -313,7 +314,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
         // player. `onHover` fires on movement only, which is exactly the wake
         // condition the task asks for.
         cursor: _visible ? MouseCursor.defer : SystemMouseCursors.none,
-        onHover: (_) => _wake(),
+        onHover: (event) {
+          if (event.delta != Offset.zero) _wake();
+        },
         onExit: (_) => _wake(),
         child: Stack(
           fit: StackFit.expand,
@@ -349,6 +352,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               key: const ValueKey('player-busy'),
               child: _BusySpinner(engine: widget.engine, onBusyChanged: _onBusyChanged),
             ),
+            if (widget.child != null) widget.child!,
             // **Mounted unconditionally now that it fades.** The `if` used to
             // be here, and an `if` cannot animate an exit: the panel was gone
             // from the tree on the same frame it was told to close, with nothing
