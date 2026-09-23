@@ -503,6 +503,13 @@ class MediaKitEngine implements PlaybackEngine {
     _width = null;
     _height = null;
 
+    // Always reset the video track to enabled before opening.
+    // If `vid=no` from a previous audio-only playback persists, opening a
+    // video-only stream here will decode nothing, mpv will never emit a
+    // duration, and the open will hang until the 20s timeout.
+    // The playback_controller will re-disable it later if still in audio-only.
+    await setVideoTrack(true);
+
     await _player.open(Media(variant.videoUrl), play: play);
 
     if (_player.state.duration <= Duration.zero) {
