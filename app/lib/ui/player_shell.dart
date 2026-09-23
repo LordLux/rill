@@ -410,12 +410,15 @@ class _FullscreenPlayer extends ConsumerWidget {
             builder: (context) => Stack(
               fit: StackFit.expand,
               children: [
-                // With `vid=no` the texture decodes nothing, so this branch is
-                // the difference between the artwork and a black screen.
-                if (ref.watch(audioModeProvider))
-                  AudioBackdrop(imageUrl: ref.watch(playbackProvider).item?.thumbnailUrl)
-                else
-                  engine.videoSurface(),
+                // With `vid=no` the texture decodes nothing, so without the
+                // overlay this is a black screen. It stays mounted underneath
+                // so the artwork can crossfade over it rather than replace it.
+                engine.videoSurface(),
+                AudioArtOverlay(
+                  show: ref.watch(audioModeProvider) ||
+                      ref.watch(playbackProvider).isRestoringVideo,
+                  imageUrl: ref.watch(playbackProvider).item?.thumbnailUrl,
+                ),
                 PlayerControls(engine: engine),
               ],
             ),

@@ -17,6 +17,52 @@ import 'audio_art_surface.dart';
 ///
 /// Drawn behind the now-playing content, so it is deliberately low-contrast:
 /// anything that competes with the foreground is a bug, not a feature.
+/// How long the artwork takes to give way to the video, and back.
+///
+/// Long enough to read as a transition rather than a flicker, short enough
+/// that it is not a thing you wait through on a toggle you meant.
+const Duration kAudioArtFade = Duration(milliseconds: 320);
+
+/// The artwork, crossfaded over the video surface.
+///
+/// **It stays up for the whole restore, not just for audio-only.** The video
+/// texture keeps the last frame decoded before `vid=no` and nothing clears it —
+/// observed 2026-09-23 showing a frame roughly two minutes stale — so handing
+/// the surface back the instant the toggle flips displays the wrong picture
+/// until mpv catches up, which takes 2.9–8.0 s (`architecture.md` §2.4).
+/// Holding the artwork until `isRestoringVideo` clears means the fade always
+/// lands on a live frame.
+///
+/// The video surface underneath stays mounted throughout, so the texture keeps
+/// decoding while this covers it — the fade is opacity only, never a remount.
+class AudioArtOverlay extends StatelessWidget {
+  const AudioArtOverlay({super.key, required this.show, required this.imageUrl});
+
+  final bool show;
+  final String? imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedSwitcher(
+        duration: kAudioArtFade,
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        // The default sizes itself to the largest child, which collapses to
+        // nothing while the outgoing artwork is fading against a shrunk
+        // placeholder. Expanding both keeps it full-bleed for the whole fade.
+        layoutBuilder: (current, previous) => Stack(
+          fit: StackFit.expand,
+          children: [...previous, ?current],
+        ),
+        child: show
+            ? AudioBackdrop(key: const ValueKey('audio-art'), imageUrl: imageUrl)
+            : const SizedBox.shrink(key: ValueKey('no-audio-art')),
+      ),
+    );
+  }
+}
+
 class AudioBackdrop extends StatefulWidget {
   const AudioBackdrop({super.key, required this.imageUrl, this.child});
 
