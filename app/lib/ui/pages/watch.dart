@@ -506,31 +506,32 @@ class _PlayerSurface extends ConsumerWidget {
   Widget _buildSurface(bool fullscreen, bool isAudioOnly, PlaybackState playback, bool isTopWatchPage, PlaybackEngine engine, ColorScheme scheme) {
     if (fullscreen) return const SizedBox.shrink();
 
-    if (isAudioOnly) {
-      final item = playback.item;
-      final content = AudioBackdrop(imageUrl: item?.thumbnailUrl);
+    // **The surface stays mounted in audio-only too.** The artwork fades over
+    // it rather than replacing it, so the texture keeps decoding underneath and
+    // the crossfade never costs a remount.
+    final muxedOnly =
+        isAudioOnly && playback.variant != null && playback.variant!.audioUrl == null;
 
-      if (playback.variant != null && playback.variant!.audioUrl == null) {
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            content,
-            Positioned(
-              top: 24,
-              right: 24,
-              child: Tooltip(
-                message: 'Audio-only stream unavailable.\nConsuming video bandwidth.',
-                child: Icon(Icons.warning_amber_rounded, color: scheme.error, size: 28, semanticLabel: 'Audio-only stream unavailable'),
-              ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
+        // Held through the restore as well — see [AudioArtOverlay].
+        AudioArtOverlay(
+          show: isAudioOnly || playback.isRestoringVideo,
+          imageUrl: playback.item?.thumbnailUrl,
+        ),
+        if (muxedOnly)
+          Positioned(
+            top: 24,
+            right: 24,
+            child: Tooltip(
+              message: 'Audio-only stream unavailable.\nConsuming video bandwidth.',
+              child: Icon(Icons.warning_amber_rounded, color: scheme.error, size: 28, semanticLabel: 'Audio-only stream unavailable'),
             ),
-          ],
-        );
-      }
-
-      return content;
-    }
-
-    return isTopWatchPage ? engine.videoSurface() : engine.videoWidget();
+          ),
+      ],
+    );
   }
 
   @override
