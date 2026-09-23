@@ -109,6 +109,28 @@ void main() {
     expect(container.read(playbackProvider).isRestoringVideo, isFalse);
   });
 
+  test('opening another video clears a restore that never finished', () async {
+    await playSomething();
+    await container.read(audioModeProvider.notifier).setMode(true);
+    await settle();
+    await container.read(audioModeProvider.notifier).setMode(false);
+    await settle();
+    expect(container.read(playbackProvider).isRestoringVideo, isTrue);
+
+    // No picture ever arrives — the case where the stream is wedged. The user
+    // gives up and plays something else.
+    container.read(queueProvider.notifier).play(video('bbb'));
+    await settle();
+
+    expect(container.read(playbackProvider).item?.id, 'bbb');
+    expect(
+      container.read(playbackProvider).isRestoringVideo,
+      isFalse,
+      reason: 'a restore belongs to the media it started on — otherwise the '
+          'artwork sits over the new video with the switch off',
+    );
+  });
+
   test('toggling back into audio-only mid-restore does not strand the spinner', () async {
     await playSomething();
     await container.read(audioModeProvider.notifier).setMode(true);
