@@ -559,6 +559,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             dragging: _dragging,
             hold: playback.hold,
             source: playback.source,
+            audioOnly: isAudioOnly,
             onDrag: (value) {
               setState(() => _dragging = value);
               _wake();
@@ -766,6 +767,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     final queue = ref.watch(queueProvider);
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
+    final isAudioOnly = ref.watch(audioModeProvider);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 2, 6, 6),
@@ -825,6 +827,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               dragging: _dragging,
               hold: playback.hold,
               source: playback.source,
+              audioOnly: isAudioOnly,
               onDrag: (value) {
                 setState(() => _dragging = value);
                 _wake();
@@ -1089,9 +1092,13 @@ class _Scrubber extends StatelessWidget {
     required this.dragging,
     required this.hold,
     required this.source,
+    required this.audioOnly,
     required this.onDrag,
     required this.onDragEnd,
   });
+
+  /// Suppresses the buffered range — see the note where it is read.
+  final bool audioOnly;
 
   final PlaybackEngine engine;
   final double? dragging;
@@ -1123,7 +1130,18 @@ class _Scrubber extends StatelessWidget {
             double durationMs = (hold?.duration ?? engine.duration).inMilliseconds.toDouble();
             double max = math.max(durationMs, 1.0);
             double positionMs = (hold?.position ?? positionSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
-            double bufferedMs = (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+            // **No buffered range in audio-only, because there is no honest one
+            // to draw.** `vid=no` tears the video demuxer down, and mpv's cache
+            // properties report *that* demuxer — measured 2026-09-22,
+            // `demuxer-cache-duration` reads 0.000000 for the whole audio-only
+            // phase while audio keeps playing from a cache nothing exposes. So
+            // media_kit's `buffer` stops advancing and the bar freezes at
+            // whatever it last saw, which claims the stream stopped buffering
+            // when it did not. Drawing nothing says "not known"; leaving the
+            // stale bar up says something false.
+            double bufferedMs = audioOnly
+                ? 0.0
+                : (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
             
             double value = (dragging ?? positionMs).clamp(0.0, max);
             double? unplayableEndFraction;

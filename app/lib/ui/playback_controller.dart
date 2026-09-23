@@ -352,6 +352,13 @@ class PlaybackController extends Notifier<PlaybackState> {
       sessionId: null,
       isLoading: true,
       isSwitchingQuality: false,
+      // **A restore belongs to the media it started on.** Without this, a
+      // restore still waiting when a different video opens keeps the flag up
+      // until its own 30 s timeout — and its `finally` will not clear it,
+      // because by then the generation has moved and clearing would stamp on
+      // the new media's state. The artwork then sits over a video whose
+      // audio-only switch is off, which is what it looked like from outside.
+      isRestoringVideo: false,
       hold: null,
       error: null,
       errorCode: null,
