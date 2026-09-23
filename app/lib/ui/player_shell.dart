@@ -8,6 +8,7 @@ import 'pages/watch.dart';
 import 'playback_controller.dart';
 import 'player/audio_art_surface.dart';
 import 'player/audio_backdrop.dart';
+import 'player/audio_mode_view.dart';
 import 'player/controls.dart';
 import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
@@ -415,12 +416,12 @@ class _FullscreenPlayer extends ConsumerWidget {
                 // so the artwork can crossfade over it rather than replace it.
                 engine.videoSurface(),
                 AudioArtOverlay(
-                  show: ref.watch(audioModeProvider) ||
-                      ref.watch(playbackProvider).isRestoringVideo,
-                  imageUrl: ref.watch(playbackProvider).source?.posterUrl ??
-                      ref.watch(playbackProvider).item?.thumbnailUrl,
+                  show: ref.watch(audioModeProvider) || ref.watch(playbackProvider).isRestoringVideo,
+                  imageUrl: ref.watch(playbackProvider).source?.posterUrl ?? ref.watch(playbackProvider).item?.thumbnailUrl,
                 ),
                 PlayerControls(engine: engine),
+                // Above the controls — see the note at the watch page's mount.
+                if (ref.watch(audioModeProvider)) const AudioModeView(showQueue: true),
               ],
             ),
           ),
