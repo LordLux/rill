@@ -394,12 +394,22 @@ Two things follow from that, and they point opposite ways:
   Measured on the real app over 242 s each, CPU fell from 11.8% to 5.3% of one
   core. The saving scales with the video's bitrate.
 - **The directions are not symmetric.** Dropping the track is immediate;
-  restoring it is a *cold refetch and re-decode*, observed between half a
-  second and ten. So leaving audio-only raises
-  `PlaybackState.isRestoringVideo`, held until `widthStream` reports a decoded
-  frame, which feeds the control bar's existing busy spinner — and its grace
-  delay means the fast case still shows nothing. Entering audio-only raises
-  nothing, because there is nothing to wait for.
+  restoring it is a *cold refetch and re-decode* — **measured at ~5.0 s** on a
+  96-minute 1080p video (`Gx8CPWxlsOc`), and observed as low as half a second
+  elsewhere. So leaving audio-only raises `PlaybackState.isRestoringVideo`,
+  which feeds the control bar's existing busy spinner; its grace delay means
+  the fast case still shows nothing. Entering audio-only raises nothing.
+
+**`vo-configured` is the only signal that says the picture is back — measured
+2026-09-23, after shipping the wrong one.** The first version waited on
+`widthStream` and the spinner never appeared once, because media_kit's cached
+`width` survives `vid=no` untouched; so does the `VideoController`'s `rect`.
+mpv's own `width` *does* clear, but comes back the instant the track is
+re-enabled, a full 5 seconds before anything is on screen. Only `vo-configured`
+tracks the picture: `no` for the whole audio-only phase, `yes` at the moment it
+returns. `dwidth` lands ~2 s early and `video-bitrate` ~3 s late. It is
+**observed, not polled** (`MediaKitEngine._observeVideoOutput`), so mpv
+delivers it on its own event thread and hard invariant 9 holds.
 
 **Do not re-derive any of this from network totals.** Windows' per-process I/O
 counters do not see mpv's socket reads at all (10 KB of process I/O against

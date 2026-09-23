@@ -17,6 +17,7 @@ class FakeEngine implements PlaybackEngine {
   final _buffering = StreamController<bool>.broadcast();
   final _buffer = StreamController<Duration>.broadcast();
   final _width = StreamController<int?>.broadcast();
+  final _videoOutput = StreamController<bool>.broadcast();
   final _height = StreamController<int?>.broadcast();
   final _volume = StreamController<double>.broadcast();
   final _completed = StreamController<bool>.broadcast();
@@ -180,15 +181,32 @@ class FakeEngine implements PlaybackEngine {
   bool videoTrackEnabled = true;
 
   @override
+  Stream<bool> get videoOutputStream => _videoOutput.stream;
+
+  @override
+  bool get videoOutputReady => _videoOutputReady;
+  bool _videoOutputReady = true;
+
+  /// The first frame after the video output is reconfigured.
+  ///
+  /// Separate from [setVideoTrack] on purpose: on the real engine re-enabling
+  /// the track and having a picture are 5 seconds apart, and that gap is the
+  /// whole thing under test.
+  void setVideoOutputReady(bool ready) {
+    _videoOutputReady = ready;
+    _videoOutput.add(ready);
+  }
+
+  @override
   Future<void> setVideoTrack(bool enabled) async {
     videoTrackEnabled = enabled;
-    // Models `vid=no`: mpv stops decoding, so the dimensions it reports go
-    // away and do not come back until the first frame after re-enabling.
-    // Putting them back is the test's job, because that gap *is* the wait
-    // being modelled — measured at between half a second and ten.
+    // Models `vid=no`: mpv tears the video output down, so `vo-configured`
+    // goes false immediately. Re-enabling does *not* bring it back here —
+    // the test decides when the picture lands, because that delay is the
+    // behaviour being modelled.
     if (!enabled) {
-      setWidth(null);
-      setHeight(null);
+      _videoOutputReady = false;
+      _videoOutput.add(false);
     }
   }
 
@@ -250,6 +268,7 @@ class FakeEngine implements PlaybackEngine {
     await _buffering.close();
     await _buffer.close();
     await _width.close();
+    await _videoOutput.close();
     await _height.close();
     await _volume.close();
     await _completed.close();

@@ -64,6 +64,26 @@ abstract class PlaybackEngine {
   Duration get duration;
   bool get playing;
 
+  /// Whether mpv has a **configured video output** — that is, whether there is
+  /// actually a picture.
+  ///
+  /// The signal for "video is back after audio-only", and the only one that
+  /// works. Measured 2026-09-23 across a `vid=no` -> `vid=auto` toggle on a
+  /// 96-minute 1080p video: media_kit's cached [width] and the
+  /// `VideoController`'s `rect` both keep their old values straight through
+  /// audio-only and never clear, and mpv's own `width` comes back the instant
+  /// the track is re-enabled — 5 seconds before anything is on screen.
+  /// `vo-configured` is `no` for the whole audio-only phase and flips to `yes`
+  /// exactly when the picture returns.
+  ///
+  /// Observed rather than polled, so hard invariant 9 holds: mpv delivers the
+  /// change on its own event thread and nothing reads a property from the UI
+  /// isolate.
+  Stream<bool> get videoOutputStream;
+
+  /// The latest value of [videoOutputStream].
+  bool get videoOutputReady;
+
   /// Whether mpv is waiting rather than presenting — see [bufferingStream].
   bool get buffering;
   Duration get buffer;
@@ -228,6 +248,7 @@ class MediaKitEngine implements PlaybackEngine {
     // difference between 0/4 and 4/4 seeks on any FFmpeg from Lavf 62.10.101
     // onward, so a future pin bump is a non-event instead of a silent freeze.
     unawaited(_setStreamOptions());
+    unawaited(_observeVideoOutput());
 
     _subscriptions.addAll([
       _player.stream.position.listen((value) => _position = value),
@@ -256,6 +277,8 @@ class MediaKitEngine implements PlaybackEngine {
   int? _width;
   int? _height;
   double _volume = 100;
+  bool _videoOutputReady = false;
+  final StreamController<bool> _videoOutput = StreamController<bool>.broadcast();
 
   /// The controller, which outlives every route. Prefer [videoSurface].
   VideoController get videoController => _video;
@@ -311,6 +334,28 @@ class MediaKitEngine implements PlaybackEngine {
     );
   }
 
+  /// Register the `vo-configured` observer, once, for the engine's lifetime.
+  ///
+  /// Once: media_kit throws `Already observed` on a second registration for the
+  /// same property, so this cannot be done per toggle. mpv reports the value as
+  /// the strings `yes` and `no`.
+  ///
+  /// Failure is logged and swallowed. A missing observer costs a spinner that
+  /// never appears, which is the old behaviour — not a player that will not
+  /// start.
+  Future<void> _observeVideoOutput() async {
+    try {
+      await (_player.platform as NativePlayer).observeProperty('vo-configured', (value) async {
+        final ready = value == 'yes';
+        if (ready == _videoOutputReady) return;
+        _videoOutputReady = ready;
+        if (!_videoOutput.isClosed) _videoOutput.add(ready);
+      });
+    } on Object catch (e) {
+      stderr.writeln('rill: could not observe vo-configured ($e) — no picture signal');
+    }
+  }
+
   Future<void> _setStreamOptions() async {
     // `RILL_STREAM_LAVF_O` replaces the value for one run. Measurement only —
     // it exists so ffmpeg's `reconnect*` options can be tested **one at a time**
@@ -339,6 +384,12 @@ class MediaKitEngine implements PlaybackEngine {
   Stream<bool> get playingStream => _player.stream.playing;
   @override
   Stream<bool> get bufferingStream => _player.stream.buffering;
+
+  @override
+  Stream<bool> get videoOutputStream => _videoOutput.stream;
+
+  @override
+  bool get videoOutputReady => _videoOutputReady;
   @override
   Stream<Duration> get bufferStream => _player.stream.buffer;
   @override
@@ -574,6 +625,7 @@ class MediaKitEngine implements PlaybackEngine {
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
+    await _videoOutput.close();
     await _player.dispose();
   }
 }

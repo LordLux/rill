@@ -776,9 +776,20 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
 
     state = state.copyWith(isRestoringVideo: true);
+    final started = DateTime.now();
     try {
       await _engine.setVideoTrack(true);
       await _waitForVideoTrack(token);
+      // The same number `switchQuality` reports, for the same reason: what the
+      // *viewer* waited for, from the app rather than a stopwatch held against
+      // the screen. It is also the only way to tell a spinner that correctly
+      // stayed hidden from one that is broken.
+      if (token == _audioModeToggle) {
+        stderr.writeln(
+          'rill: audio-only -> video, picture back in '
+          '${DateTime.now().difference(started).inMilliseconds} ms',
+        );
+      }
     } finally {
       // Not if a newer toggle owns the flag — it is responsible for clearing
       // its own, and this one must not clear it out from under it.
@@ -788,25 +799,21 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
   }
 
-  /// Wait until mpv is decoding a picture again.
+  /// Wait until mpv has a picture again.
   ///
-  /// `widthStream` is the signal because it is null until the first frame is
-  /// decoded — the only thing that separates "the call was issued" from "there
-  /// is something to look at". `setVideoTrack` itself returns in ~30 ms
-  /// (measured), so waiting on it would put the spinner up and take it down
-  /// again before the picture arrives.
+  /// **Keyed on `vo-configured`, and nothing else works.** The first version of
+  /// this waited on `widthStream` and returned instantly every time, because
+  /// media_kit's cached width survives `vid=no` untouched — measured
+  /// 2026-09-23, along with the `VideoController`'s `rect`, which is stale for
+  /// the same reason, and mpv's own `width`, which comes back the instant the
+  /// track is re-enabled and so is 5 seconds early. `vo-configured` is `no` for
+  /// the whole audio-only phase and flips when the picture is actually there.
   Future<void> _waitForVideoTrack(int token) async {
-    if ((_engine.width ?? 0) > 0) {
-      // Width outlived `vid=no`, so it cannot say when the picture is back and
-      // waiting on it would hang until the timeout. Said out loud rather than
-      // silently skipped: it would leave the spinner permanently dead.
-      stderr.writeln('rill: leaving audio-only with width already set — no picture signal');
-      return;
-    }
+    if (_engine.videoOutputReady) return;
     try {
-      await _engine.widthStream
-          .firstWhere((width) => _disposed || token != _audioModeToggle || (width ?? 0) > 0)
-          .timeout(const Duration(seconds: 25));
+      await _engine.videoOutputStream
+          .firstWhere((ready) => ready || _disposed || token != _audioModeToggle)
+          .timeout(const Duration(seconds: 30));
     } on Object {
       // Bounded on purpose: a spinner that never comes down is worse than one
       // that gives up on a picture that was never coming.

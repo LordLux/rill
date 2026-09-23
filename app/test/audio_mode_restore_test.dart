@@ -8,6 +8,13 @@
 ///
 /// `architecture.md` §2.4 used to claim both directions were instant. Only one
 /// of them is, which is why only one of them raises a spinner.
+///
+/// **The signal is `vo-configured`, and the obvious candidates are all wrong.**
+/// Measured 2026-09-23 on a 96-minute 1080p video: media_kit's cached `width`
+/// and the `VideoController`'s `rect` both survive `vid=no` untouched, and
+/// mpv's own `width` returns the instant the track is re-enabled — 5 seconds
+/// before there is anything on screen. The first version of this shipped
+/// against `width` and the spinner never appeared once.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,7 +60,7 @@ Future<void> playSomething() async {
   container.read(queueProvider.notifier).play(video('aaa'));
   await settle();
   expect(container.read(playbackProvider).source, isNotNull, reason: 'nothing opened');
-  expect(engine.width, isNotNull, reason: 'a picture should be decoding before we start');
+  expect(engine.videoOutputReady, isTrue, reason: 'a picture before we start');
 }
 
 void main() {
@@ -83,7 +90,7 @@ void main() {
     await playSomething();
     await container.read(audioModeProvider.notifier).setMode(true);
     await settle();
-    expect(engine.width, isNull, reason: 'vid=no takes the dimensions away');
+    expect(engine.videoOutputReady, isFalse, reason: 'vid=no tears the video output down');
 
     await container.read(audioModeProvider.notifier).setMode(false);
     await settle();
@@ -95,8 +102,8 @@ void main() {
       reason: 'the call returning is not the picture arriving — this is the wait',
     );
 
-    // The first decoded frame.
-    engine.setWidth(1280);
+    // The picture actually arriving — on the real engine, ~5 s after the call.
+    engine.setVideoOutputReady(true);
     await settle();
 
     expect(container.read(playbackProvider).isRestoringVideo, isFalse);
@@ -112,8 +119,8 @@ void main() {
     expect(container.read(playbackProvider).isRestoringVideo, isTrue);
 
     // Changed their mind before any picture arrived. Without the toggle token
-    // the abandoned wait would sit on `widthStream` until its 25 s timeout,
-    // holding a spinner over artwork that is already back.
+    // the abandoned wait would sit on `videoOutputStream` until its 30 s
+    // timeout, holding a spinner over artwork that is already back.
     await container.read(audioModeProvider.notifier).setMode(true);
     await settle();
 
