@@ -464,6 +464,18 @@ the answer.
   a property of the container. `src/` was swept at the same time and had no
   other such caller, so this is a trap rather than a fleet of live bugs — but it
   is a trap that reads as correct code.
+- **There is no bigger thumbnail, and audio-only mode is not symmetric — F40,
+  F41, §2.4.** Three things that each look like a bug and are not. `maxresdefault`
+  is byte-identical to `hq720` and **1280×720 is the ceiling**, so "fetch a larger
+  one" is not a fix — the watch page's related rail ships 480×360, and for a
+  square or vertical video three quarters of that is baked-in black bars. The
+  answer is to blur it, not to find a better URL. The shipped libmpv has **no**
+  audio-visualization filters, so a spectrum visualizer cannot be built here at
+  all (`lavfi-complex` being accepted is invariant 8's false positive). And
+  `vid=no` is a *teardown*, not a pause: it drops the demuxer cache to zero, so
+  going back to video is a cold refetch costing 2.9–8.0 s, gated on
+  `vo-configured` — **not** on any width or `rect`, both of which survive
+  `vid=no` untouched and will return instantly if you wait on them.
 - **Hover previews are the real video, muted, in the tile** (revised 2026-08-11;
   this note used to say sprite sheets, and `architecture.md` §2.6 records why it
   changed). **Never instantiate a player per tile** — that part is unchanged and
