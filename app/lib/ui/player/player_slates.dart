@@ -359,6 +359,6 @@ class PlayerSlates extends ConsumerWidget {
       ],
     );
 
-    return injectMaterial ? Material(child: stack) : stack;
+    return injectMaterial ? Material(type: MaterialType.transparency, child: stack) : stack;
   }
 }
