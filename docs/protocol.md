@@ -715,6 +715,7 @@ interface VideoDetail {
   isVerified: boolean;
   isArtistChannel: boolean;
   badges: string[];
+  music: MusicTrack[];                // empty is ordinary — most videos have none
   isMembersOnly: boolean;             // structural; the members slate reads this
   premiereAtMs: number | null;        // unix ms; null unless it is a premiere
   related: FeedItem[];                // the watch page's rail
@@ -722,6 +723,38 @@ interface VideoDetail {
   commentsContinuation: string | null; // → video.comments
 }
 ```
+
+**`MusicTrack` — "Music in this video".** YouTube attaches song credits to some
+watch pages, and they arrive on the `/next` response `video.info` already
+fetches, so this costs no extra request.
+
+```ts
+interface MusicTrack {
+  title: string;                      // the song; a card without one is dropped
+  artist: string | null;
+  album: string | null;
+  coverUrl: string | null;            // square, already sized by the sidecar
+}
+```
+
+Three things about it that are easy to get wrong.
+
+**`music` is empty for most videos, and that is an answer, not a gap.** Only
+videos with an attribution carry a card. A list rather than a nullable single
+because the source `cards[]` is an array and its header is templated
+("1 song") — though no capture has yet shown two.
+
+**The `Writers` credit is deliberately absent.** It exists only inside the
+card's overflow menu, in a confirm-dialog keyed by bold *localised* labels
+("Song", "Artist", "Album", "Writers"), and keying on a localised label is the
+mistake the `STATION` and members-only badges exist to warn about. The dialog's
+artist is also richer than the card's — `"Daft Punk, Julian Casablancas"`
+against `"Daft Punk"` — and the structural one still wins.
+
+**`coverUrl` is sized by the sidecar, and the client appends nothing.** The
+source is a bare `yt3.googleusercontent.com` URL that serves a small default;
+`=s1200` is the measured cap (`=s1800` returns the same 1200×1200). Same rule
+as §3.7's storyboards: the client constructs no URLs.
 
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The
@@ -1007,6 +1040,13 @@ this app.
   // see the live-manifest note below).
   "startTimestamp": null,
   "storyboardTemplate": "https://…",
+  // The widest still YouTube lists for the video, off the same /player
+  // response — for any surface that shows artwork instead of a picture.
+  // **Not a better version of the tile's thumbnailUrl the client could have
+  // built itself**: 1280x720 is YouTube's ceiling, maxresdefault is
+  // byte-identical to hq720, and the watch page's related rail ships 480x360
+  // (architecture.md F40). Null is ordinary — fall back to the tile's.
+  "posterUrl": "https://i.ytimg.com/vi/…/hq720.jpg",
   "qualityDegraded": false,
   "transport": "plain",            // "plain" | "hls" | "dash" | "sabr-dash" | "ytdlp"
   // Ranked best-first. The client picks one and may switch without

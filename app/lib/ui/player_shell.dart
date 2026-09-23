@@ -417,7 +417,8 @@ class _FullscreenPlayer extends ConsumerWidget {
                 AudioArtOverlay(
                   show: ref.watch(audioModeProvider) ||
                       ref.watch(playbackProvider).isRestoringVideo,
-                  imageUrl: ref.watch(playbackProvider).item?.thumbnailUrl,
+                  imageUrl: ref.watch(playbackProvider).source?.posterUrl ??
+                      ref.watch(playbackProvider).item?.thumbnailUrl,
                 ),
                 PlayerControls(engine: engine),
               ],
