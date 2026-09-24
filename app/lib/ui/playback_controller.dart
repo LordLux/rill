@@ -791,10 +791,6 @@ class PlaybackController extends Notifier<PlaybackState> {
       await engine.open(variant, play: wasPlaying, retainSubtitle: true, isLive: state.source?.durationMs == null);
       if (generation != _generation || _disposed) return;
 
-      // A quality switch reopens the media, which resets vid to auto. If
-      // audio-only is active, turn the video track back off.
-      if (ref.read(audioModeProvider)) await engine.setVideoTrack(false);
-
       // **Subscribed before the seek is issued**: `positionStream` is a
       // broadcast stream, so attaching afterwards misses the seek's own event
       // and the cover sits there until the timeout.
