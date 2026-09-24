@@ -20,7 +20,6 @@ import '../audio_mode_controller.dart';
 import '../auth_controller.dart';
 import '../playback_controller.dart';
 import '../player/audio_backdrop.dart';
-import '../player/audio_mode_view.dart';
 import '../player/player_slates.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
@@ -622,9 +621,6 @@ class _PlayerSurface extends ConsumerWidget {
     // subscriptions are all readable from one place. Carries the *structural*
     // members-only flag — see [isMembersOnlyFailure].
     final item = playback.item;
-    final detail = item == null
-        ? null
-        : ref.watch(videoInfoProvider(item.id)).value;
     final isAudioOnly = ref.watch(audioModeProvider);
 
     final content = ColoredBox(
