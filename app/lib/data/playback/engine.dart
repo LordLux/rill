@@ -503,12 +503,34 @@ class MediaKitEngine implements PlaybackEngine {
     _width = null;
     _height = null;
 
-    // Always reset the video track to enabled before opening.
-    // If `vid=no` from a previous audio-only playback persists, opening a
-    // video-only stream here will decode nothing, mpv will never emit a
-    // duration, and the open will hang until the 20s timeout.
-    // The playback_controller will re-disable it later if still in audio-only.
-    await setVideoTrack(true);
+    // **A file must have a selected stream at load, or it never loads.** The
+    // video URL is video-only, so with `vid=no` and the audio not yet attached
+    // nothing is selected: mpv skips the file, no duration ever arrives, and the
+    // wait below runs out its 20 s — which is what the "stuck at 0:00" audio-only
+    // stall was (`architecture.md` §2.4, `9299ed3`).
+    //
+    // `9299ed3` fixed that by forcing video on for every open, which works but
+    // means every audio-only track fetched and decoded video only to drop it a
+    // moment later. Instead, when video is off and there is a separate audio
+    // stream, the audio is attached **at load** through `audio-files`, so the
+    // file has a selected stream from the start and the video is never read.
+    //
+    // **Through `change-list`, never `setProperty('audio-files', …)`.** It is a
+    // path list, and a property write parses the value: an empty string does not
+    // clear it but sets a list of one empty path, which mpv then tries to open —
+    // measured 2026-09-24, every video-mode open failed with `Cannot open file
+    // '': Invalid argument`. A URL containing `;` would be split in two the same
+    // way. `clr` empties it and `append` adds one element unparsed.
+    //
+    // Cleared on every open, never left: it is an option, not per-file state, so
+    // a previous audio-only open's track would otherwise load into this one as a
+    // second audio stream.
+    final audioUrl = variant.audioUrl;
+    final native = _player.platform as NativePlayer;
+    final audioAtLoad = !_videoTrackEnabled && audioUrl != null;
+    await native.command(['change-list', 'audio-files', 'clr', '']);
+    if (audioAtLoad) await native.command(['change-list', 'audio-files', 'append', audioUrl]);
+    await native.setProperty('vid', audioAtLoad ? 'no' : 'auto');
 
     await _player.open(Media(variant.videoUrl), play: play);
 
@@ -539,14 +561,16 @@ class MediaKitEngine implements PlaybackEngine {
       await _player.seek(_player.state.duration);
     }
 
-    final audioUrl = variant.audioUrl;
-    if (audioUrl == null) {
-      if (retained != null) await setSubtitle(retained);
-      return;
+    if (audioUrl != null && !audioAtLoad) {
+      await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
     }
 
-    await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
-    
+    // Back to what was asked for. Only a muxed variant — no separate audio to
+    // attach at load — gets here with `vid=auto` while the app wants it off.
+    if (!_videoTrackEnabled && !audioAtLoad) {
+      await native.setProperty('vid', 'no');
+    }
+
     // After the audio, not before: both go through `sub-add`/`audio-add` against
     // a freshly loaded file, and attaching a subtitle to a file whose duration is
     // not known yet is the same race the audio wait above exists for.
@@ -566,8 +590,16 @@ class MediaKitEngine implements PlaybackEngine {
   @override
   Future<void> setVideoTrack(bool enabled) async {
     trace?.call('setVideoTrack enabled=$enabled');
+    _videoTrackEnabled = enabled;
     await (_player.platform as NativePlayer).setProperty('vid', enabled ? 'auto' : 'no');
   }
+
+  /// What the app last asked for, which [open] honours rather than overriding.
+  ///
+  /// `vid` persists across `loadfile` — it is an option, not per-file state — so
+  /// this is also the value mpv would use anyway. Tracked here because [open]
+  /// has to *choose* how to load around it, not just inherit it.
+  bool _videoTrackEnabled = true;
 
   @override
   Future<void> play() {
