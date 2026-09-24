@@ -34,12 +34,29 @@ import { text } from './text.ts';
  */
 const COVER_SIZE = '=s1200';
 
+/**
+ * YouTube's stand-in for a song with no art: a grey square with a white note,
+ * at `www.gstatic.com/youtube/img/watch/yt_music_channel.jpeg`.
+ *
+ * Measured 2026-09-24 over 22 cards: the 6 without art all carried that one
+ * URL, byte-identical, and every real cover was on `yt3.googleusercontent.com`.
+ * Nothing structural tells them apart — same keys, same shape. **The six were
+ * one song credited on six uploads**, so this is one observed case of a
+ * generically named static asset, not a survey. Matched on the host rather
+ * than the file name, so a renamed stand-in is caught too; being wrong that
+ * way costs showing the video's thumbnail instead of a cover.
+ */
+const STOCK_COVER_HOST = /^https?:\/\/([^/]+\.)?gstatic\.com\//;
+
 function coverUrl(node: unknown): string | null {
   // **Not `bestImageUrl`.** The source carries no `width`, so it scores 0
   // there and loses to anything else in the subtree — including, for a card
   // that has no image at all, some unrelated thumbnail.
   const url = str(get(node as never, 'image', 'sources', '0', 'url'));
   if (url === null || url === '') return null;
+  // No art is null, not a picture of no art: the client falls back to the
+  // video's own thumbnail, which at least shows this video.
+  if (STOCK_COVER_HOST.test(url)) return null;
   // Already sized (or something unexpected) — leave it alone rather than
   // appending a second parameter.
   return /=[sw]\d/.test(url) ? url : `${url}${COVER_SIZE}`;
