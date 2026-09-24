@@ -9,6 +9,8 @@ import '../../theme/tokens.dart';
 import '../playback_controller.dart';
 import '../queue_controller.dart';
 import '../audio_mode_controller.dart';
+import '../hide_queue_controller.dart';
+
 import '../video_info.dart';
 import '../widgets/queue_panel.dart';
 import '../pages/watch_layout.dart' show computeWatchGeometry;
@@ -120,27 +122,19 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
 
     Widget musicContent = LayoutBuilder(
       builder: (context, constraints) {
-        const double maxHeight = 400;
-        final double bottomPadding = constraints.maxHeight < maxHeight ? max(48, 48 - (maxHeight - constraints.maxHeight) * 3.0) : 48;
-        // final double bottomPadding = 48;
+        final double coverVerticalPadding = (constraints.maxHeight * 0.06).clamp(8.0, 48.0);
+        final double bottomPadding = (constraints.maxHeight * 0.15).clamp(24.0, 120.0);
+
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Flexible(
               child: Padding(
-                padding: EdgeInsets.only(
-                  left: 48,
-                  right: 48,
-                  top: bottomPadding,
-                  bottom: 32,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 48,vertical: coverVerticalPadding),
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    if (widget.visualBuilder != null)
-                      Positioned.fill(
-                        child: Builder(builder: widget.visualBuilder!),
-                      ),
+                    if (widget.visualBuilder != null) Positioned.fill(child: Builder(builder: widget.visualBuilder!)),
                     cover,
                   ],
                 ),
@@ -166,7 +160,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      [artist, album].whereType<String>().where((s) => s.isNotEmpty).join(' • '),
+                      [artist, album].whereType<String>().where((s) => s.isNotEmpty).join(' • '), // TODO marquee if too long (maybe marquee: ^2.3.0 ?)
                       style: TextStyle(
                         fontSize: 16,
                         color: tokens.onScrim.withValues(alpha: 0.7),
@@ -179,16 +173,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                 ),
               ),
             ),
-            Material(
-              type: MaterialType.transparency,
-              child: _TransportRow(item: item, detail: detail),
-            ),
-            const SizedBox(height: 48),
-            AnimatedContainer(
-              duration: ref.watch(playerControlsVisibleProvider) ? const Duration(milliseconds: 150) : const Duration(milliseconds: 400),
-              curve: ref.watch(playerControlsVisibleProvider) ? Curves.easeOut : Curves.easeIn,
-              height: ref.watch(playerControlsVisibleProvider) ? 50.0 : 0.0,
-            ),
+            SizedBox(height: bottomPadding),
           ],
         );
       },
@@ -250,13 +235,16 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                             child: Material(
                               color: Theme.of(context).colorScheme.surfaceContainerHighest,
                               borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                              child: InkWell(
-                                mouseCursor: SystemMouseCursors.click,
-                                borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                                onTap: () => ref.read(hideQueueProvider.notifier).toggle(),
-                                child: Icon(
-                                  hideQueue ? Icons.chevron_left : Icons.chevron_right,
-                                  color: Theme.of(context).tokens.onScrim.withValues(alpha: 0.7),
+                              child: Tooltip(
+                                message: hideQueue ? 'Show queue' : 'Hide queue',
+                                child: InkWell(
+                                  mouseCursor: SystemMouseCursors.click,
+                                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                                  onTap: () => ref.read(hideQueueProvider.notifier).toggle(),
+                                  child: Icon(
+                                    hideQueue ? Icons.chevron_left : Icons.chevron_right,
+                                    color: Theme.of(context).tokens.onScrim.withValues(alpha: 0.7),
+                                  ),
                                 ),
                               ),
                             ),
@@ -304,61 +292,6 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
           ],
         );
       },
-    );
-  }
-}
-
-class _TransportRow extends ConsumerWidget {
-  const _TransportRow({required this.item, required this.detail});
-
-  final VideoItem item;
-  final VideoDetail? detail;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = Theme.of(context).tokens;
-    final engine = ref.watch(playbackEngineProvider);
-    final queue = ref.watch(queueProvider);
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            key: playerPreviousKey,
-            icon: const Icon(Icons.skip_previous),
-            iconSize: 36,
-            color: queue.hasPrevious ? tokens.onScrim : tokens.onScrim.withValues(alpha: 0.3),
-            onPressed: queue.hasPrevious ? () => ref.read(playbackProvider.notifier).previous() : null,
-          ),
-          const SizedBox(width: 16),
-
-          StreamBuilder<bool>(
-            stream: engine.playingStream,
-            initialData: engine.playing,
-            builder: (context, snapshot) {
-              final playing = snapshot.data ?? false;
-              return IconButton(
-                key: playerPlayPauseKey,
-                icon: Icon(playing ? Icons.pause : Icons.play_arrow),
-                iconSize: 64,
-                color: tokens.onScrim,
-                onPressed: () => ref.read(playbackProvider.notifier).togglePlayPause(),
-              );
-            },
-          ),
-          const SizedBox(width: 16),
-
-          IconButton(
-            key: playerNextKey,
-            icon: const Icon(Icons.skip_next),
-            iconSize: 36,
-            color: queue.hasNext ? tokens.onScrim : tokens.onScrim.withValues(alpha: 0.3),
-            onPressed: queue.hasNext ? () => ref.read(playbackProvider.notifier).next() : null,
-          ),
-        ],
-      ),
     );
   }
 }

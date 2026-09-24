@@ -443,9 +443,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                   child: _buildHoverable(
                                     _MenuButton(
                                       key: playerCaptionsKey,
-                                      icon: ref.watch(captionsProvider.select((c) => c.isOn))
-                                          ? Icons.closed_caption
-                                          : Icons.closed_caption_outlined,
+                                      icon: ref.watch(captionsProvider.select((c) => c.isOn)) ? Icons.closed_caption : Icons.closed_caption_outlined,
                                       label: 'Captions',
                                       action: PlayerAction.captions,
                                       busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
@@ -552,7 +550,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   Widget _buildBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    final queue = ref.watch(queueProvider);
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
     final captions = ref.watch(captionsProvider);
@@ -594,51 +591,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
               child: Row(
                 children: [
-                  StreamBuilder<bool>(
-                    stream: widget.engine.playingStream,
-                    initialData: widget.engine.playing,
-                    builder: (context, snapshot) {
-                      final playing = snapshot.data ?? false;
-                      return _buildHoverable(
-                        _ControlIcon(
-                          iconKey: playerPlayPauseKey,
-                          icon: playing ? Icons.pause : Icons.play_arrow,
-                          label: playing ? 'Pause' : 'Play',
-                          action: PlayerAction.playPause,
-                          onPressed: () {
-                            _wake();
-                            unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                  if (queue.hasPrevious)
-                    _buildHoverable(
-                      _ControlIcon(
-                        iconKey: playerPreviousKey,
-                        icon: Icons.skip_previous,
-                        label: 'Previous video',
-                        action: PlayerAction.previous,
-                        onPressed: () {
-                          _wake();
-                          ref.read(playbackProvider.notifier).previous();
-                        },
-                      ),
-                    ),
-                  if (queue.hasNext)
-                    _buildHoverable(
-                      _ControlIcon(
-                        iconKey: playerNextKey,
-                        icon: Icons.skip_next,
-                        label: 'Next video',
-                        action: PlayerAction.next,
-                        onPressed: () {
-                          _wake();
-                          ref.read(playbackProvider.notifier).next();
-                        },
-                      ),
-                    ),
+                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable),
                   _buildHoverable(
                     _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
                   ),
@@ -676,9 +629,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       child: _buildHoverable(
                         _MenuButton(
                           key: playerCaptionsKey,
-                          icon: captions.isOn
-                              ? Icons.closed_caption
-                              : Icons.closed_caption_outlined,
+                          icon: captions.isOn ? Icons.closed_caption : Icons.closed_caption_outlined,
                           label: 'Captions',
                           action: PlayerAction.captions,
                           busy: captions.isLoadingTrack,
@@ -775,6 +726,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     final tokens = Theme.of(context).tokens;
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
+    
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -807,6 +759,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
               child: Row(
                 children: [
+                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable),
                   _buildHoverable(
                     _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
                   ),
@@ -874,7 +827,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   Widget _buildVerticalBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    final queue = ref.watch(queueProvider);
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
     final isAudioOnly = ref.watch(audioModeProvider);
@@ -883,45 +835,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
       padding: const EdgeInsets.fromLTRB(4, 2, 6, 6),
       child: Row(
         children: [
-          StreamBuilder<bool>(
-            stream: widget.engine.playingStream,
-            initialData: widget.engine.playing,
-            builder: (context, snapshot) {
-              final playing = snapshot.data ?? false;
-              return _ControlIcon(
-                iconKey: playerPlayPauseKey,
-                icon: playing ? Icons.pause : Icons.play_arrow,
-                label: playing ? 'Pause' : 'Play',
-                action: PlayerAction.playPause,
-                onPressed: () {
-                  _wake();
-                  unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                },
-              );
-            },
-          ),
-          if (queue.hasPrevious)
-            _ControlIcon(
-              iconKey: playerPreviousKey,
-              icon: Icons.skip_previous,
-              label: 'Previous video',
-              action: PlayerAction.previous,
-              onPressed: () {
-                _wake();
-                ref.read(playbackProvider.notifier).previous();
-              },
-            ),
-          if (queue.hasNext)
-            _ControlIcon(
-              iconKey: playerNextKey,
-              icon: Icons.skip_next,
-              label: 'Next video',
-              action: PlayerAction.next,
-              onPressed: () {
-                _wake();
-                ref.read(playbackProvider.notifier).next();
-              },
-            ),
+          _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: (child) => child),
           const SizedBox(width: 4),
           _Clock(
             engine: widget.engine,
@@ -1168,9 +1082,7 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     // Watched as well as read, so a switch starting or ending drives this even
     // though it arrives through Riverpod rather than through the stream above.
     ref.listen(
-      playbackProvider.select(
-        (p) => p.isSwitchingQuality || p.isLoading || p.isRestoringVideo,
-      ),
+      playbackProvider.select((p) => p.isSwitchingQuality || p.isLoading || p.isRestoringVideo),
       (_, _) => _update(),
     );
 
@@ -1249,10 +1161,8 @@ class _Scrubber extends StatelessWidget {
             // whatever it last saw, which claims the stream stopped buffering
             // when it did not. Drawing nothing says "not known"; leaving the
             // stale bar up says something false.
-            double bufferedMs = audioOnly
-                ? 0.0
-                : (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
-            
+            double bufferedMs = audioOnly ? 0.0 : (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+
             double value = (dragging ?? positionMs).clamp(0.0, max);
             double? unplayableEndFraction;
 
@@ -1260,16 +1170,16 @@ class _Scrubber extends StatelessWidget {
               final start = DateTime.parse(source!.startTimestamp!).toLocal();
               final now = DateTime.now();
               final liveEdgeMs = math.max(now.difference(start).inMilliseconds.toDouble(), 1.0);
-              
+
               final playheadOffsetMs = durationMs - positionMs;
               final absoluteValueMs = liveEdgeMs - playheadOffsetMs;
 
               max = liveEdgeMs;
               value = (dragging ?? absoluteValueMs).clamp(0.0, max);
-              
+
               final bufferOffsetMs = durationMs - bufferedMs;
               bufferedMs = (liveEdgeMs - bufferOffsetMs).clamp(0.0, max);
-              
+
               final unplayableEndMs = liveEdgeMs - durationMs;
               unplayableEndFraction = (unplayableEndMs / max).clamp(0.0, 1.0);
             }
@@ -1345,7 +1255,7 @@ class _Clock extends StatelessWidget {
         // otherwise the number under the finger is the position the user is
         // leaving, which is the one piece of information they do not need.
         final position = dragging == null ? (hold?.position ?? snapshot.data ?? Duration.zero) : Duration(milliseconds: dragging!.round());
-        
+
         if (source?.durationMs == null && source != null) {
           Widget timeWidget;
           if (source!.startTimestamp != null) {
@@ -1808,3 +1718,73 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
     }
   }
 }
+
+class _TransportControls extends ConsumerWidget {
+  const _TransportControls({
+    required this.engine,
+    required this.onWake,
+    required this.buildHoverable,
+  });
+
+  final PlaybackEngine engine;
+  final VoidCallback onWake;
+  final Widget Function(Widget child) buildHoverable;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasPrevious = ref.watch(queueProvider.select((q) => q.hasPrevious));
+    final hasNext = ref.watch(queueProvider.select((q) => q.hasNext));
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hasPrevious)
+          buildHoverable(
+            _ControlIcon(
+              iconKey: playerPreviousKey,
+              icon: Icons.skip_previous,
+              label: 'Previous video',
+              action: PlayerAction.previous,
+              onPressed: () {
+                onWake();
+                ref.read(playbackProvider.notifier).previous();
+              },
+            ),
+          ),
+        StreamBuilder<bool>(
+          stream: engine.playingStream,
+          initialData: engine.playing,
+          builder: (context, snapshot) {
+            final playing = snapshot.data ?? false;
+            return buildHoverable(
+              _ControlIcon(
+                iconKey: playerPlayPauseKey,
+                icon: playing ? Icons.pause : Icons.play_arrow,
+                label: playing ? 'Pause' : 'Play',
+                action: PlayerAction.playPause,
+                onPressed: () {
+                  onWake();
+                  unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
+                },
+              ),
+            );
+          },
+        ),
+        if (hasNext)
+          buildHoverable(
+            _ControlIcon(
+              iconKey: playerNextKey,
+              icon: Icons.skip_next,
+              label: 'Next video',
+              action: PlayerAction.next,
+              onPressed: () {
+                onWake();
+                ref.read(playbackProvider.notifier).next();
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
