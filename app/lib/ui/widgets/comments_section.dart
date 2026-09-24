@@ -759,7 +759,7 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
                           decoration: const InputDecoration(
                             hintFadeDuration: Duration(milliseconds: 200),
                             isDense: true,
-                            hintText: 'Add a reply...', // TODO check for max length
+                            hintText: 'Add a reply...',
                             border: UnderlineInputBorder(),
                           ),
                           onSubmitted: (_) => _submitReply(thread),

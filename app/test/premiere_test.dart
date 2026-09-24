@@ -10,7 +10,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
-import 'package:rill/ui/pages/watch.dart';
 import 'package:rill/ui/player/player_slates.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/view_mode.dart';
