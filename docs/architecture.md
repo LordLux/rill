@@ -194,6 +194,8 @@ same DLL. What the ANGLE path *does* change is the decoder, not the seek: see
 | F36 | **A `Stack` hit-tests its children only inside its own bounds, so a child that hangs off a small one is partly unclickable, and a disabled control never shows it.** The tile's 3-dot button (a 48 px tap target) hung off the *title row*, which is one text line, so on a tile with a one-line title the lower half of the button hit nothing. It had never been clicked: `MediaTile.onMore` was wired to nothing (the b2549cb review), so every 3-dot button in the app was drawn disabled. Fixed by hanging the button off the whole text column, which is taller than the button and sets the same offsets: the rectangles of the tile, its title, channel and views lines, and the button itself are identical before and after in ten layouts (standard at two widths, wide, large and shorts, each with a one- and a two-line title), so nothing moved on screen. The menu is `MediaTile.menu`, built by `tileMenuFor`: Add to queue, Save to Watch Later, Save to playlist… (the save dialog Task 25 §5 said this menu opens) and Share (the share dialog) for a video; Copy link alone for a mix or a playlist, which are not videos. The first cut had Add to queue third and ended in Copy link for a video too; the entries were reordered and Share replaced it afterwards. | Measured 2026-09-20 in `flutter test`, whose Ahem font makes the title row 20 px: a tap at the button's centre (y 211) ended its hit path in the tile's background, because the row ended at y 208 and the button spans 187 to 235. `tile_menu_test.dart` taps a point inside the button and below the title in the standard and wide layouts, and fails when the button is hung off the title row again (mutation-checked, with three others). The first cut was not looked at in the running app (no screenshot tool was available); the reworked menu was seen there on 2026-09-20, by the user, who reports that it works. |
 | F40 | **1280x720 is YouTube's thumbnail ceiling, the URL a surface ships varies by nearly 3x, and for a square or vertical video most of that frame is baked-in black.** `maxresdefault.jpg` is not bigger than `hq720.jpg` — they are byte-identical — and a `WEB` player response *declares* maxres as 1920 wide while the served bytes are 1278x720, so the declared width lies. Home and subscriptions tiles ship ~720; the **watch page's related rail ships 336**, which fetches as 480x360, and that rail is where queue items come from. Worse for a square or vertical video: its 4:3 `hqdefault` is the art pillarboxed with black, so only the middle 75% of the width is picture. **No available URL fixes this** — a fullscreen audio-only backdrop was upscaling a 360x360 crop ~3.3x, which is why §2.4's artwork is blurred rather than merely fetched larger | Measured 2026-09-22. `maxresdefault` and `hq720` byte-identical at 1280x720 on five videos (`dQw4w9WgXcQ`, `kJQP7kiw5Fk`, `9bZkp7q19f0`, `L-BgxLtMxh0`, `aqz-KE-bpKQ`); `x8PCNqH-Dm8` 404s both, returning a 120x90 placeholder. Widest-per-tile across the corpus: `home.json` and `subscriptions.json` mostly 720, `watch.json` 336 — and that same video's bare `hq720.jpg` fetches 1280x720. The fullscreen pillarbox measured at exactly 75% of width, which is what identifies the source as 4:3 |
 | F41 | **The shipped libmpv has no audio-visualization filters, so an audio-reactive visualizer is not possible here.** `lavfi-complex` the *option* is present and accepted, which is hard invariant 8's false positive exactly — the option existing says nothing about the filters existing. Getting them would mean bumping `media_kit_libs_windows_video` off 1.0.11, which reintroduces the F13 seek freeze, so this is closed rather than deferred. **Any visualizer built here is time-driven and must not be presented as reacting to sound** | String-table scan of the shipped `libmpv-2.dll`, 2026-09-22: `showcqt`, `showspectrum`, `showspectrumpic`, `showwaves`, `showwavespic`, `showfreqs`, `avectorscope`, `showvolume`, `ahistogram`, `aphasemeter`, `abitscope`, `astats`, `ebur128`, `volumedetect`, `silencedetect` all absent; `asplit` and `amix` absent too, so the graph could not be built even if a filter existed. Only `aresample`, `aformat`, `anull`, `abuffer`, `abuffersink` are present. `af-metadata` exists but nothing can populate it |
+| F42 | **A file loaded with `vid=no` and no audio attached is skipped, so its open never gets a duration.** A variant's video URL is video-only and its audio is a second URL. `vid` is an mpv *option*, so a `vid=no` left by an audio-only track persists into the next load; mpv then finds no stream to select, moves past the file, and `open`'s duration wait runs to its 20 s timeout. That was the 0:00 stall (`todo.md` 43, closed), and it only ever happened in audio-only mode. `9299ed3` forced video on for every open, which cured it by fetching and decoding video only to drop it; `02f2768` attaches the audio **at load** instead, through `audio-files`, so the file has a selected stream from the start and the video is never read. **`setProperty('audio-files', '')` does not clear that list** — it sets a list of one empty path, and every later video-mode open failed with `Cannot open file '': Invalid argument`. Clear and add through `change-list` (`clr`, `append`), which also keeps a `;` in a URL from splitting it. A muxed variant has no separate audio, so it still opens with video on and drops it afterwards | Measured 2026-09-24 by `audio_mode_probe.dart` (`PROBE_SCENARIO=open`), one 1080p variant opened three ways, sampled every 250 ms: video forced on then dropped — first audio at 5512 ms, 329 KB to 1.36 MB of video read, a frame decoded; audio at load — 5501 ms, **0 bytes**, no frame; video mode straight after — 5000 ms, 1.36 MB, exactly one audio track in `track-list`. The empty-path failure was caught by that third leg, before it shipped |
+| F43 | **A song credited with no art still ships a cover URL, and it points at a stock image.** `videoAttributeViewModel.image.sources[0].url` is `https://www.gstatic.com/youtube/img/watch/yt_music_channel.jpeg`, a grey square with a white note, and nothing structural marks the card: same keys, same shape, and `onTap` is absent from some real covers too. `parser/music.ts` ships `coverUrl: null` for any `gstatic.com` source, so the client falls back to the video's own still, and the audio-only view's click-to-switch between cover and thumbnail went with it — there is only ever one best image. Matched on the host rather than the file name, so a renamed stand-in is caught too; being wrong that way costs a thumbnail where a cover could have been | Measured 2026-09-24, anonymous `/next` on 22 videos: the 6 cards without art all carried that URL, 3,080 bytes with one SHA-256 at `=s1200` and `=s544`; every real cover was on `yt3.googleusercontent.com`. **All six were one song** ("M11 re-arrange and re-mix") credited on six uploads, so this is one observed case, not a survey. A claim that the placeholder's bytes differ per track was not reproduced. Seen in the release build on `Y5u8ZZqFca4`: the video's still, with the song's credits under it |
 
 ---
 
@@ -421,16 +423,28 @@ the opposite answer, which is exactly what it did here before the probe
 settled it.
 
 Consequences:
-- `engine.open` no longer takes an `audioOnly` parameter. Audio-only is a
-  rendering concern, not a media-loading concern.
+- `engine.open` takes no `audioOnly` parameter. The engine remembers what
+  `setVideoTrack` was last asked for, and `open` honours it: in audio-only mode
+  the audio is attached at load and the video is never read (**F42**). The
+  controller sets it *before* the open, so the first track after launch loads
+  the right way too, and reconciles in either direction if the mode flipped
+  while the open was in flight.
 - The `audioModeProvider` listener in `PlaybackController` calls
   `_applyAudioMode`, which toggles the track and, in the restore direction
   only, waits for a picture.
-- A quality switch (which reopens the media) resets `vid` to `auto`; the
-  controller re-applies `vid=no` afterwards if audio-only is still active.
+- A quality switch reopens through the same `open`, so it keeps whichever
+  mode is active with no second step.
 - Because the cache is dropped rather than paused, bytes already buffered when
-  the mode is enabled are **wasted** — up to the 32 MiB cap. Enabling
-  audio-only at open avoids that; toggling mid-playback cannot.
+  the mode is enabled are **wasted** — up to the 32 MiB cap. Opening in
+  audio-only mode reads no video at all (F42); toggling mid-playback cannot
+  avoid it.
+
+**The 0:00 stall was this, and it is closed — 2026-09-24.** `todo.md` 43
+described opens that succeeded everywhere and then never played, and guessed
+they were not audio-only. They were only audio-only: a `vid=no` persisting into
+the next load (F42). The one-shot watchdog `46a235a` added while the cause was
+unknown stays, as containment for whatever else might stall an open; its
+stderr line `rill: stream never started` is still the tripwire.
 
 ### 2.5 Authentication and the silent-degradation problem
 
@@ -731,6 +745,42 @@ Tile action buttons (Watch Later, Add to queue) come from
 `ThumbnailHoverOverlayToggleActionsView` and the associated
 `AddToPlaylistCommand` / `PlaylistEditEndpoint` in the feed payload.
 
+#### Controls outside the window — built 2026-09-24
+
+Two surfaces control playback without the window in front, and each answers a
+different hand. **The system media flyout** (`smtc_controller.dart`) answers
+the keyboard's media keys. **The taskbar thumbnail toolbar**
+(`taskbar_controller.dart`, `ITaskbarList3::ThumbBarAddButtons`) answers a
+pointer on the taskbar: previous, play/pause, next and like under the hover
+preview. **No dislike**: it is used far less than like, and every button in
+that strip has to earn its place. Like is disabled when signed out, with the
+reason as its tooltip, the rule of the account-gated controls below.
+
+- **Every button goes through the on-screen control's own entry point** —
+  `PlaybackController.previous`/`togglePlayPause`/`next`, and `rateVideo` in
+  `account_actions.dart`, which the watch page's rating buttons call too. A
+  second copy of the rating logic is how the two would come to disagree.
+- **One artwork resolver, `nowPlayingArtProvider`**, read by the flyout and
+  by the audio-only layout: the song's cover, else the video's poster, else the
+  tile's thumbnail. Never YouTube's stock no-art square (F43).
+- **`windows_taskbar` is vendored** (`third_party/windows_taskbar`, 1.1.2) for
+  two fixes marked `rill patch`. It never freed the icon handle `LoadImage`
+  returns, one leak per button per update, and this app updates on every
+  play/pause against a 10,000-object cap per process; measured after the fix,
+  40 updates left GDI objects at 19 and USER objects at 44. And a failed
+  first add still marked the buttons added, so every later call updated
+  buttons that never existed and the toolbar never appeared.
+- **The toolbar lives in Explorer's process, so nothing in ours can see it.**
+  The first success logs `rill: taskbar toolbar ready`, a failure logs and is
+  retried on the next change, and that is the whole of the evidence a release
+  log holds. A button press arrives as `WM_COMMAND` with `THBN_CLICKED`, so
+  the click path can be driven without Explorer by posting that message to the
+  window (command id `40001` plus the button's index) — which is how it was
+  checked.
+- The icons are Material glyphs from the pinned SDK's font, rendered to
+  multi-size `.ico` by `app/tool/gen_taskbar_icons.py`, white with a dark
+  outline so they read on a light taskbar as well as a dark one.
+
 ### 2.8 Watch page, queue panel, and the UI's sharp edges
 
 The rules below were each paid for once. The code points here rather than
@@ -877,6 +927,31 @@ account button's own badge.
 present on anonymous pages too, so a button enabled by their presence would be
 enabled always and fail always — F33's mistake (a tooltip read as state) in a
 new place. The session decides.
+
+#### The audio-only layout — built 2026-09-22 to 09-24
+
+`AudioModeView` is the song's cover and credits, with the queue beside it in
+the shell's fullscreen player. It is not a separate screen: it is one of the
+**player slates**, mounted by `PlayerSlates` beside the premiere, members-only
+and unavailable slates, in all three places a slate can appear.
+
+- **A slate sits inside `PlayerControls`' child slot, not beneath it.** The
+  controls' `MouseRegion` is opaque by default, so anything under it receives
+  no clicks at all — the first cut of this view could not be interacted with.
+  Where the slates need a `Material` ancestor (`injectMaterial`), it is
+  `MaterialType.transparency`: a default `Material` is a canvas, which paints
+  and swallows the pointer just the same.
+- **The queue can be hidden**, and that choice persists (`HideQueueController`,
+  `SharedPreferences`), because it is a listening preference rather than a
+  per-track one.
+- **Theatre belongs in audio-only mode too — decided 2026-09-24.** The bar's
+  miniplayer, theatre and fullscreen buttons are one widget (`_ViewControls`),
+  mounted by the video bar and the audio bar alike, so the modes cannot drift
+  apart.
+- **The cover is the best image there is, and there is only ever one.** It
+  reads `nowPlayingArtProvider` (§2.7). The first version let a click switch
+  between cover and thumbnail, because some covers were YouTube's stock no-art
+  square; the sidecar now ships those as no cover (F43), and the switch is gone.
 
 ### 2.9 Captions render through libass, not Flutter
 
