@@ -14,6 +14,8 @@ import 'theme/accent.dart';
 import 'theme/app_theme.dart';
 import 'ui/audio_delay_probe.dart';
 import 'ui/audio_mode_controller.dart';
+import 'ui/hide_queue_controller.dart';
+
 import 'ui/auth_controller.dart';
 import 'ui/auth_probe.dart';
 import 'ui/debug_player.dart';
