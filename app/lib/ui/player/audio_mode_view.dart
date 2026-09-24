@@ -4,18 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/feed_item.dart';
-import '../../domain/video_detail.dart';
 import '../../theme/tokens.dart';
 import '../playback_controller.dart';
-import '../queue_controller.dart';
-import '../audio_mode_controller.dart';
 import '../hide_queue_controller.dart';
 
 import '../video_info.dart';
 import '../widgets/queue_panel.dart';
 import '../pages/watch_layout.dart' show computeWatchGeometry;
 import '../../theme/screen_values.dart';
-import 'controls.dart' show playerPreviousKey, playerNextKey, playerPlayPauseKey, playerControlsVisibleProvider;
 
 class AudioModeView extends ConsumerStatefulWidget {
   const AudioModeView({super.key, this.visualBuilder, this.showQueue = false});
@@ -122,8 +118,9 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
 
     Widget musicContent = LayoutBuilder(
       builder: (context, constraints) {
-        final double coverVerticalPadding = (constraints.maxHeight * 0.06).clamp(8.0, 48.0);
-        final double bottomPadding = (constraints.maxHeight * 0.15).clamp(24.0, 120.0);
+        final double coverVerticalPadding = (constraints.maxHeight * 0.07).clamp(8.0, 48.0);
+        final double bottomPadding = (constraints.maxHeight * 0.15).clamp(32.0, 120.0);
+        final double textScale = (constraints.maxWidth / 1100).clamp(0.7, 1);
 
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -150,7 +147,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 24,
+                        fontSize: 24 * textScale,
                         fontWeight: FontWeight.bold,
                         color: tokens.onScrim,
                       ),
@@ -162,7 +159,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                     Text(
                       [artist, album].whereType<String>().where((s) => s.isNotEmpty).join(' • '), // TODO marquee if too long (maybe marquee: ^2.3.0 ?)
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 16 * textScale,
                         color: tokens.onScrim.withValues(alpha: 0.7),
                       ),
                       maxLines: 1,

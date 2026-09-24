@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'dart:async';
 
 import '../../domain/video_detail.dart';
 import '../../domain/feed_item.dart';

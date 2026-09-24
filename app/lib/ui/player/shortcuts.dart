@@ -145,6 +145,8 @@ PlayerShortcut? resolvePlayerShortcut(KeyEvent event) {
   if (key == LogicalKeyboardKey.escape) return const PlayerShortcut(PlayerAction.escape);
 
   // TODO add end and home for seeking to the start and end of the video
+  // TODO add `Shift + ,` and `Shift + .` for .25x speed increase/decrease
+  // TODO add `q` to toggle the queue, `Shift + q` to clear it, and `Shift + m` to toggle the menu
 
   // `,` and `.` step one frame; with Shift they step one second.
   //
