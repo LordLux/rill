@@ -1371,47 +1371,23 @@ class _ActionsState extends ConsumerState<_Actions> {
     if (failure == null) _say('Removed from Watch Later');
   }
 
-  /// Like, dislike and un-rate, all through one path: tapping the currently
-  /// active side clears the rating, tapping the other switches straight to
-  /// it. `action.dislike` while liked removes the like server-side on its
-  /// own, so this never has to call `action.removeRating` first.
+  /// Like, dislike and un-rate — see [rateVideo], which the taskbar's thumbnail
+  /// toolbar shares. This adds only what belongs to the widget: the busy flag,
+  /// and the snackbar.
   Future<void> _setRating(VideoRating target) async {
     if (_ratingBusy) return;
     final videoId = widget.item.id;
     final generation = _videoGeneration;
     final messenger = ScaffoldMessenger.of(context);
-    final actions = ref.read(ratingActionsProvider.notifier);
-    final had = ref.read(ratingActionsProvider).containsKey(videoId);
-    final previous = ref.read(ratingActionsProvider)[videoId];
-    final current = previous ?? widget.info.value?.myRating ?? VideoRating.none;
-    final next = current == target ? VideoRating.none : target;
 
-    actions.set(videoId, next);
     setState(() => _ratingBusy = true);
-
-    final method = switch (next) {
-      VideoRating.like => 'action.like',
-      VideoRating.dislike => 'action.dislike',
-      VideoRating.none => 'action.removeRating',
-    };
-
-    String? failure;
-    try {
-      await RpcClient.instance.call(method, {'videoId': videoId});
-    } on RpcException catch (e) {
-      failure = e.code == 'AUTH_REQUIRED'
-          ? 'Sign in to rate videos'
-          : e.message;
-    } catch (e) {
-      failure = '$e';
-    }
-
-    // Undone in the store whatever became of this widget — a rating that failed
-    // while the layout was switching must not stay drawn as set.
-    if (failure != null) {
-      actions.restore(videoId, had: had, previous: previous);
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
-    }
+    final failure = await rateVideo(
+      ref.read,
+      videoId,
+      target,
+      serverRating: widget.info.value?.myRating ?? VideoRating.none,
+    );
+    if (failure != null) messenger.showSnackBar(SnackBar(content: Text(failure)));
 
     if (!mounted || generation != _videoGeneration || widget.item.id != videoId)
       return;

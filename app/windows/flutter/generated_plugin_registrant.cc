@@ -14,6 +14,7 @@
 #include <media_kit_video/media_kit_video_plugin_c_api.h>
 #include <url_launcher_windows/url_launcher_windows.h>
 #include <volume_controller/volume_controller_plugin_c_api.h>
+#include <windows_taskbar/windows_taskbar_plugin.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   BitsdojoWindowPluginRegisterWithRegistrar(
@@ -32,4 +33,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("UrlLauncherWindows"));
   VolumeControllerPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("VolumeControllerPluginCApi"));
+  WindowsTaskbarPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("WindowsTaskbarPlugin"));
 }

@@ -16,6 +16,7 @@ import 'player/settings_menu.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
 import 'smtc_controller.dart';
+import 'taskbar_controller.dart';
 import 'widgets/topbar.dart';
 
 const String watchRouteName = 'watch';
@@ -290,6 +291,7 @@ class PlayerShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen(smtcControllerProvider, (_, _) {});
+    ref.listen(taskbarControllerProvider, (_, _) {});
     final playback = ref.watch(playbackProvider);
     final onWatchPage = ref.watch(currentRouteProvider) == watchRouteName;
     final view = ref.watch(playerViewProvider);
