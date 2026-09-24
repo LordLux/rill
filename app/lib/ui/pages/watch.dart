@@ -617,10 +617,6 @@ class _PlayerSurface extends ConsumerWidget {
     final isTopWatchPage =
         (ModalRoute.of(context)?.isCurrent == true) &&
         (ref.watch(currentRouteProvider) == watchRouteName);
-    // Watched here rather than inside the helper below, so this widget's
-    // subscriptions are all readable from one place. Carries the *structural*
-    // members-only flag — see [isMembersOnlyFailure].
-    final item = playback.item;
     final isAudioOnly = ref.watch(audioModeProvider);
 
     final content = ColoredBox(
