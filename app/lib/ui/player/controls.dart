@@ -550,7 +550,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   Widget _buildBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
     final captions = ref.watch(captionsProvider);
     final isAudioOnly = ref.watch(audioModeProvider);
@@ -676,42 +675,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerMiniPlayerKey,
-                      icon: Icons.branding_watermark_outlined,
-                      label: 'Miniplayer',
-                      action: PlayerAction.miniPlayer,
-                      onPressed: () {
-                        _wake();
-                        toMiniPlayer(ref);
-                      },
-                    ),
-                  ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerTheatreKey,
-                      icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
-                      label: view.theatre ? 'Default view' : 'Theatre mode',
-                      action: PlayerAction.theatre,
-                      onPressed: () {
-                        _wake();
-                        ref.read(playerViewProvider.notifier).toggleTheatre();
-                      },
-                    ),
-                  ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerFullscreenKey,
-                      icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                      label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
-                      action: PlayerAction.fullscreen,
-                      onPressed: () {
-                        _wake();
-                        ref.read(playerViewProvider.notifier).toggleFullscreen();
-                      },
-                    ),
-                  ),
+                  _ViewControls(onWake: _wake, buildHoverable: _buildHoverable),
                   const SizedBox(width: 4),
                 ],
               ),
@@ -724,7 +688,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   Widget _buildAudioBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
     
 
@@ -791,30 +754,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerMiniPlayerKey,
-                      icon: Icons.branding_watermark_outlined,
-                      label: 'Miniplayer',
-                      action: PlayerAction.miniPlayer,
-                      onPressed: () {
-                        _wake();
-                        toMiniPlayer(ref);
-                      },
-                    ),
-                  ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerFullscreenKey,
-                      icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                      label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
-                      action: PlayerAction.fullscreen,
-                      onPressed: () {
-                        _wake();
-                        ref.read(playerViewProvider.notifier).toggleFullscreen();
-                      },
-                    ),
-                  ),
+                  _ViewControls(onWake: _wake, buildHoverable: _buildHoverable),
                   const SizedBox(width: 4),
                 ],
               ),
@@ -1719,6 +1659,7 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
   }
 }
 
+/// The previous, play/pause and next buttons
 class _TransportControls extends ConsumerWidget {
   const _TransportControls({
     required this.engine,
@@ -1783,6 +1724,64 @@ class _TransportControls extends ConsumerWidget {
               },
             ),
           ),
+      ],
+    );
+  }
+}
+
+
+class _ViewControls extends ConsumerWidget {
+  const _ViewControls({
+    required this.onWake,
+    required this.buildHoverable,
+  });
+
+  final VoidCallback onWake;
+  final Widget Function(Widget child) buildHoverable;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final view = ref.watch(playerViewProvider);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        buildHoverable(
+          _ControlIcon(
+            iconKey: playerMiniPlayerKey,
+            icon: Icons.branding_watermark_outlined,
+            label: 'Miniplayer',
+            action: PlayerAction.miniPlayer,
+            onPressed: () {
+              onWake();
+              toMiniPlayer(ref);
+            },
+          ),
+        ),
+        buildHoverable(
+          _ControlIcon(
+            iconKey: playerTheatreKey,
+            icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
+            label: view.theatre ? 'Default view' : 'Theatre mode',
+            action: PlayerAction.theatre,
+            onPressed: () {
+              onWake();
+              ref.read(playerViewProvider.notifier).toggleTheatre();
+            },
+          ),
+        ),
+        buildHoverable(
+          _ControlIcon(
+            iconKey: playerFullscreenKey,
+            icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+            label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            action: PlayerAction.fullscreen,
+            onPressed: () {
+              onWake();
+              ref.read(playerViewProvider.notifier).toggleFullscreen();
+            },
+          ),
+        ),
       ],
     );
   }
