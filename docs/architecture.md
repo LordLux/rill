@@ -797,7 +797,8 @@ reason as its tooltip, the rule of the account-gated controls below.
   not trap the listener on it; they are disabled only at the ends of the
   queue. Like stays disabled until the watch page's data says whether the
   video is already liked, because until then a press could only guess which
-  way to toggle. Every disabled state has its own icon.
+  way to toggle. A disabled button keeps its ordinary icon and Windows dims
+  it; dedicated faded icons, dimmed again by Windows, were too faint to read.
 - **The icons' sources are the SVGs in `app/assets/icons/taskbar/`**, started
   from Material glyphs and redrawn by hand; `app/tool/gen_taskbar_icons.py`
   renders each to a multi-size `.ico` in `app/assets/taskbar/`. The PNGs beside
@@ -975,6 +976,17 @@ and unavailable slates, in all three places a slate can appear.
   reads `nowPlayingArtProvider` (§2.7). The first version let a click switch
   between cover and thumbnail, because some covers were YouTube's stock no-art
   square; the sidecar now ships those as no cover (F43), and the switch is gone.
+- **The frame takes the image's shape: square for a cover, 16:9 for a video
+  still — 2026-09-24.** A still in the square frame sat letterboxed under a
+  square shadow, with an empty band between it and the title. It keeps the
+  cover's width and gives up height rather than growing wider, since it is
+  often a 480x360 thumbnail (F40); the column stays centred, so the title comes
+  up to meet it. The change animates, which is visible on every track that has
+  a cover: the still shows first and the cover arrives with the credits. **The
+  image only fills the frame because the `AnimatedSwitcher` is given an
+  expanded layout** — its default is a loose `Stack`, in which the image keeps
+  its own shape whatever `fit` says, and that is what the square was showing
+  around.
 
 ### 2.9 Captions render through libass, not Flutter
 

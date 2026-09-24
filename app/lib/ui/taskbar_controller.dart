@@ -67,8 +67,10 @@ final _toolbarModelProvider = Provider<_ToolbarModel?>((ref) {
 /// **While a video loads, play and like are disabled; previous and next are
 /// not.** Skipping through tracks without waiting for each to load is exactly
 /// what those two are for, and a load that never finishes must not trap the
-/// listener on it. They are disabled only at the ends of the queue. Each
-/// disabled state has its own icon (`*_disabled.ico`).
+/// listener on it. They are disabled only at the ends of the queue. A disabled
+/// button keeps its ordinary icon: Windows dims it, and dedicated faded icons
+/// on top of that were too faint to read (the `*_disabled` SVGs are kept, and
+/// unused).
 ///
 /// Every button goes through the same entry point as its on-screen counterpart
 /// — `PlaybackController.previous`/`togglePlayPause`/`next` and [rateVideo] —
@@ -137,14 +139,14 @@ final taskbarControllerProvider = Provider<void>((ref) {
     try {
       await WindowsTaskbar.setThumbnailToolbar([
         ThumbnailToolbarButton(
-          icon(canPrevious ? 'previous' : 'previous_disabled'),
+          icon('previous'),
           'Previous',
           controller.previous,
           mode: canPrevious ? 0 : ThumbnailToolbarButtonMode.disabled,
         ),
         if (model == null || model.loading)
           ThumbnailToolbarButton(
-            icon('play_disabled'),
+            icon('play'),
             model == null ? 'Play' : 'Loading',
             () {},
             mode: ThumbnailToolbarButtonMode.disabled,
@@ -156,14 +158,14 @@ final taskbarControllerProvider = Provider<void>((ref) {
             () => unawaited(controller.togglePlayPause()),
           ),
         ThumbnailToolbarButton(
-          icon(canNext ? 'next' : 'next_disabled'),
+          icon('next'),
           'Next',
           controller.next,
           mode: canNext ? 0 : ThumbnailToolbarButtonMode.disabled,
         ),
         if (model == null || model.likeBlocker != null || !model.ratingKnown)
           ThumbnailToolbarButton(
-            icon('like_disabled'),
+            icon('like'),
             // Signed out, it says why — the same treatment the watch page's own
             // like button gets.
             model == null ? 'Like' : model.likeBlocker ?? 'Loading',

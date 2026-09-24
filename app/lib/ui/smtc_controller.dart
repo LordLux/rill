@@ -70,7 +70,7 @@ final smtcControllerProvider = Provider<void>((ref) {
           : fms.MediaMetadata(
               title: item.title,
               artist: item.channelName,
-              artworkUri: ref.read(nowPlayingArtProvider),
+              artworkUri: ref.read(nowPlayingArtProvider)?.url,
               duration: knownDuration,
             ),
     );
