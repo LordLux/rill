@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 43.** A new item takes it, and the same edit bumps this line.
+**Next number: 44.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -20,49 +20,8 @@ finished and deleted, it would hand the same number out twice.
 
 ## Now
 
-### 43. A stream opens successfully and then never starts
-
-**Observed 2026-09-22 and 2026-09-23, cause unknown.** Some opens succeed at
-every level we can see and then simply do not play: position sits at 0:00
-forever, audio never starts either, and it happens in both audio-only and video
-mode. It is **not** an audio-only bug — it predates that work, and the video
-path was untouched by it.
-
-What the sidecar logs on an affected open is indistinguishable from a healthy
-one:
-
-```
-[playback] open _1rF38MjpHE: tier 1 (VISIONOS plain adaptive) → 1080p (18 variants) transport=plain
-[playback-report] _1rF38MjpHE: view registered (cpn …)
-```
-
-So the resolve produced a full variant ladder, the session opened, and the view
-registered. What is missing afterwards is any `VideoOutput.Resize` — the texture
-never reconfigures, because nothing is decoding.
-
-**Reproduction is the blocker, not instrumentation.** It is intermittent: a
-different video opened immediately afterwards played normally, twice. Both
-sightings were 1080p tier-1 plain adaptive, which is also what most healthy
-opens are, so that is not yet a signal.
-
-**Mitigated, not fixed — item 43 is the diagnosis, `46a235a` was the
-containment.** A one-shot watchdog reopens the same variant once if position is
-still zero 5 s after a successful open, then falls back to the ordinary
-Unavailable screen. So the user-visible symptom is now "a stutter, then either
-it plays or you get Try again" rather than an infinite 0:00. **The stderr line
-`rill: stream never started after 5000ms, reopening` is the tripwire** — how
-often it appears is the first real data on how common this is, and whether the
-reopen actually rescues it or merely delays the failure.
-
-**Where to look when it is next caught live.** `audio_mode_probe.dart` already
-samples the properties that would answer this — `demuxer-cache-state`
-(`total-bytes`, `raw-input-rate`), `stream-pos`, `vo-configured`,
-`paused-for-cache`. The question to settle first is whether the demuxer is
-reading bytes at all: bytes arriving with nothing decoding is a different bug
-from no bytes arriving, and they have nothing in common. Note that a stalled
-open is also what made the audio-only artwork appear over the *next* video
-(fixed separately in `3893c8f`) — so this one bug has already produced two
-unrelated-looking reports.
+Nothing at the moment. Item 43, the 0:00 stall, closed 2026-09-24: it was
+audio-only, and `architecture.md` F42 has the cause and the fix.
 
 ---
 

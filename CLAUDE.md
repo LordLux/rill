@@ -476,6 +476,22 @@ the answer.
   going back to video is a cold refetch costing 2.9–8.0 s, gated on
   `vo-configured` — **not** on any width or `rect`, both of which survive
   `vid=no` untouched and will return instantly if you wait on them.
+- **`vid` persists across loads, and a load with no stream selected is
+  skipped — F42, measured 2026-09-24.** A variant's video URL is video-only, so
+  opening it under a leftover `vid=no` with the audio not yet attached gives
+  mpv nothing to play: it moves past the file, no duration arrives, and the open
+  waits out its 20 s timeout at 0:00. An audio-only open attaches the audio
+  *at load* through `audio-files` instead. Change that list with `change-list`
+  (`clr`, `append`), **never** `setProperty('audio-files', '')` — that sets a
+  list holding one empty path, and every later open fails with
+  `Cannot open file ''`.
+- **Two widgets swallow clicks meant for what is under them, and neither
+  looks like it.** `MouseRegion` is `opaque: true` by default, so a sibling
+  painted beneath `PlayerControls` gets no pointer at all — the audio-only
+  layout was unclickable until it moved into the controls' child slot
+  (`architecture.md` §2.8). And a `Material` added only for its text styles is
+  `MaterialType.canvas` by default, which paints and hit-tests like a wall; use
+  `MaterialType.transparency`.
 - **Hover previews are the real video, muted, in the tile** (revised 2026-08-11;
   this note used to say sprite sheets, and `architecture.md` §2.6 records why it
   changed). **Never instantiate a player per tile** — that part is unchanged and
