@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_media_session/flutter_media_session.dart' as fms;
 
+import 'now_playing_art.dart';
 import 'playback_controller.dart';
 import 'queue_controller.dart';
 
@@ -52,35 +53,43 @@ final smtcControllerProvider = Provider<void>((ref) {
     }
   });
 
-  final durationSub = engine.durationStream.listen((duration) {
+  // **One place builds the metadata**, called from the three things that can
+  // change it: a new track, its duration arriving, and better artwork arriving.
+  // The artwork is the same resolver the audio-only layout reads, so the
+  // flyout shows the song's cover rather than the tile thumbnail — which is
+  // 480x360 off the related rail (`architecture.md` F40).
+  //
+  // Not `engine.duration` for a new track: it is the previous one's until the
+  // new one reports, so a duration is only sent once this track has its own.
+  Duration? knownDuration;
+  void pushMetadata() {
     final item = ref.read(playbackProvider).item;
-    if (item != null) {
-      fms.FlutterMediaSessionPlatform.instance.updateMetadata(
-        fms.MediaMetadata(
-          title: item.title,
-          artist: item.channelName,
-          artworkUri: item.thumbnailUrl.isNotEmpty ? item.thumbnailUrl : null,
-          duration: duration,
-        ),
-      );
-    }
+    fms.FlutterMediaSessionPlatform.instance.updateMetadata(
+      item == null
+          ? const fms.MediaMetadata()
+          : fms.MediaMetadata(
+              title: item.title,
+              artist: item.channelName,
+              artworkUri: ref.read(nowPlayingArtProvider),
+              duration: knownDuration,
+            ),
+    );
+  }
+
+  final durationSub = engine.durationStream.listen((duration) {
+    if (duration <= Duration.zero) return;
+    knownDuration = duration;
+    pushMetadata();
   });
 
-  ref.listen(playbackProvider, (previous, next) {
-    final item = next.item;
-    if (item == null) {
-      fms.FlutterMediaSessionPlatform.instance.updateMetadata(const fms.MediaMetadata());
-    } else {
-      // Do not use engine.duration here as it is stale when a new video starts.
-      // The durationSub will handle appending the duration once it resolves.
-      fms.FlutterMediaSessionPlatform.instance.updateMetadata(
-        fms.MediaMetadata(
-          title: item.title,
-          artist: item.channelName,
-          artworkUri: item.thumbnailUrl.isNotEmpty ? item.thumbnailUrl : null,
-        ),
-      );
-    }
+  ref.listen(playbackProvider.select((p) => p.item?.id), (previous, next) {
+    if (previous == next) return;
+    knownDuration = null;
+    pushMetadata();
+  });
+
+  ref.listen(nowPlayingArtProvider, (previous, next) {
+    if (previous != next) pushMetadata();
   });
 
   ref.onDispose(() {
