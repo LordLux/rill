@@ -412,14 +412,22 @@ class PlaybackController extends Notifier<PlaybackState> {
         return;
       }
       
+      // **Set before the open, so the engine loads the right way round** — with
+      // audio attached at load and video never read, rather than loading video
+      // and dropping it afterwards (see `MediaKitEngine.open`).
+      final audioOnlyAtOpen = ref.read(audioModeProvider);
+      await _engine.setVideoTrack(!audioOnlyAtOpen);
       await _engine.open(variant, isLive: source.durationMs == null);
       if (generation != _generation || _disposed) return;
 
       // Re-read after the await: the user may have toggled audio-only while the
       // engine was loading, and the listener is guarded out (state.source is
-      // still null), so only a fresh read picks up the current intent.
-      if (ref.read(audioModeProvider)) {
-        await _engine.setVideoTrack(false);
+      // still null), so only a fresh read picks up the current intent. Both
+      // directions — this used to reconcile only *into* audio-only, so a toggle
+      // out of it mid-open left the video off.
+      final audioOnlyNow = ref.read(audioModeProvider);
+      if (audioOnlyNow != audioOnlyAtOpen) {
+        await _engine.setVideoTrack(!audioOnlyNow);
       }
 
       state = state.copyWith(
