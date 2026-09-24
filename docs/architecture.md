@@ -770,16 +770,39 @@ reason as its tooltip, the rule of the account-gated controls below.
   40 updates left GDI objects at 19 and USER objects at 44. And a failed
   first add still marked the buttons added, so every later call updated
   buttons that never existed and the toolbar never appeared.
+- **The buttons exist from startup, and nothing playing is four disabled
+  buttons, never none — measured 2026-09-24.** A flyout opened before the
+  buttons were first added keeps showing none: hover the taskbar, then play,
+  and `ThumbBarAddButtons` returned success while the flyout stayed empty,
+  across reopenings, until something re-laid out the taskbar (another app
+  starting). Opened *after* the add, the same flyout shows them and follows
+  every later update live. Adding them only once something played therefore
+  made an empty toolbar the ordinary first experience. The first add at
+  startup usually lands before the window is shown and fails, so it is retried
+  every 2 s.
 - **The toolbar lives in Explorer's process, so nothing in ours can see it.**
-  The first success logs `rill: taskbar toolbar ready`, a failure logs and is
-  retried on the next change, and that is the whole of the evidence a release
-  log holds. A button press arrives as `WM_COMMAND` with `THBN_CLICKED`, so
+  The first success logs `rill: taskbar toolbar ready`, a failure that
+  outlasts the startup race logs, and that is the whole of the evidence a
+  release log holds. A button press arrives as `WM_COMMAND` with `THBN_CLICKED`, so
   the click path can be driven without Explorer by posting that message to the
-  window (command id `40001` plus the button's index) — which is how it was
-  checked.
-- The icons are Material glyphs from the pinned SDK's font, rendered to
-  multi-size `.ico` by `app/tool/gen_taskbar_icons.py`, white with a dark
-  outline so they read on a light taskbar as well as a dark one.
+  window (command id `40001` plus the button's index). **The buttons
+  themselves are visible to UI Automation**: the flyout
+  (`TaskListThumbnailWnd`) holds a `ToolbarWindow32` whose buttons carry the
+  tooltips as names and the disabled state as `IsEnabled`, which is how the
+  states above were read while it was open — a control app's flyout (MPC-HC)
+  confirmed that an empty tree means no buttons, not an unreadable one.
+- **While a video loads, play and like are disabled and previous and next are
+  not — decided 2026-09-24.** Skipping through tracks without waiting for
+  each to load is what those two are for, and a load that never finishes must
+  not trap the listener on it; they are disabled only at the ends of the
+  queue. Like stays disabled until the watch page's data says whether the
+  video is already liked, because until then a press could only guess which
+  way to toggle. Every disabled state has its own icon.
+- **The icons' sources are the SVGs in `app/assets/icons/taskbar/`**, started
+  from Material glyphs and redrawn by hand; `app/tool/gen_taskbar_icons.py`
+  renders each to a multi-size `.ico` in `app/assets/taskbar/`. The PNGs beside
+  them are not read: they are cropped to the icon, so they have lost where it
+  sits in its square.
 
 ### 2.8 Watch page, queue panel, and the UI's sharp edges
 

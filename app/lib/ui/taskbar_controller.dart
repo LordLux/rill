@@ -20,8 +20,10 @@ import 'video_info.dart';
 /// rebuild of the providers underneath.
 typedef _ToolbarModel = ({
   String videoId,
+  bool loading,
   bool hasPrevious,
   bool hasNext,
+  bool ratingKnown,
   bool liked,
   String? likeBlocker,
   VideoRating serverRating,
@@ -31,12 +33,17 @@ final _toolbarModelProvider = Provider<_ToolbarModel?>((ref) {
   final item = ref.watch(playbackProvider.select((p) => p.item));
   if (item == null) return null;
   final local = ref.watch(ratingActionsProvider.select((m) => m[item.id]));
-  final server =
-      ref.watch(videoInfoProvider(item.id)).value?.myRating ?? VideoRating.none;
+  final info = ref.watch(videoInfoProvider(item.id));
+  final server = info.value?.myRating ?? VideoRating.none;
   return (
     videoId: item.id,
+    loading: ref.watch(playbackProvider.select((p) => p.isLoading)),
     hasPrevious: ref.watch(queueProvider.select((q) => q.hasPrevious)),
     hasNext: ref.watch(queueProvider.select((q) => q.hasNext)),
+    // Until the watch page's data arrives, whether this video is already liked
+    // is unknown, and a press could only guess which way to toggle. A failed
+    // fetch counts as known (not liked) rather than disabling like for good.
+    ratingKnown: info.hasValue || info.hasError || local != null,
     liked: (local ?? server) == VideoRating.like,
     likeBlocker: signedInActionBlocker(
       ref.watch(authProvider.select((a) => a.status)),
@@ -57,9 +64,22 @@ final _toolbarModelProvider = Provider<_ToolbarModel?>((ref) {
 /// **No dislike.** It is used far less than like, and the toolbar is a strip of
 /// small buttons where every one has to earn its place.
 ///
+/// **While a video loads, play and like are disabled; previous and next are
+/// not.** Skipping through tracks without waiting for each to load is exactly
+/// what those two are for, and a load that never finishes must not trap the
+/// listener on it. They are disabled only at the ends of the queue. Each
+/// disabled state has its own icon (`*_disabled.ico`).
+///
 /// Every button goes through the same entry point as its on-screen counterpart
 /// — `PlaybackController.previous`/`togglePlayPause`/`next` and [rateVideo] —
 /// so the two can never disagree about what a press does.
+///
+/// **The buttons are added at startup and never removed; with nothing playing
+/// they are all disabled.** A thumbnail flyout that was opened before the
+/// buttons were first added keeps showing none, however many adds and updates
+/// follow — measured 2026-09-24: hover the taskbar, then play, and the flyout
+/// stayed empty until something re-laid out the taskbar. Adding them only once
+/// something played made that the ordinary first experience.
 ///
 /// Uses the vendored `third_party/windows_taskbar`; its two `rill patch` fixes
 /// are what make updating this on every play/pause safe.
@@ -99,51 +119,65 @@ final taskbarControllerProvider = Provider<void>((ref) {
     }
   }
 
+  Timer? retry;
+  var failures = 0;
+
   Future<void> sync() async {
     final model = ref.read(_toolbarModelProvider);
-    if (model == null) {
-      if (shown != null) {
-        shown = null;
-        await WindowsTaskbar.resetThumbnailToolbar();
-      }
-      return;
-    }
-    final playing = engine.playing;
+    final playing = model != null && engine.playing;
     final signature = '$model|$playing';
     if (signature == shown) return;
     shown = signature;
 
+    // Nothing playing is four disabled buttons, never none — see the note on
+    // [taskbarControllerProvider].
+    final canPrevious = model != null && model.hasPrevious;
+    final canNext = model != null && model.hasNext;
     final controller = ref.read(playbackProvider.notifier);
     try {
       await WindowsTaskbar.setThumbnailToolbar([
         ThumbnailToolbarButton(
-          icon('previous'),
+          icon(canPrevious ? 'previous' : 'previous_disabled'),
           'Previous',
           controller.previous,
-          mode: model.hasPrevious ? 0 : ThumbnailToolbarButtonMode.disabled,
+          mode: canPrevious ? 0 : ThumbnailToolbarButtonMode.disabled,
         ),
+        if (model == null || model.loading)
+          ThumbnailToolbarButton(
+            icon('play_disabled'),
+            model == null ? 'Play' : 'Loading',
+            () {},
+            mode: ThumbnailToolbarButtonMode.disabled,
+          )
+        else
+          ThumbnailToolbarButton(
+            icon(playing ? 'pause' : 'play'),
+            playing ? 'Pause' : 'Play',
+            () => unawaited(controller.togglePlayPause()),
+          ),
         ThumbnailToolbarButton(
-          icon(playing ? 'pause' : 'play'),
-          playing ? 'Pause' : 'Play',
-          () => unawaited(controller.togglePlayPause()),
-        ),
-        ThumbnailToolbarButton(
-          icon('next'),
+          icon(canNext ? 'next' : 'next_disabled'),
           'Next',
           controller.next,
-          mode: model.hasNext ? 0 : ThumbnailToolbarButtonMode.disabled,
+          mode: canNext ? 0 : ThumbnailToolbarButtonMode.disabled,
         ),
-        ThumbnailToolbarButton(
-          icon(model.liked ? 'liked' : 'like'),
-          // Disabled rather than hidden when signed out, with the reason as its
-          // tooltip — the same treatment the watch page's own like button gets.
-          model.likeBlocker ?? (model.liked ? 'Remove like' : 'Like'),
-          () => unawaited(like(model)),
-          mode: model.likeBlocker == null
-              ? 0
-              : ThumbnailToolbarButtonMode.disabled,
-        ),
+        if (model == null || model.likeBlocker != null || !model.ratingKnown)
+          ThumbnailToolbarButton(
+            icon('like_disabled'),
+            // Signed out, it says why — the same treatment the watch page's own
+            // like button gets.
+            model == null ? 'Like' : model.likeBlocker ?? 'Loading',
+            () {},
+            mode: ThumbnailToolbarButtonMode.disabled,
+          )
+        else
+          ThumbnailToolbarButton(
+            icon(model.liked ? 'liked' : 'like'),
+            model.liked ? 'Remove like' : 'Like',
+            () => unawaited(like(model)),
+          ),
       ]);
+      failures = 0;
       // Once, so a release log shows the toolbar exists at all — it lives in
       // Explorer's process and nothing inside this one can see it.
       if (!announced) {
@@ -151,16 +185,30 @@ final taskbarControllerProvider = Provider<void>((ref) {
         stderr.writeln('rill: taskbar toolbar ready');
       }
     } on Object catch (e) {
-      // Forgotten, so the next change retries instead of believing it drew.
-      // The likeliest cause is a call before the taskbar button exists.
+      // Forgotten, so the retry sends it again instead of believing it drew.
+      // Expected once at startup: the first call can land before the window is
+      // shown or its taskbar button exists. Retried on a timer rather than on
+      // the next change, because with nothing playing there may be no next
+      // change, and the buttons have to exist before the first hover.
       shown = null;
-      stderr.writeln('rill: taskbar toolbar update failed: $e');
+      failures++;
+      // Not the first: that one is the startup race, on every launch, and a
+      // line printed every time teaches the reader to skip it.
+      if (failures == 3 || failures == 15)
+        stderr.writeln('rill: taskbar toolbar update failed (attempt $failures): $e');
+      if (failures < 15)
+        retry ??= Timer(const Duration(seconds: 2), () {
+          retry = null;
+          unawaited(sync());
+        });
     }
   }
 
   ref.listen(_toolbarModelProvider, (_, _) => unawaited(sync()));
   final playingSub = engine.playingStream.listen((_) => unawaited(sync()));
+  unawaited(sync());
   ref.onDispose(() {
+    retry?.cancel();
     unawaited(playingSub.cancel());
     unawaited(WindowsTaskbar.resetThumbnailToolbar());
   });
