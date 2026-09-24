@@ -751,10 +751,12 @@ Two surfaces control playback without the window in front, and each answers a
 different hand. **The system media flyout** (`smtc_controller.dart`) answers
 the keyboard's media keys. **The taskbar thumbnail toolbar**
 (`taskbar_controller.dart`, `ITaskbarList3::ThumbBarAddButtons`) answers a
-pointer on the taskbar: previous, play/pause, next and like under the hover
-preview. **No dislike**: it is used far less than like, and every button in
-that strip has to earn its place. Like is disabled when signed out, with the
-reason as its tooltip, the rule of the account-gated controls below.
+pointer on the taskbar: like, previous, play/pause, next and dislike under
+the hover preview. **Play/pause is in the middle, with the two ratings at the
+ends — decided 2026-09-24.** The first version had no dislike, as used far
+less than like; it came back as the counterweight that centres play/pause.
+Like and dislike are disabled when signed out, with the reason as their
+tooltip, the rule of the account-gated controls below.
 
 - **Every button goes through the on-screen control's own entry point** —
   `PlaybackController.previous`/`togglePlayPause`/`next`, and `rateVideo` in
@@ -770,8 +772,8 @@ reason as its tooltip, the rule of the account-gated controls below.
   40 updates left GDI objects at 19 and USER objects at 44. And a failed
   first add still marked the buttons added, so every later call updated
   buttons that never existed and the toolbar never appeared.
-- **The buttons exist from startup, and nothing playing is four disabled
-  buttons, never none — measured 2026-09-24.** A flyout opened before the
+- **The buttons exist from startup, and nothing playing is all of them
+  disabled, never none — measured 2026-09-24.** A flyout opened before the
   buttons were first added keeps showing none: hover the taskbar, then play,
   and `ThumbBarAddButtons` returned success while the flyout stayed empty,
   across reopenings, until something re-laid out the taskbar (another app
@@ -791,12 +793,12 @@ reason as its tooltip, the rule of the account-gated controls below.
   tooltips as names and the disabled state as `IsEnabled`, which is how the
   states above were read while it was open — a control app's flyout (MPC-HC)
   confirmed that an empty tree means no buttons, not an unreadable one.
-- **While a video loads, play and like are disabled and previous and next are
-  not — decided 2026-09-24.** Skipping through tracks without waiting for
+- **While a video loads, play and both ratings are disabled and previous and
+  next are not — decided 2026-09-24.** Skipping through tracks without waiting for
   each to load is what those two are for, and a load that never finishes must
   not trap the listener on it; they are disabled only at the ends of the
-  queue. Like stays disabled until the watch page's data says whether the
-  video is already liked, because until then a press could only guess which
+  queue. The ratings stay disabled until the watch page's data says how the
+  video is already rated, because until then a press could only guess which
   way to toggle. A disabled button keeps its ordinary icon and Windows dims
   it; dedicated faded icons, dimmed again by Windows, were too faint to read.
 - **The icons' sources are the SVGs in `app/assets/icons/taskbar/`**, started

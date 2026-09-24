@@ -24,8 +24,8 @@ typedef _ToolbarModel = ({
   bool hasPrevious,
   bool hasNext,
   bool ratingKnown,
-  bool liked,
-  String? likeBlocker,
+  VideoRating rating,
+  String? rateBlocker,
   VideoRating serverRating,
 });
 
@@ -40,34 +40,38 @@ final _toolbarModelProvider = Provider<_ToolbarModel?>((ref) {
     loading: ref.watch(playbackProvider.select((p) => p.isLoading)),
     hasPrevious: ref.watch(queueProvider.select((q) => q.hasPrevious)),
     hasNext: ref.watch(queueProvider.select((q) => q.hasNext)),
-    // Until the watch page's data arrives, whether this video is already liked
-    // is unknown, and a press could only guess which way to toggle. A failed
-    // fetch counts as known (not liked) rather than disabling like for good.
+    // Until the watch page's data arrives, how this video is already rated is
+    // unknown, and a press could only guess which way to toggle. A failed
+    // fetch counts as known (unrated) rather than disabling both for good.
     ratingKnown: info.hasValue || info.hasError || local != null,
-    liked: (local ?? server) == VideoRating.like,
-    likeBlocker: signedInActionBlocker(
+    rating: local ?? server,
+    // The watch page's wording, for the same two buttons.
+    rateBlocker: signedInActionBlocker(
       ref.watch(authProvider.select((a) => a.status)),
-      'like videos',
+      'rate videos',
     ),
     serverRating: server,
   );
 });
 
-/// Media buttons on the taskbar thumbnail's hover preview — previous,
-/// play/pause, next and like — through `ITaskbarList3::ThumbBarAddButtons`.
+/// Media buttons on the taskbar thumbnail's hover preview — like, previous,
+/// play/pause, next and dislike, in that order — through
+/// `ITaskbarList3::ThumbBarAddButtons`.
 ///
 /// Complements the system media flyout (`smtc_controller.dart`) rather than
 /// replacing it: that one answers the keyboard's media keys, this one answers a
 /// pointer on the taskbar, which is where a listener's hand is when the app is
 /// behind other windows.
 ///
-/// **No dislike.** It is used far less than like, and the toolbar is a strip of
-/// small buttons where every one has to earn its place.
+/// **Play/pause sits in the middle, with like and dislike at the two ends —
+/// decided 2026-09-24.** Dislike was left out at first, as used far less than
+/// like; it came back as the counterweight that centres play/pause, and the
+/// two ratings flank the transport rather than interrupting it.
 ///
-/// **While a video loads, play and like are disabled; previous and next are
-/// not.** Skipping through tracks without waiting for each to load is exactly
-/// what those two are for, and a load that never finishes must not trap the
-/// listener on it. They are disabled only at the ends of the queue. A disabled
+/// **While a video loads, play and the two ratings are disabled; previous and
+/// next are not.** Skipping through tracks without waiting for each to load is
+/// exactly what those two are for, and a load that never finishes must not trap
+/// the listener on it. They are disabled only at the ends of the queue. A disabled
 /// button keeps its ordinary icon: Windows dims it, and dedicated faded icons
 /// on top of that were too faint to read (the `*_disabled` SVGs are kept, and
 /// unused).
@@ -93,7 +97,7 @@ final taskbarControllerProvider = Provider<void>((ref) {
 
   /// What was last sent, so a sync that would draw the same toolbar is skipped.
   String? shown;
-  var liking = false;
+  var rating = false;
   var announced = false;
 
   // Loaded by path, so they must exist beside the executable — which is why
@@ -102,23 +106,45 @@ final taskbarControllerProvider = Provider<void>((ref) {
   ThumbnailToolbarAssetIcon icon(String name) =>
       ThumbnailToolbarAssetIcon('assets/taskbar/$name.ico');
 
-  Future<void> like(_ToolbarModel model) async {
-    if (liking) return;
-    liking = true;
+  Future<void> rate(_ToolbarModel model, VideoRating target) async {
+    if (rating) return;
+    rating = true;
     try {
       final failure = await rateVideo(
         ref.read,
         model.videoId,
-        VideoRating.like,
+        target,
         serverRating: model.serverRating,
       );
       // Nowhere to show a snackbar from the taskbar. The store has already
-      // been rolled back, so the button redraws un-liked; this says why.
+      // been rolled back, so the button redraws as it was; this says why.
       if (failure != null)
-        stderr.writeln('rill: taskbar like failed: $failure');
+        stderr.writeln('rill: taskbar ${target.name} failed: $failure');
     } finally {
-      liking = false;
+      rating = false;
     }
+  }
+
+  // Like and dislike, drawn the same way: disabled until the rating is known
+  // or while signed out, otherwise showing whether this side is the one set.
+  ThumbnailToolbarButton rateButton(_ToolbarModel? model, VideoRating side) {
+    final noun = side == VideoRating.like ? 'like' : 'dislike';
+    final label = side == VideoRating.like ? 'Like' : 'Dislike';
+    if (model == null || model.rateBlocker != null || !model.ratingKnown)
+      return ThumbnailToolbarButton(
+        icon(noun),
+        // Signed out, it says why — the same treatment the watch page's own
+        // rating buttons get.
+        model == null ? label : model.rateBlocker ?? 'Loading',
+        () {},
+        mode: ThumbnailToolbarButtonMode.disabled,
+      );
+    final set = model.rating == side;
+    return ThumbnailToolbarButton(
+      icon(set ? '${noun}d' : noun),
+      set ? 'Remove $noun' : label,
+      () => unawaited(rate(model, side)),
+    );
   }
 
   Timer? retry;
@@ -131,13 +157,14 @@ final taskbarControllerProvider = Provider<void>((ref) {
     if (signature == shown) return;
     shown = signature;
 
-    // Nothing playing is four disabled buttons, never none — see the note on
+    // Nothing playing is every button disabled, never none — see the note on
     // [taskbarControllerProvider].
     final canPrevious = model != null && model.hasPrevious;
     final canNext = model != null && model.hasNext;
     final controller = ref.read(playbackProvider.notifier);
     try {
       await WindowsTaskbar.setThumbnailToolbar([
+        rateButton(model, VideoRating.like),
         ThumbnailToolbarButton(
           icon('previous'),
           'Previous',
@@ -163,21 +190,7 @@ final taskbarControllerProvider = Provider<void>((ref) {
           controller.next,
           mode: canNext ? 0 : ThumbnailToolbarButtonMode.disabled,
         ),
-        if (model == null || model.likeBlocker != null || !model.ratingKnown)
-          ThumbnailToolbarButton(
-            icon('like'),
-            // Signed out, it says why — the same treatment the watch page's own
-            // like button gets.
-            model == null ? 'Like' : model.likeBlocker ?? 'Loading',
-            () {},
-            mode: ThumbnailToolbarButtonMode.disabled,
-          )
-        else
-          ThumbnailToolbarButton(
-            icon(model.liked ? 'liked' : 'like'),
-            model.liked ? 'Remove like' : 'Like',
-            () => unawaited(like(model)),
-          ),
+        rateButton(model, VideoRating.dislike),
       ]);
       failures = 0;
       // Once, so a release log shows the toolbar exists at all — it lives in
