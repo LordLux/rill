@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1024" height="1024">
+  <!-- Material Icons U+E65B, from the pinned Flutter SDK's materialicons-regular.otf. -->
+  <g transform="matrix(0.046875 0 0 -0.046875 0 24)">
+    <g id="outline" opacity="0.588">
+      <path d="M21 64H107V320H21V64ZM491 299C491 322 471 341 448 341H313L334 439V446C334 454 331 463 325 468L302 491L162 350C154 342 149 332 149 320V107C149 83 169 64 192 64H384C402 64 417 75 423 90L488 240C490 245 491 250 491 256V299Z" fill="#000" stroke="#000" stroke-width="42.6667" stroke-linejoin="round"/>
+    </g>
+    <g id="glyph">
+      <path d="M21 64H107V320H21V64ZM491 299C491 322 471 341 448 341H313L334 439V446C334 454 331 463 325 468L302 491L162 350C154 342 149 332 149 320V107C149 83 169 64 192 64H384C402 64 417 75 423 90L488 240C490 245 491 250 491 256V299Z" fill="#fff"/>
+    </g>
+  </g>
+</svg>
