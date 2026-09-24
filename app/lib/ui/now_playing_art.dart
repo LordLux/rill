@@ -14,7 +14,12 @@ import 'video_info.dart';
 /// **One resolver, read by everything that shows artwork for the current
 /// track** — the audio-only layout and the Windows media flyout — so the two
 /// cannot pick different images for the same song.
-final nowPlayingArtProvider = Provider<String?>((ref) {
+///
+/// `isCover` says which kind it found, because they are different shapes: a
+/// cover is square, and everything after it is a still from the video, 16:9.
+typedef NowPlayingArt = ({String url, bool isCover});
+
+final nowPlayingArtProvider = Provider<NowPlayingArt?>((ref) {
   final item = ref.watch(playbackProvider.select((p) => p.item));
   if (item == null) return null;
   final poster = ref.watch(playbackProvider.select((p) => p.source?.posterUrl));
@@ -26,8 +31,9 @@ final nowPlayingArtProvider = Provider<String?>((ref) {
       ?.music
       .firstOrNull
       ?.coverUrl;
-  for (final url in [cover, poster, item.thumbnailUrl]) {
-    if (url != null && url.isNotEmpty) return url;
+  if (cover != null && cover.isNotEmpty) return (url: cover, isCover: true);
+  for (final url in [poster, item.thumbnailUrl]) {
+    if (url != null && url.isNotEmpty) return (url: url, isCover: false);
   }
   return null;
 });

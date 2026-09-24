@@ -33,7 +33,12 @@ class AudioModeView extends ConsumerWidget {
     // The same resolver the media flyout reads: the song's cover, else the
     // video's own still — never YouTube's stock no-art square, which the
     // sidecar ships as a null cover (`parser/music.ts`).
-    final coverUrl = ref.watch(nowPlayingArtProvider) ?? '';
+    final art = ref.watch(nowPlayingArtProvider);
+    final coverUrl = art?.url ?? '';
+    // Framed as what it is: a cover square, a video still 16:9. A still in a
+    // square frame sat letterboxed under the square's shadow, with an empty
+    // band between it and the title.
+    final artAspect = (art?.isCover ?? false) ? 1.0 : 16 / 9;
 
     // Fallback: title and channelName
     final title = music?.title ?? detail?.title ?? item.title;
@@ -49,51 +54,53 @@ class AudioModeView extends ConsumerWidget {
 
     final tokens = Theme.of(context).tokens;
 
+    // Sized by the frame around it in `musicContent`, which animates its shape.
     Widget cover = Container(
-      constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 1200),
-      child: AspectRatio(
-        aspectRatio: 1,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: tokens.scrim.withValues(alpha: 0.5),
-                blurRadius: 24,
-                offset: const Offset(0, 12),
-              ),
-            ],
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: tokens.scrim.withValues(alpha: 0.5),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeOutCubic,
-            child: coverUrl.isNotEmpty
-                ? Image.network(
-                    coverUrl,
-                    key: ValueKey(coverUrl),
-                    fit: BoxFit.cover,
-                    frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                      if (wasSynchronouslyLoaded) return child;
-                      return AnimatedOpacity(
-                        opacity: frame == null ? 0 : 1,
-                        duration: const Duration(milliseconds: 400),
-                        curve: Curves.easeOutCubic,
-                        child: child,
-                      );
-                    },
-                    errorBuilder: (context, error, stackTrace) => ColoredBox(
-                      key: const ValueKey('error'),
-                      color: tokens.scrim,
-                    ),
-                  )
-                : ColoredBox(
-                    key: const ValueKey('empty'),
-                    color: tokens.scrim,
-                  ),
-          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeOutCubic,
+        // Expanded, so the image fills the frame and `BoxFit.cover` crops it.
+        // The default is a loose `Stack`, in which the image keeps its own
+        // shape and the frame shows around it.
+        layoutBuilder: (current, previous) => Stack(
+          fit: StackFit.expand,
+          children: [...previous, ?current],
         ),
+        child: coverUrl.isNotEmpty
+            ? Image.network(
+                coverUrl,
+                key: ValueKey(coverUrl),
+                fit: BoxFit.cover,
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded) return child;
+                  return AnimatedOpacity(
+                    opacity: frame == null ? 0 : 1,
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutCubic,
+                    child: child,
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) => ColoredBox(
+                  key: const ValueKey('error'),
+                  color: tokens.scrim,
+                ),
+              )
+            : ColoredBox(
+                key: const ValueKey('empty'),
+                color: tokens.scrim,
+              ),
       ),
     );
 
@@ -109,12 +116,27 @@ class AudioModeView extends ConsumerWidget {
             Flexible(
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 48,vertical: coverVerticalPadding),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (visualBuilder != null) Positioned.fill(child: Builder(builder: visualBuilder!)),
-                    cover,
-                  ],
+                child: LayoutBuilder(
+                  builder: (context, slot) {
+                    // The square a cover fills. A still keeps that width and
+                    // gives up height rather than growing wider — it is often
+                    // a 480x360 thumbnail (F40) — so the title comes up to meet
+                    // it, and the column stays centred as one group.
+                    final side = min(min(slot.maxWidth, slot.maxHeight), 1200.0);
+                    return TweenAnimationBuilder<double>(
+                      tween: Tween(end: artAspect),
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, aspect, child) => SizedBox(width: side, height: side / aspect, child: child),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (visualBuilder != null) Positioned.fill(child: Builder(builder: visualBuilder!)),
+                          cover,
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
