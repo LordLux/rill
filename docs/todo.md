@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 44.** A new item takes it, and the same edit bumps this line.
+**Next number: 45.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -20,8 +20,38 @@ finished and deleted, it would hand the same number out twice.
 
 ## Now
 
-Nothing at the moment. Item 43, the 0:00 stall, closed 2026-09-24: it was
-audio-only, and `architecture.md` F42 has the cause and the fix.
+### 44. Leaving audio-only can wedge: "playing", and nothing moves
+
+**Reported 2026-09-25, rare, never caught live, cause unknown.** Switching from
+audio-only back to video occasionally never finishes: no picture, no sound, the
+position frozen, and the player still claims to be playing — space, `k` and
+clicks do nothing. It is not the loading state. Going back to audio-only
+resumes it at once, and leaving audio-only again then works. Not the 0:00 stall
+(item 43, closed — `architecture.md` F42): that was an *open* with nothing
+selected; this is a restore mid-playback.
+
+**Contained, not diagnosed.** `PlaybackController._armRestoreWatchdog` watches
+every restore: if the player says it is playing while the position has not
+moved for 15 s, it does what fixes it by hand — video track off and on — and if
+that wedges too, reopens the same variant at the same position through the
+quality-switch path, once. `test/restore_watchdog_test.dart` drives the
+symptom through the fake engine; nothing there reproduces the cause.
+
+**When it happens again, read the release log first**
+(`%LOCALAPPDATA%\rill\logs\rill-*.log`). The watchdog writes
+`rill: stuck after leaving audio-only at <ms> (picture …, buffering …, buffer …)`
+and which recovery it tried. `picture` is `vo-configured`: `false` means the
+video output never came back, `true` means a picture that never moved. The
+normal restore writes `rill: audio-only -> video, picture back in <ms>`, and a
+restore with no picture after 30 s writes `rill: no picture after leaving
+audio-only`. Which of those lines appear, and whether the recovery line is
+followed by a resume, is the first real data on this.
+
+**What "done" means.** The cause found and fixed at the source, after which the
+watchdog either goes or stays as documented containment. The 15 s grace is
+above the 2.9–8.0 s restores §2.4 measured on purpose — the recovery drops the
+video cache again, so firing on a merely slow restore would make it slower —
+and it is a guess until a real occurrence says otherwise.
 
 ---
 

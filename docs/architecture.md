@@ -438,6 +438,15 @@ Consequences:
   the mode is enabled are **wasted** — up to the 32 MiB cap. Opening in
   audio-only mode reads no video at all (F42); toggling mid-playback cannot
   avoid it.
+- **A restore is watched, because one can wedge — added 2026-09-25.** Rarely,
+  leaving audio-only never finishes: "playing", position frozen, no picture or
+  sound, and going back to audio-only resumes it at once. Cause unknown
+  (`todo.md` 44). `_armRestoreWatchdog` samples the engine's cached state
+  once a second, and after 15 s of playing without moving it toggles the video
+  track off and on — the fix found by hand — then, if that wedges too, reopens
+  the variant through the quality-switch path, once. The grace sits well above
+  the restores measured here, because the recovery drops the video cache
+  again and would make a merely slow restore slower.
 
 **The 0:00 stall was this, and it is closed — 2026-09-24.** `todo.md` 43
 described opens that succeeded everywhere and then never played, and guessed

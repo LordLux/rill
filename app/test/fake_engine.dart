@@ -197,9 +197,14 @@ class FakeEngine implements PlaybackEngine {
     _videoOutput.add(ready);
   }
 
+  /// Every [setVideoTrack] call in order — a recovery is an off-and-on that the
+  /// final value alone cannot show.
+  final videoTrackCalls = <bool>[];
+
   @override
   Future<void> setVideoTrack(bool enabled) async {
     videoTrackEnabled = enabled;
+    videoTrackCalls.add(enabled);
     // Models `vid=no`: mpv tears the video output down, so `vo-configured`
     // goes false immediately. Re-enabling does *not* bring it back here —
     // the test decides when the picture lands, because that delay is the
