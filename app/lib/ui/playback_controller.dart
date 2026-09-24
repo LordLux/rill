@@ -270,6 +270,21 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   Timer? _stallWatchdogTimer;
 
+  /// How long playback may claim to be playing without moving, after leaving
+  /// audio-only, before it is treated as stuck rather than slow.
+  ///
+  /// Above the restores §2.4 measured (2.9-8.0 s) with room to spare, because
+  /// the recovery drops the video cache again: firing on a restore that was
+  /// merely slow would make it slower. Mutable only for tests.
+  @visibleForTesting
+  static Duration restoreStallGrace = const Duration(seconds: 15);
+
+  /// How often the restore watchdog samples. Mutable only for tests.
+  @visibleForTesting
+  static Duration restoreStallTick = const Duration(seconds: 1);
+
+  Timer? _restoreWatchdog;
+
   @visibleForTesting
   int? get preferredHeight => _preferredHeight;
 
@@ -342,6 +357,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       _disposed = true;
       _reportTimer?.cancel();
       _stallWatchdogTimer?.cancel();
+      _restoreWatchdog?.cancel();
       for (final subscription in _subscriptions) {
         unawaited(subscription.cancel());
       }
@@ -847,6 +863,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       // already over the surface. Also clears a restore this toggle overtook,
       // so a fast off-on-off cannot leave the spinner up.
       if (state.isRestoringVideo) state = state.copyWith(isRestoringVideo: false);
+      _restoreWatchdog?.cancel();
+      _restoreWatchdog = null;
       await _engine.setVideoTrack(false);
       return;
     }
@@ -855,6 +873,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     final started = DateTime.now();
     try {
       await _engine.setVideoTrack(true);
+      _armRestoreWatchdog(token, generation);
       await _waitForVideoTrack(token);
       // The same number `switchQuality` reports, for the same reason: what the
       // *viewer* waited for, from the app rather than a stopwatch held against
@@ -894,6 +913,91 @@ class PlaybackController extends Notifier<PlaybackState> {
       // Bounded on purpose: a spinner that never comes down is worse than one
       // that gives up on a picture that was never coming.
       stderr.writeln('rill: no picture after leaving audio-only — clearing the spinner');
+    }
+  }
+
+  /// Watch a restore from audio-only for the state it can occasionally wedge
+  /// in: the player says it is playing, nothing is loading, and the position
+  /// does not move — no picture, no sound, and play/pause does nothing.
+  /// Observed rarely, never caught live, cause unknown; `docs/todo.md` 44.
+  ///
+  /// Sampled rather than event-driven because the symptom *is* the absence of
+  /// events. Reads only the engine's cached values (hard invariant 9). The
+  /// clock runs only while the player says it is playing, so a pause is never
+  /// mistaken for a stall.
+  ///
+  /// Done once the picture is back *and* the position has moved forward by
+  /// about a tick — both, because either one alone has been seen without the
+  /// other: sound over no picture, and a picture that never moved.
+  void _armRestoreWatchdog(int token, int generation, {int attempt = 0}) {
+    _restoreWatchdog?.cancel();
+    var last = _engine.position;
+    var stalled = Duration.zero;
+    _restoreWatchdog = Timer.periodic(restoreStallTick, (timer) {
+      if (_disposed || generation != _generation || token != _audioModeToggle) {
+        timer.cancel();
+        return;
+      }
+      final now = _engine.position;
+      final moved = now - last;
+      last = now;
+      // Forward by roughly one tick is playback; a seek jumps further, or back.
+      final playing = moved > Duration.zero && moved < restoreStallTick * 3;
+      if (playing && _engine.videoOutputReady) {
+        timer.cancel();
+        _restoreWatchdog = null;
+        return;
+      }
+      if (playing ||
+          !_engine.playing ||
+          state.isLoading ||
+          state.isSwitchingQuality ||
+          state.error != null) {
+        stalled = Duration.zero;
+        return;
+      }
+      stalled += restoreStallTick;
+      if (stalled < restoreStallGrace) return;
+      timer.cancel();
+      _restoreWatchdog = null;
+      unawaited(_recoverStuckRestore(token, generation, attempt, now));
+    });
+  }
+
+  /// First what fixes it by hand — back to audio-only and out again, which
+  /// resumes it at once — then, if that wedges too, a reopen of the same
+  /// variant at the same position through the quality-switch path. Nothing
+  /// after that: a reopen that still does not play is not this bug.
+  Future<void> _recoverStuckRestore(
+    int token,
+    int generation,
+    int attempt,
+    Duration at,
+  ) async {
+    // Everything the engine can say without a blocking read, so a log from a
+    // user who hit this tells us which half of the pipeline stopped.
+    stderr.writeln(
+      'rill: stuck after leaving audio-only at ${at.inMilliseconds} ms '
+      '(picture ${_engine.videoOutputReady}, buffering ${_engine.buffering}, '
+      'buffer ${_engine.buffer.inMilliseconds} ms) — '
+      '${attempt == 0 ? 'toggling the video track off and on' : 'reopening'}',
+    );
+    if (attempt > 0) {
+      final variant = state.variant;
+      if (variant != null) await switchQuality(variant, force: true);
+      return;
+    }
+    state = state.copyWith(isRestoringVideo: true);
+    try {
+      await _engine.setVideoTrack(false);
+      if (_disposed || generation != _generation || token != _audioModeToggle) return;
+      await _engine.setVideoTrack(true);
+      _armRestoreWatchdog(token, generation, attempt: attempt + 1);
+      await _waitForVideoTrack(token);
+    } finally {
+      if (!_disposed && generation == _generation && token == _audioModeToggle) {
+        state = state.copyWith(isRestoringVideo: false);
+      }
     }
   }
 
