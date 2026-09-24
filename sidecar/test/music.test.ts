@@ -75,6 +75,32 @@ describe('music attribution', () => {
     expect(tracks[0]!.coverUrl).toBeNull();
   });
 
+  test("YouTube's stock no-art cover ships as null, and the track still ships", () => {
+    // The URL verbatim as measured 2026-09-24 — six cards, one URL.
+    const tracks = parseMusicTracks({
+      cards: [
+        {
+          videoAttributeViewModel: {
+            title: 'M11 re-arrange and re-mix',
+            subtitle: 'Shiro SAGISU',
+            image: { sources: [{ url: 'https://www.gstatic.com/youtube/img/watch/yt_music_channel.jpeg' }] },
+          },
+        },
+        {
+          videoAttributeViewModel: {
+            title: 'Real Song',
+            image: { sources: [{ url: 'https://yt3.googleusercontent.com/abc' }] },
+          },
+        },
+      ],
+    });
+
+    expect(tracks).toHaveLength(2);
+    expect(tracks[0]!.title).toBe('M11 re-arrange and re-mix');
+    expect(tracks[0]!.coverUrl).toBeNull();
+    expect(tracks[1]!.coverUrl).toBe('https://yt3.googleusercontent.com/abc=s1200');
+  });
+
   test('an unrecognised card does not take the rest down (hard invariant 4)', () => {
     const tracks = parseMusicTracks({
       a: { videoAttributeViewModel: 'not an object' },

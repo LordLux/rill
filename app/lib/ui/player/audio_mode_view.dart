@@ -7,46 +7,33 @@ import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
 import '../playback_controller.dart';
 import '../hide_queue_controller.dart';
-
+import '../now_playing_art.dart';
 import '../video_info.dart';
 import '../widgets/queue_panel.dart';
 import '../pages/watch_layout.dart' show computeWatchGeometry;
 import '../../theme/screen_values.dart';
 
-class AudioModeView extends ConsumerStatefulWidget {
+class AudioModeView extends ConsumerWidget {
   const AudioModeView({super.key, this.visualBuilder, this.showQueue = false});
 
   final WidgetBuilder? visualBuilder;
   final bool showQueue;
 
   @override
-  ConsumerState<AudioModeView> createState() => _AudioModeViewState();
-}
-
-class _AudioModeViewState extends ConsumerState<AudioModeView> {
-  bool _forceThumbnail = false;
-  String? _lastItemId;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final playback = ref.watch(playbackProvider);
     final item = playback.item;
     final hideQueue = ref.watch(hideQueueProvider);
     if (item == null) return const SizedBox.shrink();
 
-    if (_lastItemId != item.id) {
-      _forceThumbnail = false;
-      _lastItemId = item.id;
-    }
-
     final detail = ref.watch(videoInfoProvider(item.id)).value;
 
     final music = detail?.music.firstOrNull;
 
-    final primaryUrl = music?.coverUrl ?? playback.source?.posterUrl ?? item.thumbnailUrl;
-    final fallbackUrl = playback.source?.posterUrl ?? item.thumbnailUrl;
-    final coverUrl = _forceThumbnail ? fallbackUrl : primaryUrl;
-    final canToggle = music?.coverUrl != null && fallbackUrl.isNotEmpty && music!.coverUrl != fallbackUrl;
+    // The same resolver the media flyout reads: the song's cover, else the
+    // video's own still — never YouTube's stock no-art square, which the
+    // sidecar ships as a null cover (`parser/music.ts`).
+    final coverUrl = ref.watch(nowPlayingArtProvider) ?? '';
 
     // Fallback: title and channelName
     final title = music?.title ?? detail?.title ?? item.title;
@@ -66,51 +53,45 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
       constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 1200),
       child: AspectRatio(
         aspectRatio: 1,
-        child: MouseRegion(
-          cursor: canToggle ? SystemMouseCursors.click : MouseCursor.defer,
-          child: GestureDetector(
-            onTap: canToggle ? () => setState(() => _forceThumbnail = !_forceThumbnail) : null,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: tokens.scrim.withValues(alpha: 0.5),
-                    blurRadius: 24,
-                    offset: const Offset(0, 12),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: tokens.scrim.withValues(alpha: 0.5),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 400),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeOutCubic,
+            child: coverUrl.isNotEmpty
+                ? Image.network(
+                    coverUrl,
+                    key: ValueKey(coverUrl),
+                    fit: BoxFit.cover,
+                    frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                      if (wasSynchronouslyLoaded) return child;
+                      return AnimatedOpacity(
+                        opacity: frame == null ? 0 : 1,
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                        child: child,
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) => ColoredBox(
+                      key: const ValueKey('error'),
+                      color: tokens.scrim,
+                    ),
+                  )
+                : ColoredBox(
+                    key: const ValueKey('empty'),
+                    color: tokens.scrim,
                   ),
-                ],
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 400),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeOutCubic,
-                child: coverUrl.isNotEmpty
-                    ? Image.network(
-                        coverUrl,
-                        key: ValueKey(coverUrl),
-                        fit: BoxFit.cover,
-                        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                          if (wasSynchronouslyLoaded) return child;
-                          return AnimatedOpacity(
-                            opacity: frame == null ? 0 : 1,
-                            duration: const Duration(milliseconds: 400),
-                            curve: Curves.easeOutCubic,
-                            child: child,
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) => ColoredBox(
-                          key: const ValueKey('error'),
-                          color: tokens.scrim,
-                        ),
-                      )
-                    : ColoredBox(
-                        key: const ValueKey('empty'),
-                        color: tokens.scrim,
-                      ),
-              ),
-            ),
           ),
         ),
       ),
@@ -131,7 +112,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    if (widget.visualBuilder != null) Positioned.fill(child: Builder(builder: widget.visualBuilder!)),
+                    if (visualBuilder != null) Positioned.fill(child: Builder(builder: visualBuilder!)),
                     cover,
                   ],
                 ),
@@ -176,7 +157,7 @@ class _AudioModeViewState extends ConsumerState<AudioModeView> {
       },
     );
 
-    if (!widget.showQueue) return Center(child: musicContent);
+    if (!showQueue) return Center(child: musicContent);
 
     return LayoutBuilder(
       builder: (context, constraints) {
