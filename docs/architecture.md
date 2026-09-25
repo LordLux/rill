@@ -816,6 +816,57 @@ tooltip, the rule of the account-gated controls below.
   them are not read: they are cropped to the icon, so they have lost where it
   sits in its square.
 
+#### Chapters on the progress bar — built 2026-09-26
+
+The scrubber is one segment per chapter, the segment under the pointer grows,
+and a bubble above the pointer names the time and the chapter. The code is
+`ui/player/scrubber_chapters.dart` (geometry, mapping, growth, bubble) plus
+`_Scrubber` and `_RillSliderTrackShape` in `controls.dart`; every size in it is
+`ScrubberMetrics`, in one place, because they are tuned by eye.
+
+- **The `Slider` stays.** It is what carries focus, keyboard and semantics, and
+  what the tests find. Only what it paints changes — the track shape draws the
+  segments — and what surrounds it. Seeking is untouched: still on release, never
+  during the drag (F15).
+- **Segments are painted from the real track rect.** A chapter is a fraction of
+  the duration, so the time-to-x mapping stays linear and the thumb and the buffer
+  cross a boundary without noticing it; the gap is carved out of the two segments
+  either side of it, so nothing shifts. A segment too narrow to afford one is drawn
+  gapless, so an hour of short chapters on a small window degrades to a plain bar
+  rather than to slivers. The bar with no chapters is the same code with one
+  segment, and grows on hover the same way.
+- **The duration is `hold?.duration ?? engine.duration`, the one `max` is built
+  from** (above), so the segments and the thumb cannot disagree in a quality
+  switch. A zero duration draws the plain track.
+- **A chapter list that is not a segmentation draws none, and names none:**
+  fewer than two, starts that do not strictly ascend, a first chapter more than
+  ten seconds in, or a start at or past the end. Time before the first chapter
+  belongs to the first segment. All chapters `VideoDetail` carries are used,
+  including the ones the sidecar parsed from the description (§2.12).
+- **A live stream — `durationMs` null — has no segments and no bubble.** Its bar
+  is a moving window, not a timeline. The clock already calls any source without a
+  duration live, and this follows it, not just the ones with a `startTimestamp`.
+- **Chapters are one video's.** They are read from `videoInfoProvider` for the
+  playing item's id, and the hover state is dropped when the item changes.
+- **Hover is mapped through the slider's own track**, which the theme's padding
+  insets, not through the widget's width: the ends read exactly `0:00` and the
+  duration. `scrubberTrackSpan` is that arithmetic, and a test taps and hovers at
+  the same x and requires the click and the bubble to agree, which is what keeps
+  it the slider's own. Do not use `1.0`: the slider's box ends where its track
+  does, so a tap on that last pixel reaches nothing.
+- **The bubble is in the tree, not a `Tooltip`.** Nothing above the `Navigator`
+  has an `Overlay` (§2.8), and a tooltip that appears after a delay is the wrong
+  behaviour for a scrubber anyway. It overflows the scrubber's box, so the `Stack`
+  must not clip and no ancestor may — `expectUnclipped` walks the render tree in
+  each layout, fullscreen included. It is `IgnorePointer`, and being outside the
+  box already keeps it out of hit-testing; the wrapper is for the day it is not.
+- **A `Listener` beside the `MouseRegion`.** `onHover` does not fire while a
+  button is down, so a drag would leave the bubble where the pointer was before the
+  press. While the thumb is held the bubble reads the drag position (from the
+  controls, as the clock does), not the pointer's.
+- **Not built: a "most replayed" graph, and thumbnails in the bubble.** The
+  mini-player's `LinearProgressIndicator` shows no chapters, deliberately.
+
 ### 2.8 Watch page, queue panel, and the UI's sharp edges
 
 The rules below were each paid for once. The code points here rather than

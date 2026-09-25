@@ -24,7 +24,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show GestureBinding, PointerScrollEvent, PointerSignalEvent, kDoubleTapTimeout;
+import 'package:flutter/gestures.dart' show GestureBinding, PointerDeviceKind, PointerScrollEvent, PointerSignalEvent, PointerUpEvent, kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,7 +38,9 @@ import '../playback_controller.dart';
 import '../audio_mode_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
+import '../video_info.dart';
 import '../widgets/shortcut_tooltip.dart';
+import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
 import 'settings_menu.dart';
 import 'shortcuts.dart' show volumeStep;
@@ -1047,7 +1049,11 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
 /// **Seeks on release, never during the drag.** F15 measured a 1.2–1.3 s stall
 /// per seek, so a scrubber that seeked continuously would fire dozens across one
 /// drag and the video would be unreachable for the length of it.
-class _Scrubber extends StatelessWidget {
+///
+/// Chapter segments, the hover growth and the bubble are `architecture.md`
+/// §2.7. They change what the `Slider` paints and what surrounds it, never what
+/// it does: seeking is untouched.
+class _Scrubber extends ConsumerStatefulWidget {
   const _Scrubber({
     super.key,
     required this.engine,
@@ -1080,7 +1086,85 @@ class _Scrubber extends StatelessWidget {
   final ValueChanged<double> onDragEnd;
 
   @override
+  ConsumerState<_Scrubber> createState() => _ScrubberState();
+}
+
+class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderStateMixin {
+  late final SegmentGrowth _growth = SegmentGrowth(this);
+
+  /// The pointer's x in the scrubber's box, null when it is elsewhere. Read by
+  /// the bubble alone, so a pointer move rebuilds that and nothing else.
+  final ValueNotifier<double?> _pointerX = ValueNotifier<double?>(null);
+
+  /// What the pointer handlers need from the last build. Null when the bar has
+  /// no time to show — live, or no duration yet — which is also when hovering
+  /// does nothing.
+  ScrubberTimeline? _timeline;
+  EdgeInsets _padding = EdgeInsets.zero;
+
+  @override
+  void dispose() {
+    _growth.dispose();
+    _pointerX.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_Scrubber oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dragging != widget.dragging) _retarget();
+  }
+
+  double? _boxWidth() {
+    final box = context.findRenderObject();
+    return box is RenderBox && box.hasSize ? box.size.width : null;
+  }
+
+  /// The position the bubble names: the thumb's while it is held, else the
+  /// pointer's — null when neither is on the bar.
+  Duration? _shownPosition(ScrubberTimeline timeline, double? pointerX, double? boxWidth) {
+    final dragging = widget.dragging;
+    if (dragging != null) return Duration(milliseconds: dragging.round().clamp(0, timeline.duration.inMilliseconds));
+    if (pointerX == null || boxWidth == null) return null;
+    final track = scrubberTrackSpan(boxWidth, _padding);
+    return trackTimeAt(pointerX, trackLeft: track.left, trackWidth: track.width, duration: timeline.duration);
+  }
+
+  void _retarget() {
+    final timeline = _timeline;
+    final position = timeline == null ? null : _shownPosition(timeline, _pointerX.value, _boxWidth());
+    _growth.retarget(position == null ? null : timeline!.segmentAt(position));
+  }
+
+  void _onPointer(double? dx) {
+    _pointerX.value = _timeline == null ? null : dx;
+    _retarget();
+  }
+
+  /// A finger lifting takes the bubble with it; a mouse leaves it until it
+  /// leaves the bar, unless it was released somewhere else.
+  void _onPointerUp(PointerUpEvent event) {
+    final box = context.findRenderObject();
+    final outside = box is RenderBox && box.hasSize && !(Offset.zero & box.size).contains(box.globalToLocal(event.position));
+    if (event.kind != PointerDeviceKind.mouse || outside) _onPointer(null);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final engine = widget.engine;
+    final hold = widget.hold;
+    final source = widget.source;
+    final dragging = widget.dragging;
+
+    // Chapters are one video's: keyed by its id, so a list can never paint on
+    // the next video, and a new video starts with nothing hovered.
+    final videoId = ref.watch(playbackProvider.select((playback) => playback.item?.id));
+    final chapters = videoId == null ? null : ref.watch(videoInfoProvider(videoId).select((info) => info.value?.chapters));
+    ref.listen(playbackProvider.select((playback) => playback.item?.id), (_, _) {
+      _pointerX.value = null;
+      _growth.reset();
+    });
+
     return StreamBuilder<Duration>(
       stream: engine.positionStream,
       initialData: engine.position,
@@ -1101,10 +1185,20 @@ class _Scrubber extends StatelessWidget {
             // whatever it last saw, which claims the stream stopped buffering
             // when it did not. Drawing nothing says "not known"; leaving the
             // stale bar up says something false.
-            double bufferedMs = audioOnly ? 0.0 : (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+            double bufferedMs = widget.audioOnly ? 0.0 : (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
 
             double value = (dragging ?? positionMs).clamp(0.0, max);
             double? unplayableEndFraction;
+
+            // The same duration `max` is built from, so the segments and the
+            // thumb cannot disagree during a quality switch. A live stream has
+            // neither segments nor bubble: its bar is a moving window, not a
+            // timeline (§2.7).
+            final live = source != null && source.durationMs == null;
+            final timeline = live || durationMs <= 0
+                ? null
+                : ScrubberTimeline(duration: Duration(milliseconds: durationMs.round()), chapters: chapters ?? const []);
+            _timeline = timeline;
 
             if (source?.durationMs == null && source?.startTimestamp != null) {
               final start = DateTime.parse(source!.startTimestamp!).toLocal();
@@ -1130,9 +1224,9 @@ class _Scrubber extends StatelessWidget {
                 final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
                 // Convert back to relative
                 final relativeValue = clampedAbsolute - unplayableEndMs;
-                onDrag(relativeValue);
+                widget.onDrag(relativeValue);
               } else {
-                onDrag(absoluteValue);
+                widget.onDrag(absoluteValue);
               }
             }
 
@@ -1141,32 +1235,92 @@ class _Scrubber extends StatelessWidget {
                 final unplayableEndMs = max * unplayableEndFraction;
                 final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
                 final relativeValue = clampedAbsolute - unplayableEndMs;
-                onDragEnd(relativeValue);
+                widget.onDragEnd(relativeValue);
               } else {
-                onDragEnd(absoluteValue);
+                widget.onDragEnd(absoluteValue);
               }
             }
 
             final pad = SliderTheme.of(context).padding ?? const EdgeInsets.symmetric(horizontal: 12.0);
+            _padding = (pad / 1.5).resolve(Directionality.of(context));
 
-            return SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 4,
-                trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
-                padding: pad / 1.5,
-              ),
-              child: Slider(
-                value: value,
-                max: max,
-                secondaryTrackValue: bufferedMs.clamp(value, max),
-                onChanged: handleDrag,
-                onChangeEnd: handleDragEnd,
-              ),
+            // The whole bar is one segment when there are no chapters, so it
+            // grows on hover the same way.
+            final segments = timeline == null ? null : TrackSegments(timeline.segments, _growth.values);
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                MouseRegion(
+                  opaque: false,
+                  onHover: (event) => _onPointer(event.localPosition.dx),
+                  onExit: (_) => _onPointer(null),
+                  // Moves and releases reach a `Listener` during a drag, when
+                  // `onHover` does not.
+                  child: Listener(
+                    onPointerDown: (event) => _onPointer(event.localPosition.dx),
+                    onPointerMove: (event) => _onPointer(event.localPosition.dx),
+                    onPointerUp: _onPointerUp,
+                    onPointerCancel: (_) => _onPointer(null),
+                    child: ListenableBuilder(
+                      listenable: _growth,
+                      builder: (context, _) => SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: ScrubberMetrics.trackHeight,
+                          trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction, segments: segments),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          padding: pad / 1.5,
+                        ),
+                        child: Slider(
+                          value: value,
+                          max: max,
+                          secondaryTrackValue: bufferedMs.clamp(value, max),
+                          onChanged: handleDrag,
+                          onChangeEnd: handleDragEnd,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // In-tree rather than a `Tooltip`: nothing above the `Navigator`
+                // has an `Overlay` (§2.8), and a bubble that could not be drawn
+                // there would throw. Painted outside the box, so the `Stack`
+                // must not clip and the bubble must not be hit.
+                if (timeline != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: ValueListenableBuilder<double?>(
+                        valueListenable: _pointerX,
+                        builder: (context, pointerX, _) => _buildBubble(timeline, pointerX),
+                      ),
+                    ),
+                  ),
+              ],
             );
           },
+        );
+      },
+    );
+  }
+
+  /// The timestamp under the pointer — or under the thumb while it is held —
+  /// and the chapter it falls in. Follows the pointer, clamped inside the bar.
+  Widget _buildBubble(ScrubberTimeline timeline, double? pointerX) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final position = _shownPosition(timeline, pointerX, constraints.maxWidth);
+        if (position == null) return const SizedBox.shrink();
+        final track = scrubberTrackSpan(constraints.maxWidth, _padding);
+        final anchorX = trackXAt(position, trackLeft: track.left, trackWidth: track.width, duration: timeline.duration);
+        return CustomSingleChildLayout(
+          delegate: ScrubberBubbleLayout(anchorX: anchorX),
+          child: ScrubberBubble(
+            key: playerScrubberBubbleKey,
+            timestamp: formatClock(position),
+            title: timeline.chapterTitleAt(position),
+          ),
         );
       },
     );
@@ -1546,7 +1700,11 @@ String formatClock(Duration d) {
 
 class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
   final double? unplayableEndFraction;
-  const _RillSliderTrackShape({this.unplayableEndFraction});
+
+  /// One segment per chapter, or the whole bar as one; null draws the plain
+  /// track, which is what a live stream gets (§2.7).
+  final TrackSegments? segments;
+  const _RillSliderTrackShape({this.unplayableEndFraction, this.segments});
 
   @override
   void paint(
@@ -1599,6 +1757,20 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
         leftTrackPaint = inactivePaint;
         rightTrackPaint = activePaint;
         break;
+    }
+
+    if (segments != null) {
+      paintSegmentedTrack(
+        context.canvas,
+        trackRect: trackRect,
+        thumbX: thumbCenter.dx,
+        bufferX: secondaryOffset?.dx,
+        segments: segments!,
+        played: leftTrackPaint,
+        buffered: Paint()..color = sliderTheme.secondaryActiveTrackColor ?? sliderTheme.activeTrackColor!.withValues(alpha: 0.5),
+        remaining: rightTrackPaint,
+      );
+      return;
     }
 
     // Draw active track
