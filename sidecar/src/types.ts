@@ -293,6 +293,28 @@ export interface MusicTrack {
   coverUrl: string | null;
 }
 
+/**
+ * One of the uploader's chapters — on a music mix, one song's segment.
+ *
+ * The song credits ({@link MusicTrack}) carry no timestamps, so this is the
+ * only source of *when* a song starts. `parser/chapters.ts` has where they
+ * come from.
+ */
+export interface Chapter {
+  /** The uploader's label, verbatim — often "Artist – Song". Never empty. */
+  title: string;
+  /** Where the chapter starts. Ascending across the list, first near 0. */
+  startSeconds: number;
+  /**
+   * A still from the video at the chapter's start, or null.
+   *
+   * Low resolution (336x188 at best) and a frame of the video, not a cover —
+   * fit for a blurred backdrop and nothing sharper. Null for chapters that came
+   * from the description, which carries no image.
+   */
+  thumbnailUrl: string | null;
+}
+
 export interface VideoDetail {
   id: string;
   title: string;
@@ -366,6 +388,13 @@ export interface VideoDetail {
    * at once.
    */
   music: MusicTrack[];
+  /**
+   * The uploader's chapters, ascending — YouTube's own, else the description's
+   * timestamps. **Empty is the ordinary answer.** A music mix's chapters are
+   * its songs; anything else's are sections, and the client only reads them as
+   * songs for a video it has reason to think is music.
+   */
+  chapters: Chapter[];
   /**
    * Members-only content. Same badge and same rule as
    * {@link VideoItem.isMembersOnly}, read off the watch page.

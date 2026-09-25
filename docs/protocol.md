@@ -716,6 +716,7 @@ interface VideoDetail {
   isArtistChannel: boolean;
   badges: string[];
   music: MusicTrack[];                // empty is ordinary — most videos have none
+  chapters: Chapter[];                // ascending; empty is ordinary
   isMembersOnly: boolean;             // structural; the members slate reads this
   premiereAtMs: number | null;        // unix ms; null unless it is a premiere
   related: FeedItem[];                // the watch page's rail
@@ -755,6 +756,44 @@ against `"Daft Punk"` — and the structural one still wins.
 source is a bare `yt3.googleusercontent.com` URL that serves a small default;
 `=s1200` is the measured cap (`=s1800` returns the same 1200×1200). Same rule
 as §3.7's storyboards: the client constructs no URLs.
+
+**Only song cards are `music` — added 2026-09-25.** `videoAttributeViewModel` is
+YouTube's generic "attribute of this video" card, and a game is one too:
+`dHPQNc9oa_E` carries a card titled `"Portal 2"` whose subtitle is `"2011"`, and
+it used to ship as the song. A song is told from it by structure —
+`imageStyle` `…_SQUARE` (the game's is `…_PORTRAIT`), and a tap that opens the
+credits dialog rather than browsing to a channel — never by a label. It is a
+whitelist of the song's shape, measured on one game and ~40 songs, so an
+unfamiliar card is left out.
+
+**A compilation carries exactly 10 cards, and none has a time.** Measured
+2026-09-25 over ~45 pages: an 80s mix with 23 songs listed 10, under a header
+reading `"10 songs"`. So `music` cannot say *which song is playing now* — that is
+`chapters`.
+
+**`Chapter` — the uploader's own segmentation.** On a music mix each chapter is
+one song, so this is the only source of when a song starts.
+
+```ts
+interface Chapter {
+  title: string;                      // the uploader's label, often "Artist – Song"; never empty
+  startSeconds: number;               // ascending across the list, first near 0
+  thumbnailUrl: string | null;        // a frame of the video at the start; null from a description
+}
+```
+
+Two sources, in order. **YouTube's own** — the
+`engagement-panel-macro-markers-description-chapters` panel — has already parsed
+the description's timestamps under its own rules (a `0:00` start, at least three).
+**The description**, only when that is absent: leading or trailing `m:ss` /
+`h:mm:ss` per line, at least three, strictly ascending, the first within 30 s of
+the start; a stray out-of-order timestamp is skipped rather than believed. The
+`…-auto-chapters` panel is **not** read — those are machine summaries, and as a
+song title they would be confidently wrong.
+
+`thumbnailUrl` is a low-resolution video frame (336×188 at best), not a cover: fit
+for a blurred backdrop and nothing sharper. Whether a video's chapters are
+*songs* is the client's call, not this contract's — a lecture has chapters too.
 
 **`video.info` composes two responses.** `/next` carries the watch page but no
 duration — `lengthSeconds` is only on `/player` — so it fetches both. The

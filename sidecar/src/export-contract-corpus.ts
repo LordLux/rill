@@ -153,6 +153,14 @@ function sanitiseVideoDetail(detail: VideoDetail): VideoDetail {
       album: track.album === null ? null : `Sanitised Album ${index + 1}`,
       coverUrl: track.coverUrl === null ? null : `https://fake.url/cover${index + 1}.jpg`,
     })),
+    // A chapter's label is the uploader's free text, usually "Artist – Song".
+    // Indexed for the same reason the tracks are. `startSeconds` is a number,
+    // which the auditor does not walk, and identifies nothing.
+    chapters: detail.chapters.map((chapter, index) => ({
+      ...chapter,
+      title: `Sanitised Title ${index + 1}`,
+      thumbnailUrl: chapter.thumbnailUrl === null ? null : `https://fake.url/img${index + 1}.jpg`,
+    })),
     relatedContinuation: sanitiseContinuation(detail.relatedContinuation, 0),
     commentsContinuation: sanitiseContinuation(detail.commentsContinuation, 1),
   };

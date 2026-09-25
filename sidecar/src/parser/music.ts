@@ -15,11 +15,12 @@
  * cannot reach it by renderer name because `engagementPanels` is an array of
  * panels rather than a tile tree.
  *
- * **One fixture, one card.** `mix.json` is the only capture in the corpus that
- * carries this, and it carries exactly one. The shape is treated as a list
- * because `cards[]` is one and the header is templated ("1 song"), but nothing
- * here has been seen with two — see `architecture.md`'s note on fixtures being
- * one moment.
+ * **A list, capped at 10, with no timestamps.** Measured 2026-09-25 over ~45
+ * watch pages: single tracks carry one card, compilations carry exactly 10 —
+ * whatever the number of songs in them (an 80s mix with 23 chapters listed 10,
+ * under a header reading "10 songs"). A card has no time field of any kind, so
+ * *when* a song plays comes from the chapters (`parser/chapters.ts`), joined to
+ * these by the client.
  */
 import type { MusicTrack } from '../types.ts';
 import { get, isObject, str, walk } from './tree.ts';
@@ -63,7 +64,36 @@ function coverUrl(node: unknown): string | null {
 }
 
 /**
- * One card to one track, or null when it carries no title.
+ * `videoAttributeViewModel` is not a song. It is YouTube's generic "attribute of
+ * this video" card, and a game is one too — measured 2026-09-25 on
+ * `dHPQNc9oa_E` ("Portal 2"), where the card's title was the game, its subtitle
+ * the year ("2011"), and the audio-only view showed a game as the song.
+ *
+ * What tells the two apart is structure, not text (the labels are localised):
+ *
+ *  - a song is `VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE` — album art; the game was
+ *    `…_PORTRAIT`;
+ *  - a song's tap opens the song-credits dialog (`overflowMenuOnTap`); the game's
+ *    is an `onTap` browse to the game's channel;
+ *  - a song lives in a `horizontalCardListRenderer` under "Music"; the game in a
+ *    `videoAttributesSectionViewModel`.
+ *
+ * **One game and 40-odd songs were measured, so this is a whitelist of the
+ * song's shape rather than a blacklist of the game's.** An unfamiliar card is
+ * left out: a missing credit costs the video's own title, and a wrong one shows
+ * something that is not the song. The style decides when it is there; without it
+ * the credits dialog does.
+ */
+const SONG_IMAGE_STYLE = 'VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE';
+
+function isSongCard(view: Record<string, unknown>): boolean {
+  const style = str(view['imageStyle']);
+  if (style !== null) return style === SONG_IMAGE_STYLE;
+  return isObject(view['overflowMenuOnTap']);
+}
+
+/**
+ * One card to one track, or null when it carries no title or is not a song.
  *
  * Reads only the card's own structural fields. **The `Writers` credit is
  * deliberately not parsed**: it exists only inside the overflow menu's
@@ -75,6 +105,7 @@ function coverUrl(node: unknown): string | null {
  */
 function mapTrack(view: unknown): MusicTrack | null {
   if (!isObject(view)) return null;
+  if (!isSongCard(view)) return null;
   const title = text(get(view, 'title')) ?? str(get(view, 'title'));
   if (title === null || title === '') return null;
   return {

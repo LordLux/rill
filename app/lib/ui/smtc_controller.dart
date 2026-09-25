@@ -64,12 +64,13 @@ final smtcControllerProvider = Provider<void>((ref) {
   Duration? knownDuration;
   void pushMetadata() {
     final item = ref.read(playbackProvider).item;
+    final track = ref.read(nowPlayingTrackProvider);
     fms.FlutterMediaSessionPlatform.instance.updateMetadata(
       item == null
           ? const fms.MediaMetadata()
           : fms.MediaMetadata(
-              title: item.title,
-              artist: item.channelName,
+              title: track?.title ?? item.title,
+              artist: track?.artist ?? item.channelName,
               artworkUri: ref.read(nowPlayingArtProvider)?.url,
               duration: knownDuration,
             ),
@@ -90,6 +91,12 @@ final smtcControllerProvider = Provider<void>((ref) {
 
   ref.listen(nowPlayingArtProvider, (previous, next) {
     if (previous != next) pushMetadata();
+  });
+
+  // The song changes at a chapter boundary without the video changing, and the
+  // credits arrive after the stream does.
+  ref.listen(nowPlayingTrackProvider, (previous, next) {
+    if (previous?.title != next?.title || previous?.artist != next?.artist) pushMetadata();
   });
 
   ref.onDispose(() {
