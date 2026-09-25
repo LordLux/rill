@@ -11,20 +11,21 @@ import 'package:rill/ui/video_info.dart';
 
 import 'fake_engine.dart';
 
-VideoItem video(String id) => VideoItem(
+VideoItem video(String id, {String title = 'Video Title', bool isMusic = false}) => VideoItem(
       kind: 'video',
       id: id,
-      title: 'Video Title',
+      title: title,
       channelName: 'Video Channel',
       thumbnailUrl: 'https://i.ytimg.com/vi/$id/hq.jpg',
       isLive: false,
+      isMusic: isMusic,
       canWatchLater: true,
       canAddToQueue: true,
     );
 
-VideoDetail detailWithMusic(String id) => VideoDetail(
+VideoDetail detailWithMusic(String id, {String title = 'Video Title'}) => VideoDetail(
       id: id,
-      title: 'Video Title',
+      title: title,
       channelName: 'Video Channel',
       isLive: false,
       myRating: VideoRating.none,
@@ -85,7 +86,10 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         playbackEngineProvider.overrideWithValue(engine),
-        playbackProvider.overrideWith(() => FakePlaybackController(video('123'))),
+        // A music video, so the credit is believed with no word in common —
+        // this used to pass only because "Video Title" and "Music Title" share
+        // the word "title".
+        playbackProvider.overrideWith(() => FakePlaybackController(video('123', isMusic: true))),
         videoInfoProvider.overrideWith((ref, arg) async => detailWithMusic(arg)),
       ],
     );
@@ -119,6 +123,58 @@ void main() {
 
     expect(find.text('Video Title'), findsOneWidget);
     expect(find.text('Video Channel'), findsOneWidget);
+  });
+
+  testWidgets('a credit on a video that is not about it is not shown as the song', (tester) async {
+    // Background music under a walkthrough — and, before the structural filter in
+    // the sidecar, a game's own card.
+    final container = ProviderContainer(
+      overrides: [
+        playbackEngineProvider.overrideWithValue(engine),
+        playbackProvider.overrideWith(() => FakePlaybackController(video('123', title: 'Co-op walkthrough'))),
+        videoInfoProvider.overrideWith((ref, arg) async => detailWithMusic(arg, title: 'Co-op walkthrough')),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(wrap(container, const AudioModeView()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Co-op walkthrough'), findsOneWidget);
+    expect(find.text('Music Title'), findsNothing);
+  });
+
+  testWidgets('follows the chapters as the position moves', (tester) async {
+    final chapters = [
+      const Chapter(title: 'Artist One – Song One', startSeconds: 0),
+      const Chapter(title: 'Artist Two – Song Two', startSeconds: 200),
+      const Chapter(title: 'Artist Three – Song Three', startSeconds: 400),
+    ];
+    final container = ProviderContainer(
+      overrides: [
+        playbackEngineProvider.overrideWithValue(engine),
+        playbackProvider.overrideWith(() => FakePlaybackController(video('123', title: 'The Mix', isMusic: true))),
+        videoInfoProvider.overrideWith(
+          (ref, arg) async => detailWithoutMusic(arg).copyWith(chapters: chapters),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(wrap(container, const AudioModeView()));
+    await tester.pumpAndSettle();
+    expect(find.text('Song One'), findsOneWidget);
+    expect(find.text('Artist One'), findsOneWidget);
+
+    engine.emitPosition(const Duration(seconds: 250));
+    await tester.pumpAndSettle();
+    expect(find.text('Song Two'), findsOneWidget);
+    expect(find.text('Song One'), findsNothing);
+
+    // A seek back lands in the earlier chapter, not in a stale one.
+    engine.emitPosition(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+    expect(find.text('Song One'), findsOneWidget);
   });
 
   testWidgets('does not overflow at a narrow width', (tester) async {

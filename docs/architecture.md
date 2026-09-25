@@ -1645,6 +1645,55 @@ rotation, a crash's last line); measured 2026-09-17 on a scratch Release build,
 with pruning checked against seeded old files. `installErrorLogging` adds
 Flutter's and the zone's uncaught errors, with stacks, when there is a log.
 
+### 2.12 What is playing now — chapters, credits, and when to believe them (decided 2026-09-25)
+
+The audio-only layout and the media flyout show a song. The source for it is two
+independent things that each answer half the question, and neither is safe to
+read alone. `app/lib/domain/now_playing_track.dart` is the one resolver;
+`ui/now_playing_art.dart` feeds it, and nothing else reads `VideoDetail.music`.
+
+- **Credits** ("Music in this video") say *which recordings*, and carry the cover.
+  They have **no timestamps** and stop at **10 cards** however many songs the
+  video holds (measured 2026-09-25, ~45 pages; an 80s mix with 23 songs listed
+  10 under a header reading "10 songs"). They are also not only songs:
+  `videoAttributeViewModel` is a generic card, and a game is one (`dHPQNc9oa_E`,
+  "Portal 2") — told apart in the sidecar by structure (`protocol.md` §3.3).
+- **Chapters** say *when*. `Chapter[]` is the uploader's segmentation, which on
+  a music mix is one chapter per song. YouTube has already parsed the
+  description's timestamps into them, so the sidecar reads the
+  `…-description-chapters` panel first and parses the description itself only
+  when that is absent. The current chapter comes from `positionStream`,
+  distinct-mapped so widgets rebuild at a boundary and not per tick (hard
+  invariant 9).
+
+**Chapters are songs only for a video that is music *and* whose chapters are a
+tracklist.** A lecture's chapters are sections. So is a lyric video's
+"Intro / Verse / Chorus". Music is the tile's ♪, an artist-channel badge, a
+Topic channel, or any credit at all; a tracklist is nine or more chapters, or
+most of them written "Artist – Song", or most of them naming a credited song.
+
+**The chapter's text wins over the credit's.** A chapter is joined to a credit
+by words, only to borrow its cover and album — the credit can be another
+version of the song ("(Instrumental)") while the uploader wrote what they meant.
+Chapters past the tenth have no credit and no cover: the still stands in.
+
+**A lone credit is believed leniently.** Titles and credits legitimately
+disagree (the artist repeated, symbols, another language), so an overlap test
+would reject good credits. Any one signal passes — the video is music, or shares
+a *single* word with the credit's song or artist. What fails is a credit on a
+video that is not about it, which shows the video's own title. Several credits
+and no chapters is a guess, so it is left unguessed unless the video's title is
+about exactly one of them.
+
+**The chapter's frame is the backdrop, never the cover.** `Chapter.thumbnailUrl`
+is a 336×188 video frame. Under the blur that is fine and it changes with the
+song; as a sharp cover it would be a smear. The foreground cover stays a
+credit's or, failing that, the video's still (F40).
+
+Not built: a cover for the chapters that have no credit. The candidate is
+YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
+— they send what is being listened to to a party that is not YouTube.
+
 ---
 
 ## 3. Phasing

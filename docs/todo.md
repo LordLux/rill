@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 45.** A new item takes it, and the same edit bumps this line.
+**Next number: 46.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -349,6 +349,27 @@ app.
 ---
 
 ## Low priority
+
+### 45. Covers for the songs YouTube does not credit — try YouTube Music search
+
+**Deferred 2026-09-25, on purpose.** A music mix lists at most 10 credits, so
+the chapters past the tenth (and any video with chapters but no credits) show the
+video's still, not the song's cover (`architecture.md` §2.12). The idea, not yet
+tried: search YouTube Music for `"<artist> <song>"` from the chapter's text, as
+the `WEB_REMIX` client, take the first *Song* result and its square cover (same
+image host as the credits, `=s1200`), one request per uncovered chapter, cached
+per video.
+
+**Decide whether to build it after living with chapters for a while** — how
+good the result is without it decides whether it is worth a new client. If built:
+verify the response shape against a real capture (a reference implementation is a
+hypothesis here, `CLAUDE.md`), and reject a result whose title and artist do not
+match the chapter with the same word-overlap rule the credits use, so it cannot
+put a wrong cover on a right title. **Third-party cover APIs (iTunes, Deezer,
+MusicBrainz) are rejected**, not deferred.
+
+**Done means** a chapter with no credit shows a cover that is the right song's,
+or the still when nothing trustworthy came back.
 
 ### 36. Report the F28 race to media-kit, and drop the vendored copy when fixed
 

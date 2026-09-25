@@ -3,12 +3,10 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
 import '../playback_controller.dart';
 import '../hide_queue_controller.dart';
 import '../now_playing_art.dart';
-import '../video_info.dart';
 import '../widgets/queue_panel.dart';
 import '../pages/watch_layout.dart' show computeWatchGeometry;
 import '../../theme/screen_values.dart';
@@ -26,9 +24,10 @@ class AudioModeView extends ConsumerWidget {
     final hideQueue = ref.watch(hideQueueProvider);
     if (item == null) return const SizedBox.shrink();
 
-    final detail = ref.watch(videoInfoProvider(item.id)).value;
-
-    final music = detail?.music.firstOrNull;
+    // Title, artist and album come from one resolver, which decides which song
+    // is playing *now* (chapters), and whether a credit is believable at all —
+    // this used to be `music.firstOrNull`, trusted unconditionally.
+    final track = ref.watch(nowPlayingTrackProvider);
 
     // The same resolver the media flyout reads: the song's cover, else the
     // video's own still — never YouTube's stock no-art square, which the
@@ -40,17 +39,9 @@ class AudioModeView extends ConsumerWidget {
     // band between it and the title.
     final artAspect = (art?.isCover ?? false) ? 1.0 : 16 / 9;
 
-    // Fallback: title and channelName
-    final title = music?.title ?? detail?.title ?? item.title;
-    final artist =
-        music?.artist ??
-        detail?.channelName ??
-        item.maybeMap(
-          video: (v) => v.channelName,
-          playlist: (p) => p.channelName,
-          orElse: () => '',
-        );
-    final album = music?.album;
+    final title = track?.title ?? item.title;
+    final artist = track?.artist;
+    final album = track?.album;
 
     final tokens = Theme.of(context).tokens;
 

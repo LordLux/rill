@@ -7,6 +7,7 @@ import 'audio_mode_controller.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
 import 'player/audio_art_surface.dart';
+import 'now_playing_art.dart';
 import 'player/audio_backdrop.dart';
 import 'player/player_slates.dart';
 import 'player/controls.dart';
@@ -419,7 +420,7 @@ class _FullscreenPlayer extends ConsumerWidget {
                 engine.videoSurface(),
                 AudioArtOverlay(
                   show: ref.watch(audioModeProvider) || ref.watch(playbackProvider).isRestoringVideo,
-                  imageUrl: ref.watch(playbackProvider).source?.posterUrl ?? ref.watch(playbackProvider).item?.thumbnailUrl,
+                  imageUrl: ref.watch(nowPlayingBackdropProvider),
                 ),
                 PlayerControls(
                   engine: engine,

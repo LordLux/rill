@@ -24,6 +24,9 @@ function hasFixture(name: string): boolean {
   return existsSync(join(FIXTURES, `${name}.json`));
 }
 
+/** What every real song card carries, and the synthetic ones below must too: a bare card is not recognised as a song (`parser/music.ts`'s `isSongCard`). */
+const SONG = { imageStyle: 'VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE' };
+
 describe('music attribution', () => {
   test.skipIf(!hasFixture('mix'))('reads the song, artist and album off the card', () => {
     const tracks = parseMusicTracks(fixture('mix'));
@@ -64,8 +67,8 @@ describe('music attribution', () => {
   test('a card with no title is dropped rather than shipped blank', () => {
     const tracks = parseMusicTracks({
       cards: [
-        { videoAttributeViewModel: { subtitle: 'Nobody', secondarySubtitle: { content: 'Nothing' } } },
-        { videoAttributeViewModel: { title: 'Real Song', subtitle: 'Real Artist' } },
+        { videoAttributeViewModel: { ...SONG, subtitle: 'Nobody', secondarySubtitle: { content: 'Nothing' } } },
+        { videoAttributeViewModel: { ...SONG, title: 'Real Song', subtitle: 'Real Artist' } },
       ],
     });
 
@@ -81,6 +84,7 @@ describe('music attribution', () => {
       cards: [
         {
           videoAttributeViewModel: {
+            ...SONG,
             title: 'M11 re-arrange and re-mix',
             subtitle: 'Shiro SAGISU',
             image: { sources: [{ url: 'https://www.gstatic.com/youtube/img/watch/yt_music_channel.jpeg' }] },
@@ -88,6 +92,7 @@ describe('music attribution', () => {
         },
         {
           videoAttributeViewModel: {
+            ...SONG,
             title: 'Real Song',
             image: { sources: [{ url: 'https://yt3.googleusercontent.com/abc' }] },
           },
@@ -104,7 +109,7 @@ describe('music attribution', () => {
   test('an unrecognised card does not take the rest down (hard invariant 4)', () => {
     const tracks = parseMusicTracks({
       a: { videoAttributeViewModel: 'not an object' },
-      b: { videoAttributeViewModel: { title: 'Survivor' } },
+      b: { videoAttributeViewModel: { ...SONG, title: 'Survivor' } },
     });
 
     expect(tracks).toHaveLength(1);

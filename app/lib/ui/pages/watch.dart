@@ -19,6 +19,7 @@ import '../player_shell.dart' show currentRouteProvider, watchRouteName;
 import '../audio_mode_controller.dart';
 import '../auth_controller.dart';
 import '../playback_controller.dart';
+import '../now_playing_art.dart';
 import '../player/audio_backdrop.dart';
 import '../player/player_slates.dart';
 import '../player/controls.dart';
@@ -183,10 +184,10 @@ class _WatchPageState extends ConsumerState<WatchPage> {
           );
           final detail = info.value;
           final isAudioOnly = ref.watch(audioModeProvider);
+          final aspectValue = ref.watch(_aspectRatioProvider).value;
           final actualAspectRatio = isAudioOnly
               ? ScreenValues.normalAspectRatio
-              : (ref.watch(_aspectRatioProvider).value ??
-                    ScreenValues.normalAspectRatio);
+              : (aspectValue ?? ScreenValues.normalAspectRatio);
           final queueHasItems = ref.watch(
             queueProvider.select((q) => q.items.length > 1),
           );
@@ -559,6 +560,7 @@ class _PlayerSurface extends ConsumerWidget {
     bool isTopWatchPage,
     PlaybackEngine engine,
     ColorScheme scheme,
+    String? backdropUrl,
   ) {
     if (fullscreen) return const SizedBox.shrink();
 
@@ -577,10 +579,10 @@ class _PlayerSurface extends ConsumerWidget {
         // Held through the restore as well — see [AudioArtOverlay]
         AudioArtOverlay(
           show: isAudioOnly || playback.isRestoringVideo,
-          // Poster first: the tile's own thumbnail is whatever the surface
-          // that listed it shipped, which on the related rail is 480x360
-          // (F40). Null is ordinary, so the tile's is the fallback.
-          imageUrl: playback.source?.posterUrl ?? playback.item?.thumbnailUrl,
+          // The chapter's frame on a song mix, else the poster: the tile's own
+          // thumbnail is whatever the surface that listed it shipped, which on
+          // the related rail is 480x360 (F40). Null is ordinary.
+          imageUrl: backdropUrl,
         ),
 
         if (muxedOnly)
@@ -636,6 +638,9 @@ class _PlayerSurface extends ConsumerWidget {
             isTopWatchPage,
             engine,
             scheme,
+            // Watched only in audio-only: the chapter changes on a schedule, and
+            // nothing else on this surface should rebuild for it.
+            isAudioOnly || playback.isRestoringVideo ? ref.watch(nowPlayingBackdropProvider) : null,
           ),
 
           if (playback.isLoading)

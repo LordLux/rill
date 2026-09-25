@@ -111,7 +111,7 @@ class _AudioBackdropState extends State<AudioBackdrop>
   /// nothing on screen to show for it.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final visible = state == AppLifecycleState.resumed;
+    final visible = state != AppLifecycleState.hidden && state != AppLifecycleState.paused;
     if (visible && !_controller.isAnimating) {
       _controller.repeat(reverse: true);
     } else if (!visible && _controller.isAnimating) {
@@ -154,15 +154,25 @@ class _AudioBackdropState extends State<AudioBackdrop>
                         // slides around.
                         tileMode: TileMode.clamp,
                       ),
-                      child: AudioArtSurface(
-                        thumbnailUrl: url,
-                        scrim: false,
-                        // The downscale is most of the blur, and caps the
-                        // cost of a surface that stays up for a whole album.
-                        // Kept well above the sigma's own reach: at 128 the
-                        // upscale alone is ~12x at fullscreen, and blurring
-                        // *that* flattened the art to one colour.
-                        decodeWidth: 220,
+                      // Crossfaded, because the image now changes under a
+                      // running video: a song mix swaps it at every chapter.
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 700),
+                        layoutBuilder: (current, previous) => Stack(
+                          fit: StackFit.expand,
+                          children: [...previous, ?current],
+                        ),
+                        child: AudioArtSurface(
+                          key: ValueKey(url),
+                          thumbnailUrl: url,
+                          scrim: false,
+                          // The downscale is most of the blur, and caps the
+                          // cost of a surface that stays up for a whole album.
+                          // Kept well above the sigma's own reach: at 128 the
+                          // upscale alone is ~12x at fullscreen, and blurring
+                          // *that* flattened the art to one colour.
+                          decodeWidth: 220,
+                        ),
                       ),
                     ),
                   ),
