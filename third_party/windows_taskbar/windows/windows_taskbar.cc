@@ -126,12 +126,10 @@ bool WindowsTaskbar::SetThumbnailToolbar(
           result = taskbar_->ThumbBarUpdateButtons(
               window_, kMaxThumbButtonCount, thumb_buttons);
         }
-        if (SUCCEEDED(result)) {
-          // Freed the |image_list|.
-          result = ::ImageList_Destroy(image_list);
-          return SUCCEEDED(result);
         }
       }
+      ::ImageList_Destroy(image_list);
+      return SUCCEEDED(result);
     }
   }
   return false;
