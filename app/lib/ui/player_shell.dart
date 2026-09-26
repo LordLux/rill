@@ -3,14 +3,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/feed_item.dart';
 import '../theme/tokens.dart';
+import 'audio_mode_controller.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
+import 'player/audio_art_surface.dart';
+import 'now_playing_art.dart';
+import 'player/audio_backdrop.dart';
+import 'player/player_slates.dart';
 import 'player/controls.dart';
 import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
 import 'player/settings_menu.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
+import 'smtc_controller.dart';
+import 'taskbar_controller.dart';
 import 'widgets/topbar.dart';
 
 const String watchRouteName = 'watch';
@@ -284,6 +291,8 @@ class PlayerShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(smtcControllerProvider, (_, _) {});
+    ref.listen(taskbarControllerProvider, (_, _) {});
     final playback = ref.watch(playbackProvider);
     final onWatchPage = ref.watch(currentRouteProvider) == watchRouteName;
     final view = ref.watch(playerViewProvider);
@@ -315,6 +324,12 @@ class PlayerShell extends ConsumerWidget {
             // The only caption renderer (§2.9). It hides mpv's own on mount, so
             // nothing here has to keep `sub-visibility` in step with a toggle.
             //
+            // **Not mounted in audio-only.** It renders through libass in
+            // Flutter rather than through mpv, so `vid=no` does not suppress
+            // it: with captions left on, it kept drawing them over the artwork
+            // while `controls.dart` hid the CC button that would have turned
+            // them off.
+            //
             // **Clipped below the page's own TopBar when not fullscreen.** The
             // caption paints last in this Stack — above everything, including
             // `page_wrapper.dart`'s `Scaffold(appBar: TopBar(...))` — and
@@ -342,6 +357,7 @@ class PlayerShell extends ConsumerWidget {
             // child's, while handing the child its own unconstrained (0..∞)
             // constraints — restoring exactly the free sizing `LayerLinkFollower`
             // had before this clip existed, with the clip still applied.
+            if (!ref.watch(audioModeProvider))
             Positioned.fill(
               child: ClipRect(
                 clipper: _BelowTopBarClipper(
@@ -398,8 +414,18 @@ class _FullscreenPlayer extends ConsumerWidget {
             builder: (context) => Stack(
               fit: StackFit.expand,
               children: [
+                // With `vid=no` the texture decodes nothing, so without the
+                // overlay this is a black screen. It stays mounted underneath
+                // so the artwork can crossfade over it rather than replace it.
                 engine.videoSurface(),
-                PlayerControls(engine: engine),
+                AudioArtOverlay(
+                  show: ref.watch(audioModeProvider) || ref.watch(playbackProvider).isRestoringVideo,
+                  imageUrl: ref.watch(nowPlayingBackdropProvider),
+                ),
+                PlayerControls(
+                  engine: engine,
+                  child: const PlayerSlates(showQueue: true, injectMaterial: true),
+                ),
               ],
             ),
           ),
@@ -441,7 +467,9 @@ class MiniPlayer extends ConsumerWidget {
                     height: 54,
                     child: ColoredBox(
                       color: theme.tokens.scrim,
-                      child: engine.videoSurface(),
+                      child: ref.watch(audioModeProvider)
+                          ? AudioArtSurface(thumbnailUrl: item.thumbnailUrl, scrim: false, iconSize: 24)
+                          : engine.videoSurface(),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -474,7 +502,9 @@ class MiniPlayer extends ConsumerWidget {
                         (snapshot.data ?? false) ? Icons.pause : Icons.play_arrow,
                         color: scheme.onSurface,
                       ),
-                      onPressed: () => ref.read(playbackProvider.notifier).togglePlayPause(),
+                      // Nothing to play in a premiere, a members-only video or a
+                      // failure — the controller would ignore the press anyway.
+                      onPressed: playback.isUnplayable ? null : () => ref.read(playbackProvider.notifier).togglePlayPause(),
                     ),
                   ),
                   IconButton(

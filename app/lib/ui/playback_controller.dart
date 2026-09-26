@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/widgets.dart';
 import 'package:meta/meta.dart';
 
 import '../data/playback/engine.dart';
 import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
 import '../domain/playback_source.dart';
+import 'audio_mode_controller.dart';
 import 'queue_controller.dart';
 
 /// The engine, as a provider so tests can put a fake in its place.
@@ -61,6 +63,7 @@ class PlaybackState {
     this.sessionId,
     this.isLoading = false,
     this.isSwitchingQuality = false,
+    this.isRestoringVideo = false,
     this.hold,
     this.error,
     this.errorCode,
@@ -84,6 +87,22 @@ class PlaybackState {
   /// A quality change in flight. Distinct from [isLoading] because it must not
   /// draw the "opening a video" spinner over a video that is already playing.
   final bool isSwitchingQuality;
+
+  /// Leaving audio-only, with no picture yet.
+  ///
+  /// **`vid=no` is not a pause, it is a teardown.** Measured 2026-09-22: it
+  /// drops the demuxer cache to zero (36 MB and ~30 minutes of read-ahead, to
+  /// `total-bytes: 0`) and stops reading the video stream entirely. Coming back
+  /// is therefore a cold refetch and re-decode, not a resume — observed between
+  /// half a second and ten. Until this shipped the surface just sat black for
+  /// that whole time, which reads as a broken video rather than as a wait.
+  ///
+  /// Distinct from [isSwitchingQuality]: that one holds an opaque cover over
+  /// the surface, which here would replace the artwork the viewer is already
+  /// looking at with a black rectangle. This only raises the spinner, and only
+  /// once the spinner's own grace delay has passed, so the fast case shows
+  /// nothing at all.
+  final bool isRestoringVideo;
 
   /// Where the video is while the engine cannot say — see [PlaybackHold].
   ///
@@ -119,6 +138,16 @@ class PlaybackState {
   bool get hasVideo => source?.best != null;
   bool get canRetry => error != null && errorRetry != RpcRetryMode.no;
 
+  /// Nothing is open, and nothing can be: a premiere, a members-only video, a
+  /// rate limit, or a plain failure.
+  ///
+  /// The engine was stopped by `_failOpen`, so there is no position to scrub and
+  /// nothing to play or pause. The on-screen controls that would say otherwise
+  /// are disabled, and [PlaybackController] refuses the same requests from the
+  /// keyboard, the taskbar and the media keys — one rule, so they cannot
+  /// disagree about whether a press does anything.
+  bool get isUnplayable => error != null;
+
   /// A premiere: the video is fine, it has not started.
   ///
   /// Not an error state the user can act on by retrying — `retry` is `no` — so
@@ -150,6 +179,7 @@ class PlaybackState {
     Object? sessionId = _unchanged,
     bool? isLoading,
     bool? isSwitchingQuality,
+    bool? isRestoringVideo,
     Object? hold = _unchanged,
     Object? error = _unchanged,
     Object? errorCode = _unchanged,
@@ -166,6 +196,7 @@ class PlaybackState {
       sessionId: identical(sessionId, _unchanged) ? this.sessionId : sessionId as String?,
       isLoading: isLoading ?? this.isLoading,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
+      isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
       // *cleared* when the switch finishes, and `??` cannot clear anything.
       hold: identical(hold, _unchanged) ? this.hold : hold as PlaybackHold?,
@@ -218,6 +249,12 @@ class PlaybackController extends Notifier<PlaybackState> {
   PlaybackEngine get _engine => ref.read(playbackEngineProvider);
 
   int _generation = 0;
+
+  /// Bumped by every audio-only toggle, so a restore that is still waiting for
+  /// a picture can tell it has been superseded. Separate from [_generation],
+  /// which tracks the *media* — toggling the mode does not open anything.
+  int _audioModeToggle = 0;
+
   Timer? _reportTimer;
   final List<StreamSubscription<Object?>> _subscriptions = [];
   String? _preloadedVideoId;
@@ -233,6 +270,30 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// The volume to come back to when unmuting. Null until something is muted.
   double? _volumeBeforeMute;
+
+  /// The grace period before deciding a stream that is allegedly playing at 0:00
+  /// is actually dead and needs a reopen.
+  ///
+  /// Mutable only so tests do not have to sleep 5 seconds.
+  @visibleForTesting
+  static Duration stallGrace = const Duration(seconds: 5);
+
+  Timer? _stallWatchdogTimer;
+
+  /// How long playback may claim to be playing without moving, after leaving
+  /// audio-only, before it is treated as stuck rather than slow.
+  ///
+  /// Above the restores §2.4 measured (2.9-8.0 s) with room to spare, because
+  /// the recovery drops the video cache again: firing on a restore that was
+  /// merely slow would make it slower. Mutable only for tests.
+  @visibleForTesting
+  static Duration restoreStallGrace = const Duration(seconds: 15);
+
+  /// How often the restore watchdog samples. Mutable only for tests.
+  @visibleForTesting
+  static Duration restoreStallTick = const Duration(seconds: 1);
+
+  Timer? _restoreWatchdog;
 
   @visibleForTesting
   int? get preferredHeight => _preferredHeight;
@@ -254,14 +315,30 @@ class PlaybackController extends Notifier<PlaybackState> {
       engine.completedStream.listen((completed) {
         if (completed) unawaited(_onCompleted());
       }),
+      engine.positionStream.listen((position) {
+        if (position > Duration.zero) {
+          _stallWatchdogTimer?.cancel();
+          _stallWatchdogTimer = null;
+        }
+      }),
       // A state change is half of what §3.5 means by cadence. Filtered, because
       // media_kit emits `playing` again on things that are not transitions.
       engine.playingStream.listen((playing) {
+        if (!playing) {
+          _stallWatchdogTimer?.cancel();
+          _stallWatchdogTimer = null;
+        }
         if (_lastReportedPlaying == playing) return;
         _lastReportedPlaying = playing;
         unawaited(_report(playing ? 'playing' : 'paused'));
       }),
     ]);
+
+    ref.listen(audioModeProvider, (previous, next) {
+      if (previous != next && state.source != null && state.variant != null) {
+        unawaited(_applyAudioMode(next));
+      }
+    });
 
     // One place decides what plays. Every caller moves the queue's cursor.
     //
@@ -289,6 +366,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     ref.onDispose(() {
       _disposed = true;
       _reportTimer?.cancel();
+      _stallWatchdogTimer?.cancel();
+      _restoreWatchdog?.cancel();
       for (final subscription in _subscriptions) {
         unawaited(subscription.cancel());
       }
@@ -304,6 +383,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// slower one must not open its video over the newer one's.
   Future<void> open(VideoItem item) async {
     final generation = ++_generation;
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = null;
     // A pending resume belongs to one video. Dropped the moment a different one
     // opens — otherwise an open superseded before it resolved (a quick tap on
     // something else during an undo) returns at its generation check without
@@ -319,6 +400,13 @@ class PlaybackController extends Notifier<PlaybackState> {
       sessionId: null,
       isLoading: true,
       isSwitchingQuality: false,
+      // **A restore belongs to the media it started on.** Without this, a
+      // restore still waiting when a different video opens keeps the flag up
+      // until its own 30 s timeout — and its `finally` will not clear it,
+      // because by then the generation has moved and clearing would stamp on
+      // the new media's state. The artwork then sits over a video whose
+      // audio-only switch is off, which is what it looked like from outside.
+      isRestoringVideo: false,
       hold: null,
       error: null,
       errorCode: null,
@@ -349,9 +437,24 @@ class PlaybackController extends Notifier<PlaybackState> {
         await _failOpen('No playable stream for this video.', RpcRetryMode.user);
         return;
       }
-
+      
+      // **Set before the open, so the engine loads the right way round** — with
+      // audio attached at load and video never read, rather than loading video
+      // and dropping it afterwards (see `MediaKitEngine.open`).
+      final audioOnlyAtOpen = ref.read(audioModeProvider);
+      await _engine.setVideoTrack(!audioOnlyAtOpen);
       await _engine.open(variant, isLive: source.durationMs == null);
       if (generation != _generation || _disposed) return;
+
+      // Re-read after the await: the user may have toggled audio-only while the
+      // engine was loading, and the listener is guarded out (state.source is
+      // still null), so only a fresh read picks up the current intent. Both
+      // directions — this used to reconcile only *into* audio-only, so a toggle
+      // out of it mid-open left the video off.
+      final audioOnlyNow = ref.read(audioModeProvider);
+      if (audioOnlyNow != audioOnlyAtOpen) {
+        await _engine.setVideoTrack(!audioOnlyNow);
+      }
 
       state = state.copyWith(
         source: source,
@@ -372,6 +475,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       unawaited(_report('playing'));
       _reportTimer?.cancel();
       _reportTimer = Timer.periodic(reportInterval, (_) => unawaited(_report(null)));
+
+      _armStallWatchdog(generation, variant);
     } on RpcException catch (e) {
       if (generation != _generation || _disposed) return;
       await _failOpen(e.message, e.retry, code: e.code);
@@ -380,6 +485,45 @@ class PlaybackController extends Notifier<PlaybackState> {
       // Not an envelope — a bug on this side. `user` is the honest reading:
       // nothing will fix itself, but letting the user try again costs nothing.
       await _failOpen(e.toString(), RpcRetryMode.user);
+    }
+  }
+
+  void _armStallWatchdog(int generation, PlaybackVariant variant) {
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = Timer(stallGrace, () {
+      if (_disposed || generation != _generation) return;
+      if (_engine.position > Duration.zero || !_engine.playing || state.error != null || state.isUpcoming) return;
+
+      stderr.writeln('rill: stream never started after ${stallGrace.inMilliseconds}ms, reopening');
+      unawaited(_reopenStalled(generation, variant));
+    });
+  }
+
+  Future<void> _reopenStalled(int generation, PlaybackVariant variant) async {
+    try {
+      await _engine.open(
+        variant,
+        play: true,
+        retainSubtitle: true,
+        isLive: state.source?.durationMs == null,
+      );
+      if (_disposed || generation != _generation) return;
+
+      _stallWatchdogTimer = Timer(stallGrace, () {
+        if (_disposed || generation != _generation) return;
+        if (_engine.position > Duration.zero || !_engine.playing || state.error != null || state.isUpcoming) return;
+
+        stderr.writeln('rill: reopen did not start either — giving up');
+        unawaited(_failOpen('Stream stalled and would not play.', RpcRetryMode.user));
+      });
+    } on Object catch (e) {
+      if (_disposed || generation != _generation) return;
+      // The detail goes to stderr, not to the screen. An engine failure can
+      // quote what it was opening, and what it was opening is a signed URL —
+      // the one thing `redact.ts` exists to keep out of a message someone
+      // might screenshot.
+      stderr.writeln('rill: stalled-stream reopen threw: $e');
+      unawaited(_failOpen('Stream stalled and would not play.', RpcRetryMode.user));
     }
   }
 
@@ -543,7 +687,12 @@ class PlaybackController extends Notifier<PlaybackState> {
   @visibleForTesting
   Future<void> reportNow() => _report(null);
 
-  Future<void> togglePlayPause() => _engine.playOrPause();
+  /// **The transport methods below do nothing while [PlaybackState.isUnplayable]**:
+  /// the engine is stopped, and a press that reached it would be a seek or a play
+  /// on no media. The controls are disabled to match; this is what keeps the
+  /// keyboard, the taskbar and the media keys — which have no disabled look to
+  /// show — from acting on a video that is not there.
+  Future<void> togglePlayPause() => state.isUnplayable ? Future<void>.value() : _engine.playOrPause();
 
   /// Seek, and move the hold with it if one is up.
   ///
@@ -553,6 +702,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// it the scrubber would spring back to the held value the instant the user
   /// let go, which is worse than the snap-to-zero the hold exists to prevent.
   Future<void> seek(Duration to) {
+    if (state.isUnplayable) return Future<void>.value();
     final held = state.hold;
     if (held != null) state = state.copyWith(hold: held.at(to));
     return _engine.seek(to);
@@ -566,7 +716,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// flag the first has not finished updating, so the pair can land as two
   /// toggles in the same direction and the "undo" pauses a video the click
   /// already paused. Restoring a recorded value has no such race.
-  Future<void> setPlaying(bool value) => value ? _engine.play() : _engine.pause();
+  Future<void> setPlaying(bool value) {
+    if (state.isUnplayable) return Future<void>.value();
+    return value ? _engine.play() : _engine.pause();
+  }
 
   /// A relative seek, clamped. The ← → J L keys.
   ///
@@ -593,7 +746,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// The `,` and `.` keys. One frame, from the decoder rather than from
   /// arithmetic — see [PlaybackEngine.stepFrame].
-  Future<void> stepFrame(int direction) => _engine.stepFrame(direction);
+  Future<void> stepFrame(int direction) => state.isUnplayable ? Future<void>.value() : _engine.stepFrame(direction);
 
   /// The 0–9 keys: jump to that decile of the video.
   Future<void> seekToFraction(double fraction) {
@@ -638,14 +791,16 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// **`isSwitchingQuality` stays true until the picture is back**, not until
   /// the calls are issued: F19 measured those at 306–743 ms against a median
   /// 4.1 s. It is what holds the black cover over the surface.
-  Future<void> switchQuality(PlaybackVariant variant) async {
-    if (state.variant == variant) return;
+  Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false}) async {
+    if (!force && state.variant == variant) return;
     // **Incremented, not merely read.** Two picks in quick succession — 1080 then
     // 720 — otherwise captured the *same* generation, so neither guard fired and
     // both ran `engine.open` against the same player, racing over which stream
     // won and both clearing the cover on the way out. Claiming a generation makes
     // the newer pick supersede the older one, exactly as it does in `open`.
     final generation = ++_generation;
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = null;
     final engine = _engine;
 
     _preferredHeight = variant.height;
@@ -656,7 +811,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
     state = state.copyWith(
       variant: variant,
-      isSwitchingQuality: true,
+      isSwitchingQuality: !hideCover,
       // Set *before* the reopen, not after: `engine.open` resets the position
       // **and the duration** to zero on its way in, and anything watching would
       // paint both.
@@ -706,6 +861,161 @@ class PlaybackController extends Notifier<PlaybackState> {
     } finally {
       if (!_disposed && generation == _generation) {
         state = state.copyWith(isSwitchingQuality: false, hold: null);
+      }
+    }
+  }
+
+  /// Turn the video track off or on for audio-only, without reopening.
+  ///
+  /// Toggling `vid` keeps the position and the audio stream undisturbed, which
+  /// is why §2.4 chose it over reopening the media. **The two directions are
+  /// not symmetric, though, and §2.4 used to claim they were.** Dropping the
+  /// track is immediate. Restoring it is a cold refetch — see
+  /// [PlaybackState.isRestoringVideo] — so it gets a spinner and the other
+  /// direction does not.
+  Future<void> _applyAudioMode(bool audioOnly) async {
+    final token = ++_audioModeToggle;
+    final generation = _generation;
+
+    if (audioOnly) {
+      // Nothing to wait for, and nothing to look at either: the artwork is
+      // already over the surface. Also clears a restore this toggle overtook,
+      // so a fast off-on-off cannot leave the spinner up.
+      if (state.isRestoringVideo) state = state.copyWith(isRestoringVideo: false);
+      _restoreWatchdog?.cancel();
+      _restoreWatchdog = null;
+      await _engine.setVideoTrack(false);
+      return;
+    }
+
+    state = state.copyWith(isRestoringVideo: true);
+    final started = DateTime.now();
+    try {
+      await _engine.setVideoTrack(true);
+      _armRestoreWatchdog(token, generation);
+      await _waitForVideoTrack(token);
+      // The same number `switchQuality` reports, for the same reason: what the
+      // *viewer* waited for, from the app rather than a stopwatch held against
+      // the screen. It is also the only way to tell a spinner that correctly
+      // stayed hidden from one that is broken.
+      if (token == _audioModeToggle) {
+        stderr.writeln(
+          'rill: audio-only -> video, picture back in '
+          '${DateTime.now().difference(started).inMilliseconds} ms',
+        );
+      }
+    } finally {
+      // Not if a newer toggle owns the flag — it is responsible for clearing
+      // its own, and this one must not clear it out from under it.
+      if (!_disposed && generation == _generation && token == _audioModeToggle) {
+        state = state.copyWith(isRestoringVideo: false);
+      }
+    }
+  }
+
+  /// Wait until mpv has a picture again.
+  ///
+  /// **Keyed on `vo-configured`, and nothing else works.** The first version of
+  /// this waited on `widthStream` and returned instantly every time, because
+  /// media_kit's cached width survives `vid=no` untouched — measured
+  /// 2026-09-23, along with the `VideoController`'s `rect`, which is stale for
+  /// the same reason, and mpv's own `width`, which comes back the instant the
+  /// track is re-enabled and so is 5 seconds early. `vo-configured` is `no` for
+  /// the whole audio-only phase and flips when the picture is actually there.
+  Future<void> _waitForVideoTrack(int token) async {
+    if (_engine.videoOutputReady) return;
+    try {
+      await _engine.videoOutputStream
+          .firstWhere((ready) => ready || _disposed || token != _audioModeToggle)
+          .timeout(const Duration(seconds: 30));
+    } on Object {
+      // Bounded on purpose: a spinner that never comes down is worse than one
+      // that gives up on a picture that was never coming.
+      stderr.writeln('rill: no picture after leaving audio-only — clearing the spinner');
+    }
+  }
+
+  /// Watch a restore from audio-only for the state it can occasionally wedge
+  /// in: the player says it is playing, nothing is loading, and the position
+  /// does not move — no picture, no sound, and play/pause does nothing.
+  /// Observed rarely, never caught live, cause unknown; `docs/todo.md` 44.
+  ///
+  /// Sampled rather than event-driven because the symptom *is* the absence of
+  /// events. Reads only the engine's cached values (hard invariant 9). The
+  /// clock runs only while the player says it is playing, so a pause is never
+  /// mistaken for a stall.
+  ///
+  /// Done once the picture is back *and* the position has moved forward by
+  /// about a tick — both, because either one alone has been seen without the
+  /// other: sound over no picture, and a picture that never moved.
+  void _armRestoreWatchdog(int token, int generation, {int attempt = 0}) {
+    _restoreWatchdog?.cancel();
+    var last = _engine.position;
+    var stalled = Duration.zero;
+    _restoreWatchdog = Timer.periodic(restoreStallTick, (timer) {
+      if (_disposed || generation != _generation || token != _audioModeToggle) {
+        timer.cancel();
+        return;
+      }
+      final now = _engine.position;
+      final moved = now - last;
+      last = now;
+      // Forward by roughly one tick is playback; a seek jumps further, or back.
+      final playing = moved > Duration.zero && moved < restoreStallTick * 3;
+      if (playing && _engine.videoOutputReady) {
+        timer.cancel();
+        _restoreWatchdog = null;
+        return;
+      }
+      if (playing ||
+          !_engine.playing ||
+          state.isLoading ||
+          state.isSwitchingQuality ||
+          state.error != null) {
+        stalled = Duration.zero;
+        return;
+      }
+      stalled += restoreStallTick;
+      if (stalled < restoreStallGrace) return;
+      timer.cancel();
+      _restoreWatchdog = null;
+      unawaited(_recoverStuckRestore(token, generation, attempt, now));
+    });
+  }
+
+  /// First what fixes it by hand — back to audio-only and out again, which
+  /// resumes it at once — then, if that wedges too, a reopen of the same
+  /// variant at the same position through the quality-switch path. Nothing
+  /// after that: a reopen that still does not play is not this bug.
+  Future<void> _recoverStuckRestore(
+    int token,
+    int generation,
+    int attempt,
+    Duration at,
+  ) async {
+    // Everything the engine can say without a blocking read, so a log from a
+    // user who hit this tells us which half of the pipeline stopped.
+    stderr.writeln(
+      'rill: stuck after leaving audio-only at ${at.inMilliseconds} ms '
+      '(picture ${_engine.videoOutputReady}, buffering ${_engine.buffering}, '
+      'buffer ${_engine.buffer.inMilliseconds} ms) — '
+      '${attempt == 0 ? 'toggling the video track off and on' : 'reopening'}',
+    );
+    if (attempt > 0) {
+      final variant = state.variant;
+      if (variant != null) await switchQuality(variant, force: true);
+      return;
+    }
+    state = state.copyWith(isRestoringVideo: true);
+    try {
+      await _engine.setVideoTrack(false);
+      if (_disposed || generation != _generation || token != _audioModeToggle) return;
+      await _engine.setVideoTrack(true);
+      _armRestoreWatchdog(token, generation, attempt: attempt + 1);
+      await _waitForVideoTrack(token);
+    } finally {
+      if (!_disposed && generation == _generation && token == _audioModeToggle) {
+        state = state.copyWith(isRestoringVideo: false);
       }
     }
   }

@@ -64,6 +64,26 @@ abstract class PlaybackEngine {
   Duration get duration;
   bool get playing;
 
+  /// Whether mpv has a **configured video output** — that is, whether there is
+  /// actually a picture.
+  ///
+  /// The signal for "video is back after audio-only", and the only one that
+  /// works. Measured 2026-09-23 across a `vid=no` -> `vid=auto` toggle on a
+  /// 96-minute 1080p video: media_kit's cached [width] and the
+  /// `VideoController`'s `rect` both keep their old values straight through
+  /// audio-only and never clear, and mpv's own `width` comes back the instant
+  /// the track is re-enabled — 5 seconds before anything is on screen.
+  /// `vo-configured` is `no` for the whole audio-only phase and flips to `yes`
+  /// exactly when the picture returns.
+  ///
+  /// Observed rather than polled, so hard invariant 9 holds: mpv delivers the
+  /// change on its own event thread and nothing reads a property from the UI
+  /// isolate.
+  Stream<bool> get videoOutputStream;
+
+  /// The latest value of [videoOutputStream].
+  bool get videoOutputReady;
+
   /// Whether mpv is waiting rather than presenting — see [bufferingStream].
   bool get buffering;
   Duration get buffer;
@@ -121,6 +141,20 @@ abstract class PlaybackEngine {
   /// rectangle, the hover cursor and the drag ghost, and the ghost is only ever
   /// on screen while the real caption is being dragged.
   Stream<String?> get subtitleTextStream;
+
+  /// Enable or disable mpv's video track without reopening the media.
+  ///
+  /// **This is what makes Audio-Only → Video instant.** The old approach opened
+  /// the audio URL as the primary media in audio-only mode, which meant
+  /// switching back to video required a full `engine.open` — a cold reopen
+  /// costing 6+ seconds (seek, duration wait, picture wait). Toggling `vid`
+  /// instead keeps the demuxer, the cache and the position intact; mpv simply
+  /// stops or starts decoding video frames.
+  ///
+  /// `vid=auto` re-enables; `vid=no` disables. Both are mpv properties that
+  /// the shipped v0.36.0-403 build supports (F12/F15 confirmed `vid` in the
+  /// string table).
+  Future<void> setVideoTrack(bool enabled);
 
   /// [retainSubtitle] puts the attached track back after the media reopens.
   ///
@@ -214,6 +248,7 @@ class MediaKitEngine implements PlaybackEngine {
     // difference between 0/4 and 4/4 seeks on any FFmpeg from Lavf 62.10.101
     // onward, so a future pin bump is a non-event instead of a silent freeze.
     unawaited(_setStreamOptions());
+    unawaited(_observeVideoOutput());
 
     _subscriptions.addAll([
       _player.stream.position.listen((value) => _position = value),
@@ -242,6 +277,8 @@ class MediaKitEngine implements PlaybackEngine {
   int? _width;
   int? _height;
   double _volume = 100;
+  bool _videoOutputReady = false;
+  final StreamController<bool> _videoOutput = StreamController<bool>.broadcast();
 
   /// The controller, which outlives every route. Prefer [videoSurface].
   VideoController get videoController => _video;
@@ -297,6 +334,28 @@ class MediaKitEngine implements PlaybackEngine {
     );
   }
 
+  /// Register the `vo-configured` observer, once, for the engine's lifetime.
+  ///
+  /// Once: media_kit throws `Already observed` on a second registration for the
+  /// same property, so this cannot be done per toggle. mpv reports the value as
+  /// the strings `yes` and `no`.
+  ///
+  /// Failure is logged and swallowed. A missing observer costs a spinner that
+  /// never appears, which is the old behaviour — not a player that will not
+  /// start.
+  Future<void> _observeVideoOutput() async {
+    try {
+      await (_player.platform as NativePlayer).observeProperty('vo-configured', (value) async {
+        final ready = value == 'yes';
+        if (ready == _videoOutputReady) return;
+        _videoOutputReady = ready;
+        if (!_videoOutput.isClosed) _videoOutput.add(ready);
+      });
+    } on Object catch (e) {
+      stderr.writeln('rill: could not observe vo-configured ($e) — no picture signal');
+    }
+  }
+
   Future<void> _setStreamOptions() async {
     // `RILL_STREAM_LAVF_O` replaces the value for one run. Measurement only —
     // it exists so ffmpeg's `reconnect*` options can be tested **one at a time**
@@ -325,6 +384,12 @@ class MediaKitEngine implements PlaybackEngine {
   Stream<bool> get playingStream => _player.stream.playing;
   @override
   Stream<bool> get bufferingStream => _player.stream.buffering;
+
+  @override
+  Stream<bool> get videoOutputStream => _videoOutput.stream;
+
+  @override
+  bool get videoOutputReady => _videoOutputReady;
   @override
   Stream<Duration> get bufferStream => _player.stream.buffer;
   @override
@@ -438,6 +503,35 @@ class MediaKitEngine implements PlaybackEngine {
     _width = null;
     _height = null;
 
+    // **A file must have a selected stream at load, or it never loads.** The
+    // video URL is video-only, so with `vid=no` and the audio not yet attached
+    // nothing is selected: mpv skips the file, no duration ever arrives, and the
+    // wait below runs out its 20 s — which is what the "stuck at 0:00" audio-only
+    // stall was (`architecture.md` §2.4, `9299ed3`).
+    //
+    // `9299ed3` fixed that by forcing video on for every open, which works but
+    // means every audio-only track fetched and decoded video only to drop it a
+    // moment later. Instead, when video is off and there is a separate audio
+    // stream, the audio is attached **at load** through `audio-files`, so the
+    // file has a selected stream from the start and the video is never read.
+    //
+    // **Through `change-list`, never `setProperty('audio-files', …)`.** It is a
+    // path list, and a property write parses the value: an empty string does not
+    // clear it but sets a list of one empty path, which mpv then tries to open —
+    // measured 2026-09-24, every video-mode open failed with `Cannot open file
+    // '': Invalid argument`. A URL containing `;` would be split in two the same
+    // way. `clr` empties it and `append` adds one element unparsed.
+    //
+    // Cleared on every open, never left: it is an option, not per-file state, so
+    // a previous audio-only open's track would otherwise load into this one as a
+    // second audio stream.
+    final audioUrl = variant.audioUrl;
+    final native = _player.platform as NativePlayer;
+    final audioAtLoad = !_videoTrackEnabled && audioUrl != null;
+    await native.command(['change-list', 'audio-files', 'clr', '']);
+    if (audioAtLoad) await native.command(['change-list', 'audio-files', 'append', audioUrl]);
+    await native.setProperty('vid', audioAtLoad ? 'no' : 'auto');
+
     await _player.open(Media(variant.videoUrl), play: play);
 
     if (_player.state.duration <= Duration.zero) {
@@ -467,18 +561,45 @@ class MediaKitEngine implements PlaybackEngine {
       await _player.seek(_player.state.duration);
     }
 
-    final audioUrl = variant.audioUrl;
-    if (audioUrl == null) {
-      if (retained != null) await setSubtitle(retained);
-      return;
+    if (audioUrl != null && !audioAtLoad) {
+      await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
     }
 
-    await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+    // Back to what was asked for. Only a muxed variant — no separate audio to
+    // attach at load — gets here with `vid=auto` while the app wants it off.
+    if (!_videoTrackEnabled && !audioAtLoad) {
+      await native.setProperty('vid', 'no');
+    }
+
     // After the audio, not before: both go through `sub-add`/`audio-add` against
     // a freshly loaded file, and attaching a subtitle to a file whose duration is
     // not known yet is the same race the audio wait above exists for.
     if (retained != null) await setSubtitle(retained);
   }
+
+  /// Toggle mpv's video track on or off — see [PlaybackEngine.setVideoTrack].
+  ///
+  /// `vid=auto` lets mpv select the best video track (the only one on a
+  /// single-file open). `vid=no` disables video decoding entirely — the demuxer
+  /// still reads and the audio track keeps playing, but no frames are decoded
+  /// or composited, saving CPU and letting the texture go blank.
+  ///
+  /// **This is a property write, not an `mpv_command`.** Same binding as
+  /// `setProperty('stream-lavf-o', …)` in [_setStreamOptions], and the same
+  /// reason invariant 9 does not apply: it writes one value and reads nothing.
+  @override
+  Future<void> setVideoTrack(bool enabled) async {
+    trace?.call('setVideoTrack enabled=$enabled');
+    _videoTrackEnabled = enabled;
+    await (_player.platform as NativePlayer).setProperty('vid', enabled ? 'auto' : 'no');
+  }
+
+  /// What the app last asked for, which [open] honours rather than overriding.
+  ///
+  /// `vid` persists across `loadfile` — it is an option, not per-file state — so
+  /// this is also the value mpv would use anyway. Tracked here because [open]
+  /// has to *choose* how to load around it, not just inherit it.
+  bool _videoTrackEnabled = true;
 
   @override
   Future<void> play() {
@@ -543,6 +664,7 @@ class MediaKitEngine implements PlaybackEngine {
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
+    await _videoOutput.close();
     await _player.dispose();
   }
 }

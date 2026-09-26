@@ -149,6 +149,7 @@ class HoverPreview {
   HoverPreview({
     required this.engineFactory,
     required this.shell,
+    required this.isAudioOnly,
     PreviewResolver? resolve,
     PreviewSessionOpener? openSession,
     PreviewReporter? report,
@@ -190,6 +191,7 @@ class HoverPreview {
   /// The shell's engine — read for suppression, never opened or stopped.
   final PlaybackEngine shell;
   final Duration delay;
+  final bool Function() isAudioOnly;
 
   /// Builds the preview engine, at most once and only when a preview starts.
   final PlaybackEngine Function() engineFactory;
@@ -239,7 +241,7 @@ class HoverPreview {
   bool get isMuted => _muted;
 
   /// Whether a preview may start at all right now. Playing suppresses; paused does not (§2.6).
-  bool get isSuppressed => shell.playing;
+  bool get isSuppressed => isAudioOnly() || shell.playing;
 
   /// The pointer entered a tile. Nothing happens for [delay].
   void enter(String videoId, PreviewSink sink) {
@@ -586,11 +588,13 @@ class HoverPreviewScopeHost extends StatefulWidget {
   const HoverPreviewScopeHost({
     super.key,
     required this.shell,
+    required this.isAudioOnly,
     required this.engineFactory,
     required this.child,
   });
 
   final PlaybackEngine shell;
+  final bool Function() isAudioOnly;
   final PlaybackEngine Function() engineFactory;
   final Widget child;
 
@@ -601,6 +605,7 @@ class HoverPreviewScopeHost extends StatefulWidget {
 class _HoverPreviewScopeHostState extends State<HoverPreviewScopeHost> {
   late final HoverPreview _preview = HoverPreview(
     shell: widget.shell,
+    isAudioOnly: widget.isAudioOnly,
     engineFactory: widget.engineFactory,
   );
 

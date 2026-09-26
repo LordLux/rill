@@ -1,0 +1,2371 @@
+{
+ "_about": "Trimmed real /next engagementPanels for q_QyaPhykuI (an 80s mix): 23 chapters, 10 song cards. Captured 2026-09-25; tracking and session-bound fields removed.",
+ "engagementPanels": [
+  {
+   "engagementPanelSectionListRenderer": {
+    "panelIdentifier": "engagement-panel-macro-markers-description-chapters",
+    "header": {
+     "engagementPanelTitleHeaderRenderer": {
+      "title": {
+       "runs": [
+        {
+         "text": "Chapters"
+        }
+       ]
+      },
+      "subtitle": {},
+      "visibilityButton": {
+       "buttonRenderer": {
+        "icon": {
+         "iconType": "CLOSE"
+        },
+        "accessibilityData": {
+         "accessibilityData": {
+          "label": "Close"
+         }
+        },
+        "command": {
+         "changeEngagementPanelVisibilityAction": {
+          "targetId": "engagement-panel-macro-markers-description-chapters",
+          "visibility": "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"
+         }
+        }
+       }
+      }
+     }
+    },
+    "content": {
+     "macroMarkersListRenderer": {
+      "contents": [
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "a-ha – Take On Me"
+         },
+         "timeDescription": {
+          "simpleText": "0:00"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 0
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "0 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Michael Jackson – Billie Jean"
+         },
+         "timeDescription": {
+          "simpleText": "3:42"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=222s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 222
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "3 minutes, 42 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Wham! – Wake Me Up Before You Go-Go"
+         },
+         "timeDescription": {
+          "simpleText": "8:35"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=515s&pp=0gcJCSoDDuyUWbzu",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 515
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "8 minutes, 35 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Madonna – Like a Prayer"
+         },
+         "timeDescription": {
+          "simpleText": "12:26"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=746s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 746
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "12 minutes, 26 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Bon Jovi – Livin' On A Prayer"
+         },
+         "timeDescription": {
+          "simpleText": "18:08"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=1088s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 1088
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "18 minutes, 8 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Cyndi Lauper – Girls Just Want to Have Fun"
+         },
+         "timeDescription": {
+          "simpleText": "22:18"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=1338s&pp=0gcJCSoDDuyUWbzu",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 1338
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "22 minutes, 18 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Europe – The Final Countdown"
+         },
+         "timeDescription": {
+          "simpleText": "26:13"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=1573s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 1573
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "26 minutes, 13 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Whitney Houston – I Wanna Dance with Somebody"
+         },
+         "timeDescription": {
+          "simpleText": "31:25"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=1885s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 1885
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "31 minutes, 25 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Journey – Don't Stop Believin'"
+         },
+         "timeDescription": {
+          "simpleText": "36:14"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=2174s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 2174
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "36 minutes, 14 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Survivor – Eye of the Tiger"
+         },
+         "timeDescription": {
+          "simpleText": "40:25"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=2425s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 2425
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "40 minutes, 25 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Ray Parker Jr. – Ghostbusters"
+         },
+         "timeDescription": {
+          "simpleText": "44:30"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=2670s&pp=0gcJCSoDDuyUWbzu",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 2670
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "44 minutes, 30 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "The Bangles – Walk Like an Egyptian"
+         },
+         "timeDescription": {
+          "simpleText": "48:34"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=2914s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 2914
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "48 minutes, 34 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Toto – Africa"
+         },
+         "timeDescription": {
+          "simpleText": "51:59"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=3119s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 3119
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "51 minutes, 59 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Bruce Springsteen – Dancing In the Dark"
+         },
+         "timeDescription": {
+          "simpleText": "56:55"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=3415s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 3415
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "56 minutes, 55 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Simple Minds – Don't You (Forget About Me)"
+         },
+         "timeDescription": {
+          "simpleText": "1:00:56"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=3656s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 3656
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 56 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Alphaville – Forever Young"
+         },
+         "timeDescription": {
+          "simpleText": "1:05:18"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=3918s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 3918
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 5 minutes, 18 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "George Michael – Careless Whisper"
+         },
+         "timeDescription": {
+          "simpleText": "1:09:03"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=4143s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 4143
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 9 minutes, 3 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Cutting Crew – (I Just) Died In Your Arms"
+         },
+         "timeDescription": {
+          "simpleText": "1:14:07"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=4447s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 4447
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 14 minutes, 7 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Madonna – Like a Virgin"
+         },
+         "timeDescription": {
+          "simpleText": "1:18:46"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=4726s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 4726
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 18 minutes, 46 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Kool & The Gang – Celebration"
+         },
+         "timeDescription": {
+          "simpleText": "1:22:27"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=4947s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 4947
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 22 minutes, 27 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Earth, Wind & Fire – September"
+         },
+         "timeDescription": {
+          "simpleText": "1:27:24"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=5244s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 5244
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 27 minutes, 24 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Lipps Inc. – Funkytown"
+         },
+         "timeDescription": {
+          "simpleText": "1:31:02"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=5462s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 5462
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 31 minutes, 2 seconds"
+        }
+       },
+       {
+        "macroMarkersListItemRenderer": {
+         "title": {
+          "simpleText": "Technotronic – Pump Up The Jam"
+         },
+         "timeDescription": {
+          "simpleText": "1:38:51"
+         },
+         "thumbnail": {
+          "thumbnails": [
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCDB7NrGchdIfqTVJJRjDdhKAnqKA",
+            "width": 168,
+            "height": 94
+           },
+           {
+            "url": "https://i.ytimg.com/vi/q_QyaPhykuI/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLA1UGU59jJI5OafFddUjpX52P9eeg",
+            "width": 336,
+            "height": 188
+           }
+          ]
+         },
+         "onTap": {
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "url": "/watch?v=q_QyaPhykuI&t=5931s",
+            "webPageType": "WEB_PAGE_TYPE_WATCH",
+            "rootVe": 3832
+           }
+          },
+          "watchEndpoint": {
+           "videoId": "q_QyaPhykuI",
+           "continuePlayback": true,
+           "startTimeSeconds": 5931
+          }
+         },
+         "carouselType": "MACRO_MARKERS_LIST_ITEM_RENDERER_CAROUSEL_TYPE_DEFAULT",
+         "timeDescriptionA11yLabel": "1 hour, 38 minutes, 51 seconds"
+        }
+       }
+      ],
+      "syncButtonLabel": {
+       "runs": [
+        {
+         "text": "Sync to video time"
+        }
+       ]
+      },
+      "syncModelEntityKey": "EgpzeW5jX21vZGVsIMQBKAE%3D"
+     }
+    },
+    "targetId": "engagement-panel-macro-markers-description-chapters",
+    "visibility": "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"
+   }
+  },
+  {
+   "engagementPanelSectionListRenderer": {
+    "panelIdentifier": "engagement-panel-structured-description",
+    "content": {
+     "structuredDescriptionContentRenderer": {
+      "items": [
+       {
+        "horizontalCardListRenderer": {
+         "cards": [
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/8YZqnYRc52GUz0iyQTRZvzh8RSbCNTTC0NSrpRlKf8UfSyu87K7ziegM8aFfAyMgUXBisxT_weHb4pFE"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Take on Me (2016 Remaster)",
+            "subtitle": "a-ha",
+            "secondarySubtitle": {
+             "content": "Hunting High and Low"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=djV11Xbc914",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "djV11Xbc914"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Take on Me (2016 Remaster)"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "a-ha"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Hunting High and Low"
+                    },
+                    {
+                     "text": "\n\n"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/R7pwf7-lcPvK3dxv8jMkUd4SlbVmrM-nZOFEJqnHGLQFBl4lqj1gyeWSFO5X9HZxgUhTh4KM8n0l7j_k"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Billie Jean",
+            "subtitle": "Michael Jackson",
+            "secondarySubtitle": {
+             "content": "HIStory: PAST, PRESENT AND FUTURE, BOOK I"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=Zi_XLOBDo_Y",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "Zi_XLOBDo_Y"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Billie Jean"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Michael Jackson"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "HIStory: PAST, PRESENT AND FUTURE, BOOK I"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Michael Jackson"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/MYYMJC9foDuMgC0LkAiIWMknGNaSKql8wMcP_Tk3gtlr8K9E0f98vb6rspmrVALvn5a05ZHJR_mq_rt3qg"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Wake Me Up Before You Go-Go (Instrumental)",
+            "subtitle": "Wham!",
+            "secondarySubtitle": {
+             "content": "Make It Big"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=pIgZ7gMze7A",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "pIgZ7gMze7A"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Wake Me Up Before You Go-Go (Instrumental)"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Wham!"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Make It Big"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "George Michael"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/XJLTubAnaJDmIo6Vm1Qb0AzrEpK_-g3raFScRTkPaMF0wS8xY7tMbQictXUZlIPTV7DzjG6xfTlusiEK"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Like a Prayer",
+            "subtitle": "Madonna",
+            "secondarySubtitle": {
+             "content": "Like a Prayer"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=79fzeNUqQbQ",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "79fzeNUqQbQ"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Like a Prayer"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Madonna"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Like a Prayer"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Patrick Leonard, Madonna"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/SqcnRq7G6BLl1gYS34sMMx-ilwFSDpSO8oG0FTBabMsNyfSNSdw1P2djS_FqC93Nlruj3RoLO-6u9zOJ"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Livin' On A Prayer",
+            "subtitle": "Bon Jovi",
+            "secondarySubtitle": {
+             "content": "Slippery When Wet"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=lDK9QqIzhwk",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "lDK9QqIzhwk"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Livin' On A Prayer"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Bon Jovi"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Slippery When Wet"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Richie Sambora, Desmond Child, Jon Bon Jovi"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/N-U7_cNgPu9DCTWNP9HfqFbtmw1nQzbeIgWq7swQMNgqmjvj1GvpKBf-Um8tu9k5iA8LXHgDtiIoLe-j"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Girls Just Want To Have Fun (Album Version)",
+            "subtitle": "Cyndi Lauper",
+            "secondarySubtitle": {
+             "content": "She's So Unusual"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=PIb6AZdTr-A",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "PIb6AZdTr-A"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Girls Just Want To Have Fun (Album Version)"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Cyndi Lauper"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "She's So Unusual"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Robert Hazard"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/Ng-QT35dVQKMdAvQku2fdR-Bhl1k4gMPr9pkXEFxmQ11yEN9uaY934EnqlFC-zN6tE1lwos2ChwBOR0"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "The Final Countdown",
+            "subtitle": "Europe",
+            "secondarySubtitle": {
+             "content": "The Final Countdown (Expanded Edition)"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=9jK-NcRmVcw",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "9jK-NcRmVcw"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "The Final Countdown"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Europe"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "The Final Countdown (Expanded Edition)"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Joey Tempest"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/bu3-T2ZQxF8fLFpfq5mm6Bs5oeI5l2CNIe9UkoRQzNpd6wNjTTgu1FrUFZF9PbcZRrykJLeQlhhSdSxv"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "I Wanna Dance With Somebody (Who Loves Me) (Single Version)",
+            "subtitle": "Whitney Houston",
+            "secondarySubtitle": {
+             "content": "Whitney"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=eH3giaIzONA",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "eH3giaIzONA"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "I Wanna Dance With Somebody (Who Loves Me) (Single Version)"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Whitney Houston"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Whitney"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "George Merrill, Shannon Rubicam"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/FNpVCdES7QW4PEb0jbgXhfazWot7CKalqNliF9zo_3ba5EycYwN9iZBjUpC1d1hC-XCThi-JD8ZoCJzkLg"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Don't Stop Believin'",
+            "subtitle": "Journey",
+            "secondarySubtitle": {
+             "content": "Escape+7"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=1k8craCGpgs",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "1k8craCGpgs"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Don't Stop Believin'"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Journey"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Escape+7"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Steve Perry, Jonathan Cain, Neal Schon"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          },
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.googleusercontent.com/DMAF_TwlAenTjYFFEfZdRjGQnxE487Mqwrvi2RNrRZCxEkhUxNExWut0ffkxrZ-UWh-xZYg3Yew5coM"
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE",
+            "title": "Eye of the Tiger",
+            "subtitle": "Survivor",
+            "secondarySubtitle": {
+             "content": "Eye Of The Tiger"
+            },
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_VERTICAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/watch?v=btPJPFnesV4",
+                "webPageType": "WEB_PAGE_TYPE_WATCH",
+                "rootVe": 3832
+               }
+              },
+              "watchEndpoint": {
+               "videoId": "btPJPFnesV4"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE",
+            "overflowMenuOnTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "ignoreNavigation": true
+               }
+              },
+              "confirmDialogEndpoint": {
+               "content": {
+                "confirmDialogRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Song credits"
+                   }
+                  ]
+                 },
+                 "dialogMessages": [
+                  {
+                   "runs": [
+                    {
+                     "text": "Song",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Eye of the Tiger"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Artist",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Survivor"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Album",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Eye Of The Tiger"
+                    },
+                    {
+                     "text": "\n\n"
+                    },
+                    {
+                     "text": "Writers",
+                     "bold": true
+                    },
+                    {
+                     "text": ": ",
+                     "bold": true
+                    },
+                    {
+                     "text": "Jim Peterik, Frankie Sullivan"
+                    }
+                   ]
+                  }
+                 ],
+                 "confirmButton": {
+                  "buttonRenderer": {
+                   "style": "STYLE_BLUE_TEXT",
+                   "size": "SIZE_DEFAULT",
+                   "isDisabled": false,
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "OK"
+                     }
+                    ]
+                   },
+                   "accessibilityData": {
+                    "accessibilityData": {
+                     "label": "OK"
+                    }
+                   }
+                  }
+                 },
+                 "primaryIsCancel": false
+                }
+               }
+              }
+             }
+            },
+            "overflowMenuA11yLabel": "More actions"
+           }
+          }
+         ],
+         "header": {
+          "richListHeaderRenderer": {
+           "title": {
+            "simpleText": "Music"
+           },
+           "subtitle": {
+            "simpleText": "10 songs"
+           }
+          }
+         },
+         "style": {
+          "type": "HORIZONTAL_CARD_LIST_STYLE_TYPE_ENGAGEMENT_PANEL_SECTION"
+         },
+         "footerButton": {
+          "buttonViewModel": {
+           "iconName": "MUSIC",
+           "onTap": {
+            "innertubeCommand": {
+             "commandMetadata": {
+              "webCommandMetadata": {
+               "url": "/channel/UC-9-kyTW8ZkZNDHQJ6FgpwQ",
+               "webPageType": "WEB_PAGE_TYPE_CHANNEL",
+               "rootVe": 3611,
+               "apiUrl": "/youtubei/v1/browse"
+              }
+             },
+             "browseEndpoint": {
+              "browseId": "UC-9-kyTW8ZkZNDHQJ6FgpwQ"
+             }
+            }
+           },
+           "style": "BUTTON_VIEW_MODEL_STYLE_MONO",
+           "type": "BUTTON_VIEW_MODEL_TYPE_OUTLINE",
+           "buttonSize": "BUTTON_VIEW_MODEL_SIZE_DEFAULT",
+           "titleFormatted": {
+            "content": "Music"
+           }
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

@@ -46,6 +46,7 @@ const videoDetailKeys = <String>{
   'isVerified',
   'isArtistChannel',
   'badges',
+  'music',
   'isMembersOnly',
   'premiereAtMs',
   'related',

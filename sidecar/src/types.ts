@@ -269,6 +269,52 @@ export interface SearchSuggestResult {
 // Video detail
 // ---------------------------------------------------------------------------
 
+/**
+ * A song YouTube attributes to a video — its "Music in this video" credit.
+ *
+ * A nested DTO rather than four fields on {@link VideoDetail}, because the
+ * four are jointly present or jointly absent: flat ones would encode a
+ * constraint the type cannot express and invite
+ * `musicArtist != null && musicAlbum != null` checks at every call site. Same
+ * shape and same reason as {@link ArtistPanel}.
+ */
+export interface MusicTrack {
+  /** The song. Never empty — a card without one is dropped. */
+  title: string;
+  /**
+   * The performing artist, as the card states it.
+   *
+   * The card's primary artist, which can be narrower than the credits dialog's
+   * — see `parser/music.ts` for why the narrower structural one is preferred.
+   */
+  artist: string | null;
+  album: string | null;
+  /** Square cover art, already sized by the sidecar. */
+  coverUrl: string | null;
+}
+
+/**
+ * One of the uploader's chapters — on a music mix, one song's segment.
+ *
+ * The song credits ({@link MusicTrack}) carry no timestamps, so this is the
+ * only source of *when* a song starts. `parser/chapters.ts` has where they
+ * come from.
+ */
+export interface Chapter {
+  /** The uploader's label, verbatim — often "Artist – Song". Never empty. */
+  title: string;
+  /** Where the chapter starts. Ascending across the list, first near 0. */
+  startSeconds: number;
+  /**
+   * A still from the video at the chapter's start, or null.
+   *
+   * Low resolution (336x188 at best) and a frame of the video, not a cover —
+   * fit for a blurred backdrop and nothing sharper. Null for chapters that came
+   * from the description, which carries no image.
+   */
+  thumbnailUrl: string | null;
+}
+
 export interface VideoDetail {
   id: string;
   title: string;
@@ -332,6 +378,23 @@ export interface VideoDetail {
   /** Whether the channel holds an Official Artist Channel badge. Same badge as {@link VideoItem.isArtistChannel}. */
   isArtistChannel: boolean;
   badges: string[];
+  /**
+   * Songs attributed to this video, in the order YouTube lists them.
+   *
+   * **Empty is the ordinary answer**, not a failure — most videos carry no
+   * attribution. A list rather than a nullable single because `cards[]` is an
+   * array and the panel header is templated ("1 song"); widening later would
+   * break this, the freezed model, `protocol.md` and `contract-docs.test.ts`
+   * at once.
+   */
+  music: MusicTrack[];
+  /**
+   * The uploader's chapters, ascending — YouTube's own, else the description's
+   * timestamps. **Empty is the ordinary answer.** A music mix's chapters are
+   * its songs; anything else's are sections, and the client only reads them as
+   * songs for a video it has reason to think is music.
+   */
+  chapters: Chapter[];
   /**
    * Members-only content. Same badge and same rule as
    * {@link VideoItem.isMembersOnly}, read off the watch page.
@@ -618,6 +681,8 @@ export interface PlayerResult {
   hlsManifestUrl: string | null;
   dashManifestUrl: string | null;
   storyboards: Storyboard[];
+  /** The widest still the response lists — see {@link PlaybackSource.posterUrl}. */
+  posterUrl: string | null;
   /** Client playback nonce, needed by `playback.report`. */
   cpn: string | null;
   playabilityStatus: string | null;
@@ -927,6 +992,19 @@ export interface PlaybackSource {
   startTimestamp: string | null;
   /** Sprite-sheet template for hover previews (F8). */
   storyboardTemplate: string | null;
+  /**
+   * The widest still YouTube lists for this video, or null.
+   *
+   * For any surface that shows artwork instead of a picture — audio-only, the
+   * premiere slate — because **the tile's own `thumbnailUrl` is not good
+   * enough and cannot be upgraded by the client**: 1280x720 is YouTube's
+   * ceiling, `maxresdefault` is byte-identical to `hq720`, and the watch
+   * page's related rail ships 480x360 (F40). This comes off the `/player`
+   * response the resolve already fetched, so it costs no extra request.
+   *
+   * Null is ordinary — fall back to the tile's `thumbnailUrl`.
+   */
+  posterUrl: string | null;
   /** Drives a badge in the UI, never a dead end. */
   qualityDegraded: boolean;
   transport: PlaybackTransport;

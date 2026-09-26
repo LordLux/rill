@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:silky_scroll/silky_scroll.dart';
 
 import '../theme/screen_values.dart';
 import 'pages/all_subscriptions.dart' show allSubscriptionsRouteName;
@@ -125,7 +126,7 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
             width: isDrawerOpen ? ScreenValues.openRailWidth : ScreenValues.closedRailWidth,
             child: Material(
               color: Theme.of(context).scaffoldBackgroundColor,
-              child: ListView(
+              child: SilkyListView(
                 children: [
                   _DrawerItem(
                     key: const ValueKey('home'),
