@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 46.** A new item takes it, and the same edit bumps this line.
+**Next number: 50.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -577,6 +577,70 @@ ships beside `rill.exe`.
 
 **Done when:** a forced fast fail in a release build leaves a symbolised stack
 in the app's data directory and no dump on disk.
+
+### 46. Windows ARM64 build
+
+**Blocked by the native stack, not by CI.** The x64 installer already runs on
+Windows-on-ARM under emulation (`architecture.md` §2.13), so this is about
+running natively, not about running at all.
+
+- `media_kit_libs_windows_video` 1.0.11 (pinned exactly, `CLAUDE.md`) hard-codes
+  `mpv-dev-x86_64-20230924-git-652a1dd.7z` in its `windows/CMakeLists.txt`. An
+  arm64 libmpv means a different build with a different FFmpeg, so invariant 8
+  applies in full — scan *that* binary's string table, do not probe it — and the
+  F13 seek freeze the pin exists for has to be re-measured.
+- `app/windows/libass_bundle` is MSYS2 MINGW64 (x86_64) DLLs
+  (`THIRD_PARTY_LICENSES`); arm64 needs the CLANGARM64 equivalents.
+- The ANGLE archive the same plugin downloads has not been checked for arm64.
+- `sidecar` compiles with `bun build --compile`; whether the pinned Bun (1.1.42)
+  can target Windows arm64 has not been checked, and a newer Bun means
+  re-measuring the sidecar.
+- Hosted Windows arm64 runners may be public-repo only or absent from the plan;
+  check before writing the job.
+
+**Done when:** `Rill-Setup-arm64.exe` is built by the release workflow, starts on
+a real arm64 machine, and plays a video.
+
+### 47. macOS port
+
+Not started; there is no `app/macos/`. GitHub-hosted macOS runners can build it
+(Flutter emits a universal arm64 + x86_64 `.app` in one build, and Bun
+cross-compiles the sidecar for both darwin targets, to be joined with `lipo`), so
+CI is not the obstacle. The port is. It is roughly:
+
+- `media_kit_libs_macos_video` is a different libmpv from the Windows one, so
+  every finding measured against the Windows build (F13, F19, the invariant 8
+  scans, the audio-only teardown costs in `CLAUDE.md`) is unmeasured there.
+- Windows-only pieces need a counterpart or a guard: the SMTC / taskbar
+  controllers, `log_capture.cpp`, the libass DLL search (`dll_search.dart`),
+  `bitsdojo_window` chrome (`window_chrome.dart`) and Ctrl-vs-Cmd shortcuts.
+- `rill.ps1` and `setup.bat` are Windows-only.
+- Without an Apple Developer account there is no notarisation, so first launch
+  needs the "Open Anyway" bypass. The in-app updater has to decide how it replaces
+  a `.app`.
+- The author has an Intel Mac to test on; arm64 can only be tested in CI or on
+  someone else's machine.
+
+### 48. Authenticode-sign the installer
+
+The installer is unsigned, so SmartScreen says "unknown publisher" on each fresh
+download. The update manifest is signed separately and is what protects
+*updates* (`architecture.md` §2.13); this is only about the first install.
+Options are Azure Trusted Signing (about $10 a month; check eligibility for an
+individual in the EU) or a purchased certificate. Reputation still has to build
+up per certificate, so a signed installer can warn for a while regardless.
+
+**Done when:** the workflow signs `Rill-Setup-x64.exe` before it is hashed into
+`update.json`. Signing after hashing invalidates the manifest.
+
+### 49. Ship yt-dlp, or say it is missing
+
+The installer does not bundle `yt-dlp`, and neither did `rill zip`. The sidecar
+resolves it from `PATH` or `YT_DLP_PATH` (`capabilities.ts`), so on a machine
+without it the ladder's second tier is simply absent and playback falls to
+`ANDROID`'s 360p. That is invisible to the user. Either bundle a pinned
+`yt-dlp.exe` (it goes stale quickly, so it would want its own refresh) or make the
+absence visible in settings.
 
 ---
 

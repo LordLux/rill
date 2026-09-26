@@ -52,3 +52,5 @@ sidecar/auth.json
 scratch/
 sidecar/scratch/
 *.lnk
+# Crashpad leaves this at the repo root after a test run
+debug.log
