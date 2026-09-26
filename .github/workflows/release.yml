@@ -6,8 +6,9 @@
 #   gate     the same checks as a local `rill check` plus the sidecar's `bun run check`.
 #   build    sidecar + Flutter release build + Inno Setup installer, with smoke tests of the
 #            staged sidecar, the installer, and the uninstaller.
-#   publish  signs update.json and creates the GitHub release. Only from main, only when the
-#            gate and the build both passed, and the only job that sees the signing key.
+#   publish  signs update.json and, from main only, creates the GitHub release. Needs the gate
+#            and the build to have passed, and is the only job that sees the signing key.
+#            Off main it stops short of the release and keeps the signed manifest as an artifact.
 #
 # Design notes: docs/architecture.md, "Release pipeline".
 
@@ -45,7 +46,7 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       exists: ${{ steps.v.outputs.exists }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the commit count needs the whole history
       - id: v
@@ -74,7 +75,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # sidecar/bun.lock is in a format newer than BUN_VERSION can read (it fails with
       # InvalidLockfileVersion), so the install runs on a current Bun and everything after
       # it on the pinned one. node_modules is plain files either way, and the compiled
@@ -127,7 +128,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # sidecar/bun.lock is in a format newer than BUN_VERSION can read (it fails with
       # InvalidLockfileVersion), so the install runs on a current Bun and everything after
       # it on the pinned one. node_modules is plain files either way, and the compiled
@@ -213,16 +214,19 @@ jobs:
           if (Test-Path (Join-Path $dir 'rill.exe')) { throw 'uninstall left rill.exe behind' }
           Write-Host 'install / uninstall ok'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installer
           path: build/installer/Rill-Setup-x64.exe
           if-no-files-found: error
           retention-days: 7
 
+  # Runs on every ref up to, but not including, `gh release create`, so the notes, the
+  # signature and the secret are exercised before anything is merged. Off main the
+  # signed manifest is kept as a workflow artifact instead of a release.
   publish:
     needs: [plan, gate, build]
-    if: github.ref == 'refs/heads/main' && needs.plan.outputs.exists == 'false'
+    if: needs.plan.outputs.exists == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -231,13 +235,13 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: installer
           path: dist
@@ -262,16 +266,33 @@ jobs:
             --version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" \
             --installer dist/Rill-Setup-x64.exe --notes notes.txt --out dist
 
-      - name: Publish the release
+      - name: Write the release notes
         run: |
           {
             echo "Windows x64 installer. Installs per-user, no admin rights needed."
             echo
-            echo "Not code-signed yet, so Windows SmartScreen may say the publisher is unknown: choose **More info**, then **Run anyway**. Installed copies check for updates themselves."
+            echo "Not code-signed yet, so Windows SmartScreen may say the publisher is unknown: choose **More info**, then **Run anyway**."
             echo
             echo "### Changes"
             sed 's/^/- /' notes.txt
           } > body.md
+          cat body.md
+
+      - name: Publish the release
+        if: github.ref == 'refs/heads/main'
+        run: |
           gh release create "$TAG" \
             --target "$GITHUB_SHA" --title "Rill $VERSION" --notes-file body.md --latest \
             dist/Rill-Setup-x64.exe dist/update.json dist/update.json.sig
+
+      - name: Keep the signed manifest (not main, so nothing is released)
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: signed-manifest
+          path: |
+            dist/update.json
+            dist/update.json.sig
+            body.md
+          if-no-files-found: error
+          retention-days: 3
