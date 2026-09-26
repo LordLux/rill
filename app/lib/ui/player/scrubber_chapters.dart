@@ -31,10 +31,11 @@ abstract final class ScrubberMetrics {
 
   /// The outer corners of the whole bar: the first segment's left pair and the
   /// last one's right pair, all four when there is only one. Skia scales a
-  /// radius down to what the height allows, so at 4 and 7 px these read as
-  /// semicircular ends; tune them alongside the heights.
-  static const double endRadius = 3;
-  static const double endRadiusHovered = 5;
+  /// radius down to what the height allows — half of it, so 2 and 3.5 px here —
+  /// and anything larger reads as a semicircular end; tune them alongside the
+  /// heights.
+  static const double endRadius = 1.5;
+  static const double endRadiusHovered = 2.75;
 
   /// Between two segments, split evenly across the boundary.
   static const double chapterGap = 2;
