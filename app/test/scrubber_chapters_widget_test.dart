@@ -190,6 +190,16 @@ void testBar(String description, Future<void> Function(WidgetTester tester) body
   });
 }
 
+/// The shapes the scrubber clips its segments to — the rounded ends.
+List<RRect> clipped(WidgetTester tester) {
+  final canvas = TestRecordingCanvas();
+  tester.renderObject(find.byKey(playerScrubberKey)).paint(TestRecordingPaintingContext(canvas), Offset.zero);
+  return [
+    for (final call in canvas.invocations)
+      if (call.invocation.memberName == #clipRRect) call.invocation.positionalArguments[0] as RRect,
+  ];
+}
+
 /// Nothing between the bubble and the root clips it — read off the render tree,
 /// because a layout rect says nothing about what is painted. Every ancestor that
 /// clips must contain the bubble: the player's own box does, the scrubber's
@@ -532,6 +542,39 @@ void main() {
       await tester.pump();
       await tester.pump(ScrubberMetrics.growDuration * 2);
       expect(painted(tester).map((d) => d.rect.height).toSet(), {ScrubberMetrics.trackHeight}, reason: 'all back at rest');
+    });
+
+    testBar('the ends of the bar are rounded, and the joins between segments are not', (tester) async {
+      await pumpWatching(tester);
+      final shapes = clipped(tester);
+      expect(shapes, hasLength(2), reason: 'four chapters: the first and the last segment are shaped, the middle two are not');
+      const rest = Radius.circular(ScrubberMetrics.endRadius);
+      expect((shapes.first.tlRadius, shapes.first.blRadius, shapes.first.trRadius, shapes.first.brRadius),
+          (rest, rest, Radius.zero, Radius.zero));
+      expect((shapes.last.trRadius, shapes.last.brRadius, shapes.last.tlRadius, shapes.last.blRadius),
+          (rest, rest, Radius.zero, Radius.zero));
+    });
+
+    testBar('a bar with no chapters is one rounded shape, and it takes the larger radius on hover', (tester) async {
+      await pumpWatching(tester, queue: ['aaa']);
+      final b = bar(tester);
+      final pointer = await mouse(tester);
+
+      final atRest = clipped(tester).single;
+      expect([atRest.tlRadius, atRest.trRadius, atRest.blRadius, atRest.brRadius],
+          everyElement(const Radius.circular(ScrubberMetrics.endRadius)));
+
+      await pointer.moveTo(b.at(0.5));
+      await tester.pump();
+      await tester.pump(ScrubberMetrics.growDuration * 2);
+      final hovered = clipped(tester).single;
+      expect([hovered.tlRadius, hovered.trRadius, hovered.blRadius, hovered.brRadius],
+          everyElement(const Radius.circular(ScrubberMetrics.endRadiusHovered)));
+    });
+
+    testBar('a live stream keeps the plain track, which is not clipped', (tester) async {
+      await pumpWatching(tester, queue: ['live1']);
+      expect(clipped(tester), isEmpty);
     });
 
     testBar('a video with no chapters is one track, and it grows the same way', (tester) async {

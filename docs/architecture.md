@@ -836,6 +836,13 @@ and a bubble above the pointer names the time and the chapter. The code is
   gapless, so an hour of short chapters on a small window degrades to a plain bar
   rather than to slivers. The bar with no chapters is the same code with one
   segment, and grows on hover the same way.
+- **Only the ends of the bar are rounded** — the first segment's left corners,
+  the last one's right, all four for a bar of one. The segment is clipped to its
+  shape, so the three layers inside stay plain rects and the position crosses the
+  curve without knowing it is there. `ScrubberMetrics.endRadius` is 3 at rest and
+  5 on hover, animated with the growth. Skia scales a radius down to what the
+  height allows, so at 4 and 7 px both read as semicircular ends. The plain track
+  a live stream gets is a separate path and is not shaped this way.
 - **The duration is `hold?.duration ?? engine.duration`, the one `max` is built
   from** (above), so the segments and the thumb cannot disagree in a quality
   switch. A zero duration draws the plain track.
