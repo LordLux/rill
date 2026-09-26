@@ -502,7 +502,9 @@ class MiniPlayer extends ConsumerWidget {
                         (snapshot.data ?? false) ? Icons.pause : Icons.play_arrow,
                         color: scheme.onSurface,
                       ),
-                      onPressed: () => ref.read(playbackProvider.notifier).togglePlayPause(),
+                      // Nothing to play in a premiere, a members-only video or a
+                      // failure — the controller would ignore the press anyway.
+                      onPressed: playback.isUnplayable ? null : () => ref.read(playbackProvider.notifier).togglePlayPause(),
                     ),
                   ),
                   IconButton(

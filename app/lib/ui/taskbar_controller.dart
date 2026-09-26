@@ -21,6 +21,7 @@ import 'video_info.dart';
 typedef _ToolbarModel = ({
   String videoId,
   bool loading,
+  bool unplayable,
   bool hasPrevious,
   bool hasNext,
   bool ratingKnown,
@@ -38,6 +39,7 @@ final _toolbarModelProvider = Provider<_ToolbarModel?>((ref) {
   return (
     videoId: item.id,
     loading: ref.watch(playbackProvider.select((p) => p.isLoading)),
+    unplayable: ref.watch(playbackProvider.select((p) => p.isUnplayable)),
     hasPrevious: ref.watch(queueProvider.select((q) => q.hasPrevious)),
     hasNext: ref.watch(queueProvider.select((q) => q.hasNext)),
     // Until the watch page's data arrives, how this video is already rated is
@@ -171,10 +173,10 @@ final taskbarControllerProvider = Provider<void>((ref) {
           controller.previous,
           mode: canPrevious ? 0 : ThumbnailToolbarButtonMode.disabled,
         ),
-        if (model == null || model.loading)
+        if (model == null || model.loading || model.unplayable)
           ThumbnailToolbarButton(
             icon('play'),
-            model == null ? 'Play' : 'Loading',
+            model == null ? 'Play' : (model.unplayable ? 'Unavailable' : 'Loading'),
             () {},
             mode: ThumbnailToolbarButtonMode.disabled,
           )

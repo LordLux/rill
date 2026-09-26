@@ -14,6 +14,16 @@ const Key premiereNotifyKey = ValueKey('premiere-notify');
 const Key membersOnlySlateKey = ValueKey('members-only-slate');
 const Key membersOnlyJoinKey = ValueKey('members-only-join');
 
+/// How far up from the player's bottom edge a slate's content has to start to
+/// stay clear of the control bar, which is drawn over every slate.
+///
+/// The bar is 64 px — the 12 px scrubber, a 48 px row of buttons and its 4 px of
+/// padding — and the rest is room to breathe. The slates used to sit 20 px up,
+/// from before the bar was drawn over them, and the button ended up behind the
+/// progress bar. `player_slates_layout_test` measures the two rather than
+/// trusting this number.
+const double playerControlsClearance = 76;
+
 /// what arrives when `video.info` has not answered yet or carried no timestamp.
 @visibleForTesting
 String premiereText(int? premiereAtMs, String? fallback) {
@@ -103,7 +113,7 @@ class PremiereSlate extends ConsumerWidget {
         Align(
           alignment: Alignment.bottomLeft,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, playerControlsClearance),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,7 +227,7 @@ class MembersOnlySlate extends ConsumerWidget {
         Align(
           alignment: Alignment.bottomLeft,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, playerControlsClearance),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
