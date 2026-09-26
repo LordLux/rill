@@ -138,6 +138,16 @@ class PlaybackState {
   bool get hasVideo => source?.best != null;
   bool get canRetry => error != null && errorRetry != RpcRetryMode.no;
 
+  /// Nothing is open, and nothing can be: a premiere, a members-only video, a
+  /// rate limit, or a plain failure.
+  ///
+  /// The engine was stopped by `_failOpen`, so there is no position to scrub and
+  /// nothing to play or pause. The on-screen controls that would say otherwise
+  /// are disabled, and [PlaybackController] refuses the same requests from the
+  /// keyboard, the taskbar and the media keys — one rule, so they cannot
+  /// disagree about whether a press does anything.
+  bool get isUnplayable => error != null;
+
   /// A premiere: the video is fine, it has not started.
   ///
   /// Not an error state the user can act on by retrying — `retry` is `no` — so
@@ -677,7 +687,12 @@ class PlaybackController extends Notifier<PlaybackState> {
   @visibleForTesting
   Future<void> reportNow() => _report(null);
 
-  Future<void> togglePlayPause() => _engine.playOrPause();
+  /// **The transport methods below do nothing while [PlaybackState.isUnplayable]**:
+  /// the engine is stopped, and a press that reached it would be a seek or a play
+  /// on no media. The controls are disabled to match; this is what keeps the
+  /// keyboard, the taskbar and the media keys — which have no disabled look to
+  /// show — from acting on a video that is not there.
+  Future<void> togglePlayPause() => state.isUnplayable ? Future<void>.value() : _engine.playOrPause();
 
   /// Seek, and move the hold with it if one is up.
   ///
@@ -687,6 +702,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// it the scrubber would spring back to the held value the instant the user
   /// let go, which is worse than the snap-to-zero the hold exists to prevent.
   Future<void> seek(Duration to) {
+    if (state.isUnplayable) return Future<void>.value();
     final held = state.hold;
     if (held != null) state = state.copyWith(hold: held.at(to));
     return _engine.seek(to);
@@ -700,7 +716,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// flag the first has not finished updating, so the pair can land as two
   /// toggles in the same direction and the "undo" pauses a video the click
   /// already paused. Restoring a recorded value has no such race.
-  Future<void> setPlaying(bool value) => value ? _engine.play() : _engine.pause();
+  Future<void> setPlaying(bool value) {
+    if (state.isUnplayable) return Future<void>.value();
+    return value ? _engine.play() : _engine.pause();
+  }
 
   /// A relative seek, clamped. The ← → J L keys.
   ///
@@ -727,7 +746,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// The `,` and `.` keys. One frame, from the decoder rather than from
   /// arithmetic — see [PlaybackEngine.stepFrame].
-  Future<void> stepFrame(int direction) => _engine.stepFrame(direction);
+  Future<void> stepFrame(int direction) => state.isUnplayable ? Future<void>.value() : _engine.stepFrame(direction);
 
   /// The 0–9 keys: jump to that decile of the video.
   Future<void> seekToFraction(double fraction) {

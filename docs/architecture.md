@@ -751,6 +751,24 @@ right edge: both are flex 1, `Row` gives each half the free space, and the loose
 the default `MainAxisAlignment.start`, not to the `Spacer`, which has already
 been sized. One `Expanded` holding a left-aligned clock has no share to return.
 
+**A player with nothing to play disables its scrubber and its play button —
+decided 2026-09-26.** A premiere, a members-only video, a rate limit and a plain
+failure all end in `PlaybackState.error` (`isUnplayable`), with the engine stopped
+by `_failOpen`. The controls used to stay live regardless: a click or Space
+reached an engine with no media, and the bar could be dragged along a track with
+no duration. The `Slider` is now disabled — no thumb, no hover growth, no bubble —
+and so is play/pause. **Previous and next are not**: skipping past a video that
+will not open is exactly when they are wanted. What covers the keyboard, the media
+keys and a click on the picture is `PlaybackController` itself: `togglePlayPause`,
+`setPlaying`, `seek` (and so `seekBy` and `seekToFraction`) and `stepFrame` return
+without acting while `isUnplayable`, because none of those has a disabled look to
+show. The mini-player's and the taskbar's play buttons are disabled to match.
+**The slates keep clear of the bar.** The control bar is drawn over them, so they
+start `playerControlsClearance` (76 px) up from the bottom rather than the 20 px
+they were laid out with before the bar was drawn over them — the members-only
+"Join this channel" button sat behind the progress bar. A test measures the
+button against the bar's top instead of trusting the number.
+
 Tile action buttons (Watch Later, Add to queue) come from
 `ThumbnailHoverOverlayToggleActionsView` and the associated
 `AddToPlaylistCommand` / `PlaylistEditEndpoint` in the feed payload.

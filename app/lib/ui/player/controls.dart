@@ -567,6 +567,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             hold: playback.hold,
             source: playback.source,
             audioOnly: isAudioOnly,
+            enabled: !playback.isUnplayable,
             onDrag: (value) {
               setState(() => _dragging = value);
               _wake();
@@ -592,7 +593,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
               child: Row(
                 children: [
-                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable),
+                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable, enabled: !playback.isUnplayable),
                   _buildHoverable(
                     _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
                   ),
@@ -703,6 +704,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             hold: playback.hold,
             source: playback.source,
             audioOnly: true,
+            enabled: !playback.isUnplayable,
             onDrag: (value) {
               setState(() => _dragging = value);
               _wake();
@@ -723,7 +725,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
               child: Row(
                 children: [
-                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable),
+                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable, enabled: !playback.isUnplayable),
                   _buildHoverable(
                     _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
                   ),
@@ -776,7 +778,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
       padding: const EdgeInsets.fromLTRB(4, 2, 6, 6),
       child: Row(
         children: [
-          _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: (child) => child),
+          _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: (child) => child, enabled: !playback.isUnplayable),
           const SizedBox(width: 4),
           _Clock(
             engine: widget.engine,
@@ -793,6 +795,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               hold: playback.hold,
               source: playback.source,
               audioOnly: isAudioOnly,
+              enabled: !playback.isUnplayable,
               onDrag: (value) {
                 setState(() => _dragging = value);
                 _wake();
@@ -1060,12 +1063,19 @@ class _Scrubber extends ConsumerStatefulWidget {
     required this.hold,
     required this.source,
     required this.audioOnly,
+    required this.enabled,
     required this.onDrag,
     required this.onDragEnd,
   });
 
   /// Suppresses the buffered range — see the note where it is read.
   final bool audioOnly;
+
+  /// False when nothing is open — a premiere, a members-only video, a failure.
+  /// The `Slider` is still there, so focus and semantics are its own, but it is
+  /// disabled: no drag, no tap, no thumb, and none of the hover growth or the
+  /// bubble, which have no time to name.
+  final bool enabled;
 
   final PlaybackEngine engine;
   final double? dragging;
@@ -1194,7 +1204,7 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
             // neither segments nor bubble: its bar is a moving window, not a
             // timeline (§2.7).
             final live = source != null && source.durationMs == null;
-            final timeline = live || durationMs <= 0
+            final timeline = live || durationMs <= 0 || !widget.enabled
                 ? null
                 : ScrubberTimeline(
                     duration: Duration(milliseconds: durationMs.round()),
@@ -1271,16 +1281,20 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
                           trackHeight: ScrubberMetrics.trackHeight,
                           trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction, segments: segments),
                           overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          // No thumb while disabled: there is no position to mark.
+                          thumbShape: widget.enabled ? const RoundSliderThumbShape(enabledThumbRadius: 6) : SliderComponentShape.noThumb,
                           inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          // The same track, not the theme's default disabled grey.
+                          disabledInactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          disabledActiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
                           padding: pad / 1.5,
                         ),
                         child: Slider(
                           value: value,
                           max: max,
                           secondaryTrackValue: bufferedMs.clamp(value, max),
-                          onChanged: handleDrag,
-                          onChangeEnd: handleDragEnd,
+                          onChanged: widget.enabled ? handleDrag : null,
+                          onChangeEnd: widget.enabled ? handleDragEnd : null,
                         ),
                       ),
                     ),
@@ -1847,11 +1861,17 @@ class _TransportControls extends ConsumerWidget {
     required this.engine,
     required this.onWake,
     required this.buildHoverable,
+    required this.enabled,
   });
 
   final PlaybackEngine engine;
   final VoidCallback onWake;
   final Widget Function(Widget child) buildHoverable;
+
+  /// Whether play/pause does anything. Previous and next are **not** gated on
+  /// this: skipping past a video that will not open is exactly when they are
+  /// wanted.
+  final bool enabled;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1885,10 +1905,12 @@ class _TransportControls extends ConsumerWidget {
                 icon: playing ? Icons.pause : Icons.play_arrow,
                 label: playing ? 'Pause' : 'Play',
                 action: PlayerAction.playPause,
-                onPressed: () {
-                  onWake();
-                  unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                },
+                onPressed: enabled
+                    ? () {
+                        onWake();
+                        unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
+                      }
+                    : null,
               ),
             );
           },
