@@ -1789,6 +1789,57 @@ Not built: a cover for the chapters that have no credit. The candidate is
 YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
 — they send what is being listened to to a party that is not YouTube.
 
+### 2.13 Release pipeline — a daily installer, and how an update is trusted (decided 2026-09-26)
+
+`.github/workflows/release.yml`; the pieces it drives are in `release/`.
+
+- **One channel.** There is no nightly/stable split, so a release is just "an
+  update". It is built daily from `main`, and exists only if there is a commit
+  that has no release yet *and* the gate and the build both pass.
+- **The version is a function of the commit:** `<major.minor from
+  app/pubspec.yaml>.<commit count of HEAD>`. It is monotonic on a linear `main`,
+  the same commit always gets the same version, and "is there anything new" is
+  "does `v<version>` exist". Bump the minor by editing `pubspec.yaml`; the count
+  keeps climbing under it.
+- **The artifact is a per-user Inno Setup installer**, `Rill-Setup-x64.exe`,
+  installing to `%LOCALAPPDATA%\Programs\Rill` with no admin rights, so an update
+  never raises a UAC prompt. It clears `data\`, `sidecar\` and `*.dll` before
+  copying (the app owns those; user data does not live in `{app}`), so a file
+  dropped from one build cannot linger in every install after it. The VC++
+  runtime DLLs go in app-local — a machine without them fails before any of our
+  code runs.
+- **x64 only.** x86 is not buildable (Flutter has no Windows x86 target), and
+  arm64 is blocked by the native stack, not by CI (`todo.md` 46). The x64 build
+  runs on Windows-on-ARM under emulation.
+- **Updates are trusted through a signed manifest, not through the release
+  page.** `update.json` carries the version, the installer's URL and its SHA-256,
+  and `update.json.sig` is a detached Ed25519 signature over its exact bytes. The
+  public key is committed at `release/update-signing.pub` and is what the app
+  embeds; the private key exists only as the `UPDATE_SIGNING_KEY` Actions secret,
+  read by the `publish` job alone, and in one offline copy — **losing that copy
+  strands every installed app**, because none can verify an update signed by a new
+  key until it is reinstalled by hand. `make-manifest.ts` verifies its own output
+  against the committed public key before writing, so a wrong secret fails the
+  release rather than shipping updates that every client silently rejects. The
+  client installs only a strictly higher version, so replaying an old signed
+  manifest cannot downgrade anyone.
+- **The feed is this repo's GitHub Releases**, read through
+  `releases/latest/download/update.json` — a redirect, not the API, so no rate
+  limit and no token.
+- **What CI checks about the package.** The sidecar is byte-compared with the
+  one built and started (it must print `event.ready`) before packaging; then the
+  installer is installed silently, its files are checked, the *installed* sidecar
+  is started, and the uninstaller must remove it. That is the check for the
+  silent failure `CLAUDE.md` spends a paragraph on (a bundle running the wrong
+  sidecar) and for "Failed to start sidecar process" reaching a user.
+- **CI's gate is weaker than the local one, and says so.** `sidecar/fixtures`
+  are personal captures, gitignored, so tests guarded by `hasFixture(…)` skip on
+  a runner; `corpus/` is what runs there. A green gate is not a substitute for
+  `rill check` plus `bun run check` on a machine holding the fixtures.
+- **Not Authenticode-signed**, so SmartScreen shows "unknown publisher" once per
+  download (`todo.md` 48). The manifest signature is what makes *updates* safe;
+  it does nothing for the first install.
+
 ---
 
 ## 3. Phasing
@@ -1854,3 +1905,13 @@ CPN into WEB reporting.*
 time- and segment-addressed; a byte-range interface is an impedance mismatch
 that creates seek races and pause timeouts. *Rejected: ring buffers with HTTP
 range requests.*
+
+**A7. Inno Setup over MSIX.** MSIX must be signed by a certificate the machine
+trusts. Self-signed makes every user install the certificate by hand, which
+defeats an update that needs no manual step; the ways out are a purchased
+certificate or a Store submission, and neither fits an unattended daily build.
+It also makes the install directory
+read-only and virtualises writes under `%LOCALAPPDATA%`, which is where the
+release log lives (§2.11). *Rejected: MSIX, and `.appinstaller` auto-update with
+it.* Also rejected: WinSparkle / `auto_updater`, whose native dialogs would sit
+badly in the app's own chrome, and which cannot apply an MSIX.
