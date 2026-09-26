@@ -1832,6 +1832,18 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
   is started, and the uninstaller must remove it. That is the check for the
   silent failure `CLAUDE.md` spends a paragraph on (a bundle running the wrong
   sidecar) and for "Failed to start sidecar process" reaching a user.
+- **The sidecar is installed by one Bun and compiled by another.** `bun.lock` is in
+  a format Bun 1.1.42 cannot read (`todo.md` 50), so CI installs with a current Bun
+  under `--frozen-lockfile` and then switches to 1.1.42 for `check` and `build`. The
+  compiled sidecar embeds its compiler's runtime, and 1.1.42 is what both shipped
+  copies were built with and what it has been measured on. A step asserts the
+  switch took, because two `setup-bun` steps in a row is exactly the kind of thing
+  that quietly keeps the first.
+- **The Flutter pin is committed.** `app/.fvmrc` was gitignored until 2026-09-26
+  (FVM's generated `.gitignore` lists it), so no clone had a pin: `fvm install` had
+  nothing to read, and `tool/test_suite_guard.dart`, which falls back to a bare
+  `flutter` when it cannot see `.fvmrc`, would have tested against whatever was on
+  `PATH`. Found by the first CI run failing at exactly that step.
 - **CI's gate is weaker than the local one, and says so.** `sidecar/fixtures`
   are personal captures, gitignored, so tests guarded by `hasFixture(…)` skip on
   a runner; `corpus/` is what runs there. A green gate is not a substitute for

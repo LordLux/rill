@@ -44,6 +44,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# FVM Version Cache
+# FVM Version Cache. `.fvmrc` is the SDK pin and is committed: ignoring it left every
+# clone (CI included) without a Flutter version, and `fvm install` had nothing to read.
 .fvm/
-.fvmrc

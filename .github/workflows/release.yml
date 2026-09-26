@@ -71,16 +71,25 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # sidecar/bun.lock is in a format newer than BUN_VERSION can read (it fails with
+      # InvalidLockfileVersion), so the install runs on a current Bun and everything after
+      # it on the pinned one. node_modules is plain files either way, and the compiled
+      # sidecar embeds whichever Bun compiles it: the pinned one is what it is measured on.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Sidecar - install exactly what the lockfile says
+        working-directory: sidecar
+        run: bun install --frozen-lockfile
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Confirm the pinned Bun is the one on PATH
+        run: test "$(bun --version)" = "$BUN_VERSION"
       - name: Install fvm and the pinned Flutter SDK
         run: |
           choco install fvm --version="$FVM_VERSION" -y --no-progress
           cd app && fvm install
-      - name: Sidecar - install
-        working-directory: sidecar
-        run: bun install --frozen-lockfile
       - name: Sidecar - check (typecheck, lint, tests)
         working-directory: sidecar
         run: bun run check
@@ -115,18 +124,28 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # sidecar/bun.lock is in a format newer than BUN_VERSION can read (it fails with
+      # InvalidLockfileVersion), so the install runs on a current Bun and everything after
+      # it on the pinned one. node_modules is plain files either way, and the compiled
+      # sidecar embeds whichever Bun compiles it: the pinned one is what it is measured on.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Sidecar - install exactly what the lockfile says
+        working-directory: sidecar
+        run: bun install --frozen-lockfile
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Confirm the pinned Bun is the one on PATH
+        run: test "$(bun --version)" = "$BUN_VERSION"
       - name: Install fvm and the pinned Flutter SDK
         run: |
           choco install fvm --version="$FVM_VERSION" -y --no-progress
           cd app && fvm install
       - name: Sidecar - build
         working-directory: sidecar
-        run: |
-          bun install --frozen-lockfile
-          bun run build
+        run: bun run build
       - name: App - dependencies and codegen
         working-directory: app
         run: |

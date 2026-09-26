@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 50.** A new item takes it, and the same edit bumps this line.
+**Next number: 51.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -641,6 +641,29 @@ without it the ladder's second tier is simply absent and playback falls to
 `ANDROID`'s 360p. That is invisible to the user. Either bundle a pinned
 `yt-dlp.exe` (it goes stale quickly, so it would want its own refresh) or make the
 absence visible in settings.
+
+### 50. `sidecar/bun.lock` cannot be read by the Bun the sidecar is built with
+
+**Measured 2026-09-26.** `sidecar/bun.lock` is `lockfileVersion 1` with a
+`configVersion` (it has been since the initial commit), a format Bun 1.1.42 rejects
+with `InvalidLockfileVersion`. 1.1.42 is what `rill build` uses on this machine and
+what both `sidecar.exe` copies embed. So a plain `bun install` here ignores the
+lockfile and re-resolves the `package.json` ranges, and `bun install
+--frozen-lockfile` fails outright. The installed `node_modules` happens to match the
+lockfile's direct dependencies exactly (youtubei.js 18.0.0, typescript 5.9.3, …), so
+the lockfile is the record of what was installed; nothing here says which Bun wrote
+it.
+
+**Why it matters.** youtubei.js is the session, auth and decipher layer (invariants
+1 and 2), so a range that floats to a newer patch is a change to the part of the
+sidecar that breaks silently. The release workflow works around it by installing
+with a current Bun and building with 1.1.42 (`architecture.md` §2.13), which is
+correct but is a workaround for a mismatch that should not exist.
+
+**Done when:** one Bun both reads the lockfile and builds the sidecar — either the
+pinned Bun moves (and the sidecar is re-measured: the ~6.3 s `bun run` cold start,
+the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
+1.1.42 reads — and the workflow's two-step Bun install collapses into one.
 
 ---
 
