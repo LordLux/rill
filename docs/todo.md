@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 43.** A new item takes it, and the same edit bumps this line.
+**Next number: 46.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -20,7 +20,38 @@ finished and deleted, it would hand the same number out twice.
 
 ## Now
 
-Nothing here right now.
+### 44. Leaving audio-only can wedge: "playing", and nothing moves
+
+**Reported 2026-09-25, rare, never caught live, cause unknown.** Switching from
+audio-only back to video occasionally never finishes: no picture, no sound, the
+position frozen, and the player still claims to be playing — space, `k` and
+clicks do nothing. It is not the loading state. Going back to audio-only
+resumes it at once, and leaving audio-only again then works. Not the 0:00 stall
+(item 43, closed — `architecture.md` F42): that was an *open* with nothing
+selected; this is a restore mid-playback.
+
+**Contained, not diagnosed.** `PlaybackController._armRestoreWatchdog` watches
+every restore: if the player says it is playing while the position has not
+moved for 15 s, it does what fixes it by hand — video track off and on — and if
+that wedges too, reopens the same variant at the same position through the
+quality-switch path, once. `test/restore_watchdog_test.dart` drives the
+symptom through the fake engine; nothing there reproduces the cause.
+
+**When it happens again, read the release log first**
+(`%LOCALAPPDATA%\rill\logs\rill-*.log`). The watchdog writes
+`rill: stuck after leaving audio-only at <ms> (picture …, buffering …, buffer …)`
+and which recovery it tried. `picture` is `vo-configured`: `false` means the
+video output never came back, `true` means a picture that never moved. The
+normal restore writes `rill: audio-only -> video, picture back in <ms>`, and a
+restore with no picture after 30 s writes `rill: no picture after leaving
+audio-only`. Which of those lines appear, and whether the recovery line is
+followed by a resume, is the first real data on this.
+
+**What "done" means.** The cause found and fixed at the source, after which the
+watchdog either goes or stays as documented containment. The 15 s grace is
+above the 2.9–8.0 s restores §2.4 measured on purpose — the recovery drops the
+video cache again, so firing on a merely slow restore would make it slower —
+and it is a guess until a real occurrence says otherwise.
 
 ---
 
@@ -318,6 +349,27 @@ app.
 ---
 
 ## Low priority
+
+### 45. Covers for the songs YouTube does not credit — try YouTube Music search
+
+**Deferred 2026-09-25, on purpose.** A music mix lists at most 10 credits, so
+the chapters past the tenth (and any video with chapters but no credits) show the
+video's still, not the song's cover (`architecture.md` §2.12). The idea, not yet
+tried: search YouTube Music for `"<artist> <song>"` from the chapter's text, as
+the `WEB_REMIX` client, take the first *Song* result and its square cover (same
+image host as the credits, `=s1200`), one request per uncovered chapter, cached
+per video.
+
+**Decide whether to build it after living with chapters for a while** — how
+good the result is without it decides whether it is worth a new client. If built:
+verify the response shape against a real capture (a reference implementation is a
+hypothesis here, `CLAUDE.md`), and reject a result whose title and artist do not
+match the chapter with the same word-overlap rule the credits use, so it cannot
+put a wrong cover on a right title. **Third-party cover APIs (iTunes, Deezer,
+MusicBrainz) are rejected**, not deferred.
+
+**Done means** a chapter with no credit shows a cover that is the right song's,
+or the still when nothing trustworthy came back.
 
 ### 36. Report the F28 race to media-kit, and drop the vendored copy when fixed
 

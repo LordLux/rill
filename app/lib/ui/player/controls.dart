@@ -24,7 +24,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show GestureBinding, PointerScrollEvent, PointerSignalEvent, kDoubleTapTimeout;
+import 'package:flutter/gestures.dart' show GestureBinding, PointerDeviceKind, PointerScrollEvent, PointerSignalEvent, PointerUpEvent, kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,9 +35,12 @@ import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
+import '../audio_mode_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
+import '../video_info.dart';
 import '../widgets/shortcut_tooltip.dart';
+import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
 import 'settings_menu.dart';
 import 'shortcuts.dart' show volumeStep;
@@ -52,7 +55,7 @@ export 'settings_menu.dart' show describeVariant, distinctQualities;
 /// — `LibassLayer` needs it too, and that is the file with no reason to import
 /// this one. Re-exported so existing callers (this file's own tests included)
 /// do not need to know it moved.
-export '../../domain/player_controls_visibility.dart' show playerControlsBarKey;
+export '../../domain/player_controls_visibility.dart' show playerControlsBarKey, playerControlsVisibleProvider;
 
 /// How long the pointer must be still before the controls go away.
 const Duration autoHideDelay = Duration(seconds: 1);
@@ -94,10 +97,11 @@ const Key playerTheatreKey = ValueKey('player-theatre');
 const Key playerFullscreenKey = ValueKey('player-fullscreen');
 
 class PlayerControls extends ConsumerStatefulWidget {
-  const PlayerControls({super.key, required this.engine, this.actualAspectRatio});
+  const PlayerControls({super.key, required this.engine, this.actualAspectRatio, this.child});
 
   final PlaybackEngine engine;
   final double? actualAspectRatio;
+  final Widget? child;
 
   @override
   ConsumerState<PlayerControls> createState() => _PlayerControlsState();
@@ -312,7 +316,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
         // player. `onHover` fires on movement only, which is exactly the wake
         // condition the task asks for.
         cursor: _visible ? MouseCursor.defer : SystemMouseCursors.none,
-        onHover: (_) => _wake(),
+        onHover: (event) {
+          if (event.delta != Offset.zero) _wake();
+        },
         onExit: (_) => _wake(),
         child: Stack(
           fit: StackFit.expand,
@@ -321,14 +327,20 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // plays one real frame from position zero before the seek back
             // lands, and that flash is what reads as broken. Held until the
             // position returns, above the video and below the bar.
-            if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality))) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
+            if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)) && !ref.watch(audioModeProvider)) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
             // The click surface, beneath the bar so the bar's own buttons win
             // the hit test and its background absorbs rather than falls through.
+            // Kept in audio-only too. It was gated off to let the music
+            // layout's buttons be clicked, which did not work — the opaque
+            // `MouseRegion` above it was the real blocker — and the gate cost
+            // tap-to-pause and double-click-to-fullscreen for nothing. The
+            // layout now sits above this instead.
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _onTap,
               child: const SizedBox.expand(),
             ),
+            if (widget.child != null) widget.child!,
             // Above the click surface so it paints over the cover, but
             // pointer-transparent — a spinner that swallowed the click to
             // play/pause would take the control away exactly when the player is
@@ -374,7 +386,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // The fullscreen header: what is playing, since fullscreen hides the
             // page that would otherwise say. Fades with the bar rather than on
             // its own timer — one visibility, so they cannot disagree.
-            if (ref.watch(playerViewProvider.select((view) => view.fullscreen)))
+            if (ref.watch(playerViewProvider.select((view) => view.fullscreen)) && !ref.watch(audioModeProvider))
               Positioned(
                 key: const ValueKey('player-header'),
                 left: 0,
@@ -433,9 +445,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                   child: _buildHoverable(
                                     _MenuButton(
                                       key: playerCaptionsKey,
-                                      icon: ref.watch(captionsProvider.select((c) => c.isOn))
-                                          ? Icons.closed_caption
-                                          : Icons.closed_caption_outlined,
+                                      icon: ref.watch(captionsProvider.select((c) => c.isOn)) ? Icons.closed_caption : Icons.closed_caption_outlined,
                                       label: 'Captions',
                                       action: PlayerAction.captions,
                                       busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
@@ -526,7 +536,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         ),
                         child: Material(
                           type: MaterialType.transparency,
-                          child: _isVertical ? _buildVerticalBar(context) : _buildBar(context),
+                          child: _isVertical ? _buildVerticalBar(context) : (ref.watch(audioModeProvider) ? _buildAudioBar(context) : _buildBar(context)),
                         ),
                       ),
                     ),
@@ -542,10 +552,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   Widget _buildBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    final queue = ref.watch(queueProvider);
-    final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
     final captions = ref.watch(captionsProvider);
+    final isAudioOnly = ref.watch(audioModeProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -557,6 +566,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             dragging: _dragging,
             hold: playback.hold,
             source: playback.source,
+            audioOnly: isAudioOnly,
+            enabled: !playback.isUnplayable,
             onDrag: (value) {
               setState(() => _dragging = value);
               _wake();
@@ -582,51 +593,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
               child: Row(
                 children: [
-                  StreamBuilder<bool>(
-                    stream: widget.engine.playingStream,
-                    initialData: widget.engine.playing,
-                    builder: (context, snapshot) {
-                      final playing = snapshot.data ?? false;
-                      return _buildHoverable(
-                        _ControlIcon(
-                          iconKey: playerPlayPauseKey,
-                          icon: playing ? Icons.pause : Icons.play_arrow,
-                          label: playing ? 'Pause' : 'Play',
-                          action: PlayerAction.playPause,
-                          onPressed: () {
-                            _wake();
-                            unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                  if (queue.hasPrevious)
-                    _buildHoverable(
-                      _ControlIcon(
-                        iconKey: playerPreviousKey,
-                        icon: Icons.skip_previous,
-                        label: 'Previous video',
-                        action: PlayerAction.previous,
-                        onPressed: () {
-                          _wake();
-                          ref.read(playbackProvider.notifier).previous();
-                        },
-                      ),
-                    ),
-                  if (queue.hasNext)
-                    _buildHoverable(
-                      _ControlIcon(
-                        iconKey: playerNextKey,
-                        icon: Icons.skip_next,
-                        label: 'Next video',
-                        action: PlayerAction.next,
-                        onPressed: () {
-                          _wake();
-                          ref.read(playbackProvider.notifier).next();
-                        },
-                      ),
-                    ),
+                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable, enabled: !playback.isUnplayable),
                   _buildHoverable(
                     _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
                   ),
@@ -658,15 +625,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // other control here that reports state rather than action is
                   // theatre, and for the same reason: "on" is the fact worth
                   // reading at a glance.
-                  if (captions.hasTracks)
+                  if (captions.hasTracks && !isAudioOnly)
                     KeyedSubtree(
                       key: captionsButtonAnchorKey,
                       child: _buildHoverable(
                         _MenuButton(
                           key: playerCaptionsKey,
-                          icon: captions.isOn
-                              ? Icons.closed_caption
-                              : Icons.closed_caption_outlined,
+                          icon: captions.isOn ? Icons.closed_caption : Icons.closed_caption_outlined,
                           label: 'Captions',
                           action: PlayerAction.captions,
                           busy: captions.isLoadingTrack,
@@ -679,27 +644,100 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         ),
                       ),
                     ),
-                  // **Quality, then the gear** — specific before general. It is
-                  // the one picker anybody changes mid-video, so a row two taps
-                  // deep inside the settings menu was the wrong depth for it.
-                  //
-                  // `KeyedSubtree` because each button needs two keys: the
-                  // `ValueKey` the tests find it by, and the `GlobalKey` the
-                  // click-outside measures it by. See `settingsMenuAnchorKey`.
+                  if (!isAudioOnly)
+                    KeyedSubtree(
+                      key: qualityButtonAnchorKey,
+                      child: _buildHoverable(
+                        _MenuButton(
+                          key: playerQualityButtonKey,
+                          icon: Icons.hd_outlined,
+                          label: 'Quality',
+                          busy: playback.isSwitchingQuality,
+                          open: ref.watch(
+                            playerMenuProvider.select(
+                              (menu) => menu.open && menu.page == SettingsPage.quality,
+                            ),
+                          ),
+                          onPressed: playback.variants.isEmpty ? null : _toggleQuality,
+                        ),
+                      ),
+                    ),
                   KeyedSubtree(
-                    key: qualityButtonAnchorKey,
+                    key: settingsMenuAnchorKey,
                     child: _buildHoverable(
                       _MenuButton(
-                        key: playerQualityButtonKey,
-                        icon: Icons.hd_outlined,
-                        label: 'Quality',
-                        busy: playback.isSwitchingQuality,
+                        key: playerSettingsButtonKey,
+                        icon: Icons.settings,
+                        label: 'Settings',
                         open: ref.watch(
                           playerMenuProvider.select(
-                            (menu) => menu.open && menu.page == SettingsPage.quality,
+                            (menu) => menu.open && _isGearPage(menu.page),
                           ),
                         ),
-                        onPressed: playback.variants.isEmpty ? null : _toggleQuality,
+                        onPressed: _toggleMenu,
+                      ),
+                    ),
+                  ),
+                  _ViewControls(onWake: _wake, buildHoverable: _buildHoverable),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    ).withScrimForeground(tokens);
+  }
+
+  Widget _buildAudioBar(BuildContext context) {
+    final tokens = Theme.of(context).tokens;
+    final playback = ref.watch(playbackProvider);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildHoverable(
+          _Scrubber(
+            key: playerScrubberKey,
+            engine: widget.engine,
+            dragging: _dragging,
+            hold: playback.hold,
+            source: playback.source,
+            audioOnly: true,
+            enabled: !playback.isUnplayable,
+            onDrag: (value) {
+              setState(() => _dragging = value);
+              _wake();
+            },
+            onDragEnd: (value) {
+              setState(() => _dragging = null);
+              unawaited(
+                ref.read(playbackProvider.notifier).seek(Duration(milliseconds: value.round())),
+              );
+              _restartHideTimer();
+            },
+          ),
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 640;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+              child: Row(
+                children: [
+                  _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: _buildHoverable, enabled: !playback.isUnplayable),
+                  _buildHoverable(
+                    _Volume(engine: widget.engine, compact: compact, onChanged: _wake),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _Clock(
+                        engine: widget.engine,
+                        dragging: _dragging,
+                        hold: playback.hold,
+                        source: playback.source,
                       ),
                     ),
                   ),
@@ -710,10 +748,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                         key: playerSettingsButtonKey,
                         icon: Icons.settings,
                         label: 'Settings',
-                        // The two pages that are *not* the gear's, named rather
-                        // than `!= quality`: adding the captions page to that
-                        // test would have lit the gear up whenever the caption
-                        // panel was open, which reads as two menus at once.
                         open: ref.watch(
                           playerMenuProvider.select(
                             (menu) => menu.open && _isGearPage(menu.page),
@@ -723,49 +757,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerMiniPlayerKey,
-                      icon: Icons.branding_watermark_outlined,
-                      label: 'Miniplayer',
-                      action: PlayerAction.miniPlayer,
-                      onPressed: () {
-                        _wake();
-                        toMiniPlayer(ref);
-                      },
-                    ),
-                  ),
-                  // **State, not action — and only this one.** Every other icon
-                  // here says what pressing it does; this one says which mode
-                  // the player is in, because "theatre" has no familiar glyph
-                  // and an icon nobody recognises is better as a status than as
-                  // an instruction. Fullscreen keeps action semantics next to
-                  // it: `fullscreen_exit` is legible as a verb in a way the
-                  // crop icons are not.
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerTheatreKey,
-                      icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
-                      label: view.theatre ? 'Default view' : 'Theatre mode',
-                      action: PlayerAction.theatre,
-                      onPressed: () {
-                        _wake();
-                        ref.read(playerViewProvider.notifier).toggleTheatre();
-                      },
-                    ),
-                  ),
-                  _buildHoverable(
-                    _ControlIcon(
-                      iconKey: playerFullscreenKey,
-                      icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                      label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
-                      action: PlayerAction.fullscreen,
-                      onPressed: () {
-                        _wake();
-                        ref.read(playerViewProvider.notifier).toggleFullscreen();
-                      },
-                    ),
-                  ),
+                  _ViewControls(onWake: _wake, buildHoverable: _buildHoverable),
                   const SizedBox(width: 4),
                 ],
               ),
@@ -778,53 +770,15 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
 
   Widget _buildVerticalBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
-    final queue = ref.watch(queueProvider);
     final view = ref.watch(playerViewProvider);
     final playback = ref.watch(playbackProvider);
+    final isAudioOnly = ref.watch(audioModeProvider);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 2, 6, 6),
       child: Row(
         children: [
-          StreamBuilder<bool>(
-            stream: widget.engine.playingStream,
-            initialData: widget.engine.playing,
-            builder: (context, snapshot) {
-              final playing = snapshot.data ?? false;
-              return _ControlIcon(
-                iconKey: playerPlayPauseKey,
-                icon: playing ? Icons.pause : Icons.play_arrow,
-                label: playing ? 'Pause' : 'Play',
-                action: PlayerAction.playPause,
-                onPressed: () {
-                  _wake();
-                  unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
-                },
-              );
-            },
-          ),
-          if (queue.hasPrevious)
-            _ControlIcon(
-              iconKey: playerPreviousKey,
-              icon: Icons.skip_previous,
-              label: 'Previous video',
-              action: PlayerAction.previous,
-              onPressed: () {
-                _wake();
-                ref.read(playbackProvider.notifier).previous();
-              },
-            ),
-          if (queue.hasNext)
-            _ControlIcon(
-              iconKey: playerNextKey,
-              icon: Icons.skip_next,
-              label: 'Next video',
-              action: PlayerAction.next,
-              onPressed: () {
-                _wake();
-                ref.read(playbackProvider.notifier).next();
-              },
-            ),
+          _TransportControls(engine: widget.engine, onWake: _wake, buildHoverable: (child) => child, enabled: !playback.isUnplayable),
           const SizedBox(width: 4),
           _Clock(
             engine: widget.engine,
@@ -840,6 +794,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               dragging: _dragging,
               hold: playback.hold,
               source: playback.source,
+              audioOnly: isAudioOnly,
+              enabled: !playback.isUnplayable,
               onDrag: (value) {
                 setState(() => _dragging = value);
                 _wake();
@@ -1059,7 +1015,10 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
 
   bool _busy() {
     final playback = ref.read(playbackProvider);
-    return _buffering || playback.isSwitchingQuality || playback.isLoading;
+    return _buffering ||
+        playback.isSwitchingQuality ||
+        playback.isLoading ||
+        playback.isRestoringVideo;
   }
 
   @override
@@ -1067,7 +1026,7 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     // Watched as well as read, so a switch starting or ending drives this even
     // though it arrives through Riverpod rather than through the stream above.
     ref.listen(
-      playbackProvider.select((p) => p.isSwitchingQuality || p.isLoading),
+      playbackProvider.select((p) => p.isSwitchingQuality || p.isLoading || p.isRestoringVideo),
       (_, _) => _update(),
     );
 
@@ -1092,16 +1051,31 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
 /// **Seeks on release, never during the drag.** F15 measured a 1.2–1.3 s stall
 /// per seek, so a scrubber that seeked continuously would fire dozens across one
 /// drag and the video would be unreachable for the length of it.
-class _Scrubber extends StatelessWidget {
+///
+/// Chapter segments, the hover growth and the bubble are `architecture.md`
+/// §2.7. They change what the `Slider` paints and what surrounds it, never what
+/// it does: seeking is untouched.
+class _Scrubber extends ConsumerStatefulWidget {
   const _Scrubber({
     super.key,
     required this.engine,
     required this.dragging,
     required this.hold,
     required this.source,
+    required this.audioOnly,
+    required this.enabled,
     required this.onDrag,
     required this.onDragEnd,
   });
+
+  /// Suppresses the buffered range — see the note where it is read.
+  final bool audioOnly;
+
+  /// False when nothing is open — a premiere, a members-only video, a failure.
+  /// The `Slider` is still there, so focus and semantics are its own, but it is
+  /// disabled: no drag, no tap, no thumb, and none of the hover growth or the
+  /// bubble, which have no time to name.
+  final bool enabled;
 
   final PlaybackEngine engine;
   final double? dragging;
@@ -1121,7 +1095,85 @@ class _Scrubber extends StatelessWidget {
   final ValueChanged<double> onDragEnd;
 
   @override
+  ConsumerState<_Scrubber> createState() => _ScrubberState();
+}
+
+class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderStateMixin {
+  late final SegmentGrowth _growth = SegmentGrowth(this);
+
+  /// The pointer's x in the scrubber's box, null when it is elsewhere. Read by
+  /// the bubble alone, so a pointer move rebuilds that and nothing else.
+  final ValueNotifier<double?> _pointerX = ValueNotifier<double?>(null);
+
+  /// What the pointer handlers need from the last build. Null when the bar has
+  /// no time to show — live, or no duration yet — which is also when hovering
+  /// does nothing.
+  ScrubberTimeline? _timeline;
+  EdgeInsets _padding = EdgeInsets.zero;
+
+  @override
+  void dispose() {
+    _growth.dispose();
+    _pointerX.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_Scrubber oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dragging != widget.dragging) _retarget();
+  }
+
+  double? _boxWidth() {
+    final box = context.findRenderObject();
+    return box is RenderBox && box.hasSize ? box.size.width : null;
+  }
+
+  /// The position the bubble names: the thumb's while it is held, else the
+  /// pointer's — null when neither is on the bar.
+  Duration? _shownPosition(ScrubberTimeline timeline, double? pointerX, double? boxWidth) {
+    final dragging = widget.dragging;
+    if (dragging != null) return Duration(milliseconds: dragging.round().clamp(0, timeline.duration.inMilliseconds));
+    if (pointerX == null || boxWidth == null) return null;
+    final track = scrubberTrackSpan(boxWidth, _padding);
+    return trackTimeAt(pointerX, trackLeft: track.left, trackWidth: track.width, duration: timeline.duration);
+  }
+
+  void _retarget() {
+    final timeline = _timeline;
+    final position = timeline == null ? null : _shownPosition(timeline, _pointerX.value, _boxWidth());
+    _growth.retarget(position == null ? null : timeline!.segmentAt(position));
+  }
+
+  void _onPointer(double? dx) {
+    _pointerX.value = _timeline == null ? null : dx;
+    _retarget();
+  }
+
+  /// A finger lifting takes the bubble with it; a mouse leaves it until it
+  /// leaves the bar, unless it was released somewhere else.
+  void _onPointerUp(PointerUpEvent event) {
+    final box = context.findRenderObject();
+    final outside = box is RenderBox && box.hasSize && !(Offset.zero & box.size).contains(box.globalToLocal(event.position));
+    if (event.kind != PointerDeviceKind.mouse || outside) _onPointer(null);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final engine = widget.engine;
+    final hold = widget.hold;
+    final source = widget.source;
+    final dragging = widget.dragging;
+
+    // Chapters are one video's: keyed by its id, so a list can never paint on
+    // the next video, and a new video starts with nothing hovered.
+    final videoId = ref.watch(playbackProvider.select((playback) => playback.item?.id));
+    final chapters = videoId == null ? null : ref.watch(videoInfoProvider(videoId).select((info) => info.value?.chapters));
+    ref.listen(playbackProvider.select((playback) => playback.item?.id), (_, _) {
+      _pointerX.value = null;
+      _growth.reset();
+    });
+
     return StreamBuilder<Duration>(
       stream: engine.positionStream,
       initialData: engine.position,
@@ -1133,25 +1185,47 @@ class _Scrubber extends StatelessWidget {
             double durationMs = (hold?.duration ?? engine.duration).inMilliseconds.toDouble();
             double max = math.max(durationMs, 1.0);
             double positionMs = (hold?.position ?? positionSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
-            double bufferedMs = (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
-            
+            // **No buffered range in audio-only, because there is no honest one
+            // to draw.** `vid=no` tears the video demuxer down, and mpv's cache
+            // properties report *that* demuxer — measured 2026-09-22,
+            // `demuxer-cache-duration` reads 0.000000 for the whole audio-only
+            // phase while audio keeps playing from a cache nothing exposes. So
+            // media_kit's `buffer` stops advancing and the bar freezes at
+            // whatever it last saw, which claims the stream stopped buffering
+            // when it did not. Drawing nothing says "not known"; leaving the
+            // stale bar up says something false.
+            double bufferedMs = widget.audioOnly ? 0.0 : (bufferSnapshot.data ?? Duration.zero).inMilliseconds.toDouble();
+
             double value = (dragging ?? positionMs).clamp(0.0, max);
             double? unplayableEndFraction;
+
+            // The same duration `max` is built from, so the segments and the
+            // thumb cannot disagree during a quality switch. A live stream has
+            // neither segments nor bubble: its bar is a moving window, not a
+            // timeline (§2.7).
+            final live = source != null && source.durationMs == null;
+            final timeline = live || durationMs <= 0 || !widget.enabled
+                ? null
+                : ScrubberTimeline(
+                    duration: Duration(milliseconds: durationMs.round()),
+                    chapters: chapters ?? const [],
+                  );
+            _timeline = timeline;
 
             if (source?.durationMs == null && source?.startTimestamp != null) {
               final start = DateTime.parse(source!.startTimestamp!).toLocal();
               final now = DateTime.now();
               final liveEdgeMs = math.max(now.difference(start).inMilliseconds.toDouble(), 1.0);
-              
+
               final playheadOffsetMs = durationMs - positionMs;
               final absoluteValueMs = liveEdgeMs - playheadOffsetMs;
 
               max = liveEdgeMs;
               value = (dragging ?? absoluteValueMs).clamp(0.0, max);
-              
+
               final bufferOffsetMs = durationMs - bufferedMs;
               bufferedMs = (liveEdgeMs - bufferOffsetMs).clamp(0.0, max);
-              
+
               final unplayableEndMs = liveEdgeMs - durationMs;
               unplayableEndFraction = (unplayableEndMs / max).clamp(0.0, 1.0);
             }
@@ -1162,9 +1236,9 @@ class _Scrubber extends StatelessWidget {
                 final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
                 // Convert back to relative
                 final relativeValue = clampedAbsolute - unplayableEndMs;
-                onDrag(relativeValue);
+                widget.onDrag(relativeValue);
               } else {
-                onDrag(absoluteValue);
+                widget.onDrag(absoluteValue);
               }
             }
 
@@ -1173,32 +1247,96 @@ class _Scrubber extends StatelessWidget {
                 final unplayableEndMs = max * unplayableEndFraction;
                 final clampedAbsolute = absoluteValue.clamp(unplayableEndMs, max);
                 final relativeValue = clampedAbsolute - unplayableEndMs;
-                onDragEnd(relativeValue);
+                widget.onDragEnd(relativeValue);
               } else {
-                onDragEnd(absoluteValue);
+                widget.onDragEnd(absoluteValue);
               }
             }
 
             final pad = SliderTheme.of(context).padding ?? const EdgeInsets.symmetric(horizontal: 12.0);
+            _padding = (pad / 1.5).resolve(Directionality.of(context));
 
-            return SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 4,
-                trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
-                padding: pad / 1.5,
-              ),
-              child: Slider(
-                value: value,
-                max: max,
-                secondaryTrackValue: bufferedMs.clamp(value, max),
-                onChanged: handleDrag,
-                onChangeEnd: handleDragEnd,
-              ),
+            // The whole bar is one segment when there are no chapters, so it
+            // grows on hover the same way.
+            final segments = timeline == null ? null : TrackSegments(timeline.segments, _growth.values);
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                MouseRegion(
+                  opaque: false,
+                  onHover: (event) => _onPointer(event.localPosition.dx),
+                  onExit: (_) => _onPointer(null),
+                  // Moves and releases reach a `Listener` during a drag, when
+                  // `onHover` does not.
+                  child: Listener(
+                    onPointerDown: (event) => _onPointer(event.localPosition.dx),
+                    onPointerMove: (event) => _onPointer(event.localPosition.dx),
+                    onPointerUp: _onPointerUp,
+                    onPointerCancel: (_) => _onPointer(null),
+                    child: ListenableBuilder(
+                      listenable: _growth,
+                      builder: (context, _) => SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: ScrubberMetrics.trackHeight,
+                          trackShape: _RillSliderTrackShape(unplayableEndFraction: unplayableEndFraction, segments: segments),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                          // No thumb while disabled: there is no position to mark.
+                          thumbShape: widget.enabled ? const RoundSliderThumbShape(enabledThumbRadius: 6) : SliderComponentShape.noThumb,
+                          inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          // The same track, not the theme's default disabled grey.
+                          disabledInactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          disabledActiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                          padding: pad / 1.5,
+                        ),
+                        child: Slider(
+                          value: value,
+                          max: max,
+                          secondaryTrackValue: bufferedMs.clamp(value, max),
+                          onChanged: widget.enabled ? handleDrag : null,
+                          onChangeEnd: widget.enabled ? handleDragEnd : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // In-tree rather than a `Tooltip`: nothing above the `Navigator`
+                // has an `Overlay` (§2.8), and a bubble that could not be drawn
+                // there would throw. Painted outside the box, so the `Stack`
+                // must not clip and the bubble must not be hit.
+                if (timeline != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: ValueListenableBuilder<double?>(
+                        valueListenable: _pointerX,
+                        builder: (context, pointerX, _) => _buildBubble(timeline, pointerX),
+                      ),
+                    ),
+                  ),
+              ],
             );
           },
+        );
+      },
+    );
+  }
+
+  /// The timestamp under the pointer — or under the thumb while it is held —
+  /// and the chapter it falls in. Follows the pointer, clamped inside the bar.
+  Widget _buildBubble(ScrubberTimeline timeline, double? pointerX) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final position = _shownPosition(timeline, pointerX, constraints.maxWidth);
+        if (position == null) return const SizedBox.shrink();
+        final track = scrubberTrackSpan(constraints.maxWidth, _padding);
+        final anchorX = trackXAt(position, trackLeft: track.left, trackWidth: track.width, duration: timeline.duration);
+        return CustomSingleChildLayout(
+          delegate: ScrubberBubbleLayout(anchorX: anchorX),
+          child: ScrubberBubble(
+            key: playerScrubberBubbleKey,
+            timestamp: formatClock(position),
+            title: timeline.chapterTitleAt(position),
+          ),
         );
       },
     );
@@ -1227,7 +1365,7 @@ class _Clock extends StatelessWidget {
         // otherwise the number under the finger is the position the user is
         // leaving, which is the one piece of information they do not need.
         final position = dragging == null ? (hold?.position ?? snapshot.data ?? Duration.zero) : Duration(milliseconds: dragging!.round());
-        
+
         if (source?.durationMs == null && source != null) {
           Widget timeWidget;
           if (source!.startTimestamp != null) {
@@ -1578,7 +1716,11 @@ String formatClock(Duration d) {
 
 class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
   final double? unplayableEndFraction;
-  const _RillSliderTrackShape({this.unplayableEndFraction});
+
+  /// One segment per chapter, or the whole bar as one; null draws the plain
+  /// track, which is what a live stream gets (§2.7).
+  final TrackSegments? segments;
+  const _RillSliderTrackShape({this.unplayableEndFraction, this.segments});
 
   @override
   void paint(
@@ -1633,6 +1775,20 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
         break;
     }
 
+    if (segments != null) {
+      paintSegmentedTrack(
+        context.canvas,
+        trackRect: trackRect,
+        thumbX: thumbCenter.dx,
+        bufferX: secondaryOffset?.dx,
+        segments: segments!,
+        played: leftTrackPaint,
+        buffered: Paint()..color = sliderTheme.secondaryActiveTrackColor ?? sliderTheme.activeTrackColor!.withValues(alpha: 0.5),
+        remaining: rightTrackPaint,
+      );
+      return;
+    }
+
     // Draw active track
     final Rect leftTrackSegment = Rect.fromLTRB(trackRect.left, trackRect.top, thumbCenter.dx, trackRect.bottom);
     if (!leftTrackSegment.isEmpty) {
@@ -1668,25 +1824,168 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
       }
 
       // Draw inactive track (remaining)
-      final Rect rightTrackSegment = Rect.fromLTRB(
-        bufferRight,
-        trackRect.top,
-        trackRect.right,
-        trackRect.bottom,
+      final RRect rightTrackSegment = RRect.fromRectAndRadius(
+        Rect.fromLTRB(
+          bufferRight,
+          trackRect.top,
+          trackRect.right,
+          trackRect.bottom,
+        ),
+        Radius.circular(trackRect.height / 2),
       );
+
       if (!rightTrackSegment.isEmpty) {
-        context.canvas.drawRect(rightTrackSegment, rightTrackPaint);
+        context.canvas.drawRRect(rightTrackSegment, rightTrackPaint);
       }
     } else {
-      final Rect rightTrackSegment = Rect.fromLTRB(
-        thumbCenter.dx,
-        trackRect.top,
-        trackRect.right,
-        trackRect.bottom,
+      final RRect rightTrackSegmentR = RRect.fromRectAndRadius(
+        Rect.fromLTRB(
+          thumbCenter.dx,
+          trackRect.top,
+          trackRect.right,
+          trackRect.bottom,
+        ),
+        Radius.circular(trackRect.height / 2),
       );
-      if (!rightTrackSegment.isEmpty) {
-        context.canvas.drawRect(rightTrackSegment, rightTrackPaint);
+
+      if (!rightTrackSegmentR.isEmpty) {
+        context.canvas.drawRRect(rightTrackSegmentR, rightTrackPaint);
       }
     }
+  }
+}
+
+/// The previous, play/pause and next buttons
+class _TransportControls extends ConsumerWidget {
+  const _TransportControls({
+    required this.engine,
+    required this.onWake,
+    required this.buildHoverable,
+    required this.enabled,
+  });
+
+  final PlaybackEngine engine;
+  final VoidCallback onWake;
+  final Widget Function(Widget child) buildHoverable;
+
+  /// Whether play/pause does anything. Previous and next are **not** gated on
+  /// this: skipping past a video that will not open is exactly when they are
+  /// wanted.
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasPrevious = ref.watch(queueProvider.select((q) => q.hasPrevious));
+    final hasNext = ref.watch(queueProvider.select((q) => q.hasNext));
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hasPrevious)
+          buildHoverable(
+            _ControlIcon(
+              iconKey: playerPreviousKey,
+              icon: Icons.skip_previous,
+              label: 'Previous video',
+              action: PlayerAction.previous,
+              onPressed: () {
+                onWake();
+                ref.read(playbackProvider.notifier).previous();
+              },
+            ),
+          ),
+        StreamBuilder<bool>(
+          stream: engine.playingStream,
+          initialData: engine.playing,
+          builder: (context, snapshot) {
+            final playing = snapshot.data ?? false;
+            return buildHoverable(
+              _ControlIcon(
+                iconKey: playerPlayPauseKey,
+                icon: playing ? Icons.pause : Icons.play_arrow,
+                label: playing ? 'Pause' : 'Play',
+                action: PlayerAction.playPause,
+                onPressed: enabled
+                    ? () {
+                        onWake();
+                        unawaited(ref.read(playbackProvider.notifier).togglePlayPause());
+                      }
+                    : null,
+              ),
+            );
+          },
+        ),
+        if (hasNext)
+          buildHoverable(
+            _ControlIcon(
+              iconKey: playerNextKey,
+              icon: Icons.skip_next,
+              label: 'Next video',
+              action: PlayerAction.next,
+              onPressed: () {
+                onWake();
+                ref.read(playbackProvider.notifier).next();
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ViewControls extends ConsumerWidget {
+  const _ViewControls({
+    required this.onWake,
+    required this.buildHoverable,
+  });
+
+  final VoidCallback onWake;
+  final Widget Function(Widget child) buildHoverable;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final view = ref.watch(playerViewProvider);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        buildHoverable(
+          _ControlIcon(
+            iconKey: playerMiniPlayerKey,
+            icon: Icons.branding_watermark_outlined,
+            label: 'Miniplayer',
+            action: PlayerAction.miniPlayer,
+            onPressed: () {
+              onWake();
+              toMiniPlayer(ref);
+            },
+          ),
+        ),
+        buildHoverable(
+          _ControlIcon(
+            iconKey: playerTheatreKey,
+            icon: view.theatre ? Icons.crop_7_5 : Icons.crop_16_9,
+            label: view.theatre ? 'Default view' : 'Theatre mode',
+            action: PlayerAction.theatre,
+            onPressed: () {
+              onWake();
+              ref.read(playerViewProvider.notifier).toggleTheatre();
+            },
+          ),
+        ),
+        buildHoverable(
+          _ControlIcon(
+            iconKey: playerFullscreenKey,
+            icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+            label: view.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            action: PlayerAction.fullscreen,
+            onPressed: () {
+              onWake();
+              ref.read(playerViewProvider.notifier).toggleFullscreen();
+            },
+          ),
+        ),
+      ],
+    );
   }
 }

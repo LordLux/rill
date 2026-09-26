@@ -9,7 +9,6 @@ import '../../theme/tokens.dart';
 import '../queue_controller.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
-import 'silky_scroll_absorber.dart';
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
 /// collapse that closes the gap the sweep never has to (architecture §2.8).
@@ -20,9 +19,11 @@ const Duration _rowExit = Duration(milliseconds: 340);
 const double _rowSlidePhase = 200 / 340;
 
 class EmbeddedQueuePanel extends ConsumerStatefulWidget {
-  const EmbeddedQueuePanel({super.key, this.maxHeight = 400.0});
+  const EmbeddedQueuePanel({super.key, this.maxHeight = 400.0, this.borderRadius, this.onCollapse});
 
   final double maxHeight;
+  final BorderRadiusGeometry? borderRadius;
+  final VoidCallback? onCollapse;
 
   @override
   ConsumerState<EmbeddedQueuePanel> createState() => _EmbeddedQueuePanelState();
@@ -378,6 +379,16 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     await _shrinkCtrl.forward();
     if (!mounted) return;
   }
+  
+  void _onCollapse() {
+    if (_clearing) return;
+    
+    if (widget.onCollapse != null) {
+      widget.onCollapse!();
+    } else {
+      setState(() => _expanded = !_expanded);
+    }
+  }
 
   void _spawnParticles(Offset center) {
     final scheme = Theme.of(context).colorScheme;
@@ -447,27 +458,25 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
 
     final nextItem = queue.next;
 
-    // The list is a `SilkyScroll` and so already on the hover stack; the header,
-    // the clear button and the edges are not. See `SilkyScrollAbsorber`.
-    Widget panel = SilkyScrollAbsorber(
-      child: Material(
-        key: _panelKey,
+    Widget panel = Material(
+      key: _panelKey,
         color: scheme.surfaceContainer,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: widget.borderRadius ?? BorderRadius.circular(12),
           side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Header
             Material(
               color: Colors.transparent,
               child: Ink(
                 key: _headerKey,
                 color: scheme.surfaceContainerHighest,
                 child: InkWell(
-                  onTap: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                  onTap: _clearing ? null : () => _onCollapse(),
                   borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
                   child: Padding(
                     padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
@@ -569,7 +578,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           child: IconButton(
                             icon: Icon(Icons.keyboard_arrow_up),
                             color: scheme.onSurfaceVariant,
-                            onPressed: _clearing ? null : () => setState(() => _expanded = !_expanded),
+                            onPressed: _clearing ? null : () => _onCollapse(),
                           ),
                         ),
                       ],
@@ -578,6 +587,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                 ),
               ),
             ),
+            // Queue List
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 300),
               sizeCurve: Curves.easeOutCubic,
@@ -590,7 +600,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                 constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
                 child: SilkyScroll(
                   controller: _listScroll,
-                  builder: (context, scrollController, physics, pointerDeviceKind) {
+                  builder: (context, scrollController, physics, _) {
                     return ReorderableListView.builder(
                       scrollController: scrollController,
                       shrinkWrap: true,
@@ -620,8 +630,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
             ),
           ],
         ),
-      ),
-    );
+      );
 
     panel = Padding(
       padding: const EdgeInsets.only(bottom: 20),

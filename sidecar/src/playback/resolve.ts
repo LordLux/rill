@@ -243,6 +243,7 @@ function assemble(parts: SourceParts): PlaybackSource {
     durationMs: parts.durationMs ?? (durationSeconds === null ? null : durationSeconds * 1000),
     startTimestamp: parts.response?.startTimestamp ?? null,
     storyboardTemplate: parts.response ? storyboardTemplate(parts.response) : null,
+    posterUrl: parts.response?.posterUrl ?? null,
     // A uniform rule rather than a bottom-rung special case: tier 5 is 360p so
     // it is always degraded, and a tier-1 resolution that could only find 360p is
     // degraded too, which the user deserves to be told either way.

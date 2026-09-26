@@ -314,7 +314,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
   void _submit(String text) {
     ref.read(searchSuggestProvider.notifier).close();
     _focus.unfocus();
-    openSearch(ref, text);
+    openSearchOrVideo(ref, text);
   }
 
   /// Enter, with a suggestion arrow-highlighted: search *that* suggestion,

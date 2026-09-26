@@ -105,6 +105,13 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
 
   // Indexed so a mapper that gives every item the same value cannot pass.
   title: /^Sanitised Title \d+$/,
+  // MusicTrack: a song names a real recording, a real performer and a real
+  // Google image id, so every field is a placeholder rather than kept. The
+  // track's own title reuses the `title` shape above — the auditor keys by
+  // field name, so `title` has one shape wherever it appears.
+  artist: /^Sanitised Artist \d+$/,
+  album: /^Sanitised Album \d+$/,
+  coverUrl: /^https:\/\/fake\.url\/cover\d+\.jpg$/,
   channelName: /^Sanitised Channel \d+$/,
   name: /^Sanitised Channel \d+$/,
   subtitle: /^Sanitised Subtitle \d+$/,

@@ -38,7 +38,13 @@ dependencies:
   flutter_inappwebview: 6.1.5
   flutter_secure_storage: 9.2.4
   bitsdojo_window: ^0.1.6
-
+  flutter_media_session: ^3.0.5
+  # Vendored at 1.1.2 with two fixes, both marked `rill patch` in
+  # `windows/windows_taskbar.cc`: a GDI handle leaked per button per update, and
+  # a failed first add left every later update aimed at buttons that never
+  # existed. Same arrangement as `media_kit_video` below.
+  windows_taskbar:
+    path: ../third_party/windows_taskbar
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -76,7 +82,8 @@ dependency_overrides:
   # 1.0.11 above and is not touched by this (F13).
   media_kit_video:
     path: ../third_party/media_kit_video
-
+  silky_scroll:
+    path: ../third_party/silky_scroll
   # **Otherwise empty on purpose. Do not add an override to make the tree
   # resolve.**
   #
@@ -125,6 +132,9 @@ flutter:
 
   assets:
     - assets/icons/
+    # Loaded by path from `data/flutter_assets/`, not through the asset bundle —
+    # see `taskbar_controller.dart` and `tool/gen_taskbar_icons.py`.
+    - assets/taskbar/
     - assets/icons/reddit.svg
     - assets/icons/facebook.svg
     - assets/icons/telegram.svg

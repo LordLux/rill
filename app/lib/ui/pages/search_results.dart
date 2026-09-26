@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/search_filters.dart';
+import '../../domain/youtube_link.dart';
 import '../../theme/screen_values.dart';
 import '../feed_controller.dart';
 import '../page_wrapper.dart';
-import '../player_shell.dart' show rootNavigatorKey;
+import '../player_shell.dart' show openWatch, rootNavigatorKey;
 import '../widgets/artist_panel_card.dart';
 import '../widgets/feed_view.dart';
 
@@ -24,6 +25,23 @@ class CurrentSearchQuery extends Notifier<String?> {
 }
 
 final currentSearchQueryProvider = NotifierProvider<CurrentSearchQuery, String?>(CurrentSearchQuery.new);
+
+/// What submitting the search box does: a pasted link to one video plays that
+/// video, and anything else is searched.
+///
+/// **Not left to YouTube's search.** It answers a `watch?v=` link with the video
+/// but a `/shorts/` link with nothing — measured 2026-09-26, the response held no
+/// result at all, only the query echoed in its filter links and an ad — so a
+/// Short could not be reached by pasting its link unless the app read the link
+/// itself.
+void openSearchOrVideo(WidgetRef ref, String text) {
+  final videoId = videoIdFromLink(text);
+  if (videoId == null) {
+    openSearch(ref, text);
+    return;
+  }
+  openWatch(ref, placeholderVideoItem(videoId));
+}
 
 /// Pushes the results page, the same way `openWatch` pushes the watch page —
 /// `FeedPage` stays mounted underneath, which is what carries its scroll

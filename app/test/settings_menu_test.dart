@@ -5,7 +5,7 @@
 /// under a plain `flutter test`.
 library;
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -255,16 +255,34 @@ void main() {
     return outer;
   }
 
+  /// One wheel notch, with a stamp no other notch has.
+  ///
+  /// `silky_scroll` tells a wheel event that has already been handled from one
+  /// that has not by its `timeStamp` — Flutter clones the event as it bubbles, so
+  /// nothing else about it survives (`architecture.md` F44). `TestPointer` stamps
+  /// every event zero, which makes every notch after the first the same event to
+  /// it, already handled by somebody; a real device never does that.
+  var wheelClock = 0;
+  PointerScrollEvent notch(TestPointer pointer) =>
+      pointer.scroll(const Offset(0, 120), timeStamp: Duration(milliseconds: ++wheelClock * 20));
+
   Future<void> wheelAt(WidgetTester tester, Offset where, {int times = 5}) async {
     final pointer = TestPointer(1, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(pointer.hover(where));
     for (var i = 0; i < times; i++) {
-      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 120)));
+      await tester.sendEventToBinding(notch(pointer));
       await tester.pump(const Duration(milliseconds: 40));
     }
     await tester.pumpAndSettle(
         const Duration(milliseconds: 16), EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
   }
+
+  /// The panel's own scroll view — the ladder, or the root page's list.
+  ScrollPosition panelScroll(WidgetTester tester) => tester
+      .state<ScrollableState>(
+        find.descendant(of: find.byKey(settingsMenuPanelKey), matching: find.byType(Scrollable)).first,
+      )
+      .position;
 
   group('the wheel over a panel', () {
     // **The outer list must be a `SilkyListView`, not a `ListView`.** An earlier
@@ -273,19 +291,51 @@ void main() {
     // from its own `Listener` and never consults the `pointerSignalResolver`, so
     // a resolver claim stops a Flutter `Scrollable` and is invisible to the
     // page. The control has to be the widget the watch page actually uses.
+    //
+    // **What the panel does with a notch is `silky_scroll`'s own nesting rule,
+    // not a hover flag of ours** (F44; `SilkyScrollAbsorber` is gone). The
+    // innermost scroll view under the pointer takes a notch while it can move; at
+    // its edge it hands the next one to the page; and a part of the panel that is
+    // not a scroll view — the header — leaves it to the page. The ladder here
+    // overflows its box by only 18 px, so one notch is enough to drive it to its
+    // edge, and the tests are built on that.
 
-    testWidgets('does not reach the page, over the list or the header', (tester) async {
+    testWidgets('the list takes it first, and the page does not move while the list can', (tester) async {
+      container.read(playerMenuProvider.notifier).go(SettingsPage.quality);
+      final outer = await pumpOverPage(tester);
+      expect(panelScroll(tester).pixels, 0);
+      expect(panelScroll(tester).maxScrollExtent, greaterThan(0), reason: 'the ladder is long enough to scroll');
+
+      await wheelAt(tester, tester.getRect(find.text('480p')).center, times: 1);
+      expect(panelScroll(tester).pixels, panelScroll(tester).maxScrollExtent, reason: 'the ladder took the notch');
+      expect(outer.offset, 0, reason: 'the page must not move under a list that could');
+    });
+
+    testWidgets('hands it to the page once the list is at its edge', (tester) async {
+      container.read(playerMenuProvider.notifier).go(SettingsPage.quality);
+      final outer = await pumpOverPage(tester);
+      final over = tester.getRect(find.text('480p')).center;
+
+      await wheelAt(tester, over, times: 1);
+      expect(outer.offset, 0);
+
+      // The ladder is at its end, so this one has nowhere to go but out.
+      await wheelAt(tester, over, times: 1);
+      expect(outer.offset, greaterThan(0), reason: 'the page takes what the list cannot');
+      expect(panelScroll(tester).pixels, panelScroll(tester).maxScrollExtent, reason: 'and the ladder stays where it was');
+    });
+
+    testWidgets('over the header, which is not a scroll view, the page takes it', (tester) async {
+      // The sticky header sits outside the scroll view, so there is nothing for
+      // the panel to hold it with. **One notch only**: the page moves and the
+      // panel with it, so a second notch would land on the list under a pointer
+      // that has not moved.
       container.read(playerMenuProvider.notifier).go(SettingsPage.quality);
       final outer = await pumpOverPage(tester);
 
-      // Over the ladder — covered by the list being a `SilkyScroll`.
-      await wheelAt(tester, tester.getRect(find.text('480p')).center);
-      expect(outer.offset, 0, reason: 'the page must not move under the list');
-
-      // Over the sticky header — outside the scroll view, and the case that was
-      // still leaking after the list was fixed.
-      await wheelAt(tester, tester.getRect(find.text('Quality')).center);
-      expect(outer.offset, 0, reason: 'the page must not move under the header either');
+      await wheelAt(tester, tester.getRect(find.text('Quality')).center, times: 1);
+      expect(outer.offset, greaterThan(0), reason: 'the page took it');
+      expect(panelScroll(tester).pixels, 0, reason: 'the list was not under the pointer');
     });
 
     testWidgets('passes through when the panel has nothing to scroll', (tester) async {
@@ -311,11 +361,12 @@ void main() {
       expect(outer.offset, greaterThan(0), reason: 'the page takes it instead');
     });
 
-    testWidgets('starts holding again once the page it shows can scroll', (tester) async {
-      // And the reverse, under a stationary pointer: walking from the settings
-      // list to the quality ladder turns a panel with nothing to scroll into one
-      // with plenty. That is a metrics change without a scroll, which is what
-      // the `ScrollMetricsNotification` listener is for.
+    testWidgets('a list that appears under a stationary pointer takes the wheel from then on', (tester) async {
+      // Walking from the settings list to the quality ladder turns a panel with
+      // nothing to scroll into one with plenty, under a pointer that never moved
+      // — a metrics change with no scroll. Each notch is routed to whichever
+      // scroll view is under the pointer when it arrives, so nothing has to
+      // notice the change; this is the case that would break if something did.
       final menu = container.read(playerMenuProvider.notifier);
       menu.open();
       final outer = await pumpOverPage(tester);
@@ -324,25 +375,17 @@ void main() {
       final pointer = TestPointer(1, PointerDeviceKind.mouse);
       await tester.sendEventToBinding(pointer.hover(over));
       await tester.pumpAndSettle();
+      expect(panelScroll(tester).maxScrollExtent, 0, reason: 'the root page fits');
 
       menu.go(SettingsPage.quality);
       await tester.pumpAndSettle();
-      expect(
-        tester.state<ScrollableState>(find.descendant(
-          of: find.byKey(settingsMenuPanelKey),
-          matching: find.byType(Scrollable),
-        ).first).position.maxScrollExtent,
-        greaterThan(0),
-      );
+      expect(panelScroll(tester).maxScrollExtent, greaterThan(0));
 
-      final before = outer.offset;
-      for (var i = 0; i < 5; i++) {
-        await tester.sendEventToBinding(pointer.scroll(const Offset(0, 120)));
-        await tester.pump(const Duration(milliseconds: 40));
-      }
+      await tester.sendEventToBinding(notch(pointer));
       await tester.pumpAndSettle(
           const Duration(milliseconds: 16), EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
-      expect(outer.offset, before, reason: 'the ladder can scroll, so the panel holds again');
+      expect(panelScroll(tester).pixels, panelScroll(tester).maxScrollExtent, reason: 'the ladder took it');
+      expect(outer.offset, 0, reason: 'so the page did not');
     });
 
     testWidgets('still reaches the page everywhere else', (tester) async {
@@ -355,11 +398,11 @@ void main() {
     });
 
     testWidgets('a panel closed under the cursor does not strand the page', (tester) async {
-      // The failure mode a hover flag or a hover count has to be designed
-      // against: `MouseRegion.onExit` may never fire for a region unmounted with
-      // the pointer inside it, and a key left on silky_scroll's stack outranks
-      // the page until the app restarts. `SilkyScrollAbsorber` pops in `dispose`
-      // as well as on exit.
+      // The failure mode any hover bookkeeping has to be designed against:
+      // `MouseRegion.onExit` may never fire for a region unmounted with the
+      // pointer inside it, and a key left on silky_scroll's stack outranks the
+      // page until the app restarts. It has to be released in `dispose` as well
+      // as on exit.
       final menu = container.read(playerMenuProvider.notifier);
       menu.open();
       final outer = await pumpOverPage(tester);

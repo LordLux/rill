@@ -192,6 +192,11 @@ same DLL. What the ANGLE path *does* change is the decoder, not the seek: see
 | F34 | **A thread's replies were built eagerly and died with their row; they are now rows of the one virtualised list, and a thread's state is held by the section, not by a row.** `SliverList.builder` virtualised the threads, but inside one the replies were a plain `Column`, and three things followed. Every loaded reply existed while the thread was expanded, and the thread built a *new* widget per reply on each rebuild (a page arriving, the reply box opening, a delete), so the framework updated all of them each time: ~0.1-0.18 ms per loaded reply, per rebuild. Collapsing and re-expanding a thread mounted every loaded reply in one frame. And the expansion, the loaded replies, the "Show more replies" token and a half-typed reply lived in the thread row's `State`, which the list disposes when the row scrolls out of the viewport, so a thread scrolled away and back was collapsed with its replies gone. Memoising the reply rows fixed the first of the three and nothing else. `comments_section.dart` now flattens the section into one list of rows (a thread, each of its loaded replies, its footer), built lazily by one `SliverList.builder`, keyed by comment id, with a `findChildIndexCallback`. What a thread needs to outlive its row (`_ThreadState`: expansion, replies, token, reply box) and which comments are expanded past four lines are held by the section. **A re-sort or a change of video forgets all of it; a delete forgets the deleted thread's.** A reply box's controllers are disposed the frame after their thread leaves the list, and at once with the section. **What it costs:** the flat list is rebuilt on every build, O(threads + loaded replies), so a whole-section rebuild now grows a little with N (below); and every thread's loaded replies and reply draft are held for as long as the section lives, on screen or not. | Measured 2026-09-19 (before, memoised) and 2026-09-20 (rewrite), release/AOT, 1280x721, the real `CommentsSection` over a synthetic `CommentsSource` with real-sized (88 px) avatars served from loopback and comment lengths taken from a live page (`app/lib/probe_comments.dart`; `app/test/README.md`). **The runs compare like for like at N >= 100:** phase A's scrolling build p50 reads 0.84-0.88 ms at N=100/500/1000 in "before", in "after-1" (memoised) and, at 0.82-0.87, in the rewrite run, so they ran under the same load; "after-2" (memoised, a quiet machine) reads ~0.6x on that control and is left out of the comparisons below. **Top-level list**, N=20/100/500/1000 threads: scrolling at 4000 px/s build p50 0.4-0.9 ms, p99 <= 1.4 ms, unchanged by the rewrite, at most 3 of ~510-560 frames over 8.33 ms and 2 over 16.67 ms (isolated frames of 23 to 149 ms turned up in some of the runs, unexplained); a full sweep of 1000 threads at 20000 px/s leaves **1000 decoded avatars, 29.5 MB** in the image cache (its default cap is 1000 entries, so bounded, and not reduced). **The rewrite's cost:** a whole-section rebuild per frame, build p50 at N=20/100/500/1000, was 1.67/1.65/1.92/1.86 ms before and 1.60/1.60/1.79/1.87 memoised, and is **1.63/1.66/2.26/2.63** now: flat in N up to 100, then +0.4 ms at 500 and +0.8 ms at 1000 threads, from rebuilding the flat list and its key index. A sixth of a frame at the worst, and the price of the rest. **A thread's replies**, M=20/100/500/1000 loaded (before -> memoised -> rewrite): *rebuild of the expanded thread while on screen*, build p50, 2.57/10.28/79.77/183.41 -> 0.50/0.69/1.13/1.81 -> 1.49/0.89/1.88/1.29 ms (memoising took it from ~0.18 ms per loaded reply to ~0.001; the rewrite's is flat in M, at 0.9-1.9 ms, and slower than the memoised `Column` at small M, which skipped the rows and this rebuilds the ~8 on screen, a reading of the numbers and not separately measured); *collapse, then expand again*, worst frame, 8.42/48.53/345.12/663.25 -> 9.07/53.92/328.56/623.80 -> **4.32/2.47/2.56/3.03 ms**; *all M replies arriving in one page* (the app cannot ask for that, YouTube pages 10-23 at a time), worst frame, 12.14/60.09/341.36/673.46 -> 11.76/59.51/641.75/675.07 -> 5.74/2.88/6.04/3.33 ms; *still expanded after scrolling a screen away and back*: false/false/true/true -> false/false/true/true -> **true at all four** (before, true at 500 and 1000 most likely because a thread that tall never left the viewport entirely, an inference). **A click as the app makes it** (12 replies per page, worst build frame) with N already loaded, N=0/12/60/120/240/480: before 8.3/9.9/13.5/25.9/50.3/86.4 ms; memoised 7.2/9.3/6.7/6.9/7.2 (480 not reached; 7.5 on the quiet run); **rewrite 2.7/3.1/2.8/2.7/3.7/2.7 ms, none of 24-43 frames over 16.67 ms**. Phase C was run alone, after the first rewrite run died in it on a probe bug (the list had become lazy, and the harness looked a button up before scrolling to it); that run's two points, 3.3 and 3.5 ms, agree with these within the spread between processes. **Retained:** after expanding and scrolling for 8 s through M loaded replies the image cache holds 40/120/508/1000 decoded avatars (1.2/3.5/15.0/29.5 MB) before and 40/120/140/140 (1.2/3.5/4.1/4.1 MB) now: the eager list decoded every loaded reply's avatar on expand, the lazy one decodes what it builds, and a full sweep of a thread would still reach the cache's 1000-entry cap. **Not measured:** what the retained `_ThreadState`s cost in memory (`Comment` objects, small), scroll anchoring when a thread expands (Task 27 section 7), a live page, real avatar fetch cost, and the running app, in which none of this has been seen. |
 | F35 | **Viewer-state fields were checked against whatever state the captured account happened to be in, so a wrong reader passed; three were wrong, one of them the fix for another.** `PlaylistMembership.containsVideo` was `false` for every playlist of every video and `removeToken` always `null`: `containsSelectedVideos` is the string `"ALL"` or `"NONE"` and the parser tested `=== true`, so the save dialog never showed a playlist as holding a video and "remove from playlist" was unreachable from the UI. Its first live run was 2026-09-20 and it worked, with the removal endpoint YouTube supplies for Watch Later (`ACTION_REMOVE_VIDEO_BY_VIDEO_ID`, `removedVideoId`), not the entry id `protocol.md` §3.4 assumed. `Comment.creatorHearted` (F33's fix) missed `TOOLBAR_HEART_STATE_HEARTED_EDITABLE`, which is how the *creator* sees a comment they hearted (`..._UNHEARTED_EDITABLE` when they have not): it was verified on six videos, all seen as a non-creator. **Read correctly:** `VideoDetail.isSubscribed` agrees with the account's full subscription list (1,332 channels over 14 pages) on 34 of 34 single-owner videos, both states present; a collaboration video (`channelId` null, per-channel subscribe flags) is unresolved. `myRating` agrees with the page's own `likeStatus` on 35 of 35, and all three values were seen live (`like`, `dislike`, `none`). **Not viewer state:** `canWatchLater` and `canAddToQueue` are tile capabilities, `true` on every tile measured (24 of 24 signed-in home, 20 of 20 signed-in and 20 of 20 *anonymous* search, 100 of 100 Watch Later), and a feed tile does not say whether its video is already in Watch Later (`isToggled` false on the one of 111 subscription tiles that is; n=1), so that state has to come from the save dialog. | Measured 2026-09-20, signed in: first against the account's own lists as oracles, then with the account put in known states by `capture-viewer-state.ts`, which refuses to write a fixture unless the raw response proves the state, checked by paths of its own rather than the parsers under test. States set: on Big Buck Bunny, like it, subscribe to its channel (Blender) and add it to Watch Later; on a video the account owns, like and heart the account's own comment (hearting is creator-only, and the account owns 7 videos). All of it was reverted and the account reconciled against its subscription list (1,332, unchanged) and Watch Later list (3,200, no Big Buck Bunny); the own comment ends as it began, liked and hearted. Fixtures live in `sidecar/fixtures/viewer-state/`, which `capture.ts` now carries across instead of deleting; the sanitised pair is `corpus/viewer-state-*.json`, asserted in `corpus.test.ts` and, raw, in `viewer-state.test.ts`. Aside: `parseFeed` extracts no continuation from the liked-videos browse (`VLLL`), whose raw response has one (about 4,865 items over 48 pages); the app has no such page. |
 | F36 | **A `Stack` hit-tests its children only inside its own bounds, so a child that hangs off a small one is partly unclickable, and a disabled control never shows it.** The tile's 3-dot button (a 48 px tap target) hung off the *title row*, which is one text line, so on a tile with a one-line title the lower half of the button hit nothing. It had never been clicked: `MediaTile.onMore` was wired to nothing (the b2549cb review), so every 3-dot button in the app was drawn disabled. Fixed by hanging the button off the whole text column, which is taller than the button and sets the same offsets: the rectangles of the tile, its title, channel and views lines, and the button itself are identical before and after in ten layouts (standard at two widths, wide, large and shorts, each with a one- and a two-line title), so nothing moved on screen. The menu is `MediaTile.menu`, built by `tileMenuFor`: Add to queue, Save to Watch Later, Save to playlist… (the save dialog Task 25 §5 said this menu opens) and Share (the share dialog) for a video; Copy link alone for a mix or a playlist, which are not videos. The first cut had Add to queue third and ended in Copy link for a video too; the entries were reordered and Share replaced it afterwards. | Measured 2026-09-20 in `flutter test`, whose Ahem font makes the title row 20 px: a tap at the button's centre (y 211) ended its hit path in the tile's background, because the row ended at y 208 and the button spans 187 to 235. `tile_menu_test.dart` taps a point inside the button and below the title in the standard and wide layouts, and fails when the button is hung off the title row again (mutation-checked, with three others). The first cut was not looked at in the running app (no screenshot tool was available); the reworked menu was seen there on 2026-09-20, by the user, who reports that it works. |
+| F40 | **1280x720 is YouTube's thumbnail ceiling, the URL a surface ships varies by nearly 3x, and for a square or vertical video most of that frame is baked-in black.** `maxresdefault.jpg` is not bigger than `hq720.jpg` — they are byte-identical — and a `WEB` player response *declares* maxres as 1920 wide while the served bytes are 1278x720, so the declared width lies. Home and subscriptions tiles ship ~720; the **watch page's related rail ships 336**, which fetches as 480x360, and that rail is where queue items come from. Worse for a square or vertical video: its 4:3 `hqdefault` is the art pillarboxed with black, so only the middle 75% of the width is picture. **No available URL fixes this** — a fullscreen audio-only backdrop was upscaling a 360x360 crop ~3.3x, which is why §2.4's artwork is blurred rather than merely fetched larger | Measured 2026-09-22. `maxresdefault` and `hq720` byte-identical at 1280x720 on five videos (`dQw4w9WgXcQ`, `kJQP7kiw5Fk`, `9bZkp7q19f0`, `L-BgxLtMxh0`, `aqz-KE-bpKQ`); `x8PCNqH-Dm8` 404s both, returning a 120x90 placeholder. Widest-per-tile across the corpus: `home.json` and `subscriptions.json` mostly 720, `watch.json` 336 — and that same video's bare `hq720.jpg` fetches 1280x720. The fullscreen pillarbox measured at exactly 75% of width, which is what identifies the source as 4:3 |
+| F41 | **The shipped libmpv has no audio-visualization filters, so an audio-reactive visualizer is not possible here.** `lavfi-complex` the *option* is present and accepted, which is hard invariant 8's false positive exactly — the option existing says nothing about the filters existing. Getting them would mean bumping `media_kit_libs_windows_video` off 1.0.11, which reintroduces the F13 seek freeze, so this is closed rather than deferred. **Any visualizer built here is time-driven and must not be presented as reacting to sound** | String-table scan of the shipped `libmpv-2.dll`, 2026-09-22: `showcqt`, `showspectrum`, `showspectrumpic`, `showwaves`, `showwavespic`, `showfreqs`, `avectorscope`, `showvolume`, `ahistogram`, `aphasemeter`, `abitscope`, `astats`, `ebur128`, `volumedetect`, `silencedetect` all absent; `asplit` and `amix` absent too, so the graph could not be built even if a filter existed. Only `aresample`, `aformat`, `anull`, `abuffer`, `abuffersink` are present. `af-metadata` exists but nothing can populate it |
+| F42 | **A file loaded with `vid=no` and no audio attached is skipped, so its open never gets a duration.** A variant's video URL is video-only and its audio is a second URL. `vid` is an mpv *option*, so a `vid=no` left by an audio-only track persists into the next load; mpv then finds no stream to select, moves past the file, and `open`'s duration wait runs to its 20 s timeout. That was the 0:00 stall (`todo.md` 43, closed), and it only ever happened in audio-only mode. `9299ed3` forced video on for every open, which cured it by fetching and decoding video only to drop it; `02f2768` attaches the audio **at load** instead, through `audio-files`, so the file has a selected stream from the start and the video is never read. **`setProperty('audio-files', '')` does not clear that list** — it sets a list of one empty path, and every later video-mode open failed with `Cannot open file '': Invalid argument`. Clear and add through `change-list` (`clr`, `append`), which also keeps a `;` in a URL from splitting it. A muxed variant has no separate audio, so it still opens with video on and drops it afterwards | Measured 2026-09-24 by `audio_mode_probe.dart` (`PROBE_SCENARIO=open`), one 1080p variant opened three ways, sampled every 250 ms: video forced on then dropped — first audio at 5512 ms, 329 KB to 1.36 MB of video read, a frame decoded; audio at load — 5501 ms, **0 bytes**, no frame; video mode straight after — 5000 ms, 1.36 MB, exactly one audio track in `track-list`. The empty-path failure was caught by that third leg, before it shipped |
+| F43 | **A song credited with no art still ships a cover URL, and it points at a stock image.** `videoAttributeViewModel.image.sources[0].url` is `https://www.gstatic.com/youtube/img/watch/yt_music_channel.jpeg`, a grey square with a white note, and nothing structural marks the card: same keys, same shape, and `onTap` is absent from some real covers too. `parser/music.ts` ships `coverUrl: null` for any `gstatic.com` source, so the client falls back to the video's own still, and the audio-only view's click-to-switch between cover and thumbnail went with it — there is only ever one best image. Matched on the host rather than the file name, so a renamed stand-in is caught too; being wrong that way costs a thumbnail where a cover could have been | Measured 2026-09-24, anonymous `/next` on 22 videos: the 6 cards without art all carried that URL, 3,080 bytes with one SHA-256 at `=s1200` and `=s544`; every real cover was on `yt3.googleusercontent.com`. **All six were one song** ("M11 re-arrange and re-mix") credited on six uploads, so this is one observed case, not a survey. A claim that the placeholder's bytes differ per track was not reproduced. Seen in the release build on `Y5u8ZZqFca4`: the video's still, with the song's credits under it |
+| F44 | **Flutter's `MouseRegion` hit-testing silently fails inside deep Sliver layouts, and `PointerScrollEvent` is cloned as it bubbles.** This broke `SilkyScroll`'s `HoverStack` completely, causing nested scrollables to scroll simultaneously. Furthermore, because Flutter clones pointer events to translate local coordinates, an `Expando` cannot be used to track event consumption across widgets. The innermost scrollable must track consumption using the event's `timeStamp`, handle the scroll synchronously to outrace Flutter's native desktop scrolling engine, and manually delegate unhandled delta to its ancestor's animator at the edge instead of relying on native bubbling. | Measured 2026-09-26 across the Spike app and the main Rill app. Nested `SilkyScroll` inside a `SliverCrossAxisGroup` perfectly reproduced the `HoverStack` failure. An `Expando` failed to consume the event between inner and outer listeners. Using `PointerSignalResolver` allowed the native `Scrollable` to run first, falling back to choppy native scrolling and breaking edge-forwarding. Tracking consumption via `event.timeStamp.inMicroseconds` and manually invoking `forwardAlwaysMouseWheelDeltaAtEdge` solved all issues flawlessly. |
 
 ---
 
@@ -361,6 +366,95 @@ client reopens the media on the existing player and seeks back — no
 `playback.open`, no second `sessionId`, and no second history entry for one
 watch. It costs a visible stall (median 4.1 s to the picture moving, worst 12 s),
 which is the measurement that keeps automatic frame-drop stepping out of scope.
+
+**Audio-only mode toggles `vid`, it does not reopen the media — decided
+2026-09-22.** The first implementation opened the audio URL as the primary
+media in audio-only mode (`isAudioOnly ? variant.audioUrl : variant.videoUrl`),
+which meant switching back to video was a cold reopen: duration wait, audio
+attach, seek, picture wait — the full `switchQuality` path, measured at 6+ s.
+The reverse direction (video → audio) appeared fast (~100 ms) only because
+opening a single audio URL skips most of those steps.
+
+The fix is to **always open the video URL** and toggle mpv's `vid` property:
+`vid=no` stops video, `vid=auto` re-enables it. The playback position and the
+audio stream are undisturbed either way, which is what makes this better than
+reopening. `vid` is present in the shipped `libmpv-2.dll`'s string table (the
+same scan hard invariant 8 requires), and the `setProperty` call is the same
+write binding `stream-lavf-o` already uses — not a `getProperty` read, so hard
+invariant 9 does not apply.
+
+**Two sentences here used to be wrong, and were corrected 2026-09-22 by
+measuring rather than reasoning.** They said `vid=no` left the demuxer reading,
+and that both directions were therefore instant. Neither is true. `vid=no` is a
+teardown: sampled through `demuxer-cache-state` across two 120 s phases either
+side of the toggle, the video cache goes from 33.97 MB and ~1782 s of
+read-ahead to `total-bytes: 0`, `fw-bytes: 0`, `cache-duration: 0`, and
+`stream-pos` freezes to the byte (427,790) for the whole phase while `time-pos`
+keeps advancing in real time. The harness is
+`app/lib/ui/player/audio_mode_probe.dart`.
+
+Two things follow from that, and they point opposite ways:
+
+- **It does save bandwidth**, not just CPU — the premise of the feature holds.
+  Measured on the real app over 242 s each, CPU fell from 11.8% to 5.3% of one
+  core. The saving scales with the video's bitrate.
+- **The directions are not symmetric.** Dropping the track is immediate;
+  restoring it is a *cold refetch and re-decode* — **measured at ~5.0 s** on a
+  96-minute 1080p video (`Gx8CPWxlsOc`), and observed as low as half a second
+  elsewhere. So leaving audio-only raises `PlaybackState.isRestoringVideo`,
+  which feeds the control bar's existing busy spinner; its grace delay means
+  the fast case still shows nothing. Entering audio-only raises nothing.
+
+**`vo-configured` is the only signal that says the picture is back — measured
+2026-09-23, after shipping the wrong one.** The first version waited on
+`widthStream` and the spinner never appeared once, because media_kit's cached
+`width` survives `vid=no` untouched; so does the `VideoController`'s `rect`.
+mpv's own `width` *does* clear, but comes back the instant the track is
+re-enabled, a full 5 seconds before anything is on screen. Only `vo-configured`
+tracks the picture: `no` for the whole audio-only phase, `yes` at the moment it
+returns. `dwidth` lands ~2 s early and `video-bitrate` ~3 s late. It is
+**observed, not polled** (`MediaKitEngine._observeVideoOutput`), so mpv
+delivers it on its own event thread and hard invariant 9 holds.
+
+**Do not re-derive any of this from network totals.** Windows' per-process I/O
+counters do not see mpv's socket reads at all (10 KB of process I/O against
+1.2 MB at the NIC over the same 20 s), and the system-wide NIC total carried
+several times more background traffic than the signal — read alone it gives
+the opposite answer, which is exactly what it did here before the probe
+settled it.
+
+Consequences:
+- `engine.open` takes no `audioOnly` parameter. The engine remembers what
+  `setVideoTrack` was last asked for, and `open` honours it: in audio-only mode
+  the audio is attached at load and the video is never read (**F42**). The
+  controller sets it *before* the open, so the first track after launch loads
+  the right way too, and reconciles in either direction if the mode flipped
+  while the open was in flight.
+- The `audioModeProvider` listener in `PlaybackController` calls
+  `_applyAudioMode`, which toggles the track and, in the restore direction
+  only, waits for a picture.
+- A quality switch reopens through the same `open`, so it keeps whichever
+  mode is active with no second step.
+- Because the cache is dropped rather than paused, bytes already buffered when
+  the mode is enabled are **wasted** — up to the 32 MiB cap. Opening in
+  audio-only mode reads no video at all (F42); toggling mid-playback cannot
+  avoid it.
+- **A restore is watched, because one can wedge — added 2026-09-25.** Rarely,
+  leaving audio-only never finishes: "playing", position frozen, no picture or
+  sound, and going back to audio-only resumes it at once. Cause unknown
+  (`todo.md` 44). `_armRestoreWatchdog` samples the engine's cached state
+  once a second, and after 15 s of playing without moving it toggles the video
+  track off and on — the fix found by hand — then, if that wedges too, reopens
+  the variant through the quality-switch path, once. The grace sits well above
+  the restores measured here, because the recovery drops the video cache
+  again and would make a merely slow restore slower.
+
+**The 0:00 stall was this, and it is closed — 2026-09-24.** `todo.md` 43
+described opens that succeeded everywhere and then never played, and guessed
+they were not audio-only. They were only audio-only: a `vid=no` persisting into
+the next load (F42). The one-shot watchdog `46a235a` added while the cause was
+unknown stays, as containment for whatever else might stall an open; its
+stderr line `rill: stream never started` is still the tripwire.
 
 ### 2.5 Authentication and the silent-degradation problem
 
@@ -657,9 +751,148 @@ right edge: both are flex 1, `Row` gives each half the free space, and the loose
 the default `MainAxisAlignment.start`, not to the `Spacer`, which has already
 been sized. One `Expanded` holding a left-aligned clock has no share to return.
 
+**A player with nothing to play disables its scrubber and its play button —
+decided 2026-09-26.** A premiere, a members-only video, a rate limit and a plain
+failure all end in `PlaybackState.error` (`isUnplayable`), with the engine stopped
+by `_failOpen`. The controls used to stay live regardless: a click or Space
+reached an engine with no media, and the bar could be dragged along a track with
+no duration. The `Slider` is now disabled — no thumb, no hover growth, no bubble —
+and so is play/pause. **Previous and next are not**: skipping past a video that
+will not open is exactly when they are wanted. What covers the keyboard, the media
+keys and a click on the picture is `PlaybackController` itself: `togglePlayPause`,
+`setPlaying`, `seek` (and so `seekBy` and `seekToFraction`) and `stepFrame` return
+without acting while `isUnplayable`, because none of those has a disabled look to
+show. The mini-player's and the taskbar's play buttons are disabled to match.
+**The slates keep clear of the bar.** The control bar is drawn over them, so they
+start `playerControlsClearance` (76 px) up from the bottom rather than the 20 px
+they were laid out with before the bar was drawn over them — the members-only
+"Join this channel" button sat behind the progress bar. A test measures the
+button against the bar's top instead of trusting the number.
+
 Tile action buttons (Watch Later, Add to queue) come from
 `ThumbnailHoverOverlayToggleActionsView` and the associated
 `AddToPlaylistCommand` / `PlaylistEditEndpoint` in the feed payload.
+
+#### Controls outside the window — built 2026-09-24
+
+Two surfaces control playback without the window in front, and each answers a
+different hand. **The system media flyout** (`smtc_controller.dart`) answers
+the keyboard's media keys. **The taskbar thumbnail toolbar**
+(`taskbar_controller.dart`, `ITaskbarList3::ThumbBarAddButtons`) answers a
+pointer on the taskbar: like, previous, play/pause, next and dislike under
+the hover preview. **Play/pause is in the middle, with the two ratings at the
+ends — decided 2026-09-24.** The first version had no dislike, as used far
+less than like; it came back as the counterweight that centres play/pause.
+Like and dislike are disabled when signed out, with the reason as their
+tooltip, the rule of the account-gated controls below.
+
+- **Every button goes through the on-screen control's own entry point** —
+  `PlaybackController.previous`/`togglePlayPause`/`next`, and `rateVideo` in
+  `account_actions.dart`, which the watch page's rating buttons call too. A
+  second copy of the rating logic is how the two would come to disagree.
+- **One artwork resolver, `nowPlayingArtProvider`**, read by the flyout and
+  by the audio-only layout: the song's cover, else the video's poster, else the
+  tile's thumbnail. Never YouTube's stock no-art square (F43).
+- **`windows_taskbar` is vendored** (`third_party/windows_taskbar`, 1.1.2) for
+  two fixes marked `rill patch`. It never freed the icon handle `LoadImage`
+  returns, one leak per button per update, and this app updates on every
+  play/pause against a 10,000-object cap per process; measured after the fix,
+  40 updates left GDI objects at 19 and USER objects at 44. And a failed
+  first add still marked the buttons added, so every later call updated
+  buttons that never existed and the toolbar never appeared.
+- **The buttons exist from startup, and nothing playing is all of them
+  disabled, never none — measured 2026-09-24.** A flyout opened before the
+  buttons were first added keeps showing none: hover the taskbar, then play,
+  and `ThumbBarAddButtons` returned success while the flyout stayed empty,
+  across reopenings, until something re-laid out the taskbar (another app
+  starting). Opened *after* the add, the same flyout shows them and follows
+  every later update live. Adding them only once something played therefore
+  made an empty toolbar the ordinary first experience. The first add at
+  startup usually lands before the window is shown and fails, so it is retried
+  every 2 s.
+- **The toolbar lives in Explorer's process, so nothing in ours can see it.**
+  The first success logs `rill: taskbar toolbar ready`, a failure that
+  outlasts the startup race logs, and that is the whole of the evidence a
+  release log holds. A button press arrives as `WM_COMMAND` with `THBN_CLICKED`, so
+  the click path can be driven without Explorer by posting that message to the
+  window (command id `40001` plus the button's index). **The buttons
+  themselves are visible to UI Automation**: the flyout
+  (`TaskListThumbnailWnd`) holds a `ToolbarWindow32` whose buttons carry the
+  tooltips as names and the disabled state as `IsEnabled`, which is how the
+  states above were read while it was open — a control app's flyout (MPC-HC)
+  confirmed that an empty tree means no buttons, not an unreadable one.
+- **While a video loads, play and both ratings are disabled and previous and
+  next are not — decided 2026-09-24.** Skipping through tracks without waiting for
+  each to load is what those two are for, and a load that never finishes must
+  not trap the listener on it; they are disabled only at the ends of the
+  queue. The ratings stay disabled until the watch page's data says how the
+  video is already rated, because until then a press could only guess which
+  way to toggle. A disabled button keeps its ordinary icon and Windows dims
+  it; dedicated faded icons, dimmed again by Windows, were too faint to read.
+- **The icons' sources are the SVGs in `app/assets/icons/taskbar/`**, started
+  from Material glyphs and redrawn by hand; `app/tool/gen_taskbar_icons.py`
+  renders each to a multi-size `.ico` in `app/assets/taskbar/`. The PNGs beside
+  them are not read: they are cropped to the icon, so they have lost where it
+  sits in its square.
+
+#### Chapters on the progress bar — built 2026-09-26
+
+The scrubber is one segment per chapter, the segment under the pointer grows,
+and a bubble above the pointer names the time and the chapter. The code is
+`ui/player/scrubber_chapters.dart` (geometry, mapping, growth, bubble) plus
+`_Scrubber` and `_RillSliderTrackShape` in `controls.dart`; every size in it is
+`ScrubberMetrics`, in one place, because they are tuned by eye.
+
+- **The `Slider` stays.** It is what carries focus, keyboard and semantics, and
+  what the tests find. Only what it paints changes — the track shape draws the
+  segments — and what surrounds it. Seeking is untouched: still on release, never
+  during the drag (F15).
+- **Segments are painted from the real track rect.** A chapter is a fraction of
+  the duration, so the time-to-x mapping stays linear and the thumb and the buffer
+  cross a boundary without noticing it; the gap is carved out of the two segments
+  either side of it, so nothing shifts. A segment too narrow to afford one is drawn
+  gapless, so an hour of short chapters on a small window degrades to a plain bar
+  rather than to slivers. The bar with no chapters is the same code with one
+  segment, and grows on hover the same way.
+- **Only the ends of the bar are rounded** — the first segment's left corners,
+  the last one's right, all four for a bar of one. The segment is clipped to its
+  shape, so the three layers inside stay plain rects and the position crosses the
+  curve without knowing it is there. `ScrubberMetrics.endRadius` is 1.5 at rest
+  and 2.75 on hover, animated with the growth. Skia scales a radius down to half
+  the height (2 and 3.5 px), so a larger one reads as a semicircular end. The
+  plain track — a live stream, or a bar whose duration is not known yet — is a
+  separate path and is not shaped this way.
+- **The duration is `hold?.duration ?? engine.duration`, the one `max` is built
+  from** (above), so the segments and the thumb cannot disagree in a quality
+  switch. A zero duration draws the plain track.
+- **A chapter list that is not a segmentation draws none, and names none:**
+  fewer than two, starts that do not strictly ascend, a first chapter more than
+  ten seconds in, or a start at or past the end. Time before the first chapter
+  belongs to the first segment. All chapters `VideoDetail` carries are used,
+  including the ones the sidecar parsed from the description (§2.12).
+- **A live stream — `durationMs` null — has no segments and no bubble.** Its bar
+  is a moving window, not a timeline. The clock already calls any source without a
+  duration live, and this follows it, not just the ones with a `startTimestamp`.
+- **Chapters are one video's.** They are read from `videoInfoProvider` for the
+  playing item's id, and the hover state is dropped when the item changes.
+- **Hover is mapped through the slider's own track**, which the theme's padding
+  insets, not through the widget's width: the ends read exactly `0:00` and the
+  duration. `scrubberTrackSpan` is that arithmetic, and a test taps and hovers at
+  the same x and requires the click and the bubble to agree, which is what keeps
+  it the slider's own. Do not use `1.0`: the slider's box ends where its track
+  does, so a tap on that last pixel reaches nothing.
+- **The bubble is in the tree, not a `Tooltip`.** Nothing above the `Navigator`
+  has an `Overlay` (§2.8), and a tooltip that appears after a delay is the wrong
+  behaviour for a scrubber anyway. It overflows the scrubber's box, so the `Stack`
+  must not clip and no ancestor may — `expectUnclipped` walks the render tree in
+  each layout, fullscreen included. It is `IgnorePointer`, and being outside the
+  box already keeps it out of hit-testing; the wrapper is for the day it is not.
+- **A `Listener` beside the `MouseRegion`.** `onHover` does not fire while a
+  button is down, so a drag would leave the bubble where the pointer was before the
+  press. While the thumb is held the bubble reads the drag position (from the
+  controls, as the clock does), not the pointer's.
+- **Not built: a "most replayed" graph, and thumbnails in the bubble.** The
+  mini-player's `LinearProgressIndicator` shows no chapters, deliberately.
 
 ### 2.8 Watch page, queue panel, and the UI's sharp edges
 
@@ -778,6 +1011,23 @@ combination that does not work at all. If Flutter fixes this, `TabBarView` is
 worth revisiting for the state-preservation win alone.
 
 
+**A pasted link to one video plays that video; it is not searched — decided
+2026-09-26.** Submitting the search box calls `openSearchOrVideo`
+(`pages/search_results.dart`), and `videoIdFromLink` (`domain/youtube_link.dart`)
+is the rule. YouTube's own search answers a `watch?v=` link with the video but a
+`/shorts/` link with **nothing** — measured 2026-09-26, the raw `/search` response
+held no result at all, only the query echoed in its filter links and an ad the
+parser strips — so a Short could not be reached by pasting its link. Accepted:
+`watch?v=`, `/shorts/`, `/live/`, `/embed/`, `/v/` on youtube.com and its `www.`,
+`m.` and `music.` subdomains, and `youtu.be/`, with or without a scheme and with
+`?feature=share`, `&t=` and `&si=` ignored. **A link and nothing else**: a sentence
+that contains one is a search, and so is a bare 11-character id, which is
+indistinguishable from a word. A `list=` is ignored — the video opens, not the
+playlist — and a playlist or channel link is still searched. The video opens
+through the same `openWatch` a tile tap uses, on a placeholder tile that
+`video.info` replaces a moment later (`placeholderVideoItem`, shared with
+`RILL_OPEN_VIDEO`).
+
 #### A control that needs an account is disabled and says why — decided 2026-09-21
 
 Every action-gated control in the app reads one function,
@@ -807,6 +1057,42 @@ account button's own badge.
 present on anonymous pages too, so a button enabled by their presence would be
 enabled always and fail always — F33's mistake (a tooltip read as state) in a
 new place. The session decides.
+
+#### The audio-only layout — built 2026-09-22 to 09-24
+
+`AudioModeView` is the song's cover and credits, with the queue beside it in
+the shell's fullscreen player. It is not a separate screen: it is one of the
+**player slates**, mounted by `PlayerSlates` beside the premiere, members-only
+and unavailable slates, in all three places a slate can appear.
+
+- **A slate sits inside `PlayerControls`' child slot, not beneath it.** The
+  controls' `MouseRegion` is opaque by default, so anything under it receives
+  no clicks at all — the first cut of this view could not be interacted with.
+  Where the slates need a `Material` ancestor (`injectMaterial`), it is
+  `MaterialType.transparency`: a default `Material` is a canvas, which paints
+  and swallows the pointer just the same.
+- **The queue can be hidden**, and that choice persists (`HideQueueController`,
+  `SharedPreferences`), because it is a listening preference rather than a
+  per-track one.
+- **Theatre belongs in audio-only mode too — decided 2026-09-24.** The bar's
+  miniplayer, theatre and fullscreen buttons are one widget (`_ViewControls`),
+  mounted by the video bar and the audio bar alike, so the modes cannot drift
+  apart.
+- **The cover is the best image there is, and there is only ever one.** It
+  reads `nowPlayingArtProvider` (§2.7). The first version let a click switch
+  between cover and thumbnail, because some covers were YouTube's stock no-art
+  square; the sidecar now ships those as no cover (F43), and the switch is gone.
+- **The frame takes the image's shape: square for a cover, 16:9 for a video
+  still — 2026-09-24.** A still in the square frame sat letterboxed under a
+  square shadow, with an empty band between it and the title. It keeps the
+  cover's width and gives up height rather than growing wider, since it is
+  often a 480x360 thumbnail (F40); the column stays centred, so the title comes
+  up to meet it. The change animates, which is visible on every track that has
+  a cover: the still shows first and the cover arrives with the credits. **The
+  image only fills the frame because the `AnimatedSwitcher` is given an
+  expanded layout** — its default is a loose `Stack`, in which the image keeps
+  its own shape whatever `fit` says, and that is what the square was showing
+  around.
 
 ### 2.9 Captions render through libass, not Flutter
 
@@ -1453,6 +1739,55 @@ last lines are — is always in the current file.
 rotation, a crash's last line); measured 2026-09-17 on a scratch Release build,
 with pruning checked against seeded old files. `installErrorLogging` adds
 Flutter's and the zone's uncaught errors, with stacks, when there is a log.
+
+### 2.12 What is playing now — chapters, credits, and when to believe them (decided 2026-09-25)
+
+The audio-only layout and the media flyout show a song. The source for it is two
+independent things that each answer half the question, and neither is safe to
+read alone. `app/lib/domain/now_playing_track.dart` is the one resolver;
+`ui/now_playing_art.dart` feeds it, and nothing else reads `VideoDetail.music`.
+
+- **Credits** ("Music in this video") say *which recordings*, and carry the cover.
+  They have **no timestamps** and stop at **10 cards** however many songs the
+  video holds (measured 2026-09-25, ~45 pages; an 80s mix with 23 songs listed
+  10 under a header reading "10 songs"). They are also not only songs:
+  `videoAttributeViewModel` is a generic card, and a game is one (`dHPQNc9oa_E`,
+  "Portal 2") — told apart in the sidecar by structure (`protocol.md` §3.3).
+- **Chapters** say *when*. `Chapter[]` is the uploader's segmentation, which on
+  a music mix is one chapter per song. YouTube has already parsed the
+  description's timestamps into them, so the sidecar reads the
+  `…-description-chapters` panel first and parses the description itself only
+  when that is absent. The current chapter comes from `positionStream`,
+  distinct-mapped so widgets rebuild at a boundary and not per tick (hard
+  invariant 9).
+
+**Chapters are songs only for a video that is music *and* whose chapters are a
+tracklist.** A lecture's chapters are sections. So is a lyric video's
+"Intro / Verse / Chorus". Music is the tile's ♪, an artist-channel badge, a
+Topic channel, or any credit at all; a tracklist is nine or more chapters, or
+most of them written "Artist – Song", or most of them naming a credited song.
+
+**The chapter's text wins over the credit's.** A chapter is joined to a credit
+by words, only to borrow its cover and album — the credit can be another
+version of the song ("(Instrumental)") while the uploader wrote what they meant.
+Chapters past the tenth have no credit and no cover: the still stands in.
+
+**A lone credit is believed leniently.** Titles and credits legitimately
+disagree (the artist repeated, symbols, another language), so an overlap test
+would reject good credits. Any one signal passes — the video is music, or shares
+a *single* word with the credit's song or artist. What fails is a credit on a
+video that is not about it, which shows the video's own title. Several credits
+and no chapters is a guess, so it is left unguessed unless the video's title is
+about exactly one of them.
+
+**The chapter's frame is the backdrop, never the cover.** `Chapter.thumbnailUrl`
+is a 336×188 video frame. Under the blur that is fine and it changes with the
+song; as a sharp cover it would be a smear. The foreground cover stays a
+credit's or, failing that, the video's still (F40).
+
+Not built: a cover for the chapters that have no credit. The candidate is
+YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
+— they send what is being listened to to a party that is not YouTube.
 
 ---
 

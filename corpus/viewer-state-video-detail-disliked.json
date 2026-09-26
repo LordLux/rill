@@ -18,6 +18,14 @@
   "isVerified": false,
   "isArtistChannel": true,
   "badges": [],
+  "music": [
+    {
+      "title": "Sanitised Title 1",
+      "artist": "Sanitised Artist 1",
+      "album": "Sanitised Album 1",
+      "coverUrl": "https://fake.url/cover1.jpg"
+    }
+  ],
   "isMembersOnly": false,
   "premiereAtMs": null,
   "related": [

@@ -67,6 +67,21 @@ const MEMBERS_LOCALE_ID = 'memberslocale1';
 /** Members-only, and nothing anywhere knows the channel's name. */
 const MEMBERS_NO_CHANNEL_ID = 'membersnochan1';
 
+/**
+ * The progress bar's chapters (`scrubber_chapters_test.dart`): four of them over
+ * the fake's ten-minute video. Every other id has none, which is the ordinary case.
+ */
+const CHAPTERS_ID = 'chapters1';
+const CHAPTERS = [
+  { title: 'Intro', startSeconds: 0, thumbnailUrl: null },
+  { title: 'Explore', startSeconds: 90, thumbnailUrl: null },
+  { title: 'Build', startSeconds: 300, thumbnailUrl: null },
+  { title: 'Outro', startSeconds: 480, thumbnailUrl: null },
+];
+
+/** A live stream: no duration, a start time — the shape the scrubber remaps. */
+const LIVE_ID = 'live1';
+
 /** No caption tracks at all — the CC control must not be drawn. */
 const NO_CAPTIONS_ID = 'nocaps1';
 /** `captions.list` fails. A caption failure must not touch playback. */
@@ -295,7 +310,8 @@ rl.on('line', (line) => {
         id: req.id,
         result: {
           sessionId,
-          durationMs: 600000,
+          durationMs: req.params?.videoId === LIVE_ID ? null : 600000,
+          startTimestamp: req.params?.videoId === LIVE_ID ? new Date(Date.now() - 3_600_000).toISOString() : null,
           storyboardTemplate: null,
           qualityDegraded: false,
           transport: 'plain',
@@ -356,6 +372,10 @@ rl.on('line', (line) => {
           myRating: ratings[videoId] === 'LIKE' ? 'like' : ratings[videoId] === 'DISLIKE' ? 'dislike' : 'none',
           isSubscribed: false,
           badges: [],
+          // Empty is the ordinary answer — most videos carry no attribution,
+          // so the default payload is the no-music case on purpose.
+          music: [],
+          chapters: videoId === CHAPTERS_ID ? CHAPTERS : [],
           // Structural, from `BADGE_STYLE_TYPE_MEMBERS_ONLY` — true for both
           // members ids, including the one whose *error* the sidecar could not
           // classify.

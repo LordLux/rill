@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 
+import '../data/rpc/client.dart';
 import '../domain/video_detail.dart';
 import 'auth_controller.dart';
 
@@ -64,6 +66,56 @@ class AccountActions<K, V> extends Notifier<Map<K, V>> {
 final ratingActionsProvider = NotifierProvider<AccountActions<String, VideoRating>, Map<String, VideoRating>>(
   AccountActions<String, VideoRating>.new,
 );
+
+/// Like, dislike or un-rate a video: set optimistically in
+/// [ratingActionsProvider], ask the sidecar, and roll back if it refuses.
+/// Returns null on success, or the message to show the user.
+///
+/// One path for all three: tapping the currently active side clears the
+/// rating, tapping the other switches straight to it. `action.dislike` while
+/// liked removes the like server-side on its own, so this never has to call
+/// `action.removeRating` first.
+///
+/// **The one implementation** — the watch page's buttons and the taskbar's
+/// thumbnail toolbar both call it, so the two cannot disagree about which way
+/// a tap toggles. [serverRating] is what `video.info` reported, used until the
+/// user has acted locally.
+///
+/// Takes a `read` rather than a `Ref`, because a widget holds a `WidgetRef`
+/// and a provider holds a `Ref`, and both have exactly this method.
+Future<String?> rateVideo(
+  T Function<T>(ProviderListenable<T> provider) read,
+  String videoId,
+  VideoRating target, {
+  required VideoRating serverRating,
+}) async {
+  final actions = read(ratingActionsProvider.notifier);
+  final store = read(ratingActionsProvider);
+  final had = store.containsKey(videoId);
+  final previous = store[videoId];
+  final current = previous ?? serverRating;
+  final next = current == target ? VideoRating.none : target;
+
+  actions.set(videoId, next);
+  final method = switch (next) {
+    VideoRating.like => 'action.like',
+    VideoRating.dislike => 'action.dislike',
+    VideoRating.none => 'action.removeRating',
+  };
+
+  String? failure;
+  try {
+    await RpcClient.instance.call(method, {'videoId': videoId});
+  } on RpcException catch (e) {
+    failure = e.code == 'AUTH_REQUIRED' ? 'Sign in to rate videos' : e.message;
+  } catch (e) {
+    failure = '$e';
+  }
+  // Undone in the store whatever became of the caller — a rating that failed
+  // while the layout was switching must not stay drawn as set.
+  if (failure != null) actions.restore(videoId, had: had, previous: previous);
+  return failure;
+}
 
 /// Video id → whether it is in Watch Later, as of the user's last action.
 final watchLaterActionsProvider = NotifierProvider<AccountActions<String, bool>, Map<String, bool>>(

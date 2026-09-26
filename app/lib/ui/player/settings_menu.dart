@@ -15,8 +15,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/playback_source.dart';
-import '../widgets/silky_scroll_absorber.dart';
 import '../../domain/caption_style.dart';
+import '../audio_mode_controller.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 
@@ -326,68 +326,70 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
       // Bottom-aligned inside whatever height the `Positioned` allows, so the
       // panel grows upward from the button it belongs to.
       alignment: Alignment.bottomRight,
-      // **The whole panel goes on the hover stack, not just its list.** The
-      // `SilkySingleChildScrollView` below covers the rows; the sticky header,
-      // the padding and the panel's edges are outside it, and a wheel over those
-      // reached the page. See `SilkyScrollAbsorber`.
-      child: SilkyScrollAbsorber(
-        child: GestureDetector(
-          onTap: () {}, // Absorb taps so they don't fall through to the video
-          child: Material(
-            key: settingsMenuPanelKey,
-            elevation: 8,
-            color: scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(12),
-            clipBehavior: Clip.antiAlias,
-            child: AnimatedSize(
-              duration: settingsMenuMorph,
-              curve: Curves.easeOutCubic,
-              // From the bottom-right corner, which is the corner pinned to the
-              // button — so growing a taller page pushes the top edge up and leaves
-              // the anchor where it was.
-              alignment: Alignment.bottomRight,
-              child: AnimatedSwitcher(
-                duration: settingsMenuMorph,
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                // **The box follows the incoming page, not the larger of the two.**
-                // The default `Stack` takes its biggest child's size, so coming
-                // back from the tall ladder it would hold that height and snap down
-                // at the end, leaving the `AnimatedSize` to morph after the slide
-                // instead of with it. Positioning the outgoing children takes them
-                // out of the sizing; no `bottom`, so they overflow rather than
-                // being squashed into the new page's box on the way out.
-                layoutBuilder: (currentChild, previousChildren) => Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    for (final previous in previousChildren) Positioned(top: 0, left: 0, right: 0, child: previous),
-                    ?currentChild,
-                  ],
-                ),
-                transitionBuilder: (child, animation) {
-                  // **`transitionBuilder` is called for both directions and is not
-                  // told which**, so the child's own key is what distinguishes them.
-                  // It matters: on a push the new page has to come from the right
-                  // *and the old one leave to the left*. Reusing one tween — the
-                  // obvious reading of the API, since the outgoing animation runs in
-                  // reverse — sends the old page back out the way the new one came
-                  // in, which is the gesture for a pop played over a push.
-                  final entering = child.key == ValueKey(_shown.name);
-                  final from = (entering ? _direction : -_direction) * _travel;
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(begin: Offset(from, 0), end: Offset.zero).animate(animation),
+      child: MouseRegion(
+        child: Stack(
+            children: [
+              const Positioned.fill(child: AbsorbPointer()),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {}, // Absorb taps so they don't fall through to the video
+                child: Material(
+                  key: settingsMenuPanelKey,
+                  elevation: 8,
+                  color: scheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(12),
+                  clipBehavior: Clip.antiAlias,
+                  child: AnimatedSize(
+                    duration: settingsMenuMorph,
+                    curve: Curves.easeOutCubic,
+                    // From the bottom-right corner, which is the corner pinned to the
+                    // button — so growing a taller page pushes the top edge up and leaves
+                    // the anchor where it was.
+                    alignment: Alignment.bottomRight,
+                    child: AnimatedSwitcher(
+                      duration: settingsMenuMorph,
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      // **The box follows the incoming page, not the larger of the two.**
+                      // The default `Stack` takes its biggest child's size, so coming
+                      // back from the tall ladder it would hold that height and snap down
+                      // at the end, leaving the `AnimatedSize` to morph after the slide
+                      // instead of with it. Positioning the outgoing children takes them
+                      // out of the sizing; no `bottom`, so they overflow rather than
+                      // being squashed into the new page's box on the way out.
+                      layoutBuilder: (currentChild, previousChildren) => Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          for (final previous in previousChildren) Positioned(top: 0, left: 0, right: 0, child: previous),
+                          ?currentChild,
+                        ],
+                      ),
+                      transitionBuilder: (child, animation) {
+                        // **`transitionBuilder` is called for both directions and is not
+                        // told which**, so the child's own key is what distinguishes them.
+                        // It matters: on a push the new page has to come from the right
+                        // *and the old one leave to the left*. Reusing one tween — the
+                        // obvious reading of the API, since the outgoing animation runs in
+                        // reverse — sends the old page back out the way the new one came
+                        // in, which is the gesture for a pop played over a push.
+                        final entering = child.key == ValueKey(_shown.name);
+                        final from = (entering ? _direction : -_direction) * _travel;
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(begin: Offset(from, 0), end: Offset.zero).animate(animation),
+                            child: child,
+                          ),
+                        );
+                      },
                       child: child,
                     ),
-                  );
-                },
-                child: child,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
-      ),
     );
   }
 }
@@ -469,6 +471,20 @@ class _RootPage extends ConsumerWidget {
         SizedBox(height: 3),
         Divider(height: 9, indent: 14, endIndent: 14, color: scheme.outlineVariant),
         SizedBox(height: 2),
+        Consumer(
+          builder: (context, ref, _) {
+            final isAudioOnly = ref.watch(audioModeProvider);
+            return _MenuRow(
+              icon: isAudioOnly ? Icons.headset : Icons.headset_off,
+              label: 'Audio Only',
+              trailing: Switch(
+                value: isAudioOnly,
+                onChanged: (val) => ref.read(audioModeProvider.notifier).setMode(val),
+              ),
+              onTap: () => ref.read(audioModeProvider.notifier).toggle(),
+            );
+          },
+        ),
         for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );
@@ -1142,12 +1158,8 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
       // Gated on the (now independent) master too: a tile the master has
       // disabled should not look selectable, whatever its own flag says.
       final isEnabled = masterSwitch && active;
-      final backgroundColor = isHovered
-          ? (isEnabled ? scheme.primary : scheme.secondaryContainer)
-          : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
-      final foregroundColor = isHovered
-          ? (isEnabled ? scheme.onPrimary : scheme.onSecondaryContainer)
-          : (isEnabled ? scheme.onPrimaryContainer : scheme.onSurfaceVariant);
+      final backgroundColor = isHovered ? (isEnabled ? scheme.primary : scheme.secondaryContainer) : (isEnabled ? scheme.primaryContainer : scheme.surfaceContainerHighest);
+      final foregroundColor = isHovered ? (isEnabled ? scheme.onPrimary : scheme.onSecondaryContainer) : (isEnabled ? scheme.onPrimaryContainer : scheme.onSurfaceVariant);
       // The label reads too close to full contrast when disabled — the icon
       // stays as-is, just the text underneath it dims further.
       final labelColor = isEnabled ? foregroundColor : foregroundColor.withValues(alpha: 0.6);
@@ -1156,54 +1168,54 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
       return IgnorePointer(
         ignoring: !masterSwitch,
         child: MouseRegion(
-        onEnter: (_) => setState(() {
-          _hoverProperty = label;
-          _hoverActive = active;
-        }),
-        onExit: (_) => setState(() {
-          _hoverProperty = 'style';
-          _hoverActive = null;
-        }),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            onChanged(!active);
-            if (_hoverProperty == label) setState(() => _hoverActive = !active);
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isHovered ? scheme.outline : scheme.outlineVariant,
-                width: isHovered ? 1.5 : 0,
+          onEnter: (_) => setState(() {
+            _hoverProperty = label;
+            _hoverActive = active;
+          }),
+          onExit: (_) => setState(() {
+            _hoverProperty = 'style';
+            _hoverActive = null;
+          }),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              onChanged(!active);
+              if (_hoverProperty == label) setState(() => _hoverActive = !active);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isHovered ? scheme.outline : scheme.outlineVariant,
+                  width: isHovered ? 1.5 : 0,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 20,
+                    color: foregroundColor,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: TextStyle(
+                      fontSize: 10,
+                      height: 1.1,
+                      fontWeight: FontWeight.w500,
+                      color: labelColor,
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  size: 20,
-                  color: foregroundColor,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  style: TextStyle(
-                    fontSize: 10,
-                    height: 1.1,
-                    fontWeight: FontWeight.w500,
-                    color: labelColor,
-                  ),
-                ),
-              ],
-            ),
           ),
-        ),
         ),
       );
     }
@@ -1243,61 +1255,61 @@ class _ForceStylePageState extends ConsumerState<_ForceStylePage> {
         SizedBox(
           width: _menuMaxWidth,
           child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Font', Icons.font_download_outlined, style.forceFontFamily, (v) => controller.setStyle(style.copyWith(forceFontFamily: v), immediate: true))),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Size', Icons.format_size, style.forceFontSize, (v) => controller.setStyle(style.copyWith(forceFontSize: v), immediate: true))),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Text Color', Icons.format_color_text, style.forceTextColor, (v) => controller.setStyle(style.copyWith(forceTextColor: v), immediate: true))),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Text Opacity', Icons.opacity, style.forceTextOpacity, (v) => controller.setStyle(style.copyWith(forceTextOpacity: v), immediate: true))),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Background Color', Icons.format_color_fill, style.forceBackgroundColor, (v) => controller.setStyle(style.copyWith(forceBackgroundColor: v), immediate: true))),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Background Opacity', Icons.blur_on, style.forceBackgroundOpacity, (v) => controller.setStyle(style.copyWith(forceBackgroundOpacity: v), immediate: true))),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Window Color', Icons.picture_in_picture, style.forceWindowColor, (v) => controller.setStyle(style.copyWith(forceWindowColor: v), immediate: true))),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Window Opacity', Icons.picture_in_picture_alt, style.forceWindowOpacity, (v) => controller.setStyle(style.copyWith(forceWindowOpacity: v), immediate: true))),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(height: 54, child: buildTile('Edge', Icons.border_style, style.forceEdgeStyle, (v) => controller.setStyle(style.copyWith(forceEdgeStyle: v), immediate: true))),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Font', Icons.font_download_outlined, style.forceFontFamily, (v) => controller.setStyle(style.copyWith(forceFontFamily: v), immediate: true))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Size', Icons.format_size, style.forceFontSize, (v) => controller.setStyle(style.copyWith(forceFontSize: v), immediate: true))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Text Color', Icons.format_color_text, style.forceTextColor, (v) => controller.setStyle(style.copyWith(forceTextColor: v), immediate: true))),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Text Opacity', Icons.opacity, style.forceTextOpacity, (v) => controller.setStyle(style.copyWith(forceTextOpacity: v), immediate: true))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Background Color', Icons.format_color_fill, style.forceBackgroundColor, (v) => controller.setStyle(style.copyWith(forceBackgroundColor: v), immediate: true))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Background Opacity', Icons.blur_on, style.forceBackgroundOpacity, (v) => controller.setStyle(style.copyWith(forceBackgroundOpacity: v), immediate: true))),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Window Color', Icons.picture_in_picture, style.forceWindowColor, (v) => controller.setStyle(style.copyWith(forceWindowColor: v), immediate: true))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Window Opacity', Icons.picture_in_picture_alt, style.forceWindowOpacity, (v) => controller.setStyle(style.copyWith(forceWindowOpacity: v), immediate: true))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(height: 54, child: buildTile('Edge', Icons.border_style, style.forceEdgeStyle, (v) => controller.setStyle(style.copyWith(forceEdgeStyle: v), immediate: true))),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
+        ),
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),

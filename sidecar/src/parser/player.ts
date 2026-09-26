@@ -165,6 +165,32 @@ function trackingUrl(body: Json, name: string): string | null {
   return str(get(body, 'playbackTracking', name, 'baseUrl'));
 }
 
+/**
+ * The largest still the response itself lists for this video.
+ *
+ * **Read, never constructed.** An `i.ytimg.com/vi/<id>/<name>.jpg` URL has to
+ * be guessed, and the guess 404s on plenty of videos; this is server-supplied
+ * and therefore always fetchable. It is also the *poster* rather than a tile
+ * thumbnail: a tile carries whatever the surface that listed it shipped, which
+ * on the watch page's related rail is 480x360 (F40), while this tops out at the
+ * 1280x720 ceiling.
+ *
+ * Not `bestImageUrl`: that walks the whole subtree, and here the exact node is
+ * known.
+ */
+function extractPosterUrl(details: Json): string | null {
+  let best: { url: string; width: number } | null = null;
+  for (const entry of asArray(get(details, 'thumbnail', 'thumbnails'))) {
+    const url = str(get(entry, 'url'));
+    if (url === null) continue;
+    // Zero-width entries still beat nothing, which is why this starts at null
+    // rather than at width 0.
+    const width = num(get(entry, 'width')) ?? 0;
+    if (best === null || width > best.width) best = { url, width };
+  }
+  return best?.url ?? null;
+}
+
 export function parsePlayer(raw: Json): PlayerResult {
   const body = isObject(raw) && isObject(raw['data']) ? (raw['data'] as Json) : raw;
 
@@ -247,6 +273,7 @@ export function parsePlayer(raw: Json): PlayerResult {
     hlsManifestUrl: str(get(streaming, 'hlsManifestUrl')) ?? str(get(streaming, 'hls_manifest_url')),
     dashManifestUrl: str(get(streaming, 'dashManifestUrl')) ?? str(get(streaming, 'dash_manifest_url')),
     storyboards: extractStoryboards(body),
+    posterUrl: extractPosterUrl(details),
     cpn: extractCpn(body),
     playabilityStatus: str(get(body, 'playabilityStatus', 'status')),
     playabilityReason,

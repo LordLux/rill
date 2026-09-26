@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1024 1024">
+  <!-- Generator: Adobe Illustrator 29.0.1, SVG Export Plug-In . SVG Version: 2.1.0 Build 192)  -->
+  <defs>
+    <style>
+      .st0 {
+        opacity: .6;
+      }
+
+      .st1 {
+        fill: #fff;
+        opacity: .2;
+      }
+
+      .st2 {
+        stroke: #000;
+        stroke-linejoin: round;
+        stroke-width: 105.1px;
+      }
+    </style>
+  </defs>
+  <g id="outline" class="st0">
+    <path class="st2" d="M52.8,52.8h154.3v918.5H52.8V52.8ZM321.8,512l649.4,459.2V52.8l-649.4,459.2h0Z"/>
+  </g>
+  <g id="glyph">
+    <path class="st1" d="M52.8,52.8h154.3v918.5H52.8V52.8ZM321.8,512l649.4,459.2V52.8l-649.4,459.2h0Z"/>
+  </g>
+</svg>

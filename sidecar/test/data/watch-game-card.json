@@ -1,0 +1,87 @@
+{
+ "_about": "Trimmed real /next engagementPanels for dHPQNc9oa_E (Portal 2 gameplay): one GAME attribute card and no song. Captured 2026-09-25.",
+ "engagementPanels": [
+  {
+   "engagementPanelSectionListRenderer": {
+    "panelIdentifier": "engagement-panel-structured-description",
+    "content": {
+     "structuredDescriptionContentRenderer": {
+      "items": [
+       {
+        "videoAttributesSectionViewModel": {
+         "headerTitle": "Games",
+         "videoAttributeViewModels": [
+          {
+           "videoAttributeViewModel": {
+            "image": {
+             "sources": [
+              {
+               "url": "https://yt3.ggpht.com/Fp_es1PE9HaQEH-M1HIWXmRoJZSMXpMSrGaFhTGGAyVsdeicuXFCb_p40U1XIMF2MZ_dt_82iQ=s112-w80-h112-c-k-c0x00ffffff-no-nd-rj",
+               "width": 80,
+               "height": 112
+              },
+              {
+               "url": "https://yt3.ggpht.com/Fp_es1PE9HaQEH-M1HIWXmRoJZSMXpMSrGaFhTGGAyVsdeicuXFCb_p40U1XIMF2MZ_dt_82iQ=s224-w160-h224-c-k-c0x00ffffff-no-nd-rj",
+               "width": 160,
+               "height": 224
+              }
+             ]
+            },
+            "imageStyle": "VIDEO_ATTRIBUTE_IMAGE_STYLE_PORTRAIT",
+            "title": "Portal 2",
+            "subtitle": "2011",
+            "orientation": "VIDEO_ATTRIBUTE_ORIENTATION_HORIZONTAL",
+            "onTap": {
+             "innertubeCommand": {
+              "commandMetadata": {
+               "webCommandMetadata": {
+                "url": "/channel/UCm5tHKeVv8g3RQMGAmIn6rw",
+                "webPageType": "WEB_PAGE_TYPE_CHANNEL",
+                "rootVe": 3611,
+                "apiUrl": "/youtubei/v1/browse"
+               }
+              },
+              "browseEndpoint": {
+               "browseId": "UCm5tHKeVv8g3RQMGAmIn6rw"
+              }
+             }
+            },
+            "sizingRule": "VIDEO_ATTRIBUTE_SIZING_RULE_RESPONSIVE"
+           }
+          }
+         ],
+         "footerButton": {
+          "buttonViewModel": {
+           "iconName": "GAMING_LOGO",
+           "title": "Gaming",
+           "onTap": {
+            "innertubeCommand": {
+             "commandMetadata": {
+              "webCommandMetadata": {
+               "url": "/gaming",
+               "webPageType": "WEB_PAGE_TYPE_CHANNEL",
+               "rootVe": 3611,
+               "apiUrl": "/youtubei/v1/browse"
+              }
+             },
+             "browseEndpoint": {
+              "browseId": "UCOpNcN46UbXVtpKMrmU4Abg"
+             }
+            }
+           },
+           "accessibilityText": "Gaming",
+           "style": "BUTTON_VIEW_MODEL_STYLE_MONO",
+           "isFullWidth": false,
+           "type": "BUTTON_VIEW_MODEL_TYPE_OUTLINE",
+           "buttonSize": "BUTTON_VIEW_MODEL_SIZE_DEFAULT"
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

@@ -42,6 +42,14 @@ abstract class PlaybackSource with _$PlaybackSource {
     int? durationMs,
     String? startTimestamp,
     String? storyboardTemplate,
+
+    /// The widest still YouTube lists for this video — `protocol.md` §3.5.
+    ///
+    /// For surfaces that draw artwork instead of a picture. **Not something
+    /// the client could have built from the tile's `thumbnailUrl`**: 1280x720
+    /// is YouTube's ceiling and the watch page's related rail ships 480x360
+    /// (`architecture.md` F40). Null is ordinary — fall back to the tile's.
+    String? posterUrl,
     @Default(false) bool qualityDegraded,
     @Default('plain') String transport,
     @Default(<PlaybackVariant>[]) List<PlaybackVariant> variants,

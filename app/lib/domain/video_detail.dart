@@ -24,6 +24,43 @@ part 'video_detail.g.dart';
 /// `'dislike'` / `'none'`), so json_serializable needs no converter.
 enum VideoRating { like, dislike, none }
 
+/// A song YouTube credits on a watch page — `protocol.md` §3.3.
+///
+/// Nested rather than four fields on [VideoDetail], because the four are
+/// jointly present or jointly absent: flat ones would encode a constraint the
+/// type cannot express.
+///
+/// `coverUrl` arrives **already sized** by the sidecar; the client appends
+/// nothing to it (§3.7's rule).
+@freezed
+abstract class MusicTrack with _$MusicTrack {
+  const factory MusicTrack({
+    @Default('') String title,
+    String? artist,
+    String? album,
+    String? coverUrl,
+  }) = _MusicTrack;
+
+  factory MusicTrack.fromJson(Map<String, Object?> json) => _$MusicTrackFromJson(json);
+}
+
+/// One of the uploader's chapters — on a music mix, one song's segment.
+/// `protocol.md` §3.3.
+///
+/// The song credits carry no timestamps and stop at ten, so this is the only
+/// source of *when* a song starts. [thumbnailUrl] is a 336x188 frame of the
+/// video, not a cover — fit for a blurred backdrop and nothing sharper.
+@freezed
+abstract class Chapter with _$Chapter {
+  const factory Chapter({
+    required String title,
+    required int startSeconds,
+    String? thumbnailUrl,
+  }) = _Chapter;
+
+  factory Chapter.fromJson(Map<String, Object?> json) => _$ChapterFromJson(json);
+}
+
 @freezed
 abstract class VideoDetail with _$VideoDetail {
   const VideoDetail._();
@@ -61,6 +98,17 @@ abstract class VideoDetail with _$VideoDetail {
     @Default(false) bool isVerified,
     @Default(false) bool isArtistChannel,
     @Default(<String>[]) List<String> badges,
+
+    /// Songs credited on this video, in YouTube's order.
+    ///
+    /// **Empty is the ordinary answer**, not a gap — most videos carry no
+    /// attribution, so every path has to work without it.
+    @Default(<MusicTrack>[]) List<MusicTrack> music,
+
+    /// The uploader's chapters, ascending. **Empty is ordinary.** Whether they
+    /// are songs is decided in `now_playing_track.dart`, not here — a lecture
+    /// has chapters too.
+    @Default(<Chapter>[]) List<Chapter> chapters,
     /// Members-only content. Same badge and same rule as
     /// `FeedItem.video.isMembersOnly`, read off the watch page.
     ///
