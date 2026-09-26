@@ -9,7 +9,7 @@ import 'package:media_kit/media_kit.dart';
 import 'data/log_capture.dart';
 import 'data/playback/engine.dart';
 import 'data/playback/mpv_log.dart';
-import 'domain/feed_item.dart';
+import 'domain/youtube_link.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
 import 'ui/audio_delay_probe.dart';
@@ -161,19 +161,6 @@ void _runAudioProbe(String plan) {
   });
 }
 
-/// What a tile would have supplied. `video.info` replaces every one of these a
-/// moment later; this is only what the page shows meanwhile.
-VideoItem _placeholderItem(String videoId) => VideoItem(
-      kind: 'video',
-      id: videoId,
-      title: videoId,
-      channelName: '',
-      thumbnailUrl: '',
-      isLive: false,
-      canWatchLater: false,
-      canAddToQueue: false,
-    );
-
 /// `RILL_OPEN_VIDEO=<id>[,<id>…]` plays the first and queues the rest, as soon
 /// as there is a frame. `RILL_SEEK_TO_END=1` jumps each one to five seconds from
 /// its end.
@@ -217,9 +204,9 @@ void _openOnLaunch(ProviderContainer container) {
 
   WidgetsBinding.instance.addPostFrameCallback((_) {
     stderr.writeln('rill: RILL_OPEN_VIDEO=${ids.join(',')} — opening the watch page');
-    openWatchIn(container, _placeholderItem(ids.first));
+    openWatchIn(container, placeholderVideoItem(ids.first));
     for (final id in ids.skip(1)) {
-      container.read(queueProvider.notifier).addToQueue(_placeholderItem(id));
+      container.read(queueProvider.notifier).addToQueue(placeholderVideoItem(id));
     }
   });
 }
