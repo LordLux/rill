@@ -993,6 +993,23 @@ combination that does not work at all. If Flutter fixes this, `TabBarView` is
 worth revisiting for the state-preservation win alone.
 
 
+**A pasted link to one video plays that video; it is not searched — decided
+2026-09-26.** Submitting the search box calls `openSearchOrVideo`
+(`pages/search_results.dart`), and `videoIdFromLink` (`domain/youtube_link.dart`)
+is the rule. YouTube's own search answers a `watch?v=` link with the video but a
+`/shorts/` link with **nothing** — measured 2026-09-26, the raw `/search` response
+held no result at all, only the query echoed in its filter links and an ad the
+parser strips — so a Short could not be reached by pasting its link. Accepted:
+`watch?v=`, `/shorts/`, `/live/`, `/embed/`, `/v/` on youtube.com and its `www.`,
+`m.` and `music.` subdomains, and `youtu.be/`, with or without a scheme and with
+`?feature=share`, `&t=` and `&si=` ignored. **A link and nothing else**: a sentence
+that contains one is a search, and so is a bare 11-character id, which is
+indistinguishable from a word. A `list=` is ignored — the video opens, not the
+playlist — and a playlist or channel link is still searched. The video opens
+through the same `openWatch` a tile tap uses, on a placeholder tile that
+`video.info` replaces a moment later (`placeholderVideoItem`, shared with
+`RILL_OPEN_VIDEO`).
+
 #### A control that needs an account is disabled and says why — decided 2026-09-21
 
 Every action-gated control in the app reads one function,
