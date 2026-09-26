@@ -253,6 +253,88 @@ void main() {
     });
   });
 
+  group('the rounded ends of the bar', () {
+    // The same recording as above, with a rest height of 4 (rect 4..8).
+    List<RRect> clips({required List<ChapterSpan> spans, Map<int, double> growth = const {}}) {
+      final canvas = TestRecordingCanvas();
+      paintSegmentedTrack(
+        canvas,
+        trackRect: const Rect.fromLTRB(0, 4, 100, 8),
+        thumbX: 60,
+        bufferX: 80,
+        segments: TrackSegments(spans, growth),
+        played: Paint(),
+        buffered: Paint(),
+        remaining: Paint(),
+      );
+      return [
+        for (final call in canvas.invocations)
+          if (call.invocation.memberName == #clipRRect) call.invocation.positionalArguments[0] as RRect,
+      ];
+    }
+
+    const three = [ChapterSpan(0, 0.3), ChapterSpan(0.3, 0.7), ChapterSpan(0.7, 1)];
+    const rest = Radius.circular(ScrubberMetrics.endRadius);
+    const hovered = Radius.circular(ScrubberMetrics.endRadiusHovered);
+
+    test('only the first segment has its left corners rounded, and only the last its right', () {
+      final shapes = clips(spans: three);
+      expect(shapes, hasLength(2), reason: 'the middle segment is not clipped at all');
+
+      final first = shapes[0];
+      expect((first.tlRadius, first.blRadius), (rest, rest));
+      expect((first.trRadius, first.brRadius), (Radius.zero, Radius.zero), reason: 'its right side meets the next segment');
+
+      final last = shapes[1];
+      expect((last.trRadius, last.brRadius), (rest, rest));
+      expect((last.tlRadius, last.blRadius), (Radius.zero, Radius.zero), reason: 'its left side meets the one before');
+    });
+
+    test('a bar of one segment has all four corners rounded', () {
+      final shapes = clips(spans: const [ChapterSpan(0, 1)]);
+      expect(shapes, hasLength(1));
+      expect([shapes.single.tlRadius, shapes.single.trRadius, shapes.single.blRadius, shapes.single.brRadius], everyElement(rest));
+    });
+
+    test('the radius grows with the segment, and only that segment\'s', () {
+      // Grown fully, the first segment is at the hovered radius and the last is not.
+      final shapes = clips(spans: three, growth: {0: 1.0});
+      expect(shapes[0].tlRadius, hovered);
+      expect(shapes[1].trRadius, rest);
+
+      final half = clips(spans: const [ChapterSpan(0, 1)], growth: {0: 0.5}).single.tlRadius.x;
+      expect(half, allOf(greaterThan(ScrubberMetrics.endRadius), lessThan(ScrubberMetrics.endRadiusHovered)));
+    });
+
+    test('the clip is the segment itself, at its own height', () {
+      final shapes = clips(spans: three, growth: {2: 1.0});
+      expect(shapes[0].height, ScrubberMetrics.trackHeight);
+      expect(shapes[1].height, ScrubberMetrics.trackHeightHovered);
+      expect(shapes[0].left, 0);
+      expect(shapes[1].right, 100);
+    });
+
+    test('the layers are drawn inside the clip and the canvas is put back', () {
+      final canvas = TestRecordingCanvas();
+      paintSegmentedTrack(
+        canvas,
+        trackRect: const Rect.fromLTRB(0, 4, 100, 8),
+        thumbX: 60,
+        bufferX: 80,
+        segments: const TrackSegments(three, {}),
+        played: Paint(),
+        buffered: Paint(),
+        remaining: Paint(),
+      );
+      final calls = [for (final call in canvas.invocations) call.invocation.memberName];
+      expect(calls.where((c) => c == #save), hasLength(2));
+      expect(calls.where((c) => c == #restore), hasLength(2), reason: 'every save is undone, or the thumb would be clipped too');
+      final firstClip = calls.indexOf(#clipRRect);
+      final firstRestore = calls.indexOf(#restore);
+      expect(calls.sublist(firstClip, firstRestore).where((c) => c == #drawRect), isNotEmpty, reason: 'drawn between the clip and its restore');
+    });
+  });
+
   group('SegmentGrowth', () {
     testWidgets('grows the target over the animation and lets the rest go', (tester) async {
       final growth = SegmentGrowth(tester);

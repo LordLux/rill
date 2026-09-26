@@ -29,6 +29,13 @@ abstract final class ScrubberMetrics {
   static const double trackHeightHovered = 7;
   static const Duration growDuration = Duration(milliseconds: 120);
 
+  /// The outer corners of the whole bar: the first segment's left pair and the
+  /// last one's right pair, all four when there is only one. Skia scales a
+  /// radius down to what the height allows, so at 4 and 7 px these read as
+  /// semicircular ends; tune them alongside the heights.
+  static const double endRadius = 3;
+  static const double endRadiusHovered = 5;
+
   /// Between two segments, split evenly across the boundary.
   static const double chapterGap = 2;
 
@@ -194,9 +201,31 @@ void paintSegmentedTrack(
       if (right > left) canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), paint);
     }
 
+    // Only the ends of the bar are rounded, by clipping the segment to its
+    // shape: the three layers inside stay plain rects, so the position and the
+    // buffer cross the rounded end without knowing about it.
+    final first = i == 0;
+    final last = i == extents.length - 1;
+    final rounded = first || last;
+    if (rounded) {
+      final radius = Radius.circular(lerpDouble(ScrubberMetrics.endRadius, ScrubberMetrics.endRadiusHovered, grown)!);
+      canvas.save();
+      canvas.clipRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTRB(extent.left, top, extent.right, bottom),
+          topLeft: first ? radius : Radius.zero,
+          bottomLeft: first ? radius : Radius.zero,
+          topRight: last ? radius : Radius.zero,
+          bottomRight: last ? radius : Radius.zero,
+        ),
+      );
+    }
+
     fill(trackRect.left, thumbX, played);
     fill(thumbX, bufferRight, buffered);
     fill(bufferRight, trackRect.right, remaining);
+
+    if (rounded) canvas.restore();
   }
 }
 
