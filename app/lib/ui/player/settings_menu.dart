@@ -15,7 +15,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import '../../domain/playback_source.dart';
-import '../widgets/silky_scroll_absorber.dart';
 import '../../domain/caption_style.dart';
 import '../audio_mode_controller.dart';
 import '../captions_controller.dart';
@@ -327,13 +326,8 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
       // Bottom-aligned inside whatever height the `Positioned` allows, so the
       // panel grows upward from the button it belongs to.
       alignment: Alignment.bottomRight,
-      // **The whole panel goes on the hover stack, not just its list.** The
-      // `SilkySingleChildScrollView` below covers the rows; the sticky header,
-      // the padding and the panel's edges are outside it, and a wheel over those
-      // reached the page. See `SilkyScrollAbsorber`.
       child: MouseRegion(
-        child: SilkyScrollAbsorber(
-          child: Stack(
+        child: Stack(
             children: [
               const Positioned.fill(child: AbsorbPointer()),
               GestureDetector(
@@ -396,7 +390,6 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
             ],
           ),
         ),
-      ),
     );
   }
 }

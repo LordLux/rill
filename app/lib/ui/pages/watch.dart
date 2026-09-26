@@ -162,8 +162,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       // screen it keeps playing and simply swaps when the mix lands — better
       // than replacing real content with a placeholder, and it avoids
       // unmounting the video texture for a second (architecture §2.8).
-      if (startingMix != null)
-        return PageWrapper(title: watchVideoWidget, body: WatchSkeleton());
+      if (startingMix != null) return PageWrapper(title: watchVideoWidget, body: WatchSkeleton());
 
       return PageWrapper(
         title: watchVideoWidget,
@@ -179,18 +178,14 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       actions: const [],
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final theatre = ref.watch(
-            playerViewProvider.select((view) => view.theatre),
-          );
+          final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
           final detail = info.value;
           final isAudioOnly = ref.watch(audioModeProvider);
           final aspectValue = ref.watch(_aspectRatioProvider).value;
           final actualAspectRatio = isAudioOnly
               ? ScreenValues.normalAspectRatio
               : (aspectValue ?? ScreenValues.normalAspectRatio);
-          final queueHasItems = ref.watch(
-            queueProvider.select((q) => q.items.length > 1),
-          );
+          final queueHasItems = ref.watch(queueProvider.select((q) => q.items.length > 1));
           final theme = Theme.of(context);
           final scheme = theme.colorScheme;
 
