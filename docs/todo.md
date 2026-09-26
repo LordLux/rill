@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 51.** A new item takes it, and the same edit bumps this line.
+**Next number: 52.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -664,6 +664,27 @@ correct but is a workaround for a mismatch that should not exist.
 pinned Bun moves (and the sidecar is re-measured: the ~6.3 s `bun run` cold start,
 the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
 1.1.42 reads — and the workflow's two-step Bun install collapses into one.
+
+### 51. Two Windows plugins do not build on Visual Studio 2026
+
+**Measured 2026-09-26, first release-workflow build on `windows-latest`.** MSVC
+14.51 (Visual Studio 2026, `Microsoft Visual Studio\18`) fails `flutter build windows`
+with `C2338 … STL1011`: its STL now rejects `<experimental/coroutine>` and the
+`/await` option unless `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` is
+defined. Two plugins compile with `/await`: `flutter_inappwebview_windows` (23
+errors) and `flutter_media_session` (2). Visual Studio 2022 still accepts it, which is
+what this machine builds with (`Visual Studio 17 2022`), so nothing is broken today.
+
+The release workflow is pinned to `windows-2022` for that reason. It is a stay of
+execution, not a fix: a machine that only has Visual Studio 2026 cannot build the
+app, and so will the runners once `windows-2022` is retired. `CL=/D_SILENCE_…` in
+the environment would let it compile as an interim, but the plugins still depend on
+a feature Microsoft has announced it will remove.
+
+**Done when:** the app builds on a Visual Studio 2026 toolchain without a
+suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
+replacing them. `flutter_media_session` should be checked first, in case it is
+ours.
 
 ---
 

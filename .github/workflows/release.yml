@@ -33,6 +33,10 @@ env:
   BUN_VERSION: '1.1.42' # what the sidecar is developed and measured against
   FVM_VERSION: '3.2.1'
 
+# The Windows jobs are pinned to windows-2022 on purpose. `windows-latest` moved to
+# Visual Studio 2026 (MSVC 14.51), whose STL turned <experimental/coroutine> into a hard
+# error, and flutter_inappwebview_windows and flutter_media_session both compile with
+# /await. The app is built with Visual Studio 2022 everywhere else (todo.md 51).
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -64,7 +68,7 @@ jobs:
   gate:
     needs: plan
     if: github.event_name != 'schedule' || needs.plan.outputs.exists == 'false'
-    runs-on: windows-latest
+    runs-on: windows-2022 # Visual Studio 2022, like the dev machine — see the note above `jobs:`
     timeout-minutes: 60
     defaults:
       run:
@@ -114,7 +118,7 @@ jobs:
   build:
     needs: plan
     if: github.event_name != 'schedule' || needs.plan.outputs.exists == 'false'
-    runs-on: windows-latest
+    runs-on: windows-2022 # Visual Studio 2022, like the dev machine — see the note above `jobs:`
     timeout-minutes: 60
     env:
       VERSION: ${{ needs.plan.outputs.version }}

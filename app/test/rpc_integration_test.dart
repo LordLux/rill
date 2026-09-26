@@ -1,8 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 
+/// Live YouTube, so opt-in exactly as the sidecar's network tests are
+/// (`RUN_NETWORK_TESTS=1`, CLAUDE.md). A CI runner sits in a datacenter and is not a
+/// fair witness of whether resolving works: the first CI run failed here while the
+/// second test, which needs the same sidecar and no network, passed.
+final String? _needsNetwork = Platform.environment['RUN_NETWORK_TESTS'] == '1'
+    ? null
+    : 'talks to live YouTube; set RUN_NETWORK_TESTS=1 to run it';
+
 void main() {
-  test('Integration: auth.verify and playback.open end to end', () async {
+  test('Integration: auth.verify and playback.open end to end', skip: _needsNetwork, () async {
     final client = RpcClient.instance;
     // Real sidecar command
     client.mockCommand = null;
