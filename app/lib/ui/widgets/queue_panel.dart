@@ -9,7 +9,6 @@ import '../../theme/tokens.dart';
 import '../queue_controller.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
-import 'silky_scroll_absorber.dart';
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
 /// collapse that closes the gap the sweep never has to (architecture §2.8).
@@ -459,11 +458,8 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
 
     final nextItem = queue.next;
 
-    // The list is a `SilkyScroll` and so already on the hover stack; the header,
-    // the clear button and the edges are not. See `SilkyScrollAbsorber`.
-    Widget panel = SilkyScrollAbsorber(
-      child: Material(
-        key: _panelKey,
+    Widget panel = Material(
+      key: _panelKey,
         color: scheme.surfaceContainer,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
@@ -604,7 +600,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                 constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
                 child: SilkyScroll(
                   controller: _listScroll,
-                  builder: (context, scrollController, physics, pointerDeviceKind) {
+                  builder: (context, scrollController, physics, _) {
                     return ReorderableListView.builder(
                       scrollController: scrollController,
                       shrinkWrap: true,
@@ -634,8 +630,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
             ),
           ],
         ),
-      ),
-    );
+      );
 
     panel = Padding(
       padding: const EdgeInsets.only(bottom: 20),

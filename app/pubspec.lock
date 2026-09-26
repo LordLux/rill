@@ -946,10 +946,9 @@ packages:
   silky_scroll:
     dependency: "direct main"
     description:
-      name: silky_scroll
-      sha256: "8595e55b763981dc6748f26d88596ed31c2169cd47bf04af39ee4ba9ab8544f6"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../third_party/silky_scroll"
+      relative: true
+    source: path
     version: "2.6.4"
   sky_engine:
     dependency: transitive

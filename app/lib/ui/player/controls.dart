@@ -691,7 +691,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   Widget _buildAudioBar(BuildContext context) {
     final tokens = Theme.of(context).tokens;
     final playback = ref.watch(playbackProvider);
-    
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1197,7 +1196,10 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
             final live = source != null && source.durationMs == null;
             final timeline = live || durationMs <= 0
                 ? null
-                : ScrubberTimeline(duration: Duration(milliseconds: durationMs.round()), chapters: chapters ?? const []);
+                : ScrubberTimeline(
+                    duration: Duration(milliseconds: durationMs.round()),
+                    chapters: chapters ?? const [],
+                  );
             _timeline = timeline;
 
             if (source?.durationMs == null && source?.startTimestamp != null) {
@@ -1808,24 +1810,32 @@ class _RillSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
       }
 
       // Draw inactive track (remaining)
-      final Rect rightTrackSegment = Rect.fromLTRB(
-        bufferRight,
-        trackRect.top,
-        trackRect.right,
-        trackRect.bottom,
+      final RRect rightTrackSegment = RRect.fromRectAndRadius(
+        Rect.fromLTRB(
+          bufferRight,
+          trackRect.top,
+          trackRect.right,
+          trackRect.bottom,
+        ),
+        Radius.circular(trackRect.height / 2),
       );
+
       if (!rightTrackSegment.isEmpty) {
-        context.canvas.drawRect(rightTrackSegment, rightTrackPaint);
+        context.canvas.drawRRect(rightTrackSegment, rightTrackPaint);
       }
     } else {
-      final Rect rightTrackSegment = Rect.fromLTRB(
-        thumbCenter.dx,
-        trackRect.top,
-        trackRect.right,
-        trackRect.bottom,
+      final RRect rightTrackSegmentR = RRect.fromRectAndRadius(
+        Rect.fromLTRB(
+          thumbCenter.dx,
+          trackRect.top,
+          trackRect.right,
+          trackRect.bottom,
+        ),
+        Radius.circular(trackRect.height / 2),
       );
-      if (!rightTrackSegment.isEmpty) {
-        context.canvas.drawRect(rightTrackSegment, rightTrackPaint);
+
+      if (!rightTrackSegmentR.isEmpty) {
+        context.canvas.drawRRect(rightTrackSegmentR, rightTrackPaint);
       }
     }
   }
@@ -1901,7 +1911,6 @@ class _TransportControls extends ConsumerWidget {
   }
 }
 
-
 class _ViewControls extends ConsumerWidget {
   const _ViewControls({
     required this.onWake,
@@ -1958,4 +1967,3 @@ class _ViewControls extends ConsumerWidget {
     );
   }
 }
-

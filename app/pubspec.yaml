@@ -82,7 +82,8 @@ dependency_overrides:
   # 1.0.11 above and is not touched by this (F13).
   media_kit_video:
     path: ../third_party/media_kit_video
-
+  silky_scroll:
+    path: ../third_party/silky_scroll
   # **Otherwise empty on purpose. Do not add an override to make the tree
   # resolve.**
   #
