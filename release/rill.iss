@@ -69,3 +69,13 @@ Name: "{autodesktop}\Rill"; Filename: "{app}\rill.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\rill.exe"; Description: "Launch Rill"; Flags: nowait postinstall skipifsilent
+; The in-app updater runs this installer silently with /RELAUNCH=1 after quitting,
+; so the app comes back by itself (architecture.md §2.14). A plain silent install
+; (CI's, or a deployment script's) passes nothing and launches nothing.
+Filename: "{app}\rill.exe"; Flags: nowait; Check: ShouldRelaunch
+
+[Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:relaunch|0}') = '1');
+end;
