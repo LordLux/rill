@@ -12,9 +12,6 @@ on:
         description: A tag or commit to write the notes since. Empty means the latest release.
         required: false
         default: ''
-  # TEMPORARY, removed before merge: runs this from the branch it is being developed on.
-  push:
-    branches: [release-notes]
 
 permissions:
   contents: read
@@ -40,8 +37,6 @@ jobs:
           if [ -z "$previous" ]; then
             previous=$(gh release list --limit 1 --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
           fi
-          # TEMPORARY, with the push trigger: a wider range, so a branch run has something to write about.
-          if [ "$GITHUB_EVENT_NAME" = push ]; then previous="HEAD~25"; fi
           bun release/make-notes.ts --version preview --repo "$GITHUB_REPOSITORY" --previous "$previous" --out out
           {
             echo "### What the release body would look like"
