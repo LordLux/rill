@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 52.** A new item takes it, and the same edit bumps this line.
+**Next number: 54.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -345,6 +345,20 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
+
+### 52. The updater cannot be reached while signed out
+
+The update controls live in the account menu (`architecture.md` §2.14), and that
+menu opens only for a signed-in user: signed out, the avatar button opens the
+login flow instead. So a signed-out user gets automatic updates — the check,
+the download and the required-update strip all work — but has no way to check
+by hand, see the notes, or reach **Restart to update**; the avatar dot is
+suppressed for the same reason, since it would point at a menu the button
+cannot open. Either a settings page (none exists yet; the `Settings` row is a
+stub) or a small signed-out menu would fix it.
+
+**Done when:** a signed-out user can reach the Updates page and install a
+ready update.
 
 ---
 
@@ -685,6 +699,19 @@ a feature Microsoft has announced it will remove.
 suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
 replacing them. `flutter_media_session` should be checked first, in case it is
 ours.
+
+### 53. `make-manifest.ts` cannot sign a manifest for a local test feed
+
+It always writes `https://github.com/<repo>/releases/download/<tag>/<name>` as the
+asset URL, so a manifest pointing at `http://127.0.0.1:PORT/` — which the app
+accepts in a debug or profile build under `RILL_UPDATE_ASSET_PREFIX`
+(`architecture.md` §2.14) — cannot be produced by it, even with
+`--public-key`. The updater's end-to-end check on 2026-09-27 signed its local
+manifest with a scratch script doing the same `sign(null, body, key)` instead.
+A test-only `--asset-base-url` would make that reproducible from the repo.
+
+**Done when:** the local end-to-end walk-through needs no script outside the
+repository.
 
 ---
 
