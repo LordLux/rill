@@ -49,19 +49,17 @@ int _openDenyingWrites(String path) {
 }
 
 int _start(String path, List<String> arguments) {
-  // The launcher's job allows breakaway; a process started some other way (a
-  // debug run inside a terminal's job, say) may sit in one that does not, and
-  // there the installer outliving us is that job's business, not ours.
+  // The launcher's job allows breakaway; an outer job (a terminal's, an IDE's)
+  // may not, and then CreateProcess refuses the flag outright. Retried without
+  // it on ANY failure: GetLastError is not reliable across Dart FFI calls, and
+  // measured 2026-09-27 it read 0 here for a refused breakaway.
   const detached = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
   final pid = _create(path, arguments, detached | CREATE_BREAKAWAY_FROM_JOB);
   if (pid != null) return pid;
-  final error = GetLastError();
-  if (error == ERROR_ACCESS_DENIED) {
-    stderr.writeln('rill update: breakaway refused, starting the installer inside the current job');
-    final fallback = _create(path, arguments, detached);
-    if (fallback != null) return fallback;
-  }
-  throw InstallerLaunchException('could not start the installer (error ${GetLastError()})');
+  stderr.writeln('rill update: breakaway refused, starting the installer inside the current job');
+  final fallback = _create(path, arguments, detached);
+  if (fallback != null) return fallback;
+  throw const InstallerLaunchException('Windows refused to start the installer');
 }
 
 int? _create(String path, List<String> arguments, int flags) {

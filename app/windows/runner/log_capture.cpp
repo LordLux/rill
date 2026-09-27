@@ -372,11 +372,15 @@ bool RunAsLogLauncher(int* exit_code) {
   }
 
   // Closing the launcher closes the app, rather than leaving it writing into a
-  // pipe nobody reads.
+  // pipe nobody reads. BREAKAWAY_OK lets the updater start the installer with
+  // CREATE_BREAKAWAY_FROM_JOB: it has to outlive the app it replaces
+  // (architecture.md §2.14). Nothing else asks for it, so the sidecar still dies
+  // with the job.
   HANDLE job = ::CreateJobObjectW(nullptr, nullptr);
   if (job != nullptr) {
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
     ::SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
     ::AssignProcessToJobObject(job, app.hProcess);
   }
