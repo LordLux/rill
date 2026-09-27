@@ -22,7 +22,7 @@ const Key membersOnlyJoinKey = ValueKey('members-only-join');
 /// from before the bar was drawn over them, and the button ended up behind the
 /// progress bar. `player_slates_layout_test` measures the two rather than
 /// trusting this number.
-const double playerControlsClearance = 76;
+const double playerControlsClearance = 60;
 
 /// what arrives when `video.info` has not answered yet or carried no timestamp.
 @visibleForTesting
