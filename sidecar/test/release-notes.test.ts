@@ -232,6 +232,13 @@ describe('the prompt', () => {
     expect(SYSTEM_PROMPT).not.toContain('IGNORE ALL PREVIOUS');
   });
 
+  test('the instructions forbid inventing changes and embellishing what the input shows', () => {
+    // The first live run turned a folder named "toolchain" into "toolchain caching".
+    expect(SYSTEM_PROMPT).toContain('Never invent a change');
+    expect(SYSTEM_PROMPT).toContain('Do not embellish');
+    expect(SYSTEM_PROMPT).toContain('toolchain caching');
+  });
+
   test('the response schema asks for every section and a citation on every bullet', () => {
     expect(RESPONSE_SCHEMA.required).toEqual(['newFeatures', 'changes', 'improvements', 'fixes', 'underTheHood', 'removals', 'callouts']);
     expect(RESPONSE_SCHEMA.properties.fixes.items.required).toEqual(['text', 'commits']);
@@ -420,6 +427,15 @@ describe('make-notes, end to end against a fake API', () => {
     expect(field(seenRequests[1]?.body, 'generationConfig', 'responseJsonSchema')).toBeUndefined();
     expect(field(seenRequests[1]?.body, 'generationConfig', 'responseMimeType')).toBe('application/json');
     expect(result.stderr).toContain('via gemini');
+    // The log says which mode answered, so a schema the API stopped accepting is noticed, not silent.
+    expect(result.stderr).toContain('refused the response schema');
+    expect(result.stderr).toContain('plain JSON mode');
+  });
+
+  test('a call that needed no retry says nothing about schemas', async () => {
+    handler = () => geminiReply(goodReply());
+    const result = await run();
+    expect(result.stderr).not.toContain('schema');
   });
 
   test('a rate limit is retried after a delay, and then succeeds', async () => {
