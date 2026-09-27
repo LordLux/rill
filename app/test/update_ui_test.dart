@@ -30,7 +30,7 @@ class _FixedAuth extends AuthController {
 class FixedUpdate extends UpdateController {
   FixedUpdate(this.initial);
   final UpdateState initial;
-  final finish = Completer<void>();
+  Completer<void> finish = Completer<void>();
   UpdatePhase result = const UpdatePhase.upToDate();
 
   @override
@@ -40,6 +40,7 @@ class FixedUpdate extends UpdateController {
   Future<void> checkNow({UpdateCheckOrigin origin = UpdateCheckOrigin.manual}) async {
     state = state.copyWith(phase: UpdatePhase.checking(origin: origin));
     await finish.future;
+    finish = Completer<void>();
     state = state.copyWith(phase: result);
   }
 }
@@ -122,8 +123,14 @@ void main() {
     await openMenu(tester);
     await tester.tap(find.text('Restart to update'));
     await tester.pumpAndSettle();
-    expect(find.text('Rill 0.3.0 is ready'), findsOneWidget);
-    expect(find.text('•  Faster home feed'), findsOneWidget);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+    expect(find.text('Faster home feed'), findsOneWidget);
+    expect(find.text('Full release notes'), findsOneWidget);
+    // The card comes first, above the version and the switch.
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('update-card'))).dy,
+      lessThan(tester.getTopLeft(find.text('Version')).dy),
+    );
     expect(find.widgetWithText(FilledButton, 'Restart to update'), findsOneWidget);
     expect(find.widgetWithText(TextButton, 'Later'), findsOneWidget);
     expect(find.text('0.2.2'), findsOneWidget, reason: 'the running version');
@@ -187,5 +194,57 @@ void main() {
     expect(find.byKey(const ValueKey('update-banner')), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Restart to update'), findsOneWidget);
     expect(find.text('Later'), findsNothing);
+  });
+
+  testWidgets('Later dismisses the update and goes back to the root menu', (tester) async {
+    await pump(tester, ready());
+    await openMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Later'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign out'), findsOneWidget, reason: 'back on the root page');
+    expect(find.byKey(const ValueKey('update-dot')), findsNothing);
+  });
+
+  testWidgets('a check from the page keeps the card and loads in the header divider', (tester) async {
+    final controller = await pump(tester, ready());
+    await openMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    final cardHeight = tester.getSize(find.byKey(const ValueKey('update-card'))).height;
+    expect(find.byKey(const ValueKey('update-header-progress')), findsNothing);
+
+    await tester.tap(find.byTooltip('Check for updates'));
+    await tester.pump();
+    // Mid-check: the bar is on the divider, the card still shows the update
+    // at the same height, and the header button is still there.
+    expect(find.byKey(const ValueKey('update-header-progress')), findsOneWidget);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+    expect(find.text('Checking for updates…'), findsNothing);
+    expect(tester.getSize(find.byKey(const ValueKey('update-card'))).height, cardHeight);
+    expect(find.byTooltip('Check for updates'), findsOneWidget);
+
+    controller.result = ready().phase;
+    controller.finish.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('update-header-progress')), findsNothing);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+  });
+
+  testWidgets('notes are capped at five', (tester) async {
+    final long = UpdateManifest(
+      schema: 1,
+      version: manifest.version,
+      tag: manifest.tag,
+      notes: [for (var i = 1; i <= 8; i++) 'Note $i'],
+      windowsX64: manifest.windowsX64,
+    );
+    await pump(tester, ready(offer: long));
+    await openMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    expect(find.text('Note 5'), findsOneWidget);
+    expect(find.text('Note 6'), findsNothing);
   });
 }

@@ -48,6 +48,9 @@ class UpdateConfig {
   static const embeddedManifestUrl = 'https://github.com/LordLux/rill/releases/latest/download/update.json';
   static const embeddedAssetPrefix = 'https://github.com/LordLux/rill/releases/download/';
 
+  /// Where the Updates page's "Full release notes" link points; the tag is appended.
+  static const releasePageBase = 'https://github.com/LordLux/rill/releases/tag/';
+
   /// `release/update-signing.pub`; a test checks the two agree.
   static const embeddedPublicKeyBase64 = '6+8Nktorj+TkO4KoCVHNHcrZWPKOdmF0w3nuRZes14Q=';
 
