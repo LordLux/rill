@@ -1918,6 +1918,11 @@ the feed it reads is §2.13's.
   by default and `http://127.0.0.1:PORT/…` only under the override. Every build
   logs which configuration it uses, an overridden one also logs a loud line and
   shows `TEST FEED` on the Updates page, and no key material is printed.
+  `release/dev-feed.ts` is the other end of those overrides: a local feed
+  signed with a fixed dev key (its public half is in the script), serving a
+  padded stand-in installer slowly enough to watch, and able to offer a
+  required update or fail by signature, hash or 404 — so every state of the
+  page can be reached from a debug build with hot reload.
   Measured against the artefact (invariant 8), 2026-09-27: a release build given
   all three overrides logged `config embedded`, and its `app.so` contains the
   embedded key and neither the throwaway key nor the local feed address; the
