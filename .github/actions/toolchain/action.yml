@@ -1,0 +1,50 @@
+name: Rill Windows toolchain
+description: >-
+  Bun, the pinned Flutter SDK, and the sidecar and app dependencies, as the release
+  workflow's gate and build jobs both need them. Run it after checkout, on Windows.
+
+inputs:
+  bun-version:
+    description: The Bun the sidecar is checked and compiled with.
+    required: true
+  fvm-version:
+    description: The fvm release to install from Chocolatey.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # sidecar/bun.lock is in a format newer than bun-version can read (it fails with
+    # InvalidLockfileVersion), so the install runs on a current Bun and everything after
+    # it on the pinned one. node_modules is plain files either way, and the compiled
+    # sidecar embeds whichever Bun compiles it: the pinned one is what it is measured on
+    # (todo.md 50).
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+    - name: Sidecar - install exactly what the lockfile says
+      shell: bash
+      working-directory: sidecar
+      run: bun install --frozen-lockfile
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+    - name: Confirm the pinned Bun is the one on PATH
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+      run: test "$(bun --version)" = "$BUN_VERSION"
+
+    - name: Install fvm and the pinned Flutter SDK
+      shell: bash
+      env:
+        FVM_VERSION: ${{ inputs.fvm-version }}
+      run: |
+        choco install fvm --version="$FVM_VERSION" -y --no-progress
+        cd app && fvm install
+    - name: App - dependencies and codegen
+      shell: bash
+      working-directory: app
+      run: |
+        fvm flutter pub get
+        fvm dart run build_runner build --delete-conflicting-outputs
