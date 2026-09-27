@@ -1841,6 +1841,25 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
 - **The feed is this repo's GitHub Releases**, read through
   `releases/latest/download/update.json` — a redirect, not the API, so no rate
   limit and no token.
+- **Release notes are one tool-less Gemini call inside a template that lives in
+  code.** `release/make-notes.ts` sends the commits since the previous release (with
+  the files each touched, and a short diff excerpt for a terse one) to
+  `gemini-flash-latest` and asks for JSON: bullets sorted into the six sections of
+  the MyBicocca `release-notes` skill. The alias is deliberate — a deprecation
+  should not be a chore — and the stable format comes from the template, not from
+  the model: the intro, the headings, their order and the closing SmartScreen and
+  download callouts are code. The reply is untrusted, because it is written from
+  commit text on a public repository and lands in a release body and an app's UI.
+  A bullet has to cite a commit that was in the input (the mechanical form of
+  "never invent a change"); only a small markdown subset survives (no HTML, no
+  link outside this repository, no @mention but the owner's); and every failure —
+  no key, an HTTP error, a reply that does not parse — falls back to the plain
+  commit list with the reason on stderr, so **notes can never block a release**.
+  The key travels in the `x-goog-api-key` header only and is redacted from
+  anything printed. The same bullets feed the manifest's `notes`, minus "Under the
+  hood". `notes-preview.yml` (Actions → *release notes preview*) shows what the next
+  release would say without releasing anything, and is also the only check that the
+  live API still accepts the request: the tests run against a local stand-in.
 - **What CI checks about the package.** The sidecar is byte-compared with the
   one built and started (it must print `event.ready`) before packaging; then the
   installer is installed silently, its files are checked, the *installed* sidecar
@@ -1942,6 +1961,17 @@ read-only and virtualises writes under `%LOCALAPPDATA%`, which is where the
 release log lives (§2.11). *Rejected: MSIX, and `.appinstaller` auto-update with
 it.* Also rejected: WinSparkle / `auto_updater`, whose native dialogs would sit
 badly in the app's own chrome, and which cannot apply an MSIX.
+
+**A8. One tool-less model call over an agent with a shell, for release notes.** The
+notes are written inside the job that holds the signing key, from commit text that
+anyone who lands a commit on a public repository can influence. A model that can
+only return text can only produce bad text, and that text is validated; an agent
+with a shell and the repository is a larger thing to trust in that job, and slower
+and dearer for a task that needs no exploration. The one thing an agent does well
+here — reading a diff to classify a terse commit — is approximated by putting a
+short excerpt in the prompt. *Rejected: `claude-code-action` or any agent with
+tools; asking the model for finished markdown instead of JSON that a template
+renders.*
 
 **A9. The version derived from history, over a stored counter.** The first scheme was the
 commit count as the patch, which could not say "a merged PR adds to the minor" or take
