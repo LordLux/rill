@@ -1,0 +1,58 @@
+# Shows what the next release's notes would say, without building or releasing anything.
+# Actions -> "release notes preview" -> Run workflow. It runs the same script, with the same
+# key, that the release workflow runs, so it is also the way to check a change to the prompt.
+# The result is in the run's summary.
+
+name: release notes preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      previous:
+        description: A tag or commit to write the notes since. Empty means the latest release.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.1.42' # the Bun the release workflow uses
+      - name: Write the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PREVIOUS: ${{ inputs.previous }}
+        run: |
+          set -euo pipefail
+          previous="$PREVIOUS"
+          if [ -z "$previous" ]; then
+            previous=$(gh release list --limit 1 --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
+          fi
+          bun release/make-notes.ts --version preview --repo "$GITHUB_REPOSITORY" --previous "$previous" --out out
+          {
+            echo "### What the release body would look like"
+            echo
+            cat out/body.md
+            echo
+            echo "### What the update manifest's notes would be"
+            echo
+            echo '```'
+            cat out/notes.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat out/body.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes-preview
+          path: out
+          if-no-files-found: error
+          retention-days: 3
