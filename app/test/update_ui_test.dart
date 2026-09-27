@@ -30,7 +30,7 @@ class _FixedAuth extends AuthController {
 class FixedUpdate extends UpdateController {
   FixedUpdate(this.initial);
   final UpdateState initial;
-  final finish = Completer<void>();
+  Completer<void> finish = Completer<void>();
   UpdatePhase result = const UpdatePhase.upToDate();
 
   @override
@@ -40,6 +40,7 @@ class FixedUpdate extends UpdateController {
   Future<void> checkNow({UpdateCheckOrigin origin = UpdateCheckOrigin.manual}) async {
     state = state.copyWith(phase: UpdatePhase.checking(origin: origin));
     await finish.future;
+    finish = Completer<void>();
     state = state.copyWith(phase: result);
   }
 }
@@ -122,8 +123,14 @@ void main() {
     await openMenu(tester);
     await tester.tap(find.text('Restart to update'));
     await tester.pumpAndSettle();
-    expect(find.text('Rill 0.3.0 is ready'), findsOneWidget);
-    expect(find.text('•  Faster home feed'), findsOneWidget);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+    expect(find.text('Faster home feed'), findsOneWidget);
+    expect(find.text('Full release notes'), findsOneWidget);
+    // The card comes first, above the version and the switch.
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('update-card'))).dy,
+      lessThan(tester.getTopLeft(find.text('Version')).dy),
+    );
     expect(find.widgetWithText(FilledButton, 'Restart to update'), findsOneWidget);
     expect(find.widgetWithText(TextButton, 'Later'), findsOneWidget);
     expect(find.text('0.2.2'), findsOneWidget, reason: 'the running version');
@@ -187,5 +194,47 @@ void main() {
     expect(find.byKey(const ValueKey('update-banner')), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Restart to update'), findsOneWidget);
     expect(find.text('Later'), findsNothing);
+  });
+
+  testWidgets('Later dismisses the update and goes back to the root menu', (tester) async {
+    await pump(tester, ready());
+    await openMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Later'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign out'), findsOneWidget, reason: 'back on the root page');
+    expect(find.byKey(const ValueKey('update-dot')), findsNothing);
+  });
+
+  testWidgets("the header's refresh runs a check and spins while it does", (tester) async {
+    final controller = await pump(tester, const UpdateState(phase: UpdatePhase.upToDate(), currentVersion: current));
+    await openMenu(tester);
+    await tester.tap(find.text('Check for updates'));
+    await tester.pump();
+    controller.finish.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Rill is up to date'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Check for updates'));
+    await tester.pump();
+    expect(find.text('Checking for updates…'), findsOneWidget);
+    expect(find.byTooltip('Check for updates'), findsNothing, reason: 'the button is a spinner meanwhile');
+  });
+
+  testWidgets('notes are capped at five', (tester) async {
+    final long = UpdateManifest(
+      schema: 1,
+      version: manifest.version,
+      tag: manifest.tag,
+      notes: [for (var i = 1; i <= 8; i++) 'Note $i'],
+      windowsX64: manifest.windowsX64,
+    );
+    await pump(tester, ready(offer: long));
+    await openMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    expect(find.text('Note 5'), findsOneWidget);
+    expect(find.text('Note 6'), findsNothing);
   });
 }

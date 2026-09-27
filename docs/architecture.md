@@ -1939,10 +1939,15 @@ the feed it reads is §2.13's.
   installer never verifies again every half hour, 50 MB each time.
 - **Where it shows: the account menu, because there is no settings page.** A
   `Check for updates` row that spins while it checks and then opens an
-  `Updates` page in the same overlay: the result, the notes, `Restart to
-  update` / `Later`, the running version, the last check, and the switch. A
-  ready update puts a dot on the avatar; `Later` removes the dot for that
-  version. Nothing is modal and nothing covers the player, so an update never
+  `Updates` page in the same overlay. The page leads with one card for what
+  the updater has to say — the update on offer, in the accent container, with
+  up to five notes, a link to the full release notes, and `Restart to update` /
+  `Later`; a download in progress; a failure, in the error container, with
+  `Try again`; or that all is well — then the running version, the last check,
+  and the switch; the header's refresh button checks again. The page is 300 px
+  where the menu is 260, so the card's two buttons fit on one line. A ready
+  update puts a dot on the avatar; `Later` removes it for that version and
+  goes back to the root menu. Nothing is modal and nothing covers the player, so an update never
   interrupts playback. **Signed out, none of this is reachable** — the avatar
   opens the login flow instead of the menu — so the dot is suppressed there and
   only the automatic path works (`todo.md` 52).
