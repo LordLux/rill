@@ -145,9 +145,24 @@ void main() {
     expect(find.widgetWithText(TextButton, 'Later'), findsNothing);
   });
 
-  testWidgets('signed out, there is no dot: the button opens login, not the menu', (tester) async {
+  testWidgets('signed out, the dot shows and the menu offers Sign in and the update (todo 52)', (tester) async {
     await pump(tester, ready(), auth: const AuthState(status: AuthStatus.anonymous));
-    expect(find.byKey(const ValueKey('update-dot')), findsNothing);
+    expect(find.byKey(const ValueKey('update-dot')), findsOneWidget);
+    await tester.tap(find.byTooltip('Log in'));
+    await tester.pumpAndSettle();
+    expect(find.text("You're not signed in"), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+  });
+
+  testWidgets('an expired session says so in the signed-out menu', (tester) async {
+    await pump(tester, ready(), auth: const AuthState(status: AuthStatus.degraded));
+    await tester.tap(find.byTooltip('Your session expired. Please sign in again'));
+    await tester.pumpAndSettle();
+    expect(find.text('Your session expired'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign in again'), findsOneWidget);
   });
 
   testWidgets('checking shows a spinner in the row, then opens the result', (tester) async {
