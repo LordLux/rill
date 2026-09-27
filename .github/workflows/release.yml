@@ -204,17 +204,17 @@ jobs:
           name: installer
           path: dist
 
-      - name: Changes since the previous release
+      # One model call, wrapped in a template that lives in code. It writes body.md (the release
+      # body) and notes.txt (the manifest's notes), and it never fails the release: with no key,
+      # or on any error, it writes the plain commit list instead and says why on stderr.
+      - name: Write the release notes
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -euo pipefail
           previous=$(gh release list --limit 1 --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
-          if [ -n "$previous" ] && git merge-base --is-ancestor "$previous" HEAD 2>/dev/null; then
-            git log --no-merges --format=%s "$previous..HEAD" | head -n 40 > notes.txt
-          else
-            git log --no-merges --format=%s -n 30 > notes.txt
-          fi
-          [ -s notes.txt ] || echo "No changes listed." > notes.txt
-          cat notes.txt
+          bun release/make-notes.ts --version "$VERSION" --repo "$GITHUB_REPOSITORY" --previous "$previous" --out .
+          cat body.md
 
       - name: Sign the update manifest
         env:
@@ -223,18 +223,6 @@ jobs:
           bun release/make-manifest.ts \
             --version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" \
             --installer dist/Rill-Setup-x64.exe --notes notes.txt --out dist
-
-      - name: Write the release notes
-        run: |
-          {
-            echo "Windows x64 installer. Installs per-user, no admin rights needed."
-            echo
-            echo "Not code-signed yet, so Windows SmartScreen may say the publisher is unknown: choose **More info**, then **Run anyway**."
-            echo
-            echo "### Changes"
-            sed 's/^/- /' notes.txt
-          } > body.md
-          cat body.md
 
       - name: Publish the release
         if: github.ref == 'refs/heads/main'
