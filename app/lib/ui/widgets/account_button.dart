@@ -16,7 +16,8 @@ import 'titlebar_button.dart';
 ///
 /// Signed in: avatar chip that opens an overlay menu with the name, handle,
 /// and Sign Out.
-/// Anonymous or degraded: person-glyph chip that opens the login flow.
+/// Anonymous or degraded: person-glyph chip that opens a short menu whose first
+/// action is Sign in, so the rows that need no account (updates) stay reachable.
 ///
 /// Uses a bare [OverlayEntry] + [TapRegion] instead of [showMenu]/[PopupRoute].
 /// [showMenu] pushes a [ModalRoute] which installs a full-screen
@@ -75,6 +76,10 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
           auth: auth,
           menuTop: topLeft.dy + buttonSize.height,
           onDismiss: _dismiss,
+          onSignIn: () {
+            _dismiss();
+            showLoginFlow(context);
+          },
           onSignOut: () async {
             _dismiss();
             await ref.read(authProvider.notifier).signOut();
@@ -94,9 +99,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     final scheme = Theme.of(context).colorScheme;
-    // Only where it leads somewhere: signed out, this button opens the login
-    // flow, not the menu the update lives in (architecture.md §2.14).
-    final updateNotice = auth.isSignedIn && ref.watch(updateControllerProvider.select((s) => s.showsNotice));
+    final updateNotice = ref.watch(updateControllerProvider.select((s) => s.showsNotice));
 
     final Widget avatar = Stack(
       clipBehavior: Clip.none,
@@ -163,11 +166,9 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
       groupId: 'account_menu',
       child: TitleBarWidgetButton(
         tooltip: auth.isSignedIn ? auth.displayName : (auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in'),
-        onTap: auth.isBusy
-            ? null
-            : auth.isSignedIn
-            ? () => _openMenu(auth)
-            : () => showLoginFlow(context),
+        // Signed out too: the menu is where updates live, so it has to open
+        // for everyone; signed out, its first action is Sign in (§2.14).
+        onTap: auth.isBusy ? null : () => _openMenu(auth),
         child: inner,
       ),
     );
@@ -200,12 +201,14 @@ class _AccountMenuOverlay extends StatefulWidget {
     required this.auth,
     required this.menuTop,
     required this.onDismiss,
+    required this.onSignIn,
     required this.onSignOut,
   });
 
   final AuthState auth;
   final double menuTop;
   final VoidCallback onDismiss;
+  final VoidCallback onSignIn;
   final VoidCallback onSignOut;
 
   @override
@@ -352,6 +355,11 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
   }
 
   Widget _buildPage(_AccountMenuPage page) => switch (page) {
+    _AccountMenuPage.root when !widget.auth.isSignedIn => _SignedOutRootPage(
+      auth: widget.auth,
+      onSignIn: widget.onSignIn,
+      onGo: _go,
+    ),
     _AccountMenuPage.root => _AccountRootPage(
       auth: widget.auth,
       onSignOut: widget.onSignOut,
@@ -406,6 +414,64 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Pages
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// The root page when nobody is signed in: why, a way to sign in, and the
+/// rows that matter without an account — updates, for one (architecture.md §2.14).
+class _SignedOutRootPage extends StatelessWidget {
+  const _SignedOutRootPage({required this.auth, required this.onSignIn, required this.onGo});
+
+  final AuthState auth;
+  final VoidCallback onSignIn;
+  final void Function(_AccountMenuPage) onGo;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final expired = auth.status == AuthStatus.degraded;
+
+    return _AccountMenuBody(
+      header: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Task 22 §3: the two signed-out states say different things.
+                Text(
+                  expired ? 'Your session expired' : "You're not signed in",
+                  style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  expired
+                      ? 'Sign in again to see your subscriptions and history.'
+                      : 'Sign in to see your subscriptions, history and recommendations.',
+                  style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: onSignIn,
+                  icon: const Icon(Icons.login, size: 18),
+                  label: Text(expired ? 'Sign in again' : 'Sign in'),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: scheme.outlineVariant),
+        ],
+      ),
+      children: [
+        _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+}
 
 class _AccountRootPage extends StatelessWidget {
   const _AccountRootPage({
@@ -921,7 +987,7 @@ class _UpdatesPanelState extends ConsumerState<_UpdatesPanel> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Download updates automatically', style: textTheme.bodySmall),
+                    Flexible(child: Text('Download updates automatically', style: textTheme.bodySmall)),
                     // Material's switch is 32 px tall; scaled to sit in a text row.
                     SizedBox(
                       height: 28,

@@ -1953,9 +1953,11 @@ the feed it reads is §2.13's.
   where the menu is 260, so the card's two buttons fit on one line. A ready
   update puts a dot on the avatar; `Later` removes it for that version and
   goes back to the root menu. Nothing is modal and nothing covers the player, so an update never
-  interrupts playback. **Signed out, none of this is reachable** — the avatar
-  opens the login flow instead of the menu — so the dot is suppressed there and
-  only the automatic path works (`todo.md` 52).
+  interrupts playback. **Signed out, the avatar opens the menu too** (decided
+  2026-09-27): a short root page that says why nobody is signed in, with
+  **Sign in** as its first action, then the update row. Before that it opened
+  the login flow directly, which left a signed-out user with automatic updates
+  and nothing else.
 - **Install only on the user's click.** The app starts the installer as
   `Rill-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
   /CLOSEAPPLICATIONS /RELAUNCH=1 /LOG="…\install-<version>.log"` and closes its

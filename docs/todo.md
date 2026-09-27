@@ -346,20 +346,6 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
 
-### 52. The updater cannot be reached while signed out
-
-The update controls live in the account menu (`architecture.md` §2.14), and that
-menu opens only for a signed-in user: signed out, the avatar button opens the
-login flow instead. So a signed-out user gets automatic updates — the check,
-the download and the required-update strip all work — but has no way to check
-by hand, see the notes, or reach **Restart to update**; the avatar dot is
-suppressed for the same reason, since it would point at a menu the button
-cannot open. Either a settings page (none exists yet; the `Settings` row is a
-stub) or a small signed-out menu would fix it.
-
-**Done when:** a signed-out user can reach the Updates page and install a
-ready update.
-
 ---
 
 ## Low priority
