@@ -1,8 +1,11 @@
-# Daily release. One channel, no nightly/stable split: every release is just "an update".
+# Release on every push to main. One channel, no nightly/stable split: every release is just
+# "an update". A daily cron retries a release that failed, and a run can be started by hand.
 #
-#   plan     version = <major.minor from app/pubspec.yaml>.<commit count of HEAD>, so a
-#            commit has exactly one version and "is there anything new" is "does the
-#            release for this version exist yet". A scheduled run with nothing new stops here.
+#   plan     the version of this commit, worked out from git history by release/next-version.ts
+#            (release/version holds the setting; each merged PR adds 1 to the minor, any other
+#            commit adds 1 to the patch), so a commit has exactly one version and "is there
+#            anything new" is "does the release for this version exist yet". If it does, the
+#            run stops here. It fails if the version would be below the latest release.
 #   gate     the same checks as a local `rill check` plus the sidecar's `bun run check`.
 #   build    sidecar + Flutter release build + Inno Setup installer, with smoke tests of the
 #            staged sidecar, the installer, and the uninstaller.
@@ -15,13 +18,22 @@
 name: release
 
 on:
+  push:
+    branches: [main]
+    # An edit to a doc rides along with the next code release instead of cutting an identical installer.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   schedule:
-    - cron: '0 2 * * *' # daily, 02:00 UTC
+    - cron: '0 2 * * *' # daily, 02:00 UTC: retries a release that failed; does nothing if there is none to make
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One release at a time, in order. GitHub keeps a single waiting run and replaces it with a newer
+# one, so two merges inside one build's length collapse into one release: that run builds the newer
+# commit, and its notes cover everything since the previous release, so nothing is lost.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -44,15 +56,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # the commit count needs the whole history
+          fetch-depth: 0 # the version is counted along the whole first-parent history
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
       - id: v
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          base=$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+)\..*/\1/p' app/pubspec.yaml)
-          [ -n "$base" ] || { echo "cannot read major.minor from app/pubspec.yaml" >&2; exit 1; }
-          version="$base.$(git rev-list --count HEAD)"
+          latest=$(gh release list --limit 1 --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
+          version=$(bun release/next-version.ts ${latest:+--latest "$latest"})
           tag="v$version"
           if gh release view "$tag" >/dev/null 2>&1; then exists=true; else exists=false; fi
           {
@@ -64,7 +78,7 @@ jobs:
 
   gate:
     needs: plan
-    if: github.event_name != 'schedule' || needs.plan.outputs.exists == 'false'
+    if: needs.plan.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: windows-2022 # Visual Studio 2022, like the dev machine — see the note above `jobs:`
     timeout-minutes: 60
     defaults:
@@ -94,7 +108,7 @@ jobs:
 
   build:
     needs: plan
-    if: github.event_name != 'schedule' || needs.plan.outputs.exists == 'false'
+    if: needs.plan.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: windows-2022 # Visual Studio 2022, like the dev machine — see the note above `jobs:`
     timeout-minutes: 60
     env:
