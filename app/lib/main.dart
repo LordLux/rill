@@ -9,6 +9,9 @@ import 'package:media_kit/media_kit.dart';
 import 'data/log_capture.dart';
 import 'data/playback/engine.dart';
 import 'data/playback/mpv_log.dart';
+import 'data/rpc/client.dart';
+import 'data/ytdlp/ytdlp_paths.dart';
+import 'domain/ytdlp/ytdlp_state.dart';
 import 'domain/youtube_link.dart';
 import 'theme/accent.dart';
 import 'theme/app_theme.dart';
@@ -29,6 +32,7 @@ import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 import 'ui/update_controller.dart';
+import 'ui/ytdlp_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -86,6 +90,16 @@ Future<void> main() async {
   final audioMode = await readAudioMode();
   final hideQueue = await readHideQueue();
 
+  // Decided before the sidecar can possibly spawn — `RpcClient` reads
+  // `extraEnvironment` at its very first `_spawn`, which the first RPC call
+  // (well below, off `authProvider.notifier.restore()`) can trigger. PATH
+  // always wins and is left untouched; only the app-managed copy is ever
+  // pointed at explicitly (docs/todo.md 49).
+  final ytDlpResolution = resolveYtDlp();
+  if (ytDlpResolution.location == YtDlpLocation.appManaged) {
+    RpcClient.instance.extraEnvironment = {'YT_DLP_PATH': ytDlpResolution.path!};
+  }
+
   final container = ProviderContainer(
     overrides: [
       playbackEngineProvider.overrideWithValue(engine),
@@ -105,6 +119,9 @@ Future<void> main() async {
   // Built now rather than on first use, so its first check is 30 s after
   // launch whether or not anything has looked at it yet (architecture.md §2.14).
   container.read(updateControllerProvider);
+  // Same reasoning: the startup log line and the weekly refresh both need to
+  // run whether or not anyone opens the account menu (docs/todo.md 49).
+  container.read(ytDlpControllerProvider);
 
   doWhenWindowReady(() {
     const initialSize = Size(1280, 720);

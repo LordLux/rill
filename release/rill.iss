@@ -50,6 +50,12 @@ RestartApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: unchecked
+; Checked by default (todo.md 49). This only RECORDS the answer in the
+; registry below — nothing is downloaded here, so a silent update can never
+; fail on a network request. The app reads the value once, to seed its own
+; stored choice on first launch; after that the in-app choice is the source
+; of truth and this key is never read again (architecture.md "yt-dlp").
+Name: "ytdlp"; Description: "Download yt-dlp (improves playback of some videos; downloaded from github.com/yt-dlp)"
 
 [InstallDelete]
 ; The app owns these directories outright — user data lives under %LOCALAPPDATA%\rill
@@ -62,6 +68,12 @@ Type: files; Name: "{app}\*.dll"
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.lib,*.exp,*.pdb"
 Source: "..\THIRD_PARTY_LICENSES"; DestDir: "{app}"; Flags: ignoreversion
+
+[Registry]
+; Removed on uninstall (Flags: uninsdeletevalue), never on an upgrade — an
+; upgrade's [Registry] entries only ever add or overwrite.
+Root: HKCU; Subkey: "Software\Rill"; ValueType: string; ValueName: "YtDlpConsent"; ValueData: "yes"; Tasks: ytdlp; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Rill"; ValueType: string; ValueName: "YtDlpConsent"; ValueData: "no"; Tasks: not ytdlp; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{autoprograms}\Rill"; Filename: "{app}\rill.exe"
