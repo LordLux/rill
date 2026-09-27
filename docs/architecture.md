@@ -1887,6 +1887,91 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
   download (`todo.md` 48). The manifest signature is what makes *updates* safe;
   it does nothing for the first install.
 
+### 2.14 In-app updates — check, download, and install only on a click (decided 2026-09-27)
+
+`app/lib/domain/update/`, `app/lib/data/update/`, `app/lib/ui/update_controller.dart`;
+the feed it reads is §2.13's.
+
+- **The app knows its version from the build, not from `pubspec.yaml`.** The
+  release workflow passes `--dart-define=RILL_VERSION=$VERSION` to the release
+  build. Empty means a dev build: it has nothing to compare, so it never checks.
+  A local `rill build` passes nothing and is therefore a dev build too.
+- **Trust runs in one order and nothing is read out of order.** The Ed25519
+  signature is checked over the manifest's exact response bytes before a single
+  field is parsed; then the strict parser (every field a value or null, a wrong
+  type is a rejected manifest, never a guess); then the installer URL against
+  one allowed prefix; then the version, which must be strictly higher. A schema
+  other than `1` is logged and ignored. `minimumVersion` above the running
+  version makes the update *required*: it cannot be dismissed and gets a strip
+  above the page. The size and SHA-256 are checked after download, before the
+  rename out of `.partial`, and again immediately before the installer starts —
+  with the file held open without `FILE_SHARE_WRITE` from that check to the
+  start, so it cannot change in between.
+- **The feed, the key and the asset prefix are compile-time constants, resolved
+  in one place** (`UpdateConfig.resolve`, which takes `releaseMode` as a
+  parameter so both branches are tested). `RILL_UPDATE_FEED`,
+  `RILL_UPDATE_PUBKEY` and `RILL_UPDATE_ASSET_PREFIX` point a debug or profile
+  build at a local test feed and are **ignored in any release build**, a local
+  one included. A malformed override throws rather than falling back, so a test
+  build aimed at the wrong place fails loudly. **The https rule is not a separate
+  check**: it is the allowed prefix, `https://github.com/LordLux/rill/releases/download/`
+  by default and `http://127.0.0.1:PORT/…` only under the override. Every build
+  logs which configuration it uses, an overridden one also logs a loud line and
+  shows `TEST FEED` on the Updates page, and no key material is printed.
+  Measured against the artefact (invariant 8), 2026-09-27: a release build given
+  all three overrides logged `config embedded`, and its `app.so` contains the
+  embedded key and neither the throwaway key nor the local feed address; the
+  profile build given the same defines contains both — the control that shows
+  the grep can see them.
+- **Cadence:** 30 s after launch, then every 12 h ± up to 10 min, and on demand;
+  one check at a time (a second request joins the first). A newer verified
+  release downloads in the background to
+  `%LOCALAPPDATA%\rill\updates\<version>\`, and older version folders are
+  deleted. Automatic checking and downloading is one switch, on by default.
+  Last-checked time, the dismissed version and the switch persist in
+  `shared_preferences`.
+- **Failure is quiet when automatic and visible when asked for.** An automatic
+  failure is logged and the page goes back to what it showed; a manual one is
+  shown with its reason. A bad signature, size or hash deletes the file. Every
+  failure backs off — 30 min, doubling, capped at 12 h — and **the failure count
+  resets only when a whole cycle succeeds** (up to date, or downloaded and
+  verified). Resetting it on a successful *check* would fetch a release whose
+  installer never verifies again every half hour, 50 MB each time.
+- **Where it shows: the account menu, because there is no settings page.** A
+  `Check for updates` row that spins while it checks and then opens an
+  `Updates` page in the same overlay: the result, the notes, `Restart to
+  update` / `Later`, the running version, the last check, and the switch. A
+  ready update puts a dot on the avatar; `Later` removes the dot for that
+  version. Nothing is modal and nothing covers the player, so an update never
+  interrupts playback. **Signed out, none of this is reachable** — the avatar
+  opens the login flow instead of the menu — so the dot is suppressed there and
+  only the automatic path works (`todo.md` 52).
+- **Install only on the user's click.** The app starts the installer as
+  `Rill-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+  /CLOSEAPPLICATIONS /RELAUNCH=1 /LOG="…\install-<version>.log"` and closes its
+  window, the same close as the title-bar button. `rill.iss` has a `[Run]` entry
+  that launches Rill after a silent install only when `/RELAUNCH=1` is passed,
+  so CI's silent install and anyone else's still launch nothing. Checked
+  2026-09-27 with two scratch installers built around a stub `rill.exe` and
+  installed with `/DIR=` into a scratch folder: the upgrade closed the running
+  old copy through Restart Manager, replaced it, recorded the new version and
+  relaunched it once; a silent install without the flag launched nothing.
+- **The installer has to leave the launcher's job.** A release `rill.exe` runs
+  inside the launcher's `KILL_ON_JOB_CLOSE` job (§2.11), and anything the app
+  starts is in it too — so an installer started the ordinary way dies the moment
+  the app it is replacing exits. The job therefore sets `BREAKAWAY_OK`, and the
+  installer alone is started with `CREATE_BREAKAWAY_FROM_JOB` through
+  `CreateProcessW` (Dart's `Process.start` has no such flag); the sidecar still
+  dies with the job. An outer job that refuses breakaway (a terminal's, an IDE's)
+  makes `CreateProcessW` fail outright, so the start is retried without the flag
+  on **any** failure: `GetLastError` read 0 through Dart FFI for exactly that
+  refusal on 2026-09-27, and a fallback gated on `ERROR_ACCESS_DENIED` never
+  ran. Measured the same day, a release build started from a shell whose own
+  job forbids breakaway: the installer still broke away, and it finished two
+  seconds after the launcher had exited.
+- **The first updater-enabled release has to be installed by hand.** Every
+  release before it has no updater, and no way to know its own version.
+
 ---
 
 ## 3. Phasing
@@ -1982,3 +2067,20 @@ override held in a repository variable or a dispatch input, which lives outside 
 reviewed history: a later computed version could then fall below the override and the
 app, which installs only a higher one, would stop offering updates. *Rejected: bump
 commits, variables, dispatch-time overrides.*
+
+**A10. The app runs the update, on a click, over a signed manifest.** Rejected:
+installing without asking, on exit or on the next launch — the installer closes
+the app, and doing that unprompted is exactly the interruption the updater must
+never cause. A modal "update available" dialog, for the same reason. A feed URL,
+key or asset prefix that can be changed at runtime (a setting, an environment
+variable, a file): that would make whoever can write it a trust root, so the
+test overrides are compile-time defines that a release build ignores. Verifying
+a re-encoded manifest instead of the bytes served, which would make the
+signature depend on a JSON encoder agreeing with Node's. Starting the installer
+with `Process.start(detached)`: it stays in the launcher's job and is killed
+when the app exits (§2.14). `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK` on the
+launcher's job instead of an explicit breakaway: every child would escape, the
+sidecar included, and the job exists to take it down. A separate https check
+beside the prefix: two rules that must agree are one rule that can drift.
+*Rejected: silent auto-install, modal prompts, runtime-configurable trust,
+re-encoded verification, detached `Process.start`, silent breakaway.*

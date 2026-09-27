@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/update/update_state.dart';
 import '../auth_controller.dart';
 import '../pages/login_page.dart';
+import '../update_controller.dart';
 import 'titlebar_button.dart';
 
 /// The titlebar's account surface.
@@ -88,6 +90,9 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     final scheme = Theme.of(context).colorScheme;
+    // Only where it leads somewhere: signed out, this button opens the login
+    // flow, not the menu the update lives in (architecture.md §2.14).
+    final updateNotice = auth.isSignedIn && ref.watch(updateControllerProvider.select((s) => s.showsNotice));
 
     final Widget avatar = Stack(
       clipBehavior: Clip.none,
@@ -102,6 +107,21 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
               ? null
               : Icon(Icons.person, color: scheme.onSurfaceVariant, size: _avatarRadius * 1.25),
         ),
+        if (updateNotice)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: Container(
+              key: const ValueKey('update-dot'),
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: scheme.primary,
+                shape: BoxShape.circle,
+                border: Border.all(color: scheme.surface, width: 2),
+              ),
+            ),
+          ),
         if (auth.status == AuthStatus.degraded)
           Positioned(
             right: -2,
@@ -153,7 +173,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Which page the overlay is currently showing.
-enum _AccountMenuPage { root, appearance, language, restrictedMode, location }
+enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account menu overlay — no ModalBarrier, pointer events pass through
@@ -344,6 +364,11 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
         _AccountMenuItem(icon: Icons.check, label: 'Worldwide', onTap: () {}),
       ],
     ),
+    _AccountMenuPage.updates => _AccountSubPage(
+      title: 'Updates',
+      onBack: _back,
+      children: const [_UpdatesPanel()],
+    ),
   };
 }
 
@@ -457,6 +482,7 @@ class _AccountRootPage extends StatelessWidget {
         // ── Settings ───────────────────────────────────────────────────────
         const _AccountMenuDivider(),
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () {}),
+        _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
         // ── Help ───────────────────────────────────────────────────────────
         const _AccountMenuDivider(),
         _AccountMenuItem(icon: Icons.help_outline, label: 'Help', onTap: () {}),
@@ -574,12 +600,20 @@ class _AccountMenuItem extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.trailing,
+    this.leading,
+    this.color,
   });
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Widget? trailing;
+
+  /// Replaces the icon — a spinner while something is running.
+  final Widget? leading;
+
+  /// Icon and label colour when the row needs attention; `onSurface` otherwise.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -592,12 +626,12 @@ class _AccountMenuItem extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: scheme.onSurface),
+            leading ?? Icon(icon, size: 20, color: color ?? scheme.onSurface),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
                 label,
-                style: textTheme.bodySmall?.copyWith(color: scheme.onSurface),
+                style: textTheme.bodySmall?.copyWith(color: color ?? scheme.onSurface),
               ),
             ),
             ?trailing,
@@ -671,3 +705,238 @@ Future<void> _signIn(BuildContext context, WidgetRef ref) => showLoginFlow(conte
 
 /// The public entry point. Same body; named so other surfaces can call it.
 Future<void> openLoginFlow(BuildContext context, WidgetRef ref) => _signIn(context, ref);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Updates (architecture.md §2.14)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The root page's update row. Idle, it checks and then opens [_UpdatesPanel]
+/// with the result; while a check or download runs it says so; with an update
+/// on offer it is highlighted and opens the panel directly.
+class _UpdateMenuItem extends ConsumerWidget {
+  const _UpdateMenuItem({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(updateControllerProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final spinner = SizedBox(
+      width: 20,
+      height: 20,
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSurfaceVariant),
+      ),
+    );
+
+    Future<void> checkThenOpen() async {
+      await ref.read(updateControllerProvider.notifier).checkNow();
+      if (context.mounted) onOpen();
+    }
+
+    return switch (state.phase) {
+      UpdateChecking() => _AccountMenuItem(
+        icon: Icons.system_update_alt,
+        label: 'Checking for updates…',
+        leading: spinner,
+        onTap: null,
+      ),
+      UpdateDownloading(:final received, :final total) => _AccountMenuItem(
+        icon: Icons.downloading,
+        label: 'Downloading update · ${_percent(received, total)}%',
+        onTap: onOpen,
+      ),
+      UpdateReady() => _AccountMenuItem(
+        icon: Icons.restart_alt,
+        label: 'Restart to update',
+        color: scheme.primary,
+        onTap: onOpen,
+      ),
+      UpdateAvailable(:final manifest) => _AccountMenuItem(
+        icon: Icons.system_update_alt,
+        label: 'Update ${manifest.version} available',
+        color: scheme.primary,
+        onTap: onOpen,
+      ),
+      UpdateInstalling() => _AccountMenuItem(
+        icon: Icons.restart_alt,
+        label: 'Restarting to update…',
+        leading: spinner,
+        onTap: null,
+      ),
+      _ => _AccountMenuItem(
+        icon: Icons.system_update_alt,
+        label: 'Check for updates',
+        onTap: ref.read(updateConfigProvider).enabled ? checkThenOpen : onOpen,
+      ),
+    };
+  }
+}
+
+/// The result of a check, the update on offer and its notes, the running
+/// version, the last check, and the automatic-update switch. Lives in the
+/// account menu because there is no settings page yet (architecture.md §2.14).
+class _UpdatesPanel extends ConsumerWidget {
+  const _UpdatesPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(updateControllerProvider);
+    final config = ref.watch(updateConfigProvider);
+    final controller = ref.read(updateControllerProvider.notifier);
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final manifest = state.phase.manifest;
+    final version = manifest?.version.toString() ?? '';
+
+    final (String headline, String? detail) = !config.enabled
+        ? ('Updates are off', 'This is a development build, which has no version to compare with a release.')
+        : switch (state.phase) {
+            UpdateIdle() => ('Not checked yet', null),
+            UpdateChecking() => ('Checking for updates…', null),
+            UpdateUpToDate() => ('Rill is up to date', null),
+            UpdateAvailable() => ('Rill $version is available', null),
+            UpdateDownloading(:final received, :final total) => (
+              'Downloading Rill $version',
+              '${_percent(received, total)}% of ${(total / (1024 * 1024)).toStringAsFixed(1)} MB',
+            ),
+            UpdateReady() => ('Rill $version is ready', 'Restarting installs it and opens Rill again.'),
+            UpdateInstalling() => ('Restarting to update…', null),
+            UpdateError(:final kind, :final message) => (_errorHeadline(kind), message),
+          };
+
+    final Widget? actions = switch (state.phase) {
+      UpdateAvailable() => FilledButton(onPressed: controller.download, child: const Text('Download')),
+      UpdateReady() => Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          FilledButton(onPressed: controller.install, child: const Text('Restart to update')),
+          if (!state.isMandatory && state.dismissedVersion != version)
+            TextButton(onPressed: controller.dismiss, child: const Text('Later')),
+        ],
+      ),
+      _ => null,
+    };
+
+    final busy = !canStartCheck(state.phase);
+    final lastChecked = state.lastChecked;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (config.overridden)
+            Container(
+              key: const ValueKey('update-test-marker'),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: scheme.tertiaryContainer,
+                borderRadius: const BorderRadius.all(Radius.circular(6)),
+              ),
+              child: Text(
+                'TEST FEED · ${config.activeOverrides.join('/')}',
+                style: textTheme.labelSmall?.copyWith(color: scheme.onTertiaryContainer, fontWeight: FontWeight.w700),
+              ),
+            ),
+          Text(headline, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+          if (state.isMandatory) ...[
+            const SizedBox(height: 2),
+            Text('This update is required.', style: textTheme.bodySmall?.copyWith(color: scheme.primary)),
+          ],
+          if (detail != null) ...[
+            const SizedBox(height: 4),
+            Text(detail, style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          ],
+          if (state.phase case UpdateDownloading(:final received, :final total)) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: total == 0 ? null : received / total),
+          ] else if (state.phase is UpdateChecking) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(),
+          ],
+          if (actions != null) ...[const SizedBox(height: 10), actions],
+          if (manifest != null && manifest.notes.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text("What's new", style: textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+            const SizedBox(height: 4),
+            for (final note in manifest.notes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text('•  $note', style: textTheme.bodySmall),
+              ),
+          ],
+          const SizedBox(height: 10),
+          Divider(height: 1, color: scheme.outlineVariant),
+          const SizedBox(height: 8),
+          _UpdateInfoRow(label: 'Version', value: state.currentVersion?.toString() ?? 'Development build'),
+          _UpdateInfoRow(label: 'Last checked', value: lastChecked == null ? 'Never' : _ago(lastChecked)),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(child: Text('Download updates automatically', style: textTheme.bodySmall)),
+              Switch(
+                value: state.autoUpdate,
+                onChanged: config.enabled ? controller.setAutoUpdate : null,
+              ),
+            ],
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: config.enabled && !busy ? () => controller.checkNow() : null,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: Text(state.phase is UpdateError ? 'Try again' : 'Check for updates'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UpdateInfoRow extends StatelessWidget {
+  const _UpdateInfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: style?.copyWith(color: scheme.onSurfaceVariant))),
+          Text(value, style: style),
+        ],
+      ),
+    );
+  }
+}
+
+int _percent(int received, int total) => total <= 0 ? 0 : (received * 100 ~/ total).clamp(0, 100);
+
+String _errorHeadline(UpdateErrorKind kind) => switch (kind) {
+  UpdateErrorKind.network => "Couldn't reach the update server",
+  UpdateErrorKind.signature => 'The update failed verification',
+  UpdateErrorKind.manifest => 'The update information was invalid',
+  UpdateErrorKind.integrity => 'The download was corrupted',
+  UpdateErrorKind.disk => "Couldn't save the update",
+  UpdateErrorKind.install => "Couldn't start the installer",
+};
+
+String _ago(DateTime time) {
+  final elapsed = DateTime.now().difference(time);
+  if (elapsed.inMinutes < 1) return 'Just now';
+  if (elapsed.inHours < 1) return '${elapsed.inMinutes} min ago';
+  if (elapsed.inDays < 1) return '${elapsed.inHours} h ago';
+  return elapsed.inDays == 1 ? 'Yesterday' : '${elapsed.inDays} days ago';
+}
