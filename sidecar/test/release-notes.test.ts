@@ -321,7 +321,7 @@ function field(value: unknown, ...path: string[]): unknown {
   return current;
 }
 
-async function run(opts: { key?: string | null; previous?: string; extra?: string[] } = {}) {
+async function run(opts: { key?: string | null; previous?: string; extra?: string[]; cwd?: string } = {}) {
   seenRequests = [];
   const out = join(work, `out-${Math.random().toString(36).slice(2)}`);
   const env: Record<string, string> = {};
@@ -338,7 +338,7 @@ async function run(opts: { key?: string | null; previous?: string; extra?: strin
       '--retry-delay-ms', '1',
       ...(opts.extra ?? []),
     ],
-    { cwd: repoDir, env, stdout: 'pipe', stderr: 'pipe' },
+    { cwd: opts.cwd ?? repoDir, env, stdout: 'pipe', stderr: 'pipe' },
   );
   const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   const read = (name: string) => {
@@ -499,11 +499,24 @@ describe('make-notes, end to end against a fake API', () => {
     expect(user).toContain('Initial commit');
   });
 
-  test('an empty range is an error, not an empty release', async () => {
+  test('an empty range does not block the release: it becomes a maintenance body, and the API is not called', async () => {
     handler = () => geminiReply(goodReply());
     const result = await run({ previous: 'HEAD' });
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('nothing to write notes for');
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain('maintenance release');
+    expect(result.body).toContain('Maintenance release: nothing user-facing changed.');
+    expect(result.body).toContain('> [!TIP]');
+    expect(result.notes).toBe('Internal changes only\n');
+    expect(seenRequests).toHaveLength(0);
+  });
+
+  test('git history that cannot be read does not block the release either', async () => {
+    handler = () => geminiReply(goodReply());
+    const notARepo = mkdtempSync(join(work, 'not-a-repo-'));
+    const result = await run({ cwd: notARepo });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain('could not read the git history');
+    expect(result.body).toContain('Maintenance release: nothing user-facing changed.');
     expect(seenRequests).toHaveLength(0);
   });
 });

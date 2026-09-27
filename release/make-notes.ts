@@ -522,10 +522,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { commits, omitted, stat } = collectCommits(values.previous ? values.previous : null);
+  // Nothing below may stop a release, so unreadable history and an empty range both end in a
+  // maintenance-release body rather than an error. (A range of only merge commits is real: a
+  // merge that brought in nothing new gets a version but has nothing to describe.)
+  let collected: ReturnType<typeof collectCommits> = { commits: [], omitted: 0, stat: '' };
+  try {
+    collected = collectCommits(values.previous ? values.previous : null);
+  } catch (error) {
+    log(`could not read the git history (${error instanceof Error ? error.message : 'error'}); writing a maintenance body`);
+  }
+  const { commits, omitted, stat } = collected;
   if (commits.length === 0) {
-    log('there are no commits in the range, so there is nothing to write notes for');
-    process.exit(1);
+    log('there are no commits to describe, so the body says this is a maintenance release');
+    writeOutputs(out, emptyNotes(), repo);
+    return;
   }
 
   const key = process.env['GEMINI_API_KEY']?.trim() ?? '';
@@ -552,11 +562,16 @@ async function main(): Promise<void> {
     notes = fallbackNotes(commits);
   }
 
+  const bullets = writeOutputs(out, notes, repo);
+  log(`wrote ${join(out, 'body.md')} via ${via}: ${bullets} bullets from ${commits.length} commits`);
+}
+
+/** body.md and notes.txt. Returns how many bullets the body has. */
+function writeOutputs(out: string, notes: Notes, repo: string): number {
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, 'body.md'), renderBody(notes, repo));
   writeFileSync(join(out, 'notes.txt'), `${plainNotes(notes).join('\n')}\n`);
-  const bullets = SECTIONS.reduce((n, { key: k }) => n + notes.sections[k].length, 0);
-  log(`wrote ${join(out, 'body.md')} via ${via}: ${bullets} bullets from ${commits.length} commits`);
+  return SECTIONS.reduce((n, { key }) => n + notes.sections[key].length, 0);
 }
 
 if (import.meta.main) {
