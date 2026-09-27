@@ -1794,13 +1794,28 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
 `.github/workflows/release.yml`; the pieces it drives are in `release/`.
 
 - **One channel.** There is no nightly/stable split, so a release is just "an
-  update". It is built daily from `main`, and exists only if there is a commit
-  that has no release yet *and* the gate and the build both pass.
-- **The version is a function of the commit:** `<major.minor from
-  app/pubspec.yaml>.<commit count of HEAD>`. It is monotonic on a linear `main`,
-  the same commit always gets the same version, and "is there anything new" is
-  "does `v<version>` exist". Bump the minor by editing `pubspec.yaml`; the count
-  keeps climbing under it.
+  update". Every push to `main` that touches more than docs is built and released,
+  about 12 minutes later, and a daily cron retries any release that failed. A
+  release exists only if that commit has no release yet *and* the gate and the
+  build both pass. Runs are serialised and GitHub keeps a single waiting run, so two
+  merges inside one build's length collapse into one release: that run builds the
+  newer commit, and its notes cover everything since the previous release, so
+  nothing is lost, but the version number skips.
+- **The version is a function of the commit, and `release/version` is where you
+  set it.** That file is one strict line, `MAJOR.MINOR.PATCH`, and the commit that
+  last changed it *is* that version. From there, along `main`'s first-parent
+  history (`release/next-version.ts`), each merged pull request adds 1 to the minor
+  and resets the patch, and every other commit adds 1 to the patch. A merged pull
+  request is recognised by its subject — `Merge pull request #N`, or a squash commit
+  ending `(#N)` — so a rebase merge, which leaves nothing to recognise, counts as
+  ordinary commits. **To set the next version, edit the line in a pull request:**
+  the merge that lands it is exactly that version and counting restarts from it,
+  which is how a major bump is made. Because the number is derived from history, a
+  commit always has one version, a re-run cannot mint a second, and nothing commits
+  back to `main`. `plan` refuses a version lower than the latest release, because
+  the app installs only a strictly higher one. `app/pubspec.yaml`'s `version` no
+  longer drives anything, and the minor is a count of merged pull requests rather
+  than a mark of what they contained.
 - **The artifact is a per-user Inno Setup installer**, `Rill-Setup-x64.exe`,
   installing to `%LOCALAPPDATA%\Programs\Rill` with no admin rights, so an update
   never raises a UAC prompt. It clears `data\`, `sidecar\` and `*.dll` before
@@ -1927,3 +1942,12 @@ read-only and virtualises writes under `%LOCALAPPDATA%`, which is where the
 release log lives (§2.11). *Rejected: MSIX, and `.appinstaller` auto-update with
 it.* Also rejected: WinSparkle / `auto_updater`, whose native dialogs would sit
 badly in the app's own chrome, and which cannot apply an MSIX.
+
+**A9. The version derived from history, over a stored counter.** The first scheme was the
+commit count as the patch, which could not say "a merged PR adds to the minor" or take
+an override. Rejected: a bot that commits a bumped version back to `main` on each merge
+(noise, a race between two merges, and a push that needs its own permissions), and an
+override held in a repository variable or a dispatch input, which lives outside the
+reviewed history: a later computed version could then fall below the override and the
+app, which installs only a higher one, would stop offering updates. *Rejected: bump
+commits, variables, dispatch-time overrides.*
