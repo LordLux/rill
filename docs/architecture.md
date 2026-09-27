@@ -1794,7 +1794,8 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
 `.github/workflows/release.yml`; the pieces it drives are in `release/`.
 
 - **One channel.** There is no nightly/stable split, so a release is just "an
-  update". Every push to `main` that touches more than docs is built and released,
+  update". Every push to `main` that touches more than docs (`docs/`, `*.md`) and the
+  throwaway folders (`scratch/`, `spiking/`) is built and released,
   about 12 minutes later, and a daily cron retries any release that failed. A
   release exists only if that commit has no release yet *and* the gate and the
   build both pass. Runs are serialised and GitHub keeps a single waiting run, so two
