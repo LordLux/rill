@@ -104,10 +104,14 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
         CircleAvatar(
           radius: _avatarRadius,
           backgroundColor: scheme.surfaceContainerHighest,
-          foregroundImage: auth.accountAvatarUrl == null //
+          foregroundImage:
+              auth.accountAvatarUrl ==
+                  null //
               ? null
               : NetworkImage(auth.accountAvatarUrl!),
-          child: auth.accountAvatarUrl != null //
+          child:
+              auth.accountAvatarUrl !=
+                  null //
               ? null
               : Icon(Icons.person, color: scheme.onSurfaceVariant, size: _avatarRadius * 1.25),
         ),
@@ -158,9 +162,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     return TapRegion(
       groupId: 'account_menu',
       child: TitleBarWidgetButton(
-        tooltip: auth.isSignedIn
-            ? auth.displayName
-            : (auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in'),
+        tooltip: auth.isSignedIn ? auth.displayName : (auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in'),
         onTap: auth.isBusy
             ? null
             : auth.isSignedIn
@@ -387,7 +389,15 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
       ],
     ),
     _AccountMenuPage.updates => _AccountMenuBody(
-      header: _AccountMenuPageHeader(title: 'Updates', onBack: _back, trailing: const _UpdateRefreshButton()),
+      header: Consumer(
+        builder: (context, ref, _) => _AccountMenuPageHeader(
+          title: 'Updates',
+          onBack: _back,
+          trailing: const _UpdateRefreshButton(),
+          padding: EdgeInsets.fromLTRB(8, 12, 0, 12),
+          loading: ref.watch(updateControllerProvider.select((s) => s.phase is UpdateChecking)),
+        ),
+      ),
       children: [_UpdatesPanel(onDone: _back)],
     ),
   };
@@ -568,10 +578,15 @@ class _AccountMenuBody extends StatelessWidget {
 
 /// The back-button header for subpages, with a divider underneath.
 class _AccountMenuPageHeader extends StatelessWidget {
-  const _AccountMenuPageHeader({required this.title, this.onBack, this.trailing});
+  const _AccountMenuPageHeader({required this.title, this.onBack, this.trailing, this.padding, this.loading = false});
 
   final String title;
   final VoidCallback? onBack;
+  final EdgeInsetsGeometry? padding;
+
+  /// Draws an indeterminate bar over the divider, so the separator itself
+  /// reads as the thing loading. Overlaid, not stacked: it moves nothing.
+  final bool loading;
 
   /// An action at the right end of the header, outside the back tap target.
   final Widget? trailing;
@@ -582,7 +597,7 @@ class _AccountMenuPageHeader extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     Widget row = Padding(
-      padding: EdgeInsets.fromLTRB(onBack != null ? 8 : 16, 12, 16, 12),
+      padding: padding ?? EdgeInsets.fromLTRB(onBack != null ? 8 : 16, 12, 16, 12),
       child: Row(
         children: [
           if (onBack != null) ...[
@@ -609,7 +624,13 @@ class _AccountMenuPageHeader extends StatelessWidget {
       row = Row(
         children: [
           Expanded(child: row),
-          Padding(padding: const EdgeInsets.only(right: 8), child: trailing),
+          Flexible(
+            flex: 2,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Padding(padding: const EdgeInsets.only(right: 8), child: trailing!),
+            ),
+          ),
         ],
       );
     }
@@ -619,7 +640,19 @@ class _AccountMenuPageHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         row,
-        Divider(height: 1, color: scheme.outlineVariant),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Divider(height: 1, color: scheme.outlineVariant),
+            if (loading)
+              const Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: LinearProgressIndicator(key: ValueKey('update-header-progress'), minHeight: 2),
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -812,15 +845,30 @@ class _UpdateMenuItem extends ConsumerWidget {
 /// that all is well — then the running version, the last check, and the
 /// automatic-update switch. Lives in the account menu because there is no
 /// settings page yet (architecture.md §2.14).
-class _UpdatesPanel extends ConsumerWidget {
+class _UpdatesPanel extends ConsumerStatefulWidget {
   const _UpdatesPanel({required this.onDone});
 
   /// Back to the root page; "Later" goes there after dismissing.
   final VoidCallback onDone;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(updateControllerProvider);
+  ConsumerState<_UpdatesPanel> createState() => _UpdatesPanelState();
+}
+
+class _UpdatesPanelState extends ConsumerState<_UpdatesPanel> {
+  /// What the card showed before the current check started. A check is shown
+  /// by the header's bar; the card keeps its last result until the new one
+  /// arrives, so the page never collapses to a short "checking" card and grows
+  /// back a frame later (architecture.md §2.14).
+  UpdatePhase? _settled;
+
+  @override
+  Widget build(BuildContext context) {
+    final live = ref.watch(updateControllerProvider);
+    if (live.phase is! UpdateChecking) _settled = live.phase;
+    final settled = _settled;
+    final state = live.phase is UpdateChecking && settled != null ? live.copyWith(phase: settled) : live;
+    final onDone = widget.onDone;
     final config = ref.watch(updateConfigProvider);
     final controller = ref.read(updateControllerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
@@ -847,31 +895,49 @@ class _UpdatesPanel extends ConsumerWidget {
                 style: textTheme.labelSmall?.copyWith(color: scheme.onTertiaryContainer, fontWeight: FontWeight.w700),
               ),
             ),
-          _UpdateCard(state: state, enabled: config.enabled, onLater: () async {
-            await controller.dismiss();
-            onDone();
-          }),
+          _UpdateCard(
+            state: state,
+            enabled: config.enabled,
+            onLater: () async {
+              await controller.dismiss();
+              onDone();
+            },
+          ),
           const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _UpdateInfoRow(label: 'Version', value: state.currentVersion?.toString() ?? 'Development build'),
-                _UpdateInfoRow(label: 'Last checked', value: lastChecked == null ? 'Never' : _ago(lastChecked)),
-                const SizedBox(height: 4),
-                Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: _UpdateInfoRow(label: 'Version', value: state.currentVersion?.toString() ?? 'Development build'),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: _UpdateInfoRow(label: 'Last checked', value: lastChecked == null ? 'Never' : _ago(lastChecked)),
+              ),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(child: Text('Download updates automatically', style: textTheme.bodySmall)),
-                    Switch(
-                      value: state.autoUpdate,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onChanged: config.enabled ? controller.setAutoUpdate : null,
+                    Text('Download updates automatically', style: textTheme.bodySmall),
+                    // Material's switch is 32 px tall; scaled to sit in a text row.
+                    SizedBox(
+                      height: 28,
+                      child: FittedBox(
+                        alignment: Alignment.centerRight,
+                        child: Switch(
+                          value: state.autoUpdate,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onChanged: config.enabled ? controller.setAutoUpdate : null,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -888,23 +954,29 @@ class _UpdateRefreshButton extends ConsumerWidget {
     final phase = ref.watch(updateControllerProvider.select((s) => s.phase));
     final enabled = ref.watch(updateConfigProvider).enabled;
     final scheme = Theme.of(context).colorScheme;
-    if (phase is UpdateChecking) {
-      return SizedBox.square(
-        dimension: 32,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: CircularProgressIndicator(strokeWidth: 2, color: scheme.primary),
+    // Disabled rather than replaced while a check runs: swapping it for a
+    // spinner changed the header's width, and the bar under the header already
+    // says something is loading.
+    return Padding(
+      padding: const EdgeInsets.only(left: 12),
+      child: Tooltip(
+        message: 'Check for updates',
+        preferBelow: false,
+        child: TextButton.icon(
+          onPressed: enabled && canStartCheck(phase) ? () => ref.read(updateControllerProvider.notifier).checkNow() : null,
+          iconAlignment: IconAlignment.end,
+          icon: const Icon(Icons.refresh, size: 20),
+          // Ellipsised rather than overflowing when the header is short of room.
+          label: const Text('Check for updates', maxLines: 1, overflow: TextOverflow.ellipsis),
+          style: TextButton.styleFrom(
+            foregroundColor: scheme.primary,
+            iconAlignment: IconAlignment.end,
+            padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
         ),
-      );
-    }
-    return IconButton(
-      tooltip: 'Check for updates',
-      icon: const Icon(Icons.refresh, size: 20),
-      color: scheme.primary,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-      padding: EdgeInsets.zero,
-      onPressed: enabled && canStartCheck(phase) ? () => ref.read(updateControllerProvider.notifier).checkNow() : null,
+      ),
     );
   }
 }
@@ -932,8 +1004,7 @@ class _UpdateCard extends ConsumerWidget {
     final (Color background, Color foreground) = switch (phase) {
       _ when !enabled => (scheme.surfaceContainerHighest, scheme.onSurface),
       UpdateError() => (scheme.errorContainer, scheme.onErrorContainer),
-      UpdateAvailable() || UpdateDownloading() || UpdateReady() || UpdateInstalling() =>
-        (scheme.primaryContainer, scheme.onPrimaryContainer),
+      UpdateAvailable() || UpdateDownloading() || UpdateReady() || UpdateInstalling() => (scheme.primaryContainer, scheme.onPrimaryContainer),
       _ => (scheme.surfaceContainerHighest, scheme.onSurface),
     };
     final muted = foreground.withValues(alpha: 0.72);
@@ -954,8 +1025,7 @@ class _UpdateCard extends ConsumerWidget {
     final String? detail = !enabled
         ? 'This is a development build, which has no version to compare with a release.'
         : switch (phase) {
-            UpdateDownloading(:final received, :final total) =>
-              '${_percent(received, total)}% of ${(total / (1024 * 1024)).toStringAsFixed(1)} MB',
+            UpdateDownloading(:final received, :final total) => '${_percent(received, total)}% of ${(total / (1024 * 1024)).toStringAsFixed(1)} MB',
             UpdateError(:final message) => message,
             _ => null,
           };
@@ -993,10 +1063,16 @@ class _UpdateCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(headline, style: textTheme.titleMedium?.copyWith(color: foreground, fontWeight: FontWeight.w700)),
+          Text(
+            headline,
+            style: textTheme.titleMedium?.copyWith(color: foreground, fontWeight: FontWeight.w700),
+          ),
           if (state.isMandatory) ...[
             const SizedBox(height: 2),
-            Text('This update is required.', style: textTheme.bodySmall?.copyWith(color: foreground, fontWeight: FontWeight.w600)),
+            Text(
+              'This update is required.',
+              style: textTheme.bodySmall?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+            ),
           ],
           if (detail != null) ...[
             const SizedBox(height: 4),
@@ -1005,9 +1081,6 @@ class _UpdateCard extends ConsumerWidget {
           if (phase case UpdateDownloading(:final received, :final total)) ...[
             const SizedBox(height: 10),
             LinearProgressIndicator(value: total == 0 ? null : received / total),
-          ] else if (phase is UpdateChecking) ...[
-            const SizedBox(height: 10),
-            const LinearProgressIndicator(),
           ],
           if (offersNotes) ...[
             const SizedBox(height: 8),
@@ -1023,7 +1096,9 @@ class _UpdateCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('•  ', style: textTheme.bodySmall?.copyWith(color: foreground)),
-                    Expanded(child: Text(note, style: textTheme.bodySmall?.copyWith(color: foreground))),
+                    Expanded(
+                      child: Text(note, style: textTheme.bodySmall?.copyWith(color: foreground)),
+                    ),
                   ],
                 ),
               ),
@@ -1088,7 +1163,9 @@ class _UpdateInfoRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Expanded(child: Text(label, style: style?.copyWith(color: scheme.onSurfaceVariant))),
+          Expanded(
+            child: Text(label, style: style?.copyWith(color: scheme.onSurfaceVariant)),
+          ),
           Text(value, style: style),
         ],
       ),

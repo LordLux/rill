@@ -207,19 +207,29 @@ void main() {
     expect(find.byKey(const ValueKey('update-dot')), findsNothing);
   });
 
-  testWidgets("the header's refresh runs a check and spins while it does", (tester) async {
-    final controller = await pump(tester, const UpdateState(phase: UpdatePhase.upToDate(), currentVersion: current));
+  testWidgets('a check from the page keeps the card and loads in the header divider', (tester) async {
+    final controller = await pump(tester, ready());
     await openMenu(tester);
-    await tester.tap(find.text('Check for updates'));
-    await tester.pump();
-    controller.finish.complete();
+    await tester.tap(find.text('Restart to update'));
     await tester.pumpAndSettle();
-    expect(find.text('Rill is up to date'), findsOneWidget);
+    final cardHeight = tester.getSize(find.byKey(const ValueKey('update-card'))).height;
+    expect(find.byKey(const ValueKey('update-header-progress')), findsNothing);
 
     await tester.tap(find.byTooltip('Check for updates'));
     await tester.pump();
-    expect(find.text('Checking for updates…'), findsOneWidget);
-    expect(find.byTooltip('Check for updates'), findsNothing, reason: 'the button is a spinner meanwhile');
+    // Mid-check: the bar is on the divider, the card still shows the update
+    // at the same height, and the header button is still there.
+    expect(find.byKey(const ValueKey('update-header-progress')), findsOneWidget);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+    expect(find.text('Checking for updates…'), findsNothing);
+    expect(tester.getSize(find.byKey(const ValueKey('update-card'))).height, cardHeight);
+    expect(find.byTooltip('Check for updates'), findsOneWidget);
+
+    controller.result = ready().phase;
+    controller.finish.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('update-header-progress')), findsNothing);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
   });
 
   testWidgets('notes are capped at five', (tester) async {
