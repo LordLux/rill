@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "version": "0.2.2",
+  "tag": "v0.2.2",
+  "publishedAt": "2026-09-27T03:00:49.225Z",
+  "notes": [
+    "Internal changes only"
+  ],
+  "minimumVersion": null,
+  "assets": {
+    "windows-x64": {
+      "name": "Rill-Setup-x64.exe",
+      "url": "https://github.com/LordLux/rill/releases/download/v0.2.2/Rill-Setup-x64.exe",
+      "sha256": "9f67dc48b860447252282493172ca27054199c87f8aa445326aa44da4e73f802",
+      "size": 52942993
+    }
+  }
+}
