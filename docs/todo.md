@@ -633,15 +633,6 @@ up per certificate, so a signed installer can warn for a while regardless.
 **Done when:** the workflow signs `Rill-Setup-x64.exe` before it is hashed into
 `update.json`. Signing after hashing invalidates the manifest.
 
-### 49. Ship yt-dlp, or say it is missing
-
-The installer does not bundle `yt-dlp`, and neither did `rill zip`. The sidecar
-resolves it from `PATH` or `YT_DLP_PATH` (`capabilities.ts`), so on a machine
-without it the ladder's second tier is simply absent and playback falls to
-`ANDROID`'s 360p. That is invisible to the user. Either bundle a pinned
-`yt-dlp.exe` (it goes stale quickly, so it would want its own refresh) or make the
-absence visible in settings.
-
 ### 50. `sidecar/bun.lock` cannot be read by the Bun the sidecar is built with
 
 **Measured 2026-09-26.** `sidecar/bun.lock` is `lockfileVersion 1` with a

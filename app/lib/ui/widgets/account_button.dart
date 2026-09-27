@@ -7,9 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/update/update_config.dart';
 import '../../domain/update/update_state.dart';
+import '../../domain/ytdlp/ytdlp_state.dart';
 import '../auth_controller.dart';
 import '../pages/login_page.dart';
 import '../update_controller.dart';
+import '../ytdlp_controller.dart';
 import 'titlebar_button.dart';
 
 /// The titlebar's account surface.
@@ -100,6 +102,9 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     final auth = ref.watch(authProvider);
     final scheme = Theme.of(context).colorScheme;
     final updateNotice = ref.watch(updateControllerProvider.select((s) => s.showsNotice));
+    // The bottom-right dot means "needs attention" for either reason
+    // (todo.md 49): an expired session, or an unresolved yt-dlp problem.
+    final needsAttention = auth.status == AuthStatus.degraded || ref.watch(ytDlpControllerProvider.select((s) => s.hasProblem));
 
     final Widget avatar = Stack(
       clipBehavior: Clip.none,
@@ -133,7 +138,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
               ),
             ),
           ),
-        if (auth.status == AuthStatus.degraded)
+        if (needsAttention)
           Positioned(
             right: -2,
             bottom: -2,
@@ -165,7 +170,11 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     return TapRegion(
       groupId: 'account_menu',
       child: TitleBarWidgetButton(
-        tooltip: auth.isSignedIn ? auth.displayName : (auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in'),
+        tooltip: auth.isSignedIn
+            ? (needsAttention ? '${auth.displayName} — needs attention' : auth.displayName)
+            : (auth.status == AuthStatus.degraded
+                  ? 'Your session expired. Please sign in again'
+                  : (needsAttention ? 'Needs attention. Log in' : 'Log in')),
         // Signed out too: the menu is where updates live, so it has to open
         // for everyone; signed out, its first action is Sign in (§2.14).
         onTap: auth.isBusy ? null : () => _openMenu(auth),
@@ -180,7 +189,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Which page the overlay is currently showing.
-enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates }
+enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates, problems }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account menu overlay — no ModalBarrier, pointer events pass through
@@ -408,6 +417,10 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
       ),
       children: [_UpdatesPanel(onDone: _back)],
     ),
+    _AccountMenuPage.problems => _AccountMenuBody(
+      header: _AccountMenuPageHeader(title: 'Problems', onBack: _back),
+      children: const [_ProblemsPanel()],
+    ),
   };
 }
 
@@ -466,6 +479,7 @@ class _SignedOutRootPage extends StatelessWidget {
         ],
       ),
       children: [
+        _ProblemsMenuItem(onOpen: () => onGo(_AccountMenuPage.problems)),
         _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
         const SizedBox(height: 4),
       ],
@@ -546,6 +560,10 @@ class _AccountRootPage extends StatelessWidget {
         ],
       ),
       children: [
+        // ── Problems (todo.md 49) ────────────────────────────────────────
+        // First in the list, so it is the first thing seen when it shows —
+        // hidden the rest of the time, when it renders nothing.
+        _ProblemsMenuItem(onOpen: () => onGo(_AccountMenuPage.problems)),
         // ── Account ────────────────────────────────────────────────────────
         _AccountMenuItem(icon: Icons.manage_accounts, label: 'Google Account', onTap: () {}),
         _AccountMenuItem(icon: Icons.switch_account, label: 'Switch account', onTap: () {}),
@@ -981,6 +999,13 @@ class _UpdatesPanelState extends ConsumerState<_UpdatesPanel> {
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: _UpdateInfoRow(label: 'Last checked', value: lastChecked == null ? 'Never' : _ago(lastChecked)),
               ),
+              // A way back after declining (todo.md 49) — this row shows
+              // whatever state yt-dlp is actually in, with a Download action
+              // only when there is something to download.
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: _YtDlpInfoRow(),
+              ),
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 4),
@@ -1235,6 +1260,177 @@ class _UpdateInfoRow extends StatelessWidget {
           Text(value, style: style),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Problems (todo.md 49)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The root page's Problems row. Renders nothing while there is no problem —
+/// currently the one check this app has (yt-dlp missing with no choice made,
+/// or a download that failed); a second one slots in the same way.
+class _ProblemsMenuItem extends ConsumerWidget {
+  const _ProblemsMenuItem({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasProblem = ref.watch(ytDlpControllerProvider.select((s) => s.hasProblem));
+    if (!hasProblem) return const SizedBox.shrink();
+    return _AccountMenuItem(
+      icon: Icons.warning_amber_rounded,
+      label: 'Problems',
+      color: Theme.of(context).colorScheme.error,
+      onTap: onOpen,
+    );
+  }
+}
+
+/// The Problems page's body: one card per unresolved problem. Reachable only
+/// from a row that is itself hidden without a problem, but a card can resolve
+/// itself (a background download finishing) while the page is still open, so
+/// this checks fresh rather than assuming the row's condition still holds.
+class _ProblemsPanel extends ConsumerWidget {
+  const _ProblemsPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(ytDlpControllerProvider);
+    if (!state.hasProblem) {
+      final scheme = Theme.of(context).colorScheme;
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('No problems right now.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+      child: _YtDlpProblemCard(state: state),
+    );
+  }
+}
+
+class _YtDlpProblemCard extends ConsumerWidget {
+  const _YtDlpProblemCard({required this.state});
+
+  final YtDlpState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(ytDlpControllerProvider.notifier);
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final phase = state.phase;
+    final downloading = phase is YtDlpDownloading;
+    final error = phase is YtDlpPhaseError ? phase.message : null;
+
+    return Container(
+      key: const ValueKey('ytdlp-problem-card'),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: const BorderRadius.all(Radius.circular(16))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 20, color: scheme.onErrorContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'yt-dlp is not installed',
+                  style: textTheme.titleSmall?.copyWith(color: scheme.onErrorContainer, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'yt-dlp helps Rill play some videos YouTube does not serve directly to this '
+            'app — age-restricted videos and some label or Vevo content. Without it, '
+            'those videos may fail to play or fall back to a lower quality.',
+            style: textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer.withValues(alpha: 0.85)),
+          ),
+          if (downloading) ...[
+            const SizedBox(height: 10),
+            LinearProgressIndicator(color: scheme.onErrorContainer),
+            const SizedBox(height: 6),
+            Text('Downloading…', style: textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
+          ] else if (error != null) ...[
+            const SizedBox(height: 8),
+            Text(error, style: textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              FilledButton(
+                onPressed: downloading ? null : controller.download,
+                child: Text(error != null ? 'Try again' : 'Download yt-dlp'),
+              ),
+              TextButton(
+                onPressed: downloading ? null : controller.decline,
+                child: const Text("I don't want it"),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The Updates page's info row for yt-dlp — "a way back after declining"
+/// (todo.md 49): whatever state it is actually in, with a Download action
+/// only when there is something to download.
+class _YtDlpInfoRow extends ConsumerWidget {
+  const _YtDlpInfoRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(ytDlpControllerProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall;
+
+    final value = switch (state.location) {
+      YtDlpLocation.appManaged => state.appManagedVersion ?? 'Installed',
+      YtDlpLocation.onPath => 'On PATH',
+      YtDlpLocation.missing => 'Not installed',
+    };
+    final downloading = state.phase is YtDlpDownloading;
+    final canDownload = state.location == YtDlpLocation.missing && !downloading;
+
+    // Three pieces of text can outgrow the 260 px panel (label, value, and
+    // "Download") where `_UpdateInfoRow`'s two never do — the value shrinks
+    // first, inside its own flexible group, rather than overflowing the row.
+    return Row(
+      children: [
+        Expanded(child: Text('yt-dlp', style: style?.copyWith(color: scheme.onSurfaceVariant))),
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(child: Text(value, style: style, overflow: TextOverflow.ellipsis)),
+              if (downloading) ...[
+                const SizedBox(width: 8),
+                const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+              ] else if (canDownload) ...[
+                const SizedBox(width: 8),
+                InkWell(
+                  borderRadius: const BorderRadius.all(Radius.circular(4)),
+                  onTap: () => ref.read(ytDlpControllerProvider.notifier).download(),
+                  child: Text('Download', style: style?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
