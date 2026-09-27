@@ -9,6 +9,7 @@ import 'pages/subscriptions.dart';
 import 'player_shell.dart'
     show currentRouteProvider, homeRouteName, rootNavigatorKey, sectionRouteProvider, transientRouteOpenProvider;
 import 'widgets/topbar.dart';
+import 'widgets/update_banner.dart';
 
 const String drawerPrefsKey = 'left_drawer_open';
 
@@ -176,11 +177,19 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
             ),
           ),
 
-          // The actual page content
+          // The actual page content, under the required-update banner when
+          // there is one (architecture.md §2.14).
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadiusGeometry.only(topLeft: Radius.circular(10)),
-              child: widget.body,
+            child: Column(
+              children: [
+                const UpdateBanner(),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadiusGeometry.only(topLeft: Radius.circular(10)),
+                    child: widget.body,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

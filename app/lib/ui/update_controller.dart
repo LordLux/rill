@@ -79,11 +79,19 @@ class UpdateController extends Notifier<UpdateState> {
   }
 
   Future<void> _initAsync(UpdateConfig config) async {
-    final prefs = await SharedPreferences.getInstance();
+    int? lastCheckedMs;
+    String? dismissedVersion;
+    var autoUpdate = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      lastCheckedMs = prefs.getInt('update_last_checked_ms');
+      dismissedVersion = prefs.getString('update_dismissed_version');
+      autoUpdate = prefs.getBool('update_auto') ?? true;
+    } on Object catch (e) {
+      // Unreadable preferences cost the remembered values, not the updater.
+      stderr.writeln('rill update: preferences unavailable ($e); using defaults');
+    }
     if (!ref.mounted) return;
-    final lastCheckedMs = prefs.getInt('update_last_checked_ms');
-    final dismissedVersion = prefs.getString('update_dismissed_version');
-    final autoUpdate = prefs.getBool('update_auto') ?? true;
 
     state = state.copyWith(
       lastChecked: lastCheckedMs != null ? DateTime.fromMillisecondsSinceEpoch(lastCheckedMs) : null,
