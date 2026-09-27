@@ -152,6 +152,7 @@ void main() {
     UpdateHttp? http,
     Random? random,
     DateTime Function()? clock,
+    Duration manualFloor = Duration.zero,
   }) async {
     timers = [];
     launcher = FakeLauncher();
@@ -171,6 +172,7 @@ void main() {
         updateClockProvider.overrideWithValue(clock ?? () => DateTime.utc(2026, 9, 27)),
         updateInstallerLauncherProvider.overrideWithValue(launcher.call),
         updateExitAppProvider.overrideWithValue(() async => exits++),
+        updateManualCheckFloorProvider.overrideWithValue(manualFloor),
       ],
     );
     addTearDown(container.dispose);
@@ -373,5 +375,20 @@ void main() {
     expect(timers.single.cancelled, isFalse);
     await controller.setAutoUpdate(false);
     expect(timers.single.cancelled, isTrue);
+  });
+
+  test('a manual check is shown as running for at least the floor; an automatic one is not held', () async {
+    final http = await feed('0.1.0');
+    final (container, controller) = await start(config: config('0.1.0'), http: http, manualFloor: const Duration(milliseconds: 100));
+
+    final manual = controller.checkNow();
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(container.read(updateControllerProvider).phase, isA<UpdateChecking>(), reason: 'the answer is in, the floor is not over');
+    await manual;
+    expect(container.read(updateControllerProvider).phase, isA<UpdateUpToDate>());
+
+    final watch = Stopwatch()..start();
+    await controller.checkNow(origin: UpdateCheckOrigin.automatic);
+    expect(watch.elapsedMilliseconds, lessThan(100));
   });
 }

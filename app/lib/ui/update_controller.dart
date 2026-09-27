@@ -29,6 +29,9 @@ final updateExitAppProvider = Provider<Future<void> Function()>((ref) => () asyn
 
 final updateControllerProvider = NotifierProvider<UpdateController, UpdateState>(UpdateController.new);
 
+/// The shortest a manual check is shown as running.
+final updateManualCheckFloorProvider = Provider<Duration>((ref) => const Duration(milliseconds: 250));
+
 const updateFirstCheckDelay = Duration(seconds: 30);
 const updateCheckInterval = Duration(hours: 12);
 const updateCheckJitter = Duration(minutes: 10);
@@ -134,16 +137,25 @@ class UpdateController extends Notifier<UpdateState> {
 
     final http = ref.read(updateHttpProvider);
     final clock = ref.read(updateClockProvider);
-    
+    // A manual check that answers within a frame reads as a flicker, not as a
+    // check; it is held to a floor before its result is shown.
+    final floor = origin == UpdateCheckOrigin.manual
+        ? Future<void>.delayed(ref.read(updateManualCheckFloorProvider))
+        : Future<void>.value();
+
     try {
-      final manifestBytes = await http.getBytes(config.manifestUrl, maxBytes: 64 * 1024);
-      final signatureBytes = await http.getBytes(config.signatureUrl, maxBytes: 1024);
-      
-      final checkResult = await checkManifest(
-        manifestBytes: manifestBytes,
-        signatureFileBytes: signatureBytes,
-        config: config,
-      );
+      final ManifestCheck checkResult;
+      try {
+        final manifestBytes = await http.getBytes(config.manifestUrl, maxBytes: 64 * 1024);
+        final signatureBytes = await http.getBytes(config.signatureUrl, maxBytes: 1024);
+        checkResult = await checkManifest(
+          manifestBytes: manifestBytes,
+          signatureFileBytes: signatureBytes,
+          config: config,
+        );
+      } finally {
+        await floor;
+      }
 
       final now = clock();
       state = state.copyWith(lastChecked: now);
