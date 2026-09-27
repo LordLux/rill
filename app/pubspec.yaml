@@ -45,6 +45,13 @@ dependencies:
   # existed. Same arrangement as `media_kit_video` below.
   windows_taskbar:
     path: ../third_party/windows_taskbar
+  # The updater (architecture.md §2.14): Ed25519 over the manifest's bytes,
+  # SHA-256 over the installer, and `CreateProcessW` to start the installer
+  # outside the launcher's job object. All three were already in the lock
+  # (win32 and crypto transitively); only cryptography is new.
+  cryptography: ^2.9.0
+  crypto: ^3.0.7
+  win32: ^5.15.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -3,3 +3,5 @@
 *.cmd text eol=crlf
 *.png binary
 *.lockb binary
+# Signed bytes: a line-ending conversion would break the signature they are tested against.
+app/test/signed_update/** -text
