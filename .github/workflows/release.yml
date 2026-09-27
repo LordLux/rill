@@ -18,10 +18,6 @@ on:
   schedule:
     - cron: '0 2 * * *' # daily, 02:00 UTC
   workflow_dispatch:
-  # TEMPORARY, removed before merge: runs the pipeline from this branch while it is
-  # being developed. `publish` is gated on main, so nothing is released from here.
-  push:
-    branches: [release-pipeline]
 
 permissions:
   contents: read
