@@ -67,7 +67,7 @@ const MAX_BULLET_CHARS = 400;
 const MAX_CALLOUTS = 2;
 
 const SMARTSCREEN_NOTE =
-  "Rill isn't code-signed yet, so Windows SmartScreen may say the publisher is unknown: choose **More info**, then **Run anyway**.";
+  "Rill isn't code-signed, so Windows SmartScreen may say the publisher is unknown: choose **More info**, then **Run anyway**.";
 const DOWNLOAD_TIP =
   'Download `Rill-Setup-x64.exe`. It installs for your user only and needs no admin rights. `update.json` and `update.json.sig` describe the release for update checks; you can ignore them.';
 
