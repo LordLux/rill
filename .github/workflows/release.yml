@@ -131,7 +131,9 @@ jobs:
         run: bun run build
       - name: App - release build
         working-directory: app
-        run: fvm flutter build windows --release --build-name="$VERSION" --build-number=0
+        # RILL_VERSION is how the app knows its own version, which the updater
+        # compares against (architecture.md §2.14). Empty means a dev build.
+        run: fvm flutter build windows --release --build-name="$VERSION" --build-number=0 --dart-define=RILL_VERSION="$VERSION"
 
       # The same staging rill.ps1 does, plus the VC++ runtime: a machine without it
       # would fail to start rill.exe before any of our code runs. App-local copies of
