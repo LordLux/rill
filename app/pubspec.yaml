@@ -52,6 +52,14 @@ dependencies:
   cryptography: ^2.9.0
   crypto: ^3.0.7
   win32: ^5.15.0
+  # Reads HKCU\Software\Rill\YtDlpConsent, written by the installer (todo.md 49).
+  win32_registry: ^2.1.0
+  # Verifies yt-dlp's SHA2-256SUMS.sig — a raw binary OpenPGP detached
+  # signature, not the ASCII-armored `--clearsign` kind — over the checksums
+  # file, on top of the SHA-256 check on the binary itself. Pure Dart, same
+  # reasoning as `cryptography`'s `DartEd25519` above: no platform plugin
+  # between the app and the bytes it is verifying.
+  dart_pg: ^2.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
