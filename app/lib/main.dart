@@ -28,6 +28,7 @@ import 'ui/player/controls_probe.dart';
 import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
+import 'ui/update_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -100,6 +101,10 @@ Future<void> main() async {
       child: const RillApp(),
     ),
   );
+
+  // Built now rather than on first use, so its first check is 30 s after
+  // launch whether or not anything has looked at it yet (architecture.md §2.14).
+  container.read(updateControllerProvider);
 
   doWhenWindowReady(() {
     const initialSize = Size(1280, 720);
