@@ -20,10 +20,13 @@ name: release
 on:
   push:
     branches: [main]
-    # An edit to a doc rides along with the next code release instead of cutting an identical installer.
+    # An edit to a doc, or to the throwaway folders, rides along with the next code release
+    # instead of cutting an identical installer.
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - 'scratch/**'
+      - 'spiking/**'
   schedule:
     - cron: '0 2 * * *' # daily, 02:00 UTC: retries a release that failed; does nothing if there is none to make
   workflow_dispatch:
