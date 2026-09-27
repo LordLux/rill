@@ -75,6 +75,10 @@ Future<void> main(List<String> args) async {
   /// from a real regression without bisecting by hand. That is how one got
   /// waved through as "pre-existing, unrelated" in this repo before.
   final testNames = <int, String>{};
+  /// Test id -> the first error the reporter emitted for it, which arrives before
+  /// that test's `testDone`. A failure was a name and nothing else, so a red CI run
+  /// meant guessing at the cause from the name alone (2026-09-26).
+  final testErrors = <int, String>{};
   final failures = <String>[];
   var sawAnyEvent = false;
 
@@ -118,18 +122,22 @@ Future<void> main(List<String> args) async {
           final suite = suitePaths[suiteId] ?? 'suite $suiteId';
           testNames[testId] = '$suite: $name';
         }
+      case 'error':
+        final id = decoded['testID'] as int?;
+        final message = (decoded['error'] as String? ?? '').trim();
+        if (id != null && message.isNotEmpty) testErrors.putIfAbsent(id, () => message);
       case 'testDone':
         if (decoded['result'] != 'success' && decoded['hidden'] != true) {
           final id = decoded['testID'] as int?;
-          failures.add(
-            testNames[id] ??
-                // A synthesised test (a load, a setUpAll, a tearDownAll) has no
-                // `testStart` this guard recorded, because those are skipped
-                // above. Naming it as such is still far better than an id: a
-                // failure here is a teardown problem, not a test's own.
-                'unnamed test $id (a load, setUpAll or tearDownAll — '
-                    'result: ${decoded['result']})',
-          );
+          final name = testNames[id] ??
+              // A synthesised test (a load, a setUpAll, a tearDownAll) has no
+              // `testStart` this guard recorded, because those are skipped
+              // above. Naming it as such is still far better than an id: a
+              // failure here is a teardown problem, not a test's own.
+              'unnamed test $id (a load, setUpAll or tearDownAll — '
+                  'result: ${decoded['result']})';
+          final why = testErrors[id];
+          failures.add(why == null ? name : '$name\n${_indented(why)}');
         }
     }
   }
@@ -181,4 +189,13 @@ Future<void> main(List<String> args) async {
   }
 
   exit(testExit);
+}
+
+/// The first lines of an error, indented under the test it belongs to. A whole
+/// stack trace would bury the names of the other failures.
+String _indented(String message, {int maxLines = 8}) {
+  final lines = message.split('\n');
+  final shown = lines.take(maxLines).map((line) => '      $line');
+  final more = lines.length > maxLines ? '\n      … (${lines.length - maxLines} more lines)' : '';
+  return '${shown.join('\n')}$more';
 }

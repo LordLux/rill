@@ -1,0 +1,256 @@
+# Daily release. One channel, no nightly/stable split: every release is just "an update".
+#
+#   plan     version = <major.minor from app/pubspec.yaml>.<commit count of HEAD>, so a
+#            commit has exactly one version and "is there anything new" is "does the
+#            release for this version exist yet". A scheduled run with nothing new stops here.
+#   gate     the same checks as a local `rill check` plus the sidecar's `bun run check`.
+#   build    sidecar + Flutter release build + Inno Setup installer, with smoke tests of the
+#            staged sidecar, the installer, and the uninstaller.
+#   publish  signs update.json and, from main only, creates the GitHub release. Needs the gate
+#            and the build to have passed, and is the only job that sees the signing key.
+#            Off main it stops short of the release and keeps the signed manifest as an artifact.
+#
+# Design notes: docs/architecture.md, "Release pipeline".
+
+name: release
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # daily, 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: '1.1.42' # what the sidecar is developed and measured against
+  FVM_VERSION: '3.2.1'
+
+# The Windows jobs are pinned to windows-2022 on purpose. `windows-latest` moved to
+# Visual Studio 2026 (MSVC 14.51), whose STL turned <experimental/coroutine> into a hard
+# error, and flutter_inappwebview_windows and flutter_media_session both compile with
+# /await. The app is built with Visual Studio 2022 everywhere else (todo.md 51).
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      exists: ${{ steps.v.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the commit count needs the whole history
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+)\..*/\1/p' app/pubspec.yaml)
+          [ -n "$base" ] || { echo "cannot read major.minor from app/pubspec.yaml" >&2; exit 1; }
+          version="$base.$(git rev-list --count HEAD)"
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then exists=true; else exists=false; fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "exists=$exists"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version — release $tag exists: $exists"
+
+  gate:
+    needs: plan
+    if: github.event_name != 'schedule' || needs.plan.outputs.exists == 'false'
+    runs-on: windows-2022 # Visual Studio 2022, like the dev machine — see the note above `jobs:`
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/toolchain
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          fvm-version: ${{ env.FVM_VERSION }}
+      - name: Sidecar - check (typecheck, lint, tests)
+        working-directory: sidecar
+        run: bun run check
+      - name: Sidecar - build (the app's tests run the compiled one)
+        working-directory: sidecar
+        run: bun run build
+      - name: App - lint plugin dependencies
+        working-directory: app/tool/rill_lints
+        run: fvm dart pub get
+      - name: App - tests (guarded; concurrency 2 as on the dev machine, see CLAUDE.md)
+        working-directory: app
+        run: fvm dart run tool/test_suite_guard.dart --concurrency=2
+      - name: App - lint gate
+        working-directory: app
+        run: fvm dart run tool/lint_gate.dart
+
+  build:
+    needs: plan
+    if: github.event_name != 'schedule' || needs.plan.outputs.exists == 'false'
+    runs-on: windows-2022 # Visual Studio 2022, like the dev machine — see the note above `jobs:`
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE_DIR: app/build/windows/x64/runner/Release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/toolchain
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          fvm-version: ${{ env.FVM_VERSION }}
+      - name: Sidecar - build
+        working-directory: sidecar
+        run: bun run build
+      - name: App - release build
+        working-directory: app
+        run: fvm flutter build windows --release --build-name="$VERSION" --build-number=0
+
+      # The same staging rill.ps1 does, plus the VC++ runtime: a machine without it
+      # would fail to start rill.exe before any of our code runs. App-local copies of
+      # these three DLLs are what Microsoft's redistribution terms allow.
+      - name: Stage the release folder
+        run: |
+          mkdir -p "$RELEASE_DIR/sidecar/dist"
+          cp sidecar/dist/sidecar.exe "$RELEASE_DIR/sidecar/dist/sidecar.exe"
+          cmp sidecar/dist/sidecar.exe "$RELEASE_DIR/sidecar/dist/sidecar.exe"
+          # %SystemRoot%, not a literal C:\Windows: the runner's system drive is not ours to assume.
+          system32="$(cygpath -u "$SYSTEMROOT")/System32"
+          for dll in msvcp140 vcruntime140 vcruntime140_1; do
+            cp "$system32/$dll.dll" "$RELEASE_DIR/"
+          done
+          du -sh "$RELEASE_DIR"
+
+      - name: Smoke - staged sidecar starts
+        shell: pwsh
+        run: release/smoke-sidecar.ps1 -Sidecar "$env:RELEASE_DIR/sidecar/dist/sidecar.exe"
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$env:VERSION" "/Obuild\installer" release\rill.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed (exit $LASTEXITCODE)" }
+          Get-Item build\installer\Rill-Setup-x64.exe | Format-List Name, Length
+
+      - name: Smoke - install, start the installed sidecar, uninstall
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'rill-installed'
+          $log = Join-Path $env:RUNNER_TEMP 'install.log'
+          $p = Start-Process build\installer\Rill-Setup-x64.exe -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$dir", "/LOG=$log"
+          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "installer exited $($p.ExitCode)" }
+
+          foreach ($f in 'rill.exe', 'flutter_windows.dll', 'libmpv-2.dll', 'libass-9.dll', 'msvcp140.dll', 'vcruntime140.dll',
+                         'sidecar\dist\sidecar.exe', 'THIRD_PARTY_LICENSES', 'unins000.exe') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "missing after install: $f" }
+          }
+          foreach ($f in 'rill.lib', 'rill.exp') {
+            if (Test-Path (Join-Path $dir $f)) { throw "should not have been installed: $f" }
+          }
+          release/smoke-sidecar.ps1 -Sidecar (Join-Path $dir 'sidecar\dist\sidecar.exe')
+
+          # The uninstaller hands off to a copy of itself, so waiting on the process is not
+          # waiting for the removal.
+          Start-Process (Join-Path $dir 'unins000.exe') -Wait -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path (Join-Path $dir 'rill.exe')) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+          if (Test-Path (Join-Path $dir 'rill.exe')) { throw 'uninstall left rill.exe behind' }
+          Write-Host 'install / uninstall ok'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: build/installer/Rill-Setup-x64.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # Runs on every ref up to, but not including, `gh release create`, so the notes, the
+  # signature and the secret are exercised before anything is merged. Off main the
+  # signed manifest is kept as a workflow artifact instead of a release.
+  publish:
+    needs: [plan, gate, build]
+    if: needs.plan.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer
+          path: dist
+
+      - name: Changes since the previous release
+        run: |
+          set -euo pipefail
+          previous=$(gh release list --limit 1 --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
+          if [ -n "$previous" ] && git merge-base --is-ancestor "$previous" HEAD 2>/dev/null; then
+            git log --no-merges --format=%s "$previous..HEAD" | head -n 40 > notes.txt
+          else
+            git log --no-merges --format=%s -n 30 > notes.txt
+          fi
+          [ -s notes.txt ] || echo "No changes listed." > notes.txt
+          cat notes.txt
+
+      - name: Sign the update manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          bun release/make-manifest.ts \
+            --version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --installer dist/Rill-Setup-x64.exe --notes notes.txt --out dist
+
+      - name: Write the release notes
+        run: |
+          {
+            echo "Windows x64 installer. Installs per-user, no admin rights needed."
+            echo
+            echo "Not code-signed yet, so Windows SmartScreen may say the publisher is unknown: choose **More info**, then **Run anyway**."
+            echo
+            echo "### Changes"
+            sed 's/^/- /' notes.txt
+          } > body.md
+          cat body.md
+
+      - name: Publish the release
+        if: github.ref == 'refs/heads/main'
+        run: |
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" --title "Rill $VERSION" --notes-file body.md --latest \
+            dist/Rill-Setup-x64.exe dist/update.json dist/update.json.sig
+
+      - name: Keep the signed manifest (not main, so nothing is released)
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: signed-manifest
+          path: |
+            dist/update.json
+            dist/update.json.sig
+            body.md
+          if-no-files-found: error
+          retention-days: 3

@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 46.** A new item takes it, and the same edit bumps this line.
+**Next number: 52.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -577,6 +577,114 @@ ships beside `rill.exe`.
 
 **Done when:** a forced fast fail in a release build leaves a symbolised stack
 in the app's data directory and no dump on disk.
+
+### 46. Windows ARM64 build
+
+**Blocked by the native stack, not by CI.** The x64 installer already runs on
+Windows-on-ARM under emulation (`architecture.md` §2.13), so this is about
+running natively, not about running at all.
+
+- `media_kit_libs_windows_video` 1.0.11 (pinned exactly, `CLAUDE.md`) hard-codes
+  `mpv-dev-x86_64-20230924-git-652a1dd.7z` in its `windows/CMakeLists.txt`. An
+  arm64 libmpv means a different build with a different FFmpeg, so invariant 8
+  applies in full — scan *that* binary's string table, do not probe it — and the
+  F13 seek freeze the pin exists for has to be re-measured.
+- `app/windows/libass_bundle` is MSYS2 MINGW64 (x86_64) DLLs
+  (`THIRD_PARTY_LICENSES`); arm64 needs the CLANGARM64 equivalents.
+- The ANGLE archive the same plugin downloads has not been checked for arm64.
+- `sidecar` compiles with `bun build --compile`; whether the pinned Bun (1.1.42)
+  can target Windows arm64 has not been checked, and a newer Bun means
+  re-measuring the sidecar.
+- Hosted Windows arm64 runners may be public-repo only or absent from the plan;
+  check before writing the job.
+
+**Done when:** `Rill-Setup-arm64.exe` is built by the release workflow, starts on
+a real arm64 machine, and plays a video.
+
+### 47. macOS port
+
+Not started; there is no `app/macos/`. GitHub-hosted macOS runners can build it
+(Flutter emits a universal arm64 + x86_64 `.app` in one build, and Bun
+cross-compiles the sidecar for both darwin targets, to be joined with `lipo`), so
+CI is not the obstacle. The port is. It is roughly:
+
+- `media_kit_libs_macos_video` is a different libmpv from the Windows one, so
+  every finding measured against the Windows build (F13, F19, the invariant 8
+  scans, the audio-only teardown costs in `CLAUDE.md`) is unmeasured there.
+- Windows-only pieces need a counterpart or a guard: the SMTC / taskbar
+  controllers, `log_capture.cpp`, the libass DLL search (`dll_search.dart`),
+  `bitsdojo_window` chrome (`window_chrome.dart`) and Ctrl-vs-Cmd shortcuts.
+- `rill.ps1` and `setup.bat` are Windows-only.
+- Without an Apple Developer account there is no notarisation, so first launch
+  needs the "Open Anyway" bypass. The in-app updater has to decide how it replaces
+  a `.app`.
+- The author has an Intel Mac to test on; arm64 can only be tested in CI or on
+  someone else's machine.
+
+### 48. Authenticode-sign the installer
+
+The installer is unsigned, so SmartScreen says "unknown publisher" on each fresh
+download. The update manifest is signed separately and is what protects
+*updates* (`architecture.md` §2.13); this is only about the first install.
+Options are Azure Trusted Signing (about $10 a month; check eligibility for an
+individual in the EU) or a purchased certificate. Reputation still has to build
+up per certificate, so a signed installer can warn for a while regardless.
+
+**Done when:** the workflow signs `Rill-Setup-x64.exe` before it is hashed into
+`update.json`. Signing after hashing invalidates the manifest.
+
+### 49. Ship yt-dlp, or say it is missing
+
+The installer does not bundle `yt-dlp`, and neither did `rill zip`. The sidecar
+resolves it from `PATH` or `YT_DLP_PATH` (`capabilities.ts`), so on a machine
+without it the ladder's second tier is simply absent and playback falls to
+`ANDROID`'s 360p. That is invisible to the user. Either bundle a pinned
+`yt-dlp.exe` (it goes stale quickly, so it would want its own refresh) or make the
+absence visible in settings.
+
+### 50. `sidecar/bun.lock` cannot be read by the Bun the sidecar is built with
+
+**Measured 2026-09-26.** `sidecar/bun.lock` is `lockfileVersion 1` with a
+`configVersion` (it has been since the initial commit), a format Bun 1.1.42 rejects
+with `InvalidLockfileVersion`. 1.1.42 is what `rill build` uses on this machine and
+what both `sidecar.exe` copies embed. So a plain `bun install` here ignores the
+lockfile and re-resolves the `package.json` ranges, and `bun install
+--frozen-lockfile` fails outright. The installed `node_modules` happens to match the
+lockfile's direct dependencies exactly (youtubei.js 18.0.0, typescript 5.9.3, …), so
+the lockfile is the record of what was installed; nothing here says which Bun wrote
+it.
+
+**Why it matters.** youtubei.js is the session, auth and decipher layer (invariants
+1 and 2), so a range that floats to a newer patch is a change to the part of the
+sidecar that breaks silently. The release workflow works around it by installing
+with a current Bun and building with 1.1.42 (`architecture.md` §2.13), which is
+correct but is a workaround for a mismatch that should not exist.
+
+**Done when:** one Bun both reads the lockfile and builds the sidecar — either the
+pinned Bun moves (and the sidecar is re-measured: the ~6.3 s `bun run` cold start,
+the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
+1.1.42 reads — and the workflow's two-step Bun install collapses into one.
+
+### 51. Two Windows plugins do not build on Visual Studio 2026
+
+**Measured 2026-09-26, first release-workflow build on `windows-latest`.** MSVC
+14.51 (Visual Studio 2026, `Microsoft Visual Studio\18`) fails `flutter build windows`
+with `C2338 … STL1011`: its STL now rejects `<experimental/coroutine>` and the
+`/await` option unless `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` is
+defined. Two plugins compile with `/await`: `flutter_inappwebview_windows` (23
+errors) and `flutter_media_session` (2). Visual Studio 2022 still accepts it, which is
+what this machine builds with (`Visual Studio 17 2022`), so nothing is broken today.
+
+The release workflow is pinned to `windows-2022` for that reason. It is a stay of
+execution, not a fix: a machine that only has Visual Studio 2026 cannot build the
+app, and so will the runners once `windows-2022` is retired. `CL=/D_SILENCE_…` in
+the environment would let it compile as an interim, but the plugins still depend on
+a feature Microsoft has announced it will remove.
+
+**Done when:** the app builds on a Visual Studio 2026 toolchain without a
+suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
+replacing them. `flutter_media_session` should be checked first, in case it is
+ours.
 
 ---
 
