@@ -700,19 +700,6 @@ suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
 replacing them. `flutter_media_session` should be checked first, in case it is
 ours.
 
-### 53. `make-manifest.ts` cannot sign a manifest for a local test feed
-
-It always writes `https://github.com/<repo>/releases/download/<tag>/<name>` as the
-asset URL, so a manifest pointing at `http://127.0.0.1:PORT/` — which the app
-accepts in a debug or profile build under `RILL_UPDATE_ASSET_PREFIX`
-(`architecture.md` §2.14) — cannot be produced by it, even with
-`--public-key`. The updater's end-to-end check on 2026-09-27 signed its local
-manifest with a scratch script doing the same `sign(null, body, key)` instead.
-A test-only `--asset-base-url` would make that reproducible from the repo.
-
-**Done when:** the local end-to-end walk-through needs no script outside the
-repository.
-
 ---
 
 ## Triggered — read when one of these fires
