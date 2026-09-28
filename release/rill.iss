@@ -55,7 +55,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: unchecked
 ; fail on a network request. The app reads the value once, to seed its own
 ; stored choice on first launch; after that the in-app choice is the source
 ; of truth and this key is never read again (architecture.md "yt-dlp").
-Name: "ytdlp"; Description: "Download yt-dlp (improves playback of some videos; downloaded from github.com/yt-dlp)"
+Name: "ytdlp"; Description: "Download yt-dlp (required for age-restricted videos and some music-label content to play; without it, those videos won't play at all)"
 
 [InstallDelete]
 ; The app owns these directories outright — user data lives under %LOCALAPPDATA%\rill

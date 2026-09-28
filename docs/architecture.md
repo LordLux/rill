@@ -1823,7 +1823,13 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
   copying (the app owns those; user data does not live in `{app}`), so a file
   dropped from one build cannot linger in every install after it. The VC++
   runtime DLLs go in app-local — a machine without them fails before any of our
-  code runs.
+  code runs. **`rill.ps1` stages the same three DLLs a local `build`/`run`/`zip`
+  needs, added 2026-09-28** — it did not before, so a locally built installer
+  started with `rill exe: MSVCP140.dll was not found` on any machine that
+  doesn't already have the redistributable for some other reason, which is
+  every dev machine and no genuinely clean one. Found by installing a locally
+  built `Rill-Setup-x64.exe` in a fresh Windows Sandbox — the one environment
+  a normal dev loop never exercises, and exactly the one this gap needed.
 - **x64 only.** x86 is not buildable (Flutter has no Windows x86 target), and
   arm64 is blocked by the native stack, not by CI (`todo.md` 46). The x64 build
   runs on Windows-on-ARM under emulation.
@@ -2061,19 +2067,33 @@ the feed it reads is §2.13's.
   doing — an open playback session included — the same way an unrelated crash
   restart already does; a download is a deliberate, infrequent user or
   once-a-week action, not a hidden cost of ordinary use.
-- **The Problems row and page (item 4) are a list of one today, on purpose.**
-  `YtDlpStateExt.hasProblem` is `location == missing && (choice == null ||
-  choice == download)` — nothing to fix if PATH or an app-managed copy already
-  works, and nothing to nag about if the user said no. The row is hidden
-  entirely rather than showing a count, and the page currently renders exactly
-  one card; a second problem type would add a second `hasProblem`-shaped
-  check and a second card, not a new abstraction — no list/registry of
-  "problem" objects exists because there is only ever one kind to plug in by
-  hand today. The avatar's bottom-right dot now means "needs attention" for
-  either an expired session or an unresolved yt-dlp problem, and the button's
-  tooltip says so explicitly when signed in (`"<name> — needs attention"`) or
-  signed out and not degraded (`"Needs attention. Log in"`) — the degraded
-  message itself is unchanged, since it already names a concrete reason.
+- **The yt-dlp row is always there while it is missing, not hidden behind a
+  "Problems" framing — revised 2026-09-28 after live testing.** The first
+  version hid a "Problems" row entirely unless `location == missing &&
+  (choice == null || choice == download)`, and showed a red warning for that
+  whole range once it did. Installed in a fresh Windows Sandbox and watched
+  live, that read as "OMG THERE'S A PROBLEM" for the ordinary, harmless case —
+  most videos play identically with or without yt-dlp, so its ordinary absence
+  is not urgent. `YtDlpRowSeverity` (`ytdlp_state.dart`) now has three levels:
+  `none` (PATH or an app-managed copy resolves it — say nothing), `info`
+  (missing, but nothing has actively gone wrong — declined, undecided, or
+  downloading — a calm `tertiary`-coloured row), and `problem` (an attempted
+  download that failed — `error`-coloured, and the only case that lights the
+  avatar's dot). `_YtDlpMenuItem` is always present at `info` or `problem`,
+  positioned below the update row in both root pages (it was above it, and
+  first in the signed-in menu, before this revision) — the same
+  "always-there, label and colour follow the state" shape `_UpdateMenuItem`
+  already uses, rather than a row that is either invisible or alarming. A
+  second future check would still add its own severity-shaped condition and
+  its own card, not a new abstraction — there is still only one kind to plug
+  in by hand. The avatar's dot and the button's tooltip
+  (`"<name> — needs attention"` / `"Needs attention. Log in"`) now key off
+  `severity == problem` specifically, not "yt-dlp is merely absent"; the
+  degraded-session tooltip is unchanged, since it already names a concrete
+  reason. Declining no longer hides the row (it only stops the automatic
+  background download) — the card just drops its now-redundant "I don't want
+  it" button once `choice == declined`, since offering to decline again would
+  be a no-op dressed up as a button.
 
 ## 3. Phasing
 

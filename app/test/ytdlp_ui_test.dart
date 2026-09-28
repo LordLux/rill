@@ -1,7 +1,11 @@
 /// The yt-dlp surfaces — docs/todo.md 49. What a person sees: the avatar dot,
-/// the Problems row and page, and the Updates page's info row. The
-/// controller's behaviour is asserted in `ytdlp_controller_test.dart`;
+/// the always-present yt-dlp row and its page, and the Updates page's info
+/// row. The controller's behaviour is asserted in `ytdlp_controller_test.dart`;
 /// nothing here touches the network or the real filesystem.
+///
+/// Severity (`YtDlpRowSeverity`) was revised 2026-09-28 after live testing:
+/// the row is now always shown while yt-dlp is missing, in a calm colour —
+/// only an actual failed download turns it red and raises the avatar's dot.
 library;
 
 import 'package:flutter/material.dart';
@@ -92,40 +96,47 @@ Future<void> openMenu(WidgetTester tester, {String tooltip = 'Ada Lovelace'}) as
 }
 
 void main() {
-  testWidgets('no problem: no dot, no row, in either root page', (tester) async {
-    await pump(tester, missingDeclined);
+  testWidgets('resolved (onPath): no row, no dot, in either root page', (tester) async {
+    await pump(tester, onPath);
     expect(find.byKey(const ValueKey('update-dot')), findsNothing);
     await openMenu(tester);
-    expect(find.text('Problems'), findsNothing);
+    expect(find.text('yt-dlp not installed'), findsNothing);
   });
 
-  testWidgets('a problem puts the dot on the avatar and a row in the signed-in menu', (tester) async {
+  testWidgets('missing and undecided: the row shows, calmly, with no attention dot', (tester) async {
     await pump(tester, missingNoChoice);
     expect(find.byKey(const ValueKey('update-dot')), findsNothing, reason: 'that key is the update dot, not this one');
-    // The bottom-right attention dot has no key of its own; found by its
-    // position instead — simplest is just to open the menu and check the row.
-    // The tooltip itself changes too (checked separately below).
-    await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
-    expect(find.text('Problems'), findsOneWidget);
+    expect(find.byTooltip('Ada Lovelace'), findsOneWidget, reason: 'an ordinary absence does not need attention');
+    await openMenu(tester);
+    expect(find.text('yt-dlp not installed'), findsOneWidget);
   });
 
-  testWidgets('the tooltip says "needs attention" when signed in with a problem', (tester) async {
-    await pump(tester, missingNoChoice);
+  testWidgets('declined: the row still shows (a way back), still no attention dot', (tester) async {
+    await pump(tester, missingDeclined);
+    expect(find.byTooltip('Ada Lovelace'), findsOneWidget);
+    await openMenu(tester);
+    expect(find.text('yt-dlp not installed'), findsOneWidget);
+  });
+
+  testWidgets('a failed download puts the dot on the avatar and turns the row red', (tester) async {
+    await pump(tester, const YtDlpState(phase: YtDlpPhase.error(message: 'HTTP 503'), choice: YtDlpChoice.download));
     expect(find.byTooltip('Ada Lovelace — needs attention'), findsOneWidget);
+    await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
+    expect(find.text('yt-dlp download failed'), findsOneWidget);
   });
 
-  testWidgets('signed out with a problem: the row is in the signed-out root page too', (tester) async {
+  testWidgets('signed out, missing and undecided: the row is in the signed-out root page too', (tester) async {
     await pump(tester, missingNoChoice, auth: const AuthState(status: AuthStatus.anonymous));
-    expect(find.byTooltip('Needs attention. Log in'), findsOneWidget);
-    await openMenu(tester, tooltip: 'Needs attention. Log in');
-    expect(find.text('Problems'), findsOneWidget);
+    expect(find.byTooltip('Log in'), findsOneWidget, reason: 'no dot-worthy problem, so the plain tooltip');
+    await openMenu(tester, tooltip: 'Log in');
+    expect(find.text('yt-dlp not installed'), findsOneWidget);
     expect(find.text('Sign in'), findsOneWidget, reason: 'still the first action');
   });
 
-  testWidgets('the Problems page explains yt-dlp and offers both actions', (tester) async {
+  testWidgets('the yt-dlp page explains it and offers both actions when undecided', (tester) async {
     await pump(tester, missingNoChoice);
-    await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
-    await tester.tap(find.text('Problems'));
+    await openMenu(tester);
+    await tester.tap(find.text('yt-dlp not installed'));
     await tester.pumpAndSettle();
 
     expect(find.text('yt-dlp is not installed'), findsOneWidget);
@@ -133,37 +144,49 @@ void main() {
     expect(find.widgetWithText(TextButton, "I don't want it"), findsOneWidget);
   });
 
+  testWidgets('already declined: no "I don\'t want it" button, only Download', (tester) async {
+    await pump(tester, missingDeclined);
+    await openMenu(tester);
+    await tester.tap(find.text('yt-dlp not installed'));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(FilledButton, 'Download yt-dlp'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, "I don't want it"), findsNothing);
+  });
+
   testWidgets('Download yt-dlp calls the controller', (tester) async {
     final controller = await pump(tester, missingNoChoice);
-    await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
-    await tester.tap(find.text('Problems'));
+    await openMenu(tester);
+    await tester.tap(find.text('yt-dlp not installed'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Download yt-dlp'));
     await tester.pump();
     expect(controller.downloadCalls, 1);
   });
 
-  testWidgets("declining clears the row and the dot", (tester) async {
+  testWidgets("declining keeps the row (now without the dot) rather than clearing it", (tester) async {
     final controller = await pump(tester, missingNoChoice);
-    await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
-    await tester.tap(find.text('Problems'));
+    await openMenu(tester);
+    await tester.tap(find.text('yt-dlp not installed'));
     await tester.pumpAndSettle();
     await tester.tap(find.text("I don't want it"));
     await tester.pumpAndSettle();
 
     expect(controller.declineCalls, 1);
-    expect(find.text('No problems right now.'), findsOneWidget);
-    await tester.tap(find.byIcon(Icons.chevron_left));
-    await tester.pumpAndSettle();
-    expect(find.text('Problems'), findsNothing);
+    // FixedYtDlp.decline() only sets choice; severity stays info (still
+    // missing), so the same card is still here — the row was never hidden.
+    expect(find.text('yt-dlp is not installed'), findsOneWidget);
   });
 
   testWidgets('a downloading phase shows progress and disables the buttons', (tester) async {
     await pump(tester, const YtDlpState(phase: YtDlpPhase.downloading(received: 2048, total: 0)));
-    await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
-    await tester.tap(find.text('Problems'));
-    // Not pumpAndSettle: the card's own indeterminate LinearProgressIndicator
-    // never settles. A couple of frames past the menu's 180 ms morph is enough.
+    // Not openMenu/pumpAndSettle anywhere here: the row's own spinner is
+    // already an indeterminate CircularProgressIndicator, so pumpAndSettle
+    // never settles even just to open the root menu.
+    await tester.tap(find.byTooltip('Ada Lovelace'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('Downloading yt-dlp…'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
@@ -175,7 +198,7 @@ void main() {
   testWidgets('an error phase shows the message and "Try again"', (tester) async {
     await pump(tester, const YtDlpState(phase: YtDlpPhase.error(message: 'HTTP 503'), choice: YtDlpChoice.download));
     await openMenu(tester, tooltip: 'Ada Lovelace — needs attention');
-    await tester.tap(find.text('Problems'));
+    await tester.tap(find.text('yt-dlp download failed'));
     await tester.pumpAndSettle();
 
     expect(find.text('HTTP 503'), findsOneWidget);
