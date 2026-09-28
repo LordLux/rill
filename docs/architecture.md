@@ -1823,7 +1823,13 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
   copying (the app owns those; user data does not live in `{app}`), so a file
   dropped from one build cannot linger in every install after it. The VC++
   runtime DLLs go in app-local — a machine without them fails before any of our
-  code runs.
+  code runs. **`rill.ps1` stages the same three DLLs a local `build`/`run`/`zip`
+  needs, added 2026-09-28** — it did not before, so a locally built installer
+  started with `rill exe: MSVCP140.dll was not found` on any machine that
+  doesn't already have the redistributable for some other reason, which is
+  every dev machine and no genuinely clean one. Found by installing a locally
+  built `Rill-Setup-x64.exe` in a fresh Windows Sandbox — the one environment
+  a normal dev loop never exercises, and exactly the one this gap needed.
 - **x64 only.** x86 is not buildable (Flutter has no Windows x86 target), and
   arm64 is blocked by the native stack, not by CI (`todo.md` 46). The x64 build
   runs on Windows-on-ARM under emulation.
@@ -1984,7 +1990,110 @@ the feed it reads is §2.13's.
 - **The first updater-enabled release has to be installed by hand.** Every
   release before it has no updater, and no way to know its own version.
 
----
+### 2.15 yt-dlp: consent, download, and staying current (decided 2026-09-28)
+
+`app/lib/data/ytdlp/`, `app/lib/domain/ytdlp/ytdlp_state.dart`,
+`app/lib/ui/ytdlp_controller.dart`; the installer side is `release/rill.iss`'s
+`ytdlp` task and `[Registry]` entry (docs/todo.md 49).
+
+- **The registry is read exactly once; after that the in-app choice is the only
+  truth.** The installer's `[Tasks]` checkbox (checked by default) writes
+  `HKCU\Software\Rill\YtDlpConsent` = `"yes"`/`"no"`, removed on uninstall
+  (`Flags: uninsdeletevalue`). `YtDlpController` reads it only when
+  `shared_preferences`' own `ytdlp_choice` is unset, seeds that preference, and
+  never reads the registry again. A silent update re-running the installer can
+  rewrite the registry value back to the checkbox's current default regardless
+  of what the user chose originally — Inno applies a task's default state on
+  every silent run unless `/TASKS=` is passed, which the updater does not do —
+  but this is harmless by construction: nothing reads the key a second time.
+- **PATH always wins, and is checked the same way the sidecar checks it.**
+  `ytDlpOnPath` walks `PATH` for `yt-dlp.exe`/`.bat`/`.cmd`/bare `yt-dlp`, the
+  same names `Bun.which` resolves in `sidecar/src/capabilities.ts`. Only when
+  nothing is found there does the app look at its own copy
+  (`%LOCALAPPDATA%\rill\bin\yt-dlp.exe`) and only then does it set
+  `YT_DLP_PATH` for the sidecar — so a user's own yt-dlp is never shadowed,
+  touched, or upgraded by this app, and the resolution both main.dart (before
+  the first spawn) and `YtDlpController` (for its own state) use is one
+  function (`resolveYtDlp`), not two copies that could drift.
+- **Verification is SHA-256 against yt-dlp's own `SHA2-256SUMS`, plus a PGP
+  signature check on that file — both checked against real captured yt-dlp
+  release data in `app/test/ytdlp_fixtures/`, not synthetic stand-ins.**
+  `SHA2-256SUMS.sig` is a **raw binary** OpenPGP detached signature (the
+  `gpg --verify` kind), not the ASCII-armored `--clearsign` kind — confirmed by
+  inspecting the actual bytes (`0x89 0x02…`, an old-format signature packet)
+  before writing the verifier, not assumed. `dart_pg` (pure Dart, same
+  reasoning as the updater's `DartEd25519`: no platform plugin between the app
+  and the bytes) verifies it, but `SignaturePacketInterface` — the type its own
+  `Signature.verify` takes — is never exported from `package:dart_pg/dart_pg.dart`,
+  only the concrete `SignaturePacket` is (via `packet/base_packet.dart`'s
+  `export 'signature.dart'`). `ytdlp_verifier.dart` therefore decodes the
+  packet list and calls the packet's own `verify` directly rather than going
+  through the unreachable message-level wrapper. yt-dlp's public key
+  (`github.com/yt-dlp/yt-dlp/raw/master/public.key`) is vendored as a constant
+  rather than fetched at runtime — fetching a key over the same channel it is
+  meant to authenticate would defeat the point, the same reasoning as embedding
+  the updater's own Ed25519 key rather than serving it from the feed.
+- **The weekly refresh compares hashes, not versions.** The task that named
+  this feature suggested comparing `yt-dlp --version` against "the latest
+  release tag"; `SHA2-256SUMS` carries no version field at all, so getting a
+  tag would mean a second network round trip (resolving the `releases/latest`
+  redirect) purely to decide whether the first one already answered the
+  question. Comparing the installed file's own SHA-256 against the freshly
+  verified expected hash answers exactly the same question — is the installed
+  copy current — using data already fetched for verification anyway, with
+  nothing to parse out of a URL. `YtDlpDownloader.fetchVerifiedHash` costs
+  under a kilobyte both ways and downloads no binary; the 18 MB fetch only
+  happens on an actual mismatch. `yt-dlp --version` is still run, once, right
+  after a fresh download installs — its output is what the Problems and
+  Updates pages display, and this app has no other way to learn it (the
+  release lists no version anywhere accessible without downloading the file).
+- **A stale or wrong app-managed file self-heals the same way a missing one
+  does.** `needsMaintenance` (whether to schedule the weekly check at all) is
+  `location == appManaged` OR `(location == missing && choice == download)` —
+  unconditional on the *choice* once a copy already exists. Measured directly
+  2026-09-28: a debug run found a yt-dlp.exe already present with a hash the
+  live `SHA2-256SUMS` no longer matched, and the scheduled check replaced it
+  with the current verified release and restarted the sidecar, with no
+  registry value and no `ytdlp_choice` ever set — exactly the behaviour this
+  rule describes, discovered by the machine's own state rather than staged.
+- **The sidecar is restarted wholesale, not re-probed.** `capabilities.ts`'s
+  own doc says it plainly: "probed once, said out loud" — there is no RPC to
+  ask it to re-read `YT_DLP_PATH` mid-session, and adding one would be new
+  sidecar surface for a rare, user-initiated event. `RpcClient.restart()`
+  reuses `killForTestAndWait`'s teardown (despite the name: it is exactly the
+  signal-then-wait-for-exit primitive this needs, for the same Windows
+  pipe-teardown race documented on `_spawn`) and calls `start()` again with
+  `extraEnvironment` already updated. This interrupts whatever the sidecar was
+  doing — an open playback session included — the same way an unrelated crash
+  restart already does; a download is a deliberate, infrequent user or
+  once-a-week action, not a hidden cost of ordinary use.
+- **The yt-dlp row is always there while it is missing, not hidden behind a
+  "Problems" framing — revised 2026-09-28 after live testing.** The first
+  version hid a "Problems" row entirely unless `location == missing &&
+  (choice == null || choice == download)`, and showed a red warning for that
+  whole range once it did. Installed in a fresh Windows Sandbox and watched
+  live, that read as "OMG THERE'S A PROBLEM" for the ordinary, harmless case —
+  most videos play identically with or without yt-dlp, so its ordinary absence
+  is not urgent. `YtDlpRowSeverity` (`ytdlp_state.dart`) now has three levels:
+  `none` (PATH or an app-managed copy resolves it — say nothing), `info`
+  (missing, but nothing has actively gone wrong — declined, undecided, or
+  downloading — a calm `tertiary`-coloured row), and `problem` (an attempted
+  download that failed — `error`-coloured, and the only case that lights the
+  avatar's dot). `_YtDlpMenuItem` is always present at `info` or `problem`,
+  positioned below the update row in both root pages (it was above it, and
+  first in the signed-in menu, before this revision) — the same
+  "always-there, label and colour follow the state" shape `_UpdateMenuItem`
+  already uses, rather than a row that is either invisible or alarming. A
+  second future check would still add its own severity-shaped condition and
+  its own card, not a new abstraction — there is still only one kind to plug
+  in by hand. The avatar's dot and the button's tooltip
+  (`"<name> — needs attention"` / `"Needs attention. Log in"`) now key off
+  `severity == problem` specifically, not "yt-dlp is merely absent"; the
+  degraded-session tooltip is unchanged, since it already names a concrete
+  reason. Declining no longer hides the row (it only stops the automatic
+  background download) — the card just drops its now-redundant "I don't want
+  it" button once `choice == declined`, since offering to decline again would
+  be a no-op dressed up as a button.
 
 ## 3. Phasing
 
@@ -2096,3 +2205,19 @@ sidecar included, and the job exists to take it down. A separate https check
 beside the prefix: two rules that must agree are one rule that can drift.
 *Rejected: silent auto-install, modal prompts, runtime-configurable trust,
 re-encoded verification, detached `Process.start`, silent breakaway.*
+
+**A11. yt-dlp: hash comparison over version/tag chasing, the app as the only
+writer of its own copy.** Comparing the installed file's SHA-256 against
+`SHA2-256SUMS`'s answers "does this need a refresh" with data already fetched
+for verification; resolving `releases/latest`'s redirect to read a tag out of
+the URL would be a second round trip for a fact the first one already implies.
+*Rejected: parsing the release tag to decide whether to refresh.* PGP
+verification runs through `dart_pg`, a pure-Dart OpenPGP implementation,
+matching the updater's own pure-Dart Ed25519 choice — no platform plugin
+between the app and the bytes it is checking. *Rejected: an FFI-based OpenPGP
+library, or shelling out to `gpg` (which the target machine may not have).*
+The installer is the only writer of `YtDlpConsent`; the app never writes it
+back, even to reconcile a value a silent update's task-default reset —
+`ytdlp_choice` in `shared_preferences` is the only state that matters once it
+exists, and giving the registry a second writer would make two things capable
+of being "the" answer. *Rejected: the app re-syncing the registry key.*

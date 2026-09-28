@@ -29,6 +29,13 @@ class RpcClient {
   /// Override this in tests to run a fake sidecar script.
   List<String>? mockCommand;
 
+  /// Merged on top of the inherited environment at every spawn — today just
+  /// `YT_DLP_PATH`, set before the first `start()` (main.dart) once the app
+  /// has decided whether it manages its own copy (docs/todo.md 49). Changing
+  /// this after the sidecar is already running does nothing on its own; call
+  /// [restart].
+  Map<String, String> extraEnvironment = {};
+
   Process? _process;
   int _nextId = 1;
   final Map<int, Completer<dynamic>> _pending = {};
@@ -247,6 +254,7 @@ class RpcClient {
       try {
         return await Process.start(executable, command, workingDirectory: root, environment: {
           'FLUTTER_PARENT_PID': pid.toString(),
+          ...extraEnvironment,
         });
       } on Object {
         if (attempt >= 4) rethrow;
@@ -534,6 +542,19 @@ class RpcClient {
       // A process that will not report its exit is not worth failing a suite
       // over; the caller's next `start()` will say so far more clearly.
     }
+  }
+
+  /// Restarts the sidecar so a changed [extraEnvironment] takes effect —
+  /// `YT_DLP_PATH` is read once at the sidecar's own startup (`capabilities.ts`
+  /// says so directly: "probed once, said out loud"), so installing yt-dlp
+  /// while the app is running needs a fresh process, not a new call. Reuses
+  /// [killForTestAndWait]'s teardown despite the name: it is exactly the
+  /// primitive this needs — signal, then actually wait for the old process to
+  /// exit before starting the next one, for the same Windows pipe-teardown
+  /// race documented on `_spawn`.
+  Future<void> restart() async {
+    await killForTestAndWait();
+    await start();
   }
 
   void killForTest() {

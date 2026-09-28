@@ -37,6 +37,9 @@ function Show-Help {
     Write-Host '  - The script copies sidecar/dist/sidecar.exe into the release folder. The app prefers'
     Write-Host '    the copy beside its own executable, and ''flutter build windows'' does not refresh'
     Write-Host '    an already-populated bundle. This script prevents running stale sidecar code.'
+    Write-Host '  - It also copies the VC++ runtime (MSVCP140/VCRUNTIME140/VCRUNTIME140_1) from'
+    Write-Host '    System32 into the release folder, the same three DLLs the release workflow stages,'
+    Write-Host '    so a build/run/zip output still starts on a machine without them already installed.'
     Write-Host '  - It requires fvm (Flutter Version Management) and stops without it. Falling back to'
     Write-Host '    the global Flutter re-resolves app/pubspec.lock and breaks the next fvm command.'
     Write-Host '  - Loads YT_COOKIE from .env. A checkout can come up signed in with the variable unset'
@@ -222,6 +225,22 @@ try {
         New-Item -ItemType Directory -Force -Path "$ReleaseDir\sidecar\dist" | Out-Null
         Copy-Item -Force 'sidecar\dist\sidecar.exe' "$ReleaseDir\sidecar\dist\sidecar.exe"
         Write-Host "  ok: $ReleaseDir\sidecar\dist\sidecar.exe"
+
+        # App-local copies of the VC++ runtime, the same three DLLs and the same
+        # source .github/workflows/release.yml stages before packaging (its
+        # comment: "these three DLLs are what Microsoft's redistribution terms
+        # allow"). Without them rill.exe fails before any of our code runs —
+        # "MSVCP140.dll was not found" — on any machine that doesn't already
+        # have the redistributable installed for some other reason, which is
+        # every dev machine that has Visual Studio but no genuinely clean one.
+        # Measured 2026-09-28: a `rill build` output installed into a fresh
+        # Windows Sandbox hit exactly this before this step existed.
+        Write-Host 'Bundling the VC++ runtime into the release folder...'
+        $system32 = Join-Path $env:SystemRoot 'System32'
+        foreach ($dll in @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
+            Copy-Item -Force (Join-Path $system32 $dll) "$ReleaseDir\$dll"
+            Write-Host "  ok: $ReleaseDir\$dll"
+        }
 
         if ($Action -eq 'zip') {
             Write-Host 'Zipping the release folder...'
