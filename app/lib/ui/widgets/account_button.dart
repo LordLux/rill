@@ -7,9 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/update/update_config.dart';
 import '../../domain/update/update_state.dart';
+import '../../domain/ytdlp/ytdlp_state.dart';
 import '../auth_controller.dart';
 import '../pages/login_page.dart';
 import '../update_controller.dart';
+import '../ytdlp_controller.dart';
 import 'titlebar_button.dart';
 
 /// The titlebar's account surface.
@@ -100,6 +102,12 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     final auth = ref.watch(authProvider);
     final scheme = Theme.of(context).colorScheme;
     final updateNotice = ref.watch(updateControllerProvider.select((s) => s.showsNotice));
+    // The bottom-right dot means "needs attention" for either reason
+    // (todo.md 49): an expired session, or a yt-dlp download that failed.
+    // yt-dlp's ordinary absence (declined, undecided, still downloading) is
+    // not urgent enough to earn the dot — only YtDlpRowSeverity.problem is.
+    final needsAttention =
+        auth.status == AuthStatus.degraded || ref.watch(ytDlpControllerProvider.select((s) => s.severity == YtDlpRowSeverity.problem));
 
     final Widget avatar = Stack(
       clipBehavior: Clip.none,
@@ -133,7 +141,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
               ),
             ),
           ),
-        if (auth.status == AuthStatus.degraded)
+        if (needsAttention)
           Positioned(
             right: -2,
             bottom: -2,
@@ -165,7 +173,11 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     return TapRegion(
       groupId: 'account_menu',
       child: TitleBarWidgetButton(
-        tooltip: auth.isSignedIn ? auth.displayName : (auth.status == AuthStatus.degraded ? 'Your session expired. Please sign in again' : 'Log in'),
+        tooltip: auth.isSignedIn
+            ? (needsAttention ? '${auth.displayName} — needs attention' : auth.displayName)
+            : (auth.status == AuthStatus.degraded
+                  ? 'Your session expired. Please sign in again'
+                  : (needsAttention ? 'Needs attention. Log in' : 'Log in')),
         // Signed out too: the menu is where updates live, so it has to open
         // for everyone; signed out, its first action is Sign in (§2.14).
         onTap: auth.isBusy ? null : () => _openMenu(auth),
@@ -180,7 +192,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Which page the overlay is currently showing.
-enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates }
+enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates, ytdlp }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account menu overlay — no ModalBarrier, pointer events pass through
@@ -408,6 +420,10 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
       ),
       children: [_UpdatesPanel(onDone: _back)],
     ),
+    _AccountMenuPage.ytdlp => _AccountMenuBody(
+      header: _AccountMenuPageHeader(title: 'yt-dlp', onBack: _back),
+      children: const [_YtDlpPanel()],
+    ),
   };
 }
 
@@ -467,6 +483,7 @@ class _SignedOutRootPage extends StatelessWidget {
       ),
       children: [
         _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
+        _YtDlpMenuItem(onOpen: () => onGo(_AccountMenuPage.ytdlp)),
         const SizedBox(height: 4),
       ],
     );
@@ -580,6 +597,7 @@ class _AccountRootPage extends StatelessWidget {
         const _AccountMenuDivider(),
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () {}),
         _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
+        _YtDlpMenuItem(onOpen: () => onGo(_AccountMenuPage.ytdlp)),
         // ── Help ───────────────────────────────────────────────────────────
         const _AccountMenuDivider(),
         _AccountMenuItem(icon: Icons.help_outline, label: 'Help', onTap: () {}),
@@ -981,6 +999,13 @@ class _UpdatesPanelState extends ConsumerState<_UpdatesPanel> {
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: _UpdateInfoRow(label: 'Last checked', value: lastChecked == null ? 'Never' : _ago(lastChecked)),
               ),
+              // A way back after declining (todo.md 49) — this row shows
+              // whatever state yt-dlp is actually in, with a Download action
+              // only when there is something to download.
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: _YtDlpInfoRow(),
+              ),
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 4),
@@ -1235,6 +1260,242 @@ class _UpdateInfoRow extends StatelessWidget {
           Text(value, style: style),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// yt-dlp (todo.md 49)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The root pages' yt-dlp row — always there while [YtDlpRowSeverity] is not
+/// [YtDlpRowSeverity.none], the same "always present, label and colour follow
+/// the state" shape as [_UpdateMenuItem]. yt-dlp is optional, so its ordinary
+/// absence (declined, undecided, or a download under way) reads in a calm
+/// tertiary colour; only [YtDlpRowSeverity.problem] — an attempted download
+/// that failed — turns it the same red as an actual error (revised 2026-09-28
+/// after live testing: the first version called every missing case "a
+/// problem" and showed a red warning for all of them, which overstated an
+/// absence most videos never notice).
+class _YtDlpMenuItem extends ConsumerWidget {
+  const _YtDlpMenuItem({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(ytDlpControllerProvider);
+    if (state.severity == YtDlpRowSeverity.none) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    final color = state.severity == YtDlpRowSeverity.problem ? scheme.error : scheme.tertiary;
+    final spinner = SizedBox(
+      width: 20,
+      height: 20,
+      child: Padding(padding: const EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 2, color: color)),
+    );
+
+    return switch (state.phase) {
+      YtDlpChecking() => _AccountMenuItem(icon: Icons.warning_amber_rounded, label: 'Checking yt-dlp…', leading: spinner, color: color, onTap: null),
+      YtDlpDownloading() => _AccountMenuItem(icon: Icons.warning_amber_rounded, label: 'Downloading yt-dlp…', leading: spinner, color: color, onTap: onOpen),
+      YtDlpPhaseError() => _AccountMenuItem(icon: Icons.warning_amber_rounded, label: 'yt-dlp download failed', color: color, onTap: onOpen),
+      _ => _AccountMenuItem(icon: Icons.warning_amber_rounded, label: 'yt-dlp not installed', color: color, onTap: onOpen),
+    };
+  }
+}
+
+/// The yt-dlp page's body. Reachable only from a row that is itself hidden at
+/// [YtDlpRowSeverity.none], but the state can still resolve itself (a
+/// background download finishing) while the page is open, so this checks
+/// fresh rather than assuming the row's condition still holds. Resolving
+/// while the page is open is not a rare edge case — it is how a successful
+/// download is actually seen: the person is watching this exact page when it
+/// finishes, so the "all done" card is the real completion state, not a
+/// throwaway fallback (fixed 2026-09-28 after live testing turned up a bare
+/// "yt-dlp is available." line here).
+class _YtDlpPanel extends ConsumerWidget {
+  const _YtDlpPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(ytDlpControllerProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+      child: state.severity == YtDlpRowSeverity.none ? _YtDlpResolvedCard(state: state) : _YtDlpCard(state: state),
+    );
+  }
+}
+
+class _YtDlpResolvedCard extends StatelessWidget {
+  const _YtDlpResolvedCard({required this.state});
+
+  final YtDlpState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    final (String headline, String? detail) = switch (state.location) {
+      YtDlpLocation.appManaged => ('yt-dlp has been installed!', state.appManagedVersion != null ? 'Version ${state.appManagedVersion}' : null),
+      YtDlpLocation.onPath => ('yt-dlp is available', 'Found on PATH at ${state.onPathPath}'),
+      YtDlpLocation.missing => ('yt-dlp is available', null),
+    };
+
+    return Container(
+      key: const ValueKey('ytdlp-resolved-card'),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: const BorderRadius.all(Radius.circular(16))),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.check_circle, size: 20, color: scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(headline, style: textTheme.titleSmall?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700)),
+                if (detail != null) ...[
+                  const SizedBox(height: 4),
+                  Text(detail, style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _YtDlpCard extends ConsumerWidget {
+  const _YtDlpCard({required this.state});
+
+  final YtDlpState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(ytDlpControllerProvider.notifier);
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final phase = state.phase;
+    final downloading = phase is YtDlpDownloading;
+    final error = phase is YtDlpPhaseError ? phase.message : null;
+    final problem = state.severity == YtDlpRowSeverity.problem;
+
+    // A calm tertiary container for the ordinary "not installed yet" case, the
+    // same error container an actual failed download gets everywhere else.
+    final (Color background, Color foreground) = problem ? (scheme.errorContainer, scheme.onErrorContainer) : (scheme.tertiaryContainer, scheme.onTertiaryContainer);
+
+    return Container(
+      key: const ValueKey('ytdlp-card'),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(color: background, borderRadius: const BorderRadius.all(Radius.circular(16))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 20, color: foreground),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  problem ? 'yt-dlp download failed' : 'yt-dlp is not installed',
+                  style: textTheme.titleSmall?.copyWith(color: foreground, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'yt-dlp is required for age-restricted videos and some music-label content '
+            'to play. Without it, those specific videos will not play at all; every '
+            'other video is unaffected.',
+            style: textTheme.bodySmall?.copyWith(color: foreground.withValues(alpha: 0.85)),
+          ),
+          if (downloading) ...[
+            const SizedBox(height: 10),
+            LinearProgressIndicator(color: foreground),
+            const SizedBox(height: 6),
+            Text('Downloading…', style: textTheme.bodySmall?.copyWith(color: foreground)),
+          ] else if (error != null) ...[
+            const SizedBox(height: 8),
+            Text(error, style: textTheme.bodySmall?.copyWith(color: foreground)),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              FilledButton(
+                onPressed: downloading ? null : controller.download,
+                child: Text(error != null ? 'Try again' : 'Download yt-dlp'),
+              ),
+              // Already declined once: offering to decline again is a no-op
+              // dressed up as a button.
+              if (state.choice != YtDlpChoice.declined)
+                TextButton(
+                  onPressed: downloading ? null : controller.decline,
+                  child: const Text("I don't want it"),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The Updates page's info row for yt-dlp — "a way back after declining"
+/// (todo.md 49): whatever state it is actually in, with a Download action
+/// only when there is something to download.
+class _YtDlpInfoRow extends ConsumerWidget {
+  const _YtDlpInfoRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(ytDlpControllerProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall;
+
+    final value = switch (state.location) {
+      YtDlpLocation.appManaged => state.appManagedVersion ?? 'Installed',
+      YtDlpLocation.onPath => 'On PATH',
+      YtDlpLocation.missing => 'Not installed',
+    };
+    final downloading = state.phase is YtDlpDownloading;
+    final canDownload = state.location == YtDlpLocation.missing && !downloading;
+
+    // Three pieces of text can outgrow the 260 px panel (label, value, and
+    // "Download") where `_UpdateInfoRow`'s two never do — the value shrinks
+    // first, inside its own flexible group, rather than overflowing the row.
+    return Row(
+      children: [
+        Expanded(child: Text('yt-dlp', style: style?.copyWith(color: scheme.onSurfaceVariant))),
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(child: Text(value, style: style, overflow: TextOverflow.ellipsis)),
+              if (downloading) ...[
+                const SizedBox(width: 8),
+                const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+              ] else if (canDownload) ...[
+                const SizedBox(width: 8),
+                InkWell(
+                  borderRadius: const BorderRadius.all(Radius.circular(4)),
+                  onTap: () => ref.read(ytDlpControllerProvider.notifier).download(),
+                  child: Text('Download', style: style?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
