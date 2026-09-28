@@ -713,6 +713,17 @@ the answer.
   the one being edited*. Run after the last `bun run check` of a session, it
   reports success while leaving the suite red and possibly real capture data in
   `corpus/`. Measured 2026-09-04, which is how this note exists.
+- **The compiled sidecar can fail to start under some virtualization, and it
+  is not a packaging bug.** `sidecar.exe` is a `bun build --compile` binary;
+  Bun's JS engine can require CPU features (AVX2) that some virtualized CPUs
+  do not expose to the guest. Measured 2026-09-28: an installer with an
+  identical, correctly bundled `sidecar.exe` ran fine in a Windows Sandbox
+  (which passes the host's real CPU straight through) and on real hardware,
+  but failed with "Failed to start sidecar process" in a VirtualBox VM with a
+  more restrictive virtual CPU profile — no crash log, no useful message from
+  the app's side, since the process fails before it can print anything.
+  Diagnosing this needs running `sidecar.exe` directly in a terminal on the
+  machine in question, not trusting the app's generic wrapper message.
 
 ## Current state
 
