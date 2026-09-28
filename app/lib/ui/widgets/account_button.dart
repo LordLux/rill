@@ -1307,23 +1307,65 @@ class _YtDlpMenuItem extends ConsumerWidget {
 /// The yt-dlp page's body. Reachable only from a row that is itself hidden at
 /// [YtDlpRowSeverity.none], but the state can still resolve itself (a
 /// background download finishing) while the page is open, so this checks
-/// fresh rather than assuming the row's condition still holds.
+/// fresh rather than assuming the row's condition still holds. Resolving
+/// while the page is open is not a rare edge case — it is how a successful
+/// download is actually seen: the person is watching this exact page when it
+/// finishes, so the "all done" card is the real completion state, not a
+/// throwaway fallback (fixed 2026-09-28 after live testing turned up a bare
+/// "yt-dlp is available." line here).
 class _YtDlpPanel extends ConsumerWidget {
   const _YtDlpPanel();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(ytDlpControllerProvider);
-    if (state.severity == YtDlpRowSeverity.none) {
-      final scheme = Theme.of(context).colorScheme;
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text('yt-dlp is available.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-      );
-    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-      child: _YtDlpCard(state: state),
+      child: state.severity == YtDlpRowSeverity.none ? _YtDlpResolvedCard(state: state) : _YtDlpCard(state: state),
+    );
+  }
+}
+
+class _YtDlpResolvedCard extends StatelessWidget {
+  const _YtDlpResolvedCard({required this.state});
+
+  final YtDlpState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    final (String headline, String? detail) = switch (state.location) {
+      YtDlpLocation.appManaged => ('yt-dlp has been installed!', state.appManagedVersion != null ? 'Version ${state.appManagedVersion}' : null),
+      YtDlpLocation.onPath => ('yt-dlp is available', 'Found on PATH at ${state.onPathPath}'),
+      YtDlpLocation.missing => ('yt-dlp is available', null),
+    };
+
+    return Container(
+      key: const ValueKey('ytdlp-resolved-card'),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: const BorderRadius.all(Radius.circular(16))),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.check_circle, size: 20, color: scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(headline, style: textTheme.titleSmall?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700)),
+                if (detail != null) ...[
+                  const SizedBox(height: 4),
+                  Text(detail, style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
