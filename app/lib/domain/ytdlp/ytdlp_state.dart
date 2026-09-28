@@ -35,10 +35,28 @@ abstract class YtDlpState with _$YtDlpState {
   }) = _YtDlpState;
 }
 
+/// How urgently the yt-dlp row should read. yt-dlp is optional — most videos
+/// play the same with or without it — so its ordinary absence is not treated
+/// as an emergency; only an actual failure is. Revised 2026-09-28 after live
+/// testing: the first version raised the same "a problem" framing for every
+/// missing case, which read as alarming for the common, harmless one.
+enum YtDlpRowSeverity {
+  /// PATH or an app-managed copy already resolves it. Nothing to say.
+  none,
+
+  /// Missing, but nothing has actively gone wrong — declined, undecided, or a
+  /// download in progress. Worth a quiet, permanent mention, not a dot.
+  info,
+
+  /// A download that was attempted and failed. This is what lights the
+  /// avatar's attention dot.
+  problem,
+}
+
 extension YtDlpStateExt on YtDlpState {
-  /// The Problems row shows and the avatar's attention dot lights up while
-  /// this is true: nothing playable is installed, and either nobody has ever
-  /// said what to do about it, or they asked for it and it is not there yet
-  /// (a download that failed, or has not run since the choice was made).
-  bool get hasProblem => location == YtDlpLocation.missing && (choice == null || choice == YtDlpChoice.download);
+  YtDlpRowSeverity get severity {
+    if (location != YtDlpLocation.missing) return YtDlpRowSeverity.none;
+    if (phase is YtDlpPhaseError) return YtDlpRowSeverity.problem;
+    return YtDlpRowSeverity.info;
+  }
 }

@@ -136,12 +136,12 @@ void main() {
 
   FakeTimer pending() => timers.lastWhere((t) => !t.cancelled);
 
-  test('no registry answer and nothing installed: a problem, nothing scheduled', () async {
+  test('no registry answer and nothing installed: shown as info, nothing scheduled', () async {
     final (container, _) = await start();
     final state = container.read(ytDlpControllerProvider);
     expect(state.location, YtDlpLocation.missing);
     expect(state.choice, isNull);
-    expect(state.hasProblem, isTrue);
+    expect(state.severity, YtDlpRowSeverity.info);
     expect(timers, isEmpty);
   });
 
@@ -155,11 +155,11 @@ void main() {
     expect(prefs.getString('ytdlp_choice'), 'download');
   });
 
-  test('registry says no, seeds declined and has no problem', () async {
+  test('registry says no, seeds declined: still shown as info, nothing scheduled', () async {
     final (container, _) = await start(registryConsent: 'no');
     final state = container.read(ytDlpControllerProvider);
     expect(state.choice, YtDlpChoice.declined);
-    expect(state.hasProblem, isFalse);
+    expect(state.severity, YtDlpRowSeverity.info, reason: 'declining stops auto-download, not the quiet row');
     expect(timers, isEmpty, reason: 'declined and nothing to maintain');
   });
 
@@ -185,7 +185,7 @@ void main() {
 
     final state = container.read(ytDlpControllerProvider);
     expect(state.location, YtDlpLocation.appManaged);
-    expect(state.hasProblem, isFalse);
+    expect(state.severity, YtDlpRowSeverity.none);
     expect(restarts, hasLength(1));
     expect(restarts.single, isNotNull);
     expect(File(restarts.single!).readAsBytesSync(), exeBytes);
@@ -197,18 +197,18 @@ void main() {
     await controller.download();
     final state = container.read(ytDlpControllerProvider);
     expect(state.choice, YtDlpChoice.download);
-    expect(state.hasProblem, isTrue, reason: 'asked for, still missing after the failed attempt');
+    expect(state.severity, YtDlpRowSeverity.problem, reason: 'an actual attempt failed, not just an ordinary absence');
     expect(state.phase, isA<YtDlpPhaseError>());
   });
 
-  test('decline() stops scheduling and clears the problem', () async {
+  test('decline() stops scheduling; the row stays as a quiet info entry', () async {
     final (container, controller) = await start(registryConsent: 'yes', http: fakeFor(utf8.encode('x')));
     expect(timers.single.cancelled, isFalse);
 
     await controller.decline();
     final state = container.read(ytDlpControllerProvider);
     expect(state.choice, YtDlpChoice.declined);
-    expect(state.hasProblem, isFalse);
+    expect(state.severity, YtDlpRowSeverity.info);
     expect(timers.single.cancelled, isTrue);
   });
 
@@ -218,7 +218,7 @@ void main() {
       resolution: const YtDlpResolution(location: YtDlpLocation.onPath, path: r'C:\somewhere\yt-dlp.exe'),
     );
     expect(timers, isEmpty, reason: 'a PATH copy needs no maintenance');
-    expect(container.read(ytDlpControllerProvider).hasProblem, isFalse);
+    expect(container.read(ytDlpControllerProvider).severity, YtDlpRowSeverity.none);
 
     await controller.sync(manual: true);
     expect(restarts, isEmpty);
