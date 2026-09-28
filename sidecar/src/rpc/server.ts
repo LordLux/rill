@@ -442,8 +442,12 @@ async function handleRequest(request: RpcRequest) {
       const playlistId = optionalString(params, 'playlistId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
+      // A plain cookie string for tier 4 (`yt-dlp`) alone, never a session —
+      // the resolve `session` above stays the anonymous identity
+      // `resolve-anonymous.test.ts` guards, and this value never reaches
+      // `createSession`. `architecture.md` A12, `todo.md` 54.
       const result = await openPlayback(
-        { session },
+        { session, cookie: browseAuth.cookieForYtDlp() },
         { videoId, preload: params?.preload === true, playlistId },
       );
       emitResponse(id, result);

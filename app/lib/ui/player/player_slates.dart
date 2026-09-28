@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,8 @@ import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
 import '../audio_mode_controller.dart';
 import 'audio_mode_view.dart';
+import '../auth_controller.dart';
+import '../pages/login_page.dart';
 import '../playback_controller.dart';
 import '../video_info.dart';
 
@@ -13,6 +17,8 @@ const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
 const Key membersOnlySlateKey = ValueKey('members-only-slate');
 const Key membersOnlyJoinKey = ValueKey('members-only-join');
+const Key ageVerificationSlateKey = ValueKey('age-verification-slate');
+const Key ageVerificationSignInKey = ValueKey('age-verification-sign-in');
 
 /// How far up from the player's bottom edge a slate's content has to start to
 /// stay clear of the control bar, which is drawn over every slate.
@@ -283,6 +289,103 @@ class MembersOnlySlate extends ConsumerWidget {
   }
 }
 
+/// An account-level age gate — `AGE_VERIFICATION_REQUIRED`, `docs/todo.md` 54.
+///
+/// **Two copies for one code, chosen by [AuthState.isSignedIn], not by
+/// anything on [PlaybackState].** The sidecar cannot tell these apart — its
+/// `retry` is `user` either way (`playback_controller.dart`'s
+/// [PlaybackState.isAgeVerificationRequired]) — but the two are different
+/// problems for the viewer: signed out, the next step is *this app's* sign-in
+/// flow, so the action is "Sign in", not "Try again". Signed in, this app
+/// already tried tier 4 with the account's real cookie and YouTube still
+/// refused — `resolve.ts`'s `tierYtDlp`, measured live 2026-09-28 — which
+/// means the account itself has not completed YouTube's own age-verification.
+/// Nothing this app can do fixes that, so a *Try again* here would be the
+/// same broken promise `docs/todo.md` 54 reported in the first place: offer
+/// no button rather than one that cannot work.
+class AgeVerificationRequiredSlate extends ConsumerWidget {
+  const AgeVerificationRequiredSlate({super.key, required this.playback});
+
+  final PlaybackState playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = Theme.of(context).tokens;
+    final isSignedIn = ref.watch(authProvider.select((a) => a.isSignedIn));
+    final item = playback.item;
+    final thumbnailUrl = item?.thumbnailUrl;
+
+    return Stack(
+      key: ageVerificationSlateKey,
+      fit: StackFit.expand,
+      children: [
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+          Image.network(
+            thumbnailUrl,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                tokens.scrim.withValues(alpha: 0.75),
+                tokens.scrim.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomLeft,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, playerControlsClearance),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'AGE-RESTRICTED',
+                  style: TextStyle(
+                    color: tokens.onScrim.withValues(alpha: 0.7),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isSignedIn
+                      ? "YouTube needs this account to complete its own age-verification before this will play — signing in again here won't do it."
+                      : 'Sign in to watch this video.',
+                  style: TextStyle(
+                    color: tokens.onScrim,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (!isSignedIn) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    key: ageVerificationSignInKey,
+                    onPressed: () async {
+                      final signedIn = await showLoginFlow(context);
+                      if (signedIn) unawaited(ref.read(playbackProvider.notifier).retry());
+                    },
+                    icon: const Icon(Icons.login, size: 18),
+                    label: const Text('Sign in'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class UnavailableSlate extends ConsumerWidget {
   const UnavailableSlate({super.key, required this.playback});
 
@@ -362,6 +465,8 @@ class PlayerSlates extends ConsumerWidget {
           PremiereSlate(playback: playback)
         else if (isMembersOnlyFailure(playback, detail))
           MembersOnlySlate(playback: playback)
+        else if (playback.isAgeVerificationRequired)
+          AgeVerificationRequiredSlate(playback: playback)
         else if (playback.error != null)
           UnavailableSlate(playback: playback),
       ],

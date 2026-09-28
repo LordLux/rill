@@ -106,6 +106,23 @@ export class BrowseAuth {
     return this.#cookie !== undefined;
   }
 
+  /**
+   * The cookie itself, for the one caller allowed to leave this class with it:
+   * tier 4's `yt-dlp` subprocess (`playback/resolve.ts`), which needs the
+   * account's session to have any chance at an account-level age gate that no
+   * anonymous client can clear — see `architecture.md` A12. `undefined` when
+   * signed out, same as [hasCookie].
+   *
+   * **Never log this.** It is already registered with `redact.ts` (the
+   * constructor and `setCookie` both do it), which is the second line of
+   * defence, not the first — the first is that nothing calls this except to
+   * write a throwaway cookie-jar file for yt-dlp, deleted the moment the
+   * subprocess exits.
+   */
+  cookieForYtDlp(): string | undefined {
+    return this.#cookie;
+  }
+
   /** The last measured state, or `null` if `verify` has never run. */
   get lastVerifiedState(): AuthState | null {
     return this.#verified;

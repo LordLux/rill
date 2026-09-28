@@ -22,6 +22,13 @@
  * plumb anywhere. Now there is a `BrowseAuth` object holding a live cookie, and
  * "just pass `browseAuth.session()`" is a one-line change that would look like
  * a simplification.
+ *
+ * **One exception, added 2026-09-28 for `todo.md` 54 — `architecture.md`
+ * A12.** `playback.open` reads `browseAuth.cookieForYtDlp()`, a plain string
+ * for tier 4's `yt-dlp` subprocess. That is not a `createSession` cookie and
+ * not `browseAuth.session()`, so the checks below still enforce the InnerTube
+ * resolve session's anonymity and CPN isolation (A5) in full — see the test
+ * itself for exactly what is and is not allowed.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -79,6 +86,21 @@ function createSessionCalls(): Array<{ file: string; args: string }> {
   return out;
 }
 
+/**
+ * One `else if (method === '...')` branch's source, from its match to the
+ * next branch (or end of file). A fixed-size window undercounts a handler
+ * with a long comment before its code — measured directly: `playback.open`'s
+ * own cookie-for-yt-dlp line sits 2250 characters past the match, past the
+ * 1400-character window this file used before 2026-09-28, so that window
+ * would have let the reference go unseen rather than flag it.
+ */
+function handlerSource(server: string, method: string): string {
+  const start = server.indexOf(`method === '${method}'`);
+  if (start === -1) return '';
+  const next = server.indexOf('} else if (method ===', start + 1);
+  return server.slice(start, next === -1 ? undefined : next);
+}
+
 describe('the resolution path is anonymous', () => {
   const calls = createSessionCalls();
 
@@ -122,18 +144,46 @@ describe('the resolution path is anonymous', () => {
     // The other shape this could take: not a cookie on `createSession`, but
     // `browseAuth.session()` passed where the resolve session belongs. Every
     // resolution entry point in `rpc/server.ts` takes `getResolveSession()`.
+    //
+    // **One narrow, deliberate exception — `architecture.md` A12, `todo.md`
+    // 54, 2026-09-28.** `playback.open` also reads `browseAuth.cookieForYtDlp()`,
+    // a plain string handed only to tier 4's `yt-dlp` subprocess
+    // (`playback/resolve.ts`'s `PlaybackDeps.cookie`), which is not an
+    // InnerTube session and has no CPN to bridge — A5, which this file's
+    // opening comment invokes, is about *that* system, not about giving an
+    // external tool the signed-in account's cookie. `browseAuth.session()`
+    // itself, and `getBrowseSession`, stay forbidden everywhere below: the
+    // resolve `session` these handlers pass to `openPlayback`/etc. must still
+    // be the anonymous one.
     const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
     for (const method of ['playback.open', 'video.storyboard', 'captions.list', 'captions.get']) {
-      const handler = server.slice(
-        server.indexOf(`method === '${method}'`),
-        server.indexOf(`method === '${method}'`) + 1400,
-      );
+      const handler = handlerSource(server, method);
       expect(handler.length, `handler for ${method} not found`).toBeGreaterThan(0);
       expect(
         handler,
         `${method} must resolve through getResolveSession(), never the browse session`,
       ).not.toContain('getBrowseSession');
-      expect(handler).not.toContain('browseAuth');
+      expect(handler, `${method} must never touch browseAuth.session()`).not.toContain(
+        'browseAuth.session(',
+      );
+
+      const browseAuthUses = [...handler.matchAll(/\bbrowseAuth\.(\w+)/g)].map((m) => m[1]);
+      const allowed = method === 'playback.open' ? ['cookieForYtDlp'] : [];
+      const unexpected = browseAuthUses.filter((use) => !allowed.includes(use!));
+      expect(
+        unexpected,
+        `${method} references browseAuth in a way this test does not recognise as tier 4's ` +
+          `cookie-for-yt-dlp exception: ${unexpected.join(', ')}`,
+      ).toEqual([]);
     }
+  });
+
+  test('playback.open still hands tier 4 the account cookie', () => {
+    // The positive half of the exception above — without it, quietly dropping
+    // the cookie plumbing would pass every check in this file while silently
+    // undoing the fix `todo.md` 54 asked for.
+    const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
+    const handler = handlerSource(server, 'playback.open');
+    expect(handler).toContain('browseAuth.cookieForYtDlp()');
   });
 });
