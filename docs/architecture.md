@@ -197,6 +197,7 @@ same DLL. What the ANGLE path *does* change is the decoder, not the seek: see
 | F42 | **A file loaded with `vid=no` and no audio attached is skipped, so its open never gets a duration.** A variant's video URL is video-only and its audio is a second URL. `vid` is an mpv *option*, so a `vid=no` left by an audio-only track persists into the next load; mpv then finds no stream to select, moves past the file, and `open`'s duration wait runs to its 20 s timeout. That was the 0:00 stall (`todo.md` 43, closed), and it only ever happened in audio-only mode. `9299ed3` forced video on for every open, which cured it by fetching and decoding video only to drop it; `02f2768` attaches the audio **at load** instead, through `audio-files`, so the file has a selected stream from the start and the video is never read. **`setProperty('audio-files', '')` does not clear that list** — it sets a list of one empty path, and every later video-mode open failed with `Cannot open file '': Invalid argument`. Clear and add through `change-list` (`clr`, `append`), which also keeps a `;` in a URL from splitting it. A muxed variant has no separate audio, so it still opens with video on and drops it afterwards | Measured 2026-09-24 by `audio_mode_probe.dart` (`PROBE_SCENARIO=open`), one 1080p variant opened three ways, sampled every 250 ms: video forced on then dropped — first audio at 5512 ms, 329 KB to 1.36 MB of video read, a frame decoded; audio at load — 5501 ms, **0 bytes**, no frame; video mode straight after — 5000 ms, 1.36 MB, exactly one audio track in `track-list`. The empty-path failure was caught by that third leg, before it shipped |
 | F43 | **A song credited with no art still ships a cover URL, and it points at a stock image.** `videoAttributeViewModel.image.sources[0].url` is `https://www.gstatic.com/youtube/img/watch/yt_music_channel.jpeg`, a grey square with a white note, and nothing structural marks the card: same keys, same shape, and `onTap` is absent from some real covers too. `parser/music.ts` ships `coverUrl: null` for any `gstatic.com` source, so the client falls back to the video's own still, and the audio-only view's click-to-switch between cover and thumbnail went with it — there is only ever one best image. Matched on the host rather than the file name, so a renamed stand-in is caught too; being wrong that way costs a thumbnail where a cover could have been | Measured 2026-09-24, anonymous `/next` on 22 videos: the 6 cards without art all carried that URL, 3,080 bytes with one SHA-256 at `=s1200` and `=s544`; every real cover was on `yt3.googleusercontent.com`. **All six were one song** ("M11 re-arrange and re-mix") credited on six uploads, so this is one observed case, not a survey. A claim that the placeholder's bytes differ per track was not reproduced. Seen in the release build on `Y5u8ZZqFca4`: the video's still, with the song's credits under it |
 | F44 | **Flutter's `MouseRegion` hit-testing silently fails inside deep Sliver layouts, and `PointerScrollEvent` is cloned as it bubbles.** This broke `SilkyScroll`'s `HoverStack` completely, causing nested scrollables to scroll simultaneously. Furthermore, because Flutter clones pointer events to translate local coordinates, an `Expando` cannot be used to track event consumption across widgets. The innermost scrollable must track consumption using the event's `timeStamp`, handle the scroll synchronously to outrace Flutter's native desktop scrolling engine, and manually delegate unhandled delta to its ancestor's animator at the edge instead of relying on native bubbling. | Measured 2026-09-26 across the Spike app and the main Rill app. Nested `SilkyScroll` inside a `SliverCrossAxisGroup` perfectly reproduced the `HoverStack` failure. An `Expando` failed to consume the event between inner and outer listeners. Using `PointerSignalResolver` allowed the native `Scrollable` to run first, falling back to choppy native scrolling and breaking edge-forwarding. Tracking consumption via `event.timeStamp.inMicroseconds` and manually invoking `forwardAlwaysMouseWheelDeltaAtEdge` solved all issues flawlessly. |
+| F45 | **An account-level age gate is not a cookie problem, and a real cookie proves it.** `docs/todo.md` 54's own hypothesis — "the ladder needs to hand yt-dlp a cookie jar" — was tested directly against the reported video with a real, valid, signed-in cookie (`yt-dlp --cookies <netscape jar>`, bypassing this app entirely). It still refused: `"This video is age-restricted and YouTube is requiring account age-verification"`, then `"Sorry, this content is age-restricted"`. Cookie extraction itself worked (767 cookies read, the account cookies found and accepted — no rotation warning on the file-based jar), so the refusal is not about the cookie being missing, wrong, or stale; it is Google's own account-level age-verification step, which this app has no client for and cannot complete on the account's behalf. **A12 is still the right fix** — it is exactly what an age-verified account's cookie is for, on this video and on every other one tier 4 exists for — it simply cannot close this specific repro, which is now `AGE_VERIFICATION_REQUIRED` rather than a silent dead end. | Measured 2026-09-28 against `nKVsXpeYbCU`. `--cookies-from-browser` against a live Chrome/Edge profile failed first with `Failed to decrypt with DPAPI` (Chrome's app-bound encryption, unrelated); against a live Firefox-family profile it read 767 cookies but yt-dlp flagged them "no longer valid... rotated in the browser" (this repo's own cookie-rotation note, `CLAUDE.md`, reproducing live); a clean exported `cookies.txt`, read with no rotation warning, reached `[youtube] Found YouTube account cookies` and still ended in the account-verification refusal above. |
 
 ---
 
@@ -260,7 +261,8 @@ on a single field name.
 | --- | --- | --- |
 | Browse — feed, chips, search, playlists, history | `WEB` | cookies |
 | Stream resolution — ladder tier 1 | `VISIONOS` | anonymous, server-issued visitor id |
-| Stream resolution — tiers 4 and 5 (yt-dlp's metadata, the itag 18 floor) | `ANDROID` | anonymous |
+| Stream resolution — tier 5 (the itag 18 floor), and tier 4's own metadata (duration, storyboards) | `ANDROID` | anonymous |
+| Stream resolution — tier 4 (`yt-dlp` subprocess) | not InnerTube — an external tool | the browse account's cookie when signed in, else anonymous — **A12** |
 | Caption-track fallback, a live stream's start time — not playback | `MWEB` | anonymous |
 | Watch reporting | `WEB` | cookies |
 
@@ -2120,7 +2122,7 @@ identical across both so the swap touches only the transport.
 | `VISIONOS` goes SABR-only, or starts requiring a PO token as `ANDROID_VR` did (F5) | Tier 1 declines on every video; opens fall to yt-dlp or the 360p floor | Phase 2 |
 | New renderer type | Items silently missing | Tolerant parser skips; log unknown types |
 | Undeciphered `n` | ~50 KB/s, constant buffering | Never let a raw URL cross the RPC boundary |
-| Age-restricted / Vevo | `playback.open` fails | Fall through to yt-dlp with PO token provider |
+| Age-restricted / Vevo | `playback.open` fails | Fall through to yt-dlp, with a PO token provider and, when signed in, the account's cookie (**A12**) — an account-level age gate that survives every tier answers `AGE_VERIFICATION_REQUIRED`, not `STREAM_UNAVAILABLE` |
 | `yt-dlp` not installed | The ladder is `VISIONOS` then the 360p floor; the videos tier 4 exists for (age-restricted, Vevo) fail as "Unavailable" with nothing naming the cause | Probed and warned at startup, and reported in the `event.ready` handshake as `capabilities.ytDlp` (`protocol.md` §2) |
 | ffmpeg opens with `Range: bytes=0-` | HTTP 403 on an `MWEB` URL that fetches fine under a bounded range | Resolve as `VISIONOS` — ladder tier 1, whose URLs answer 206 at every offset (F11). F10 is also why `MWEB` left the ladder (§2.4) |
 | YouTube throttles this connection's anonymous resolution (~180 resolutions an hour, F20) | `LOGIN_REQUIRED — "Sign in to confirm you're not a bot"` on every tier, still refused after tier 1's fresh visitor id | `RATE_LIMITED`, `retry: user`: the watch page says the connection is limited and offers a retry. Not terminal — a lower tier may still get through (`protocol.md` §4) |
@@ -2221,3 +2223,36 @@ back, even to reconcile a value a silent update's task-default reset —
 `ytdlp_choice` in `shared_preferences` is the only state that matters once it
 exists, and giving the registry a second writer would make two things capable
 of being "the" answer. *Rejected: the app re-syncing the registry key.*
+
+**A12. Tier 4 (`yt-dlp`) carries the browse cookie when signed in; tiers 1 and
+5's InnerTube session does not — decided 2026-09-28, `docs/todo.md` 54 (closed).**
+Every resolve-path client (`VISIONOS`, `ANDROID`) is anonymous by design (A5,
+Task 22 §8, `resolve-anonymous.test.ts`), so an account-level age gate reached
+every one of them identically whether or not the app was signed in — the bug
+as reported. `yt-dlp` is not part of that system: it is a separate subprocess,
+not an InnerTube session, with no CPN to bridge and no bucket to poison, so
+handing it the signed-in account's cookie does not reopen A5. It is written to
+a throwaway Netscape cookie-jar file (`resolve.ts`'s `cookieHeaderToNetscapeJar`)
+because yt-dlp's own auth needs jar entries, not a header, and the file is
+deleted the moment the subprocess returns, success or failure — the same rule
+as the crash-dump handling in §2.11's log note: read it, delete it, never
+leave it lying around. `resolve-anonymous.test.ts` was updated rather than
+loosened wholesale — it names the one call (`browseAuth.cookieForYtDlp()`
+inside `playback.open`) this decision allows and keeps failing on anything
+broader. **Does not close `todo.md` 54's own repro** — F45 measured a real,
+valid cookie still refused with "YouTube is requiring account age-verification",
+a Google account-level check no cookie or client here can satisfy; it is
+still the correct fix for the age-restricted and Vevo videos tier 4 exists
+for, on an account that has actually completed that verification.
+`AGE_VERIFICATION_REQUIRED` (`errors.ts`, `protocol.md` §4) is the paired
+change: a ladder that saw the age gate and found nothing below it — yt-dlp
+included — answers that code rather than the generic `STREAM_UNAVAILABLE`, so
+the watch page can offer "Sign in" when signed out and a plain explanation
+with no retry when already signed in, instead of a *Try again* that cannot
+work either way. *Rejected: reusing `AUTH_REQUIRED`* — that code already means
+"sign in and this will work" (`VIDEO_MEMBERS_ONLY`'s own doc note draws the
+same line for a different reason), and F45 proved sign-in alone is not always
+sufficient here; a single code with one `retry` value, read by the client
+against its own `AuthState.isSignedIn`, is honest about both outcomes without
+the sidecar's `RETRY_BY_CODE` table disagreeing with itself between two call
+sites.

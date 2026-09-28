@@ -20,58 +20,6 @@ finished and deleted, it would hand the same number out twice.
 
 ## Now
 
-### 54. An age-restricted video never plays, signed in or not, yt-dlp or not
-
-**Reported 2026-09-28.** `youtu.be/nKVsXpeYbCU` (age-restricted) refuses to
-play every time, on every machine tried: this developer's own main machine
-(signed in for weeks) and a separate Windows 11 machine, both with a verified,
-working app-managed yt-dlp installed (todo.md 49's own testing confirmed the
-download/verify/install pipeline works). Signed out, the player shows
-`LOGIN_REQUIRED — "Sign in to confirm your age"`; signing in, restarting the
-app, and clicking "Try again" all leave it exactly the same.
-
-**Likely cause, not yet confirmed: the resolve ladder is anonymous by design,
-yt-dlp's tier included, so no account ever reaches it.** `architecture.md`
-says plainly that resolve is anonymous ("`/player` half asks as `VISIONOS`
-over the anonymous resolve session"), and `sidecar/src/playback/resolve.ts`'s
-`tierYtDlp` shells out to `yt-dlp --dump-single-json` with no cookie of any
-kind. Age-restriction and "Vevo, whatever else refuses" (the same file's own
-words) is exactly what yt-dlp tier 4 exists for, per its doc comment and
-todo.md 49's original text — but if *this particular* age gate needs a real,
-age-verified Google account rather than just any signed-in session, an
-entirely anonymous yt-dlp invocation can never clear it no matter what the
-*app* is signed into, because the app's cookie is never handed to the
-subprocess. That would explain the exact symptom: identical failure whether
-or not the user is signed in, because "signed in" and "the resolve session"
-are disconnected. Worth checking first: does `yt-dlp --cookies-from-browser`
-or an explicit `--cookies` file resolve this exact video by hand, outside the
-app entirely, with a real account's cookies? If yes, this is a straight
-"the ladder needs to hand yt-dlp a cookie jar" fix; if a real account's
-cookies *also* fail via plain yt-dlp, the cause is elsewhere (or genuinely
-outside what this app can do anything about).
-
-**Also — known error codes deserve their own UI, not the generic player
-error.** Right now `LOGIN_REQUIRED` (and presumably others) render through the
-same "This video would not open" / "Try again" surface as an unclassified
-failure. `VIDEO_UPCOMING` already gets exactly this kind of dedicated
-treatment (`architecture.md`: "The UI shows the thumbnail, the scheduled time
-and a reminder, never a *Try again*" — because no lower tier can resolve a
-stream that has not started, so offering to retry is actively misleading).
-`LOGIN_REQUIRED` for an age gate is the same shape: retrying without doing
-anything different about authentication cannot possibly help, so the button
-that implies it might is the bug's own contribution to how confusing this was
-to diagnose live. Whatever "done" looks like for the actual playback cause,
-this part is a normal UI task apart from it — a distinct copy and action
-(most likely "Sign in" when signed out, or a plain explanation with no retry
-when already signed in and yt-dlp exhausted) for at least `LOGIN_REQUIRED`,
-in the same place `VIDEO_UPCOMING` already branches.
-
-**Done when:** the exact repro video plays for a signed-in account (or, if it
-genuinely cannot — some age gates may be unresolvable without official OAuth
-scopes no client here has — the failure says so specifically rather than
-offering a "Try again" that can never work), and `LOGIN_REQUIRED` has its own
-UI state distinct from an unclassified `STREAM_UNAVAILABLE`.
-
 ### 44. Leaving audio-only can wedge: "playing", and nothing moves
 
 **Reported 2026-09-25, rare, never caught live, cause unknown.** Switching from

@@ -47,6 +47,22 @@ export type EnvelopeErrorCode =
    * so it is not `STREAM_UNAVAILABLE`, whose message would blame the video.
    */
   | 'RATE_LIMITED'
+  /**
+   * Every tier declined, and at least one saw YouTube's account-level age gate
+   * ("Sign in to confirm your age" / "requiring account age-verification") —
+   * added for `todo.md` 54, architecture.md A12.
+   *
+   * Distinct from `RATE_LIMITED` and `STREAM_UNAVAILABLE` because retrying
+   * genuinely can succeed here, just not from anything this app controls: tier
+   * 4 now hands `yt-dlp` the signed-in account's cookie (A12), and measured
+   * live against the reported video, a real, valid cookie still refused with
+   * this exact wording — the account itself has not completed YouTube's
+   * age-verification, which is a Google-side step no client here can do for
+   * it. `user`, the same shape as `RATE_LIMITED`: an external condition (sign
+   * in, or verify the account on youtube.com) can make the next attempt
+   * succeed, so the retry affordance is honest, not decorative.
+   */
+  | 'AGE_VERIFICATION_REQUIRED'
   | 'UPSTREAM_ERROR';
 
 /**
@@ -115,6 +131,7 @@ const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.fre
   // hour, so a silent automatic retry is a spinner that never ends; the user is
   // told what is happening and chooses when to try again.
   RATE_LIMITED: 'user',
+  AGE_VERIFICATION_REQUIRED: 'user',
   UPSTREAM_ERROR: 'auto',
 });
 

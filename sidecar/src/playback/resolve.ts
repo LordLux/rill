@@ -41,6 +41,9 @@
  * rather than a protocol revision.
  */
 
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ytDlpBinary } from '../capabilities.ts';
 import { RpcError, hasCode, type EnvelopeErrorCode } from '../errors.ts';
 import { logger } from '../log.ts';
@@ -95,6 +98,17 @@ export interface PlaybackDeps {
   poTokens?: PoTokenProvider;
   /** Override the `yt-dlp` binary for tier 4. Defaults to `YT_DLP_PATH` or PATH. */
   ytDlpPath?: string;
+  /**
+   * The browse session's cookie, for tier 4 (`yt-dlp`) only — `undefined`
+   * when signed out. `architecture.md` A12.
+   *
+   * **Not the resolve `session` above, and never turned into one.** `session`
+   * stays the anonymous VISIONOS/MWEB identity `resolve-anonymous.test.ts`
+   * guards (Task 22 §8, A5) — this field never reaches `createSession` and
+   * never reaches any tier but `tierYtDlp`, which writes it to a throwaway
+   * cookie-jar file for the subprocess and deletes it on the way out.
+   */
+  cookie?: string;
 }
 
 export interface OpenParams {
@@ -301,6 +315,19 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
   // tier may still get through; `descendLadder` reports it if none does.
   if (status === 'LOGIN_REQUIRED' && /not a bot/i.test(reason)) {
     throw new RpcError('RATE_LIMITED', `${videoId}: ${status} — ${reason}`);
+  }
+
+  // An account-level age gate — `LOGIN_REQUIRED` with YouTube's own "confirm
+  // your age" wording, the same trick `RATE_LIMITED` above reads prose for.
+  // `todo.md` 54, `architecture.md` A12: **not terminal.** Unlike the "not a
+  // bot" throttle this is not about this connection, but every resolution
+  // client here (VISIONOS, ANDROID) is anonymous regardless of account, so
+  // every tier up to yt-dlp reports it identically — declining lets tier 4
+  // try with the signed-in account's cookie (A12), which a genuinely
+  // age-verified account can clear. `descendLadder` turns this into
+  // `AGE_VERIFICATION_REQUIRED` only if nothing gets through.
+  if (status === 'LOGIN_REQUIRED' && /confirm your age/i.test(reason)) {
+    throw new RpcError('AGE_VERIFICATION_REQUIRED', `${videoId}: ${status} — ${reason}`);
   }
 
   if (status === 'UNPLAYABLE' && /page needs to be reloaded/i.test(reason)) {
@@ -784,6 +811,33 @@ export function sourceFromYtDlpDump(
 }
 
 /**
+ * A `NAME=VALUE; NAME2=VALUE2` cookie header, as a Netscape-format cookie jar
+ * `yt-dlp --cookies` reads.
+ *
+ * yt-dlp needs actual jar entries, not a header: the SAPISID hash it signs
+ * authenticated requests with looks cookies up by name, so `--add-headers
+ * 'Cookie: …'` is not equivalent (and yt-dlp has no flag for it besides). The
+ * header carries no domain, path or expiry, so every entry is written
+ * host-only against `.youtube.com`, path `/`, secure, with a far-future
+ * expiry — 2038's 32-bit sentinel, comfortably past a subprocess that runs
+ * for seconds and is deleted after. Pure and file-free so the mapping is
+ * testable without a temp directory.
+ */
+export function cookieHeaderToNetscapeJar(cookie: string): string {
+  const NEVER_EXPIRES = 2147483647;
+  const lines = ['# Netscape HTTP Cookie File'];
+  for (const pair of cookie.split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) continue;
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (!name) continue;
+    lines.push(['.youtube.com', 'TRUE', '/', 'TRUE', String(NEVER_EXPIRES), name, value].join('\t'));
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
  * Shell out to `yt-dlp` for the videos InnerTube will not serve us directly:
  * age-restricted, Vevo, and the assorted edge cases that answer `LOGIN_REQUIRED`
  * to an anonymous client.
@@ -793,6 +847,26 @@ export function sourceFromYtDlpDump(
  * through `adoptExternallyDeciphered` instead, which re-checks the boundary
  * condition it still can (`n` present for a client that throttles) and is named
  * so it cannot be reached for casually.
+ *
+ * **`deps.cookie`, when signed in — `architecture.md` A12, `todo.md` 54.**
+ * Every InnerTube tier above this one is anonymous by design (`resolve-anonymous.test.ts`,
+ * A5), so an account-level age gate reached every one of them identically
+ * regardless of whether the app was signed in — the exact bug 54 reported.
+ * yt-dlp is not part of that system: it is a separate subprocess, not an
+ * InnerTube session, so handing it the browse cookie does not reopen A5 or
+ * bridge any CPN. It is written to a throwaway Netscape cookie-jar file
+ * (`cookieHeaderToNetscapeJar`) rather than passed as a header, because
+ * yt-dlp's own auth needs jar entries, and the file is deleted the moment
+ * this call returns — `finally`, not "on success", because a cookie file is
+ * exactly the kind of thing `architecture.md`'s crash-dump rule already
+ * applies to: read it (here, by yt-dlp), delete it, never leave it lying
+ * around. **Does not close `todo.md` 54's own repro** — measured live
+ * 2026-09-28 with a real, valid cookie: yt-dlp still refused with "YouTube is
+ * requiring account age-verification", which is a Google account-level check
+ * no cookie or client here can satisfy. It is still correct to send: other
+ * age-restricted and Vevo videos, on an account that *has* completed that
+ * verification, are exactly what this tier exists for, and an anonymous
+ * subprocess call was never going to clear any of them either.
  */
 export async function tierYtDlp(
   deps: PlaybackDeps,
@@ -804,65 +878,78 @@ export async function tierYtDlp(
   // spawn cannot disagree about what "yt-dlp" means on this machine.
   const binary = ytDlpBinary(deps.ytDlpPath);
 
-  const args = [
-    '--dump-single-json',
-    '--no-warnings',
-    '--no-playlist',
-    '--no-progress',
-    '-f',
-    'bv*+ba/b',
-    ...(poToken ? ['--extractor-args', `youtube:po_token=web.gvs+${poToken}`] : []),
-    `https://www.youtube.com/watch?v=${videoId}`,
-  ];
-
-  let stdout: string;
+  let cookieFile: string | null = null;
   try {
-    const child = Bun.spawn([binary, ...args], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      // yt-dlp can sit on a slow extractor indefinitely; the ladder has to move on.
-      timeout: YT_DLP_TIMEOUT_MS,
-    });
-
-    // Both pipes, concurrently, before waiting on the exit. Draining stdout to
-    // completion while nothing reads stderr is the classic subprocess deadlock:
-    // a child that writes past the OS pipe buffer (~64 KB) blocks in `write`,
-    // never finishes stdout and never exits, and the caller waits out the
-    // timeout instead of getting an answer. Measured on Bun 1.3, `Bun.spawn`
-    // drains both pipes into memory eagerly, so the deadlock does not currently
-    // reproduce here — that is a property of this runtime's implementation, not
-    // of the code, and it is not something to depend on.
-    const [stdoutText, stderrText] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-    stdout = stdoutText;
-
-    const exitCode = await child.exited;
-    if (exitCode !== 0) {
-      const stderr = stderrText.trim().split('\n').slice(-2).join(' ');
-      throw new Error(`exit ${exitCode}: ${stderr || '(no output)'}`);
+    if (deps.cookie) {
+      cookieFile = join(tmpdir(), `rill-ytdlp-cookies-${crypto.randomUUID()}.txt`);
+      await Bun.write(cookieFile, cookieHeaderToNetscapeJar(deps.cookie));
     }
-  } catch (error) {
-    // Not installed is the ordinary case on a machine that has never needed it,
-    // and declining is the right response — but name the binary, so "tier 4
-    // never works" does not turn into a debugging session.
-    throw new RpcError(
-      'UPSTREAM_ERROR',
-      `${videoId}: ${binary} failed (${(error as Error).message})`,
-    );
-  }
 
-  let dump: YtDlpDump;
-  try {
-    dump = JSON.parse(stdout) as YtDlpDump;
-  } catch {
-    throw new RpcError('UPSTREAM_ERROR', `${videoId}: ${binary} returned unparseable JSON`);
-  }
+    const args = [
+      '--dump-single-json',
+      '--no-warnings',
+      '--no-playlist',
+      '--no-progress',
+      '-f',
+      'bv*+ba/b',
+      ...(cookieFile ? ['--cookies', cookieFile] : []),
+      ...(poToken ? ['--extractor-args', `youtube:po_token=web.gvs+${poToken}`] : []),
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ];
 
-  const source = sourceFromYtDlpDump(dump, binary, response);
-  log.debug(`${videoId}: yt-dlp resolved ${topHeight(source) ?? '?'}p`);
-  return source;
+    let stdout: string;
+    try {
+      const child = Bun.spawn([binary, ...args], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        // yt-dlp can sit on a slow extractor indefinitely; the ladder has to move on.
+        timeout: YT_DLP_TIMEOUT_MS,
+      });
+
+      // Both pipes, concurrently, before waiting on the exit. Draining stdout to
+      // completion while nothing reads stderr is the classic subprocess deadlock:
+      // a child that writes past the OS pipe buffer (~64 KB) blocks in `write`,
+      // never finishes stdout and never exits, and the caller waits out the
+      // timeout instead of getting an answer. Measured on Bun 1.3, `Bun.spawn`
+      // drains both pipes into memory eagerly, so the deadlock does not currently
+      // reproduce here — that is a property of this runtime's implementation, not
+      // of the code, and it is not something to depend on.
+      const [stdoutText, stderrText] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      stdout = stdoutText;
+
+      const exitCode = await child.exited;
+      if (exitCode !== 0) {
+        const stderr = stderrText.trim().split('\n').slice(-2).join(' ');
+        throw new Error(`exit ${exitCode}: ${stderr || '(no output)'}`);
+      }
+    } catch (error) {
+      // Not installed is the ordinary case on a machine that has never needed it,
+      // and declining is the right response — but name the binary, so "tier 4
+      // never works" does not turn into a debugging session.
+      throw new RpcError(
+        'UPSTREAM_ERROR',
+        `${videoId}: ${binary} failed (${(error as Error).message})`,
+      );
+    }
+
+    let dump: YtDlpDump;
+    try {
+      dump = JSON.parse(stdout) as YtDlpDump;
+    } catch {
+      throw new RpcError('UPSTREAM_ERROR', `${videoId}: ${binary} returned unparseable JSON`);
+    }
+
+    const source = sourceFromYtDlpDump(dump, binary, response);
+    log.debug(`${videoId}: yt-dlp resolved ${topHeight(source) ?? '?'}p`);
+    return source;
+  } finally {
+    // Every path out of this tier, not just success — a cookie file left
+    // behind on a decline is still a cookie file left behind.
+    if (cookieFile) await rm(cookieFile, { force: true }).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -966,6 +1053,7 @@ export async function descendLadder(
 ): Promise<PlaybackSource> {
   const declined: string[] = [];
   let throttled = false;
+  let ageRestricted = false;
 
   for (const [index, tier] of tiers.entries()) {
     try {
@@ -999,6 +1087,7 @@ export async function descendLadder(
       const message = error instanceof Error ? error.message : String(error);
       declined.push(`${tier.name}: ${message}`);
       if (hasCode(error, 'RATE_LIMITED')) throttled = true;
+      if (hasCode(error, 'AGE_VERIFICATION_REQUIRED')) ageRestricted = true;
       if (hasCode(error, 'STREAM_REQUIRES_SABR')) {
         log.debug(`${videoId}: tier ${index + 1} (${tier.name}) declined — ${message}`);
       } else {
@@ -1025,6 +1114,17 @@ export async function descendLadder(
     throw new RpcError(
       'RATE_LIMITED',
       `${videoId}: YouTube is throttling this connection —\n  ${declined.join('\n  ')}`,
+    );
+  }
+  // Same shape as the throttle above: an age gate changes the answer without
+  // ending the ladder early (`assertPlayable` above; `todo.md` 54,
+  // `architecture.md` A12) — yt-dlp still gets a shot with the account's
+  // cookie, and only a ladder that both saw the gate and found nothing below
+  // it answers `AGE_VERIFICATION_REQUIRED` instead of `STREAM_UNAVAILABLE`.
+  if (ageRestricted) {
+    throw new RpcError(
+      'AGE_VERIFICATION_REQUIRED',
+      `${videoId}: YouTube requires account age-verification —\n  ${declined.join('\n  ')}`,
     );
   }
   throw new RpcError(
