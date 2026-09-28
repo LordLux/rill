@@ -48,6 +48,10 @@ class FixedYtDlp extends YtDlpController {
     declineCalls++;
     state = state.copyWith(choice: YtDlpChoice.declined);
   }
+
+  /// Simulates what a real download does on success, for a test that watches
+  /// the page react while it is open.
+  void resolveAs(YtDlpState newState) => state = newState;
 }
 
 const signedIn = AuthState(status: AuthStatus.authenticated, accountName: 'Ada Lovelace', accountHandle: '@ada');
@@ -176,6 +180,25 @@ void main() {
     // FixedYtDlp.decline() only sets choice; severity stays info (still
     // missing), so the same card is still here — the row was never hidden.
     expect(find.text('yt-dlp is not installed'), findsOneWidget);
+  });
+
+  testWidgets('a download finishing while the page is open shows an install-complete card', (tester) async {
+    final controller = await pump(tester, missingNoChoice);
+    await openMenu(tester);
+    await tester.tap(find.text('yt-dlp not installed'));
+    await tester.pumpAndSettle();
+
+    // This is the actual, common way this card is seen — the person is
+    // watching this exact page when a real download finishes.
+    controller.resolveAs(const YtDlpState(
+      phase: YtDlpPhase.idle(),
+      location: YtDlpLocation.appManaged,
+      appManagedVersion: '2026.08.19',
+    ));
+    await tester.pump();
+
+    expect(find.text('yt-dlp has been installed!'), findsOneWidget);
+    expect(find.text('Version 2026.08.19'), findsOneWidget);
   });
 
   testWidgets('a downloading phase shows progress and disables the buttons', (tester) async {
