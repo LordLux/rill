@@ -1,14 +1,18 @@
 /**
  * The anonymous ladder stays token-free — asserted over the source, offline.
  *
- * F49: wiring `botguardPoTokenProvider` into the main `openPlayback` call
- * broke real playback for an ordinary, non-age-gated video. `/player`
- * tolerating a PO token (F48) was never evidence that the *signed stream
- * URL* — the thing mpv actually opens — tolerates one too; only the
- * age-restricted retry's own throwaway `WEB_CREATOR` session is verified end
- * to end (a real byte fetch, not just an `OK` status). This is hard
- * invariant 8's shape again, one layer down: a response looking right is not
- * evidence the URL built from it works.
+ * F49: wiring `botguardPoTokenProvider` into the main `openPlayback` call was
+ * pulled back after a report of mpv failing to open an ordinary video
+ * immediately after this exact line attached a token to it — suggestive, but
+ * never independently confirmed as the actual cause (the same failure text
+ * has occurred before, rarely, with no token involved). The pullback does
+ * not rest on that one incident: `/player` tolerating a PO token (F48) was
+ * never evidence that the *signed stream URL* — the thing mpv actually opens
+ * — tolerates one too, and nothing had verified that before this shipped;
+ * only the age-restricted retry's own throwaway `WEB_CREATOR` session is
+ * verified end to end (a real byte fetch, not just an `OK` status). This is
+ * hard invariant 8's shape again, one layer down: a response looking right
+ * is not evidence the URL built from it works.
  *
  * There is no offline way to prove a token breaks streaming — that needs a
  * real `videoplayback` fetch, which is `network.test.ts`'s job. What *can*
@@ -49,8 +53,8 @@ describe('the anonymous ladder never gets a real PoTokenProvider (F49)', () => {
     expect(ladderCall, 'could not find the openPlayback({...}, ...) call in playback.open').not.toBeNull();
     expect(
       ladderCall![0],
-      'openPlayback in playback.open must not pass poTokens — F49: a real ' +
-        'token attached to VISIONOS broke actual streaming for an ordinary video',
+      'openPlayback in playback.open must not pass poTokens — F49: never ' +
+        'verified against a real stream fetch, only a /player metadata response',
     ).not.toContain('poTokens');
   });
 });
