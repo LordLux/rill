@@ -328,30 +328,39 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               ],
             ),
           ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            color: scheme.surfaceContainerHighest,
-            child: Row(
-              children: [
-                if (busy)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _message,
-                    style: TextStyle(color: scheme.onSurfaceVariant),
+          // **Not shown once `_canRetry` is up.** The cover already carries
+          // this exact message, front and center, next to the button that
+          // acts on it — repeating it down here in a narrow strip below the
+          // fold is how a real failure ended up reading as background noise
+          // rather than something to act on (2026-09-30). Every other state
+          // this bar covers (waiting, checking, "not signed in yet") has no
+          // competing copy of the message anywhere else, so it keeps this
+          // bar for those.
+          if (!_canRetry)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: scheme.surfaceContainerHighest,
+              child: Row(
+                children: [
+                  if (busy)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _message,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
