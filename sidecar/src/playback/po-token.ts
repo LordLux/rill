@@ -251,21 +251,41 @@ function ensureMinter(): Promise<Minter> {
 class BotguardPoTokenProvider implements PoTokenProvider {
   warm(): void {
     ensureMinter().catch((error: unknown) => {
-      log.warn(`PO-token minter warm-up failed (${(error as Error).message}); will retry on first use`);
+      log.error(
+        `PO-token minter warm-up failed (${(error as Error).message}) — will retry on first ` +
+          'use, but every mint until then declines. See `mint()` if this keeps happening.',
+      );
     });
   }
 
   async mint(videoId: string): Promise<string | null> {
+    // Two different failures, two different severities. Building the shared
+    // minter failing (no network, BotGuard's challenge shape changed, the
+    // interpreter shim rejects it) means every mint on this process will
+    // keep failing until whatever broke is fixed — that is worth a loud
+    // `error`, not a line indistinguishable from an ordinary per-video
+    // hiccup. Once a minter exists, one video's `mintAsWebsafeString` call
+    // failing is the isolated case a `warn` was always meant for.
+    let entry;
     try {
-      let entry = await ensureMinter();
+      entry = await ensureMinter();
       if (Date.now() >= entry.expiresAt) {
         minterPromise = null;
         entry = await ensureMinter();
       }
+    } catch (error) {
+      log.error(
+        `PO-token minter could not be built (${(error as Error).message}) — every mint on this ` +
+          'process will decline until this is fixed. Interface contract still holds: the caller ' +
+          'gets null, never a thrown error, so a video declines rather than crashes.',
+      );
+      return null;
+    }
+    try {
       const token = await entry.minter.mintAsWebsafeString(videoId);
       return token ?? null;
     } catch (error) {
-      // Interface contract: `null` is always safe. A BotGuard/network failure
+      // Interface contract: `null` is always safe. A per-video mint failure
       // must decline the token, never the video.
       log.warn(`PO-token mint failed for ${videoId} (${(error as Error).message}); continuing without one`);
       return null;
