@@ -58,6 +58,14 @@ MaterialPageRoute<void> page(String name) => MaterialPageRoute<void>(
       builder: (_) => _pageBody(name),
     );
 
+/// A `showLoginFlow`-shaped route: `fullscreenDialog: true`, no name — the
+/// shape that reintroduced the mini-player bug (`player_shell.dart`,
+/// `LoginPage`'s own `showLoginFlow`).
+MaterialPageRoute<void> fullscreenDialogPage() => MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => _pageBody('fullscreen dialog'),
+    );
+
 /// Pumps the app the tests navigate inside: a home page, and the real tracker
 /// attached as a navigator observer.
 Future<void> pumpApp(WidgetTester tester) async {
@@ -204,6 +212,48 @@ void main() {
       // had blanked the route out from under it.
       await pumpApp(tester);
       await tester.tap(find.text('open dialog'));
+      await tester.pumpAndSettle();
+      expect(current, homeRouteName);
+    });
+  });
+
+  group('a fullscreen dialog page route is invisible too — this is showLoginFlow', () {
+    testWidgets('opening one changes nothing', (tester) async {
+      // The same bug in a different shape: `fullscreenDialog: true` is a
+      // `PageRoute`, not a `PopupRoute`, and `LoginPage` carries no
+      // `settings.name` — so before this was filtered, pushing it reported
+      // `null`, and `PlayerShell` read that as having left the watch page
+      // exactly the way an unfiltered dialog once did.
+      await pumpApp(tester);
+      nav.push(page(watchRouteName));
+      await tester.pumpAndSettle();
+
+      nav.push(fullscreenDialogPage());
+      await tester.pumpAndSettle();
+
+      expect(find.text('page fullscreen dialog'), findsOneWidget);
+      expect(current, watchRouteName);
+      expect(transient, isTrue);
+    });
+
+    testWidgets('closing one changes nothing either', (tester) async {
+      await pumpApp(tester);
+      nav.push(page(watchRouteName));
+      await tester.pumpAndSettle();
+      nav.push(fullscreenDialogPage());
+      await tester.pumpAndSettle();
+
+      nav.pop();
+      await tester.pumpAndSettle();
+
+      expect(find.text('page fullscreen dialog'), findsNothing);
+      expect(current, watchRouteName, reason: 'the watch page is still the page');
+      expect(transient, isFalse);
+    });
+
+    testWidgets('a fullscreen dialog over Home leaves Home current', (tester) async {
+      await pumpApp(tester);
+      nav.push(fullscreenDialogPage());
       await tester.pumpAndSettle();
       expect(current, homeRouteName);
     });
