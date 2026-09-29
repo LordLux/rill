@@ -688,7 +688,13 @@ describe('a throttle is RATE_LIMITED, not "would not open" — decided 2026-09-1
       ANDROID: rawPlayerBody({ client: 'ANDROID', ...ageGate }),
     });
     const failure = await failureOf(openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' }));
-    expect(hasCode(failure, 'STREAM_UNAVAILABLE')).toBe(true);
+    // Not RATE_LIMITED (this test's point) — and, since `todo.md` 54 /
+    // `architecture.md` A12, not the generic STREAM_UNAVAILABLE either: an
+    // age gate that survives every tier (yt-dlp included, absent here) gets
+    // its own code so the watch page can say so instead of offering a *Try
+    // again* that implies the problem is transient.
+    expect(hasCode(failure, 'RATE_LIMITED')).toBe(false);
+    expect(hasCode(failure, 'AGE_VERIFICATION_REQUIRED')).toBe(true);
   });
 });
 

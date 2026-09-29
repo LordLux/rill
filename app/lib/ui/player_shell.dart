@@ -87,26 +87,48 @@ final transientRouteOpenProvider =
 
 /// Watches the navigator and reports the topmost **page** route.
 ///
-/// **Popups and dialogs are deliberately invisible to this.** A
-/// `PopupMenuButton` pushes a `_PopupMenuRoute` and `showDialog` pushes a
-/// `DialogRoute`; both extend `PopupRoute`, neither is a `PageRoute`, and
-/// neither carries a `settings.name`. Reporting them set the current route to
-/// `null`, which two separate features then read as "the user navigated away":
+/// **Popups, dialogs and full-screen dialog routes are deliberately
+/// invisible to this.** A `PopupMenuButton` pushes a `_PopupMenuRoute` and
+/// `showDialog` pushes a `DialogRoute`; both extend `PopupRoute`, neither is
+/// a `PageRoute`, and neither carries a `settings.name`. Reporting them set
+/// the current route to `null`, which two separate features then read as
+/// "the user navigated away":
 ///
 ///   - `PlayerShell` popped the mini-player up over the watch page the moment
 ///     you opened the account menu or the share dialog, because `null` is not
 ///     `watchRouteName`.
 ///   - the rail lit Home, because `null` was mistaken for the home route.
 ///
-/// Filtering on `route is PageRoute` fixes both at the source rather than
+/// Filtering on `route is PageRoute` fixed both at the source rather than
 /// teaching each consumer to recognise a dialog. `PageRoute` and `PopupRoute`
 /// are siblings under `ModalRoute`, so the test is exact rather than a guess
 /// about class names.
+///
+/// **A `fullscreenDialog: true` `PageRoute` gets the same treatment as a
+/// popup, added 2026-09-30.** `showLoginFlow`'s `LoginPage` route is exactly
+/// this — a `MaterialPageRoute` with no `settings.name`, so it reported
+/// `null` the same way a popup used to, and the same bug came back in the
+/// one shape this filter did not cover: with the account menu open on top of
+/// a playing video's watch page, `PlayerShell` floated the mini-player over
+/// Google's full-screen sign-in page, because `null` is still not
+/// `watchRouteName`. `fullscreenDialog` is visually and semantically a modal
+/// takeover, not a real navigation away from whatever page is underneath it
+/// — closer to `PopupRoute` than to an ordinary `PageRoute` push — so it is
+/// routed through `_transient` instead of `_report` here too.
 class RouteTracker extends NavigatorObserver {
   RouteTracker({required this.onPageRoute, required this.onTransientChange});
 
   final void Function(String? routeName) onPageRoute;
   final void Function(bool pushed) onTransientChange;
+
+  /// A `PageRoute` this tracker should report as a real navigation — every
+  /// one except a full-screen dialog, which behaves like a popup instead.
+  bool _isReportablePage(Route<dynamic> route) => route is PageRoute && !route.fullscreenDialog;
+
+  /// A route `_transient` should count — an ordinary popup, or a full-screen
+  /// dialog `PageRoute` (see the class doc comment).
+  bool _isTransient(Route<dynamic> route) =>
+      route is PopupRoute || (route is PageRoute && route.fullscreenDialog);
 
   void _report(Route<dynamic>? route) {
     final name = route?.settings.name;
@@ -119,34 +141,34 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PageRoute) {
+    if (_isReportablePage(route)) {
       _report(route);
-    } else if (route is PopupRoute) {
+    } else if (_isTransient(route)) {
       _transient(true);
     }
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PageRoute) {
+    if (_isReportablePage(route)) {
       _report(previousRoute);
-    } else if (route is PopupRoute) {
+    } else if (_isTransient(route)) {
       _transient(false);
     }
   }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PageRoute) {
+    if (_isReportablePage(route)) {
       _report(previousRoute);
-    } else if (route is PopupRoute) {
+    } else if (_isTransient(route)) {
       _transient(false);
     }
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    if (newRoute is PageRoute) _report(newRoute);
+    if (newRoute != null && _isReportablePage(newRoute)) _report(newRoute);
   }
 }
 

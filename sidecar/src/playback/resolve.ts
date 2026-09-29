@@ -50,7 +50,7 @@ import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
 import { isSabrOnly } from './sabr-detect.ts';
-import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
+import type { PoTokenProvider } from './po-token.ts';
 import { openPlaybackSession } from './sessions.ts';
 
 /**
@@ -301,6 +301,19 @@ function assertPlayable(response: PlayerResult, videoId: string): void {
   // tier may still get through; `descendLadder` reports it if none does.
   if (status === 'LOGIN_REQUIRED' && /not a bot/i.test(reason)) {
     throw new RpcError('RATE_LIMITED', `${videoId}: ${status} — ${reason}`);
+  }
+
+  // An account-level age gate — `LOGIN_REQUIRED` with YouTube's own "confirm
+  // your age" wording, the same trick `RATE_LIMITED` above reads prose for.
+  // `todo.md` 54, `architecture.md` A12: **not terminal.** Unlike the "not a
+  // bot" throttle this is not about this connection, but every resolution
+  // client here (VISIONOS, ANDROID) is anonymous regardless of account, so
+  // every tier up to yt-dlp reports it identically — declining lets tier 4
+  // try with the signed-in account's cookie (A12), which a genuinely
+  // age-verified account can clear. `descendLadder` turns this into
+  // `AGE_VERIFICATION_REQUIRED` only if nothing gets through.
+  if (status === 'LOGIN_REQUIRED' && /confirm your age/i.test(reason)) {
+    throw new RpcError('AGE_VERIFICATION_REQUIRED', `${videoId}: ${status} — ${reason}`);
   }
 
   if (status === 'UNPLAYABLE' && /page needs to be reloaded/i.test(reason)) {
@@ -793,6 +806,17 @@ export function sourceFromYtDlpDump(
  * through `adoptExternallyDeciphered` instead, which re-checks the boundary
  * condition it still can (`n` present for a client that throttles) and is named
  * so it cannot be reached for casually.
+ *
+ * **Anonymous, same as every other tier — `architecture.md` F46, `todo.md`
+ * 54.** A cookie-for-yt-dlp path was tried and reverted: yt-dlp's `--cookies`
+ * flag only accepts a file path (checked against `yt-dlp --help` directly,
+ * no header/stdin form exists), and Task 22 §5 forbids writing a cookie to
+ * disk outside the credential store — "no temp file... do not reintroduce
+ * the pattern under a new name." That rule is not negotiable here even for a
+ * file deleted in a `finally`, because the failure mode it guards against is
+ * a crash between the write and the delete, not an ordinary decline. See F46
+ * for what actually blocks age-restricted content, and A12 for why an
+ * in-process token is the path being investigated instead.
  */
 export async function tierYtDlp(
   deps: PlaybackDeps,
@@ -966,6 +990,7 @@ export async function descendLadder(
 ): Promise<PlaybackSource> {
   const declined: string[] = [];
   let throttled = false;
+  let ageRestricted = false;
 
   for (const [index, tier] of tiers.entries()) {
     try {
@@ -999,6 +1024,7 @@ export async function descendLadder(
       const message = error instanceof Error ? error.message : String(error);
       declined.push(`${tier.name}: ${message}`);
       if (hasCode(error, 'RATE_LIMITED')) throttled = true;
+      if (hasCode(error, 'AGE_VERIFICATION_REQUIRED')) ageRestricted = true;
       if (hasCode(error, 'STREAM_REQUIRES_SABR')) {
         log.debug(`${videoId}: tier ${index + 1} (${tier.name}) declined — ${message}`);
       } else {
@@ -1027,6 +1053,17 @@ export async function descendLadder(
       `${videoId}: YouTube is throttling this connection —\n  ${declined.join('\n  ')}`,
     );
   }
+  // Same shape as the throttle above: an age gate changes the answer without
+  // ending the ladder early (`assertPlayable` above; `todo.md` 54,
+  // `architecture.md` A12) — yt-dlp still gets a shot with the account's
+  // cookie, and only a ladder that both saw the gate and found nothing below
+  // it answers `AGE_VERIFICATION_REQUIRED` instead of `STREAM_UNAVAILABLE`.
+  if (ageRestricted) {
+    throw new RpcError(
+      'AGE_VERIFICATION_REQUIRED',
+      `${videoId}: YouTube requires account age-verification —\n  ${declined.join('\n  ')}`,
+    );
+  }
   throw new RpcError(
     'STREAM_UNAVAILABLE',
     `${videoId}: every resolution tier declined —\n  ${declined.join('\n  ')}`,
@@ -1038,7 +1075,14 @@ export async function openPlayback(
   params: OpenParams,
 ): Promise<PlaybackSource> {
   const { videoId, preload = false } = params;
-  const poToken = await (deps.poTokens ?? nullPoTokenProvider).mint(videoId);
+  // No `nullPoTokenProvider` import here, deliberately — `PoTokenProvider` is
+  // `import type` only. A real provider's own module (`po-token.ts`, pulling
+  // in `jsdom`/`bgutils-js`) failing to import must never be able to take
+  // the anonymous ladder down with it; see the failure this shape produced,
+  // architecture.md F49's follow-up. `deps.poTokens` is optional and nothing
+  // in the real caller (`rpc/server.ts`) passes one, so this is the one
+  // fallback that matters in practice — inlined rather than imported.
+  const poToken = deps.poTokens ? await deps.poTokens.mint(videoId) : null;
 
   // The `ANDROID` entry, fetched at most once and only if something below
   // tier 1 asks for it. Tiers 2 and 3 read their formats from it, and tier 2

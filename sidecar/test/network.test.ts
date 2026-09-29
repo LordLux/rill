@@ -683,6 +683,63 @@ describe.if(ONLINE && YT_DLP !== null)('ladder tier 4 — yt-dlp', () => {
 
 // ---------------------------------------------------------------------------
 
+/** Genuinely age-restricted on YouTube, not merely "some formats missing". */
+const AGE_RESTRICTED_VIDEO = process.env['YT_VIDEO_AGE_RESTRICTED'] ?? 'nKVsXpeYbCU';
+const COOKIE = process.env['YT_COOKIE'];
+
+describe.if(ONLINE && COOKIE !== undefined)('the age-restricted path — architecture.md A12, F48', () => {
+  test(
+    'a PO token mints, and the in-process WEB_CREATOR retry clears a real age gate',
+    async () => {
+      const { botguardPoTokenProvider } = await import('../src/playback/po-token.ts');
+      const { resolveAgeRestricted } = await import('../src/playback/age-restricted.ts');
+
+      const token = await botguardPoTokenProvider.mint(AGE_RESTRICTED_VIDEO);
+      expect(token).not.toBeNull();
+
+      // `preload: true` — a test run watching nothing must not register a
+      // reportable playback session.
+      const source = await resolveAgeRestricted({
+        videoId: AGE_RESTRICTED_VIDEO,
+        cookie: COOKIE!,
+        poTokens: botguardPoTokenProvider,
+        preload: true,
+      });
+
+      expect(source).not.toBeNull();
+      expect(source!.variants.length).toBeGreaterThan(0);
+      expect(source!.transport).toBe('plain');
+    },
+    2 * MINUTE,
+  );
+
+  test(
+    'the same video, through the anonymous ladder alone, still declines — the control',
+    async () => {
+      // Without this, a regression that started clearing age gates
+      // unconditionally (a token good enough on its own, say) would pass the
+      // test above and never be noticed.
+      const { openPlayback } = await import('../src/playback/resolve.ts');
+      const { botguardPoTokenProvider } = await import('../src/playback/po-token.ts');
+      const { hasCode } = await import('../src/errors.ts');
+      let failure: unknown;
+      try {
+        await openPlayback(
+          { session, poTokens: botguardPoTokenProvider },
+          { videoId: AGE_RESTRICTED_VIDEO, preload: true },
+        );
+        failure = null;
+      } catch (error) {
+        failure = error;
+      }
+      expect(hasCode(failure, 'AGE_VERIFICATION_REQUIRED')).toBe(true);
+    },
+    2 * MINUTE,
+  );
+});
+
+// ---------------------------------------------------------------------------
+
 describe.if(ONLINE)('video.storyboard', () => {
   test(
     'resolves a real video without opening a session or resolving a stream',

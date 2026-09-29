@@ -169,6 +169,19 @@ class PlaybackState {
   /// the one who knows when to try again.
   bool get isRateLimited => errorCode == 'RATE_LIMITED';
 
+  /// An account-level age gate — `AGE_VERIFICATION_REQUIRED`, `retry: user`.
+  ///
+  /// `docs/todo.md` 54, `architecture.md` A12. `retry: user` is honest the
+  /// same way [isRateLimited]'s is: an external condition (signing in, or
+  /// completing YouTube's own age-verification on youtube.com) can make the
+  /// next attempt succeed, even though pressing the button right now usually
+  /// will not. Which of those two conditions applies is not something the
+  /// sidecar can know from one video's refusal — it depends on whether *this
+  /// app* is signed in, which is [AuthState.isSignedIn], not anything on this
+  /// class — so `AgeVerificationRequiredSlate` reads that separately rather
+  /// than this class trying to fold it into one flag.
+  bool get isAgeVerificationRequired => errorCode == 'AGE_VERIFICATION_REQUIRED';
+
   /// The ladder the quality menu lists. Empty when nothing is open.
   List<PlaybackVariant> get variants => source?.variants ?? const [];
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,8 @@ import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
 import '../audio_mode_controller.dart';
 import 'audio_mode_view.dart';
+import '../auth_controller.dart';
+import '../pages/login_page.dart';
 import '../playback_controller.dart';
 import '../video_info.dart';
 
@@ -13,6 +17,8 @@ const Key premiereSlateKey = ValueKey('premiere-slate');
 const Key premiereNotifyKey = ValueKey('premiere-notify');
 const Key membersOnlySlateKey = ValueKey('members-only-slate');
 const Key membersOnlyJoinKey = ValueKey('members-only-join');
+const Key ageVerificationSlateKey = ValueKey('age-verification-slate');
+const Key ageVerificationSignInKey = ValueKey('age-verification-sign-in');
 
 /// How far up from the player's bottom edge a slate's content has to start to
 /// stay clear of the control bar, which is drawn over every slate.
@@ -283,6 +289,127 @@ class MembersOnlySlate extends ConsumerWidget {
   }
 }
 
+/// An account-level age gate — `AGE_VERIFICATION_REQUIRED`,
+/// `architecture.md` A12, F46, F48 (formerly `docs/todo.md` 54, closed).
+///
+/// **Two copies for one code, chosen by [AuthState.isSignedIn], not by
+/// anything on [PlaybackState].** The sidecar cannot tell these apart — its
+/// `retry` is `user` either way (`playback_controller.dart`'s
+/// [PlaybackState.isAgeVerificationRequired]) — but the two are different
+/// problems for the viewer: signed out, the next step is *this app's* sign-in
+/// flow, so the action is "Sign in", not "Try again".
+///
+/// **Signed in, the copy does not claim to know the cause — corrected
+/// 2026-09-29, `architecture.md` F46.** An earlier version said outright that
+/// the *account* needed Google's own age-verification and that signing in
+/// again would not help. That was this app's own diagnosis after one live
+/// test, not something YouTube's response actually says — and it turned out
+/// to be the wrong half of a real ambiguity: YouTube answers with the exact
+/// same wording whether the true cause is an unverified account or a missing
+/// proof-of-origin token, and the two need different fixes.
+///
+/// **Reaching this code signed in now means the sidecar already tried the
+/// fix, not that nothing exists — F48.** `age-restricted.ts` retries the
+/// video once, in-process, with the account's own cookie and a PO token,
+/// between the ladder declining and this error ever reaching the app. So a
+/// signed-in viewer seeing this slate is seeing the outcome *after* that
+/// retry, not before it — which is exactly why there is still no *Try
+/// again* here: the one thing a manual retry could try, the sidecar already
+/// did, with real credentials, before this widget ever built.
+class AgeVerificationRequiredSlate extends ConsumerWidget {
+  const AgeVerificationRequiredSlate({super.key, required this.playback});
+
+  final PlaybackState playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = Theme.of(context).tokens;
+    final isSignedIn = ref.watch(authProvider.select((a) => a.isSignedIn));
+    final item = playback.item;
+    final thumbnailUrl = item?.thumbnailUrl;
+
+    return Stack(
+      key: ageVerificationSlateKey,
+      fit: StackFit.expand,
+      children: [
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+          Image.network(
+            thumbnailUrl,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                tokens.scrim.withValues(alpha: 0.75),
+                tokens.scrim.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomLeft,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, playerControlsClearance),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'AGE-RESTRICTED',
+                  style: TextStyle(
+                    color: tokens.onScrim.withValues(alpha: 0.7),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isSignedIn
+                      ? "This video couldn't be opened. It may be a restriction this app can't currently clear."
+                      : 'Sign in to watch this video.',
+                  style: TextStyle(
+                    color: tokens.onScrim,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (!isSignedIn) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    key: ageVerificationSignInKey,
+                    onPressed: () async {
+                      // Read the notifier *before* the await, not after.
+                      // Signing in can itself change what this slate's
+                      // parent builds while `showLoginFlow` is suspended
+                      // (`isSignedIn` is watched above) — a `context.mounted`
+                      // guard after the await would make the retry silently
+                      // not happen exactly when it matters most, since a
+                      // dead widget is also the common case right after
+                      // signing in. The notifier outlives this widget either
+                      // way, so there is nothing to guard: nothing here
+                      // touches `ref`/`context` once the gap opens.
+                      final notifier = ref.read(playbackProvider.notifier);
+                      final signedIn = await showLoginFlow(context);
+                      if (signedIn) unawaited(notifier.retry());
+                    },
+                    icon: const Icon(Icons.login, size: 18),
+                    label: const Text('Sign in'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class UnavailableSlate extends ConsumerWidget {
   const UnavailableSlate({super.key, required this.playback});
 
@@ -362,6 +489,8 @@ class PlayerSlates extends ConsumerWidget {
           PremiereSlate(playback: playback)
         else if (isMembersOnlyFailure(playback, detail))
           MembersOnlySlate(playback: playback)
+        else if (playback.isAgeVerificationRequired)
+          AgeVerificationRequiredSlate(playback: playback)
         else if (playback.error != null)
           UnavailableSlate(playback: playback),
       ],
