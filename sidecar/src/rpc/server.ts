@@ -441,7 +441,6 @@ async function handleRequest(request: RpcRequest) {
       // resolution ladder — see `OpenParams.playlistId`.
       const playlistId = optionalString(params, 'playlistId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
-      const { botguardPoTokenProvider } = await import('../playback/po-token.ts');
       const session = await getResolveSession();
       const openParams = { videoId, preload: params?.preload === true, playlistId };
       let result;
@@ -471,14 +470,58 @@ async function handleRequest(request: RpcRequest) {
         // and only with a cookie in hand.
         const cookie = browseAuth.cookieForAgeVerification;
         if (!hasCode(error, 'AGE_VERIFICATION_REQUIRED') || cookie === undefined) throw error;
-        const { resolveAgeRestricted } = await import('../playback/age-restricted.ts');
-        const retried = await resolveAgeRestricted({
-          videoId,
-          cookie,
-          poTokens: botguardPoTokenProvider,
-          preload: openParams.preload,
-          playlistId: openParams.playlistId,
-        });
+        // Imports moved here from above the ladder call, deliberately: they
+        // used to run on every single `playback.open`, ordinary videos
+        // included, which meant a broken `po-token.ts` import (the exact
+        // shape a lost `css-tree` patch takes — architecture.md F48) would
+        // have failed *every* video, not just age-restricted ones. Now
+        // nothing outside this one retry path can be affected by it.
+        //
+        // The whole retry — both imports and the call — is wrapped so that
+        // any failure here, import included, degrades to the same
+        // `AGE_VERIFICATION_REQUIRED` the user would have seen anyway
+        // (`error`, rethrown below) rather than replacing a recognisable
+        // age-gate slate with a generic `UPSTREAM_ERROR`. `resolveAgeRestricted`
+        // already catches its own internal failures and returns `null` — this
+        // outer layer exists for the one class of failure that happens
+        // *before* any of its own code runs: the dynamic imports themselves.
+        //
+        // **`botguardPoTokenProvider` is checked explicitly, not just
+        // `await`ed and trusted.** Measured directly, compiled, against a
+        // deliberately reverted `css-tree` patch: a *second* `import()` of an
+        // already-broken module does not reject the way the first one did —
+        // it resolves with `botguardPoTokenProvider: undefined` and no error
+        // at this line at all. Without this check that `undefined` reaches
+        // `resolveAgeRestricted` as its `poTokens` argument, which still
+        // fails safely (its own try/catch), but one layer further from here
+        // than this comment used to claim, and past the log line below.
+        let retried = null;
+        try {
+          const { botguardPoTokenProvider } = await import('../playback/po-token.ts');
+          if (!botguardPoTokenProvider) {
+            throw new Error('po-token.ts imported but exported no provider — its module failed earlier');
+          }
+          const { resolveAgeRestricted } = await import('../playback/age-restricted.ts');
+          retried = await resolveAgeRestricted({
+            videoId,
+            cookie,
+            poTokens: botguardPoTokenProvider,
+            preload: openParams.preload,
+            playlistId: openParams.playlistId,
+          });
+        } catch (retryError) {
+          // Loud and distinct from `resolveAgeRestricted`'s own "declined"
+          // logging (age-restricted.ts, po-token.ts): this is the PO-token
+          // path itself failing to even load, not a video genuinely being
+          // refused. A lost patch makes every age-restricted video decline
+          // exactly as it did before F48 shipped — this line is what would
+          // say why, instead of nothing.
+          log.error(
+            `${videoId}: age-restricted retry could not even run (${(retryError as Error).message}) — ` +
+              'falling back to the plain age-gate result. If this keeps happening, the PO-token ' +
+              'minter itself is broken, not this video.',
+          );
+        }
         if (retried === null) throw error;
         result = retried;
       }
@@ -703,9 +746,21 @@ export function startRpcServer() {
   // existing. Import is dynamic for the same reason every other heavy module
   // here is — this file must not pay for the resolution graph before
   // anything asks for it.
-  void import('../playback/po-token.ts').then(({ botguardPoTokenProvider }) => {
-    botguardPoTokenProvider.warm();
-  });
+  //
+  // **`.catch` here, not just inside `warm()`.** `warm()` already logs and
+  // swallows a failure to *build* the minter (`po-token.ts`), but this
+  // import can fail before any of that code runs at all — a lost `css-tree`
+  // patch throws right here, at import time. Uncaught, that is an unhandled
+  // promise rejection at startup for something nobody is even waiting on.
+  import('../playback/po-token.ts')
+    .then(({ botguardPoTokenProvider }) => botguardPoTokenProvider.warm())
+    .catch((error: unknown) => {
+      log.error(
+        `po-token.ts failed to import (${(error as Error).message}) — the age-restricted retry ` +
+          'is unavailable for the life of this process. This is the shape a lost `css-tree` ' +
+          'patch takes (F48); check `bun install` reapplied `patches/css-tree@3.2.1.patch`.',
+      );
+    });
 
   // No `output`. stdout is the protocol (hard invariant 3), and handing it to
   // readline hands readline a writer into the NDJSON stream. `terminal: false`

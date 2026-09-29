@@ -50,7 +50,7 @@ import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
 import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
 import { isSabrOnly } from './sabr-detect.ts';
-import { nullPoTokenProvider, type PoTokenProvider } from './po-token.ts';
+import type { PoTokenProvider } from './po-token.ts';
 import { openPlaybackSession } from './sessions.ts';
 
 /**
@@ -1075,7 +1075,14 @@ export async function openPlayback(
   params: OpenParams,
 ): Promise<PlaybackSource> {
   const { videoId, preload = false } = params;
-  const poToken = await (deps.poTokens ?? nullPoTokenProvider).mint(videoId);
+  // No `nullPoTokenProvider` import here, deliberately — `PoTokenProvider` is
+  // `import type` only. A real provider's own module (`po-token.ts`, pulling
+  // in `jsdom`/`bgutils-js`) failing to import must never be able to take
+  // the anonymous ladder down with it; see the failure this shape produced,
+  // architecture.md F49's follow-up. `deps.poTokens` is optional and nothing
+  // in the real caller (`rpc/server.ts`) passes one, so this is the one
+  // fallback that matters in practice — inlined rather than imported.
+  const poToken = deps.poTokens ? await deps.poTokens.mint(videoId) : null;
 
   // The `ANDROID` entry, fetched at most once and only if something below
   // tier 1 asks for it. Tiers 2 and 3 read their formats from it, and tier 2
