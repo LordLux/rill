@@ -383,8 +383,19 @@ class AgeVerificationRequiredSlate extends ConsumerWidget {
                   FilledButton.icon(
                     key: ageVerificationSignInKey,
                     onPressed: () async {
+                      // Read the notifier *before* the await, not after.
+                      // Signing in can itself change what this slate's
+                      // parent builds while `showLoginFlow` is suspended
+                      // (`isSignedIn` is watched above) — a `context.mounted`
+                      // guard after the await would make the retry silently
+                      // not happen exactly when it matters most, since a
+                      // dead widget is also the common case right after
+                      // signing in. The notifier outlives this widget either
+                      // way, so there is nothing to guard: nothing here
+                      // touches `ref`/`context` once the gap opens.
+                      final notifier = ref.read(playbackProvider.notifier);
                       final signedIn = await showLoginFlow(context);
-                      if (signedIn) unawaited(ref.read(playbackProvider.notifier).retry());
+                      if (signedIn) unawaited(notifier.retry());
                     },
                     icon: const Icon(Icons.login, size: 18),
                     label: const Text('Sign in'),
