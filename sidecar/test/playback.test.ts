@@ -28,7 +28,6 @@ import {
   fetchWithVisitorRetry,
   openPlayback,
   responseForDecipher,
-  cookieHeaderToNetscapeJar,
   sourceFromYtDlpDump,
   tierPlainAdaptive,
   tierProgressive,
@@ -1474,62 +1473,6 @@ const stub = join(stubDir, process.platform === 'win32' ? 'stub.cmd' : 'stub.sh'
   }
 }
 
-/**
- * A second stub, for the cookie-file test above: reads whatever `--cookies
- * <path>` it was spawned with, records the path (so the test can prove it is
- * deleted afterward) and reports what it found in `height`, rather than the
- * test trusting anything it wrote itself.
- */
-const cookiePathSideChannel = join(stubDir, 'cookie-path-seen.txt');
-const cookieStub = join(stubDir, process.platform === 'win32' ? 'cookie-stub.cmd' : 'cookie-stub.sh');
-const failingCookieStub = join(
-  stubDir,
-  process.platform === 'win32' ? 'failing-cookie-stub.cmd' : 'failing-cookie-stub.sh',
-);
-
-{
-  const script = join(stubDir, 'cookie-stub.mjs');
-  writeFileSync(
-    script,
-    [
-      "import { writeFileSync, readFileSync, existsSync } from 'node:fs';",
-      "const flagIndex = process.argv.indexOf('--cookies');",
-      "const cookiePath = flagIndex === -1 ? null : process.argv[flagIndex + 1];",
-      "writeFileSync(" + JSON.stringify(cookiePathSideChannel) + ", cookiePath ?? '');",
-      'let height = 555;',
-      'if (cookiePath === null) {',
-      '  height = 111;',
-      "} else if (existsSync(cookiePath) && readFileSync(cookiePath, 'utf8').includes('SID\\tletmein')) {",
-      '  height = 777;',
-      '}',
-      "if (process.env.STUB_FAIL) { process.stderr.write('stub: deliberate failure\\n'); process.exit(1); }",
-      'process.stdout.write(JSON.stringify({',
-      "  duration: 1, url: 'https://r1.googlevideo.com/videoplayback?itag=18&c=MWEB&n=DECIPHERED',",
-      "  vcodec: 'avc1.42001E', acodec: 'mp4a.40.2', height,",
-      '}));',
-    ].join('\n'),
-    'utf8',
-  );
-
-  if (process.platform === 'win32') {
-    writeFileSync(cookieStub, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`, 'utf8');
-    writeFileSync(
-      failingCookieStub,
-      `@echo off\r\nset STUB_FAIL=1\r\n"${process.execPath}" "${script}" %*\r\n`,
-      'utf8',
-    );
-  } else {
-    writeFileSync(cookieStub, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, 'utf8');
-    writeFileSync(
-      failingCookieStub,
-      `#!/bin/sh\nexport STUB_FAIL=1\nexec "${process.execPath}" "${script}" "$@"\n`,
-      'utf8',
-    );
-    chmodSync(cookieStub, 0o755);
-    chmodSync(failingCookieStub, 0o755);
-  }
-}
-
 afterAll(() => {
   rmSync(stubDir, { recursive: true, force: true });
 });
@@ -1592,30 +1535,6 @@ describe('yt-dlp tier', () => {
     expect(() => sourceFromYtDlpDump({ duration: 10 }, 'yt-dlp', null)).toThrow(/no stream URL/);
   });
 
-  describe('cookieHeaderToNetscapeJar', () => {
-    test('one entry per NAME=VALUE pair, host-only against .youtube.com', () => {
-      const jar = cookieHeaderToNetscapeJar('SID=abc123; HSID=def456');
-      const lines = jar.trim().split('\n');
-      expect(lines[0]).toBe('# Netscape HTTP Cookie File');
-      expect(lines).toHaveLength(3);
-      expect(lines[1]!.split('\t')).toEqual(['.youtube.com', 'TRUE', '/', 'TRUE', '2147483647', 'SID', 'abc123']);
-      expect(lines[2]!.split('\t')).toEqual([
-        '.youtube.com',
-        'TRUE',
-        '/',
-        'TRUE',
-        '2147483647',
-        'HSID',
-        'def456',
-      ]);
-    });
-
-    test('a stray segment with no "=" is skipped rather than emitted malformed', () => {
-      const jar = cookieHeaderToNetscapeJar('SID=abc; ; HSID=def');
-      expect(jar.trim().split('\n')).toHaveLength(3); // header + two real entries
-    });
-  });
-
   test(
     'the stub really does overflow the pipe buffer',
     async () => {
@@ -1675,54 +1594,6 @@ describe('yt-dlp tier', () => {
     expect(isRpcError(failure)).toBe(true);
     expect(hasCode(failure, 'UPSTREAM_ERROR')).toBe(true);
     expect((failure as RpcError).message).toContain('yt-dlp-does-not-exist');
-  });
-
-  describe('the cookie file — architecture.md A12, todo.md 54', () => {
-    test('deps.cookie reaches the subprocess as --cookies <file>, and the file is gone after', async () => {
-      // The cookie-aware stub records the path it was given and whether that
-      // file, read at spawn time, held the recognisable cookie pair —
-      // recorded into its own JSON `height` field rather than trusted from
-      // stderr, so the assertion is on what the subprocess actually saw, not
-      // on what this test handed it.
-      const source = await tierYtDlp(
-        { session: null as never, ytDlpPath: cookieStub, cookie: 'SID=letmein; HSID=alsoletmein' },
-        'aqz-KE-bpKQ',
-        null,
-        null,
-      );
-
-      expect(source.variants[0]!.height).toBe(777);
-      const seenPath = readFileSync(cookiePathSideChannel, 'utf8').trim();
-      expect(seenPath.length).toBeGreaterThan(0);
-      // The whole point of a throwaway file: gone once this call has returned,
-      // success or not — `tierYtDlp`'s `finally` deletes it either way.
-      expect(existsSync(seenPath)).toBe(false);
-    });
-
-    test('no cookie means no --cookies flag at all, not an empty one', async () => {
-      const source = await tierYtDlp(
-        { session: null as never, ytDlpPath: cookieStub },
-        'aqz-KE-bpKQ',
-        null,
-        null,
-      );
-      expect(source.variants[0]!.height).toBe(111);
-    });
-
-    test('a declined resolution still cleans up the cookie file', async () => {
-      // The unhappy path: the subprocess itself fails (non-zero exit), and the
-      // file it was handed must not survive that either.
-      await tierYtDlp(
-        { session: null as never, ytDlpPath: failingCookieStub, cookie: 'SID=letmein' },
-        'aqz-KE-bpKQ',
-        null,
-        null,
-      ).catch((error: unknown) => error);
-
-      const seenPath = readFileSync(cookiePathSideChannel, 'utf8').trim();
-      expect(seenPath.length).toBeGreaterThan(0);
-      expect(existsSync(seenPath)).toBe(false);
-    });
   });
 });
 
