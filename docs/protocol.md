@@ -60,11 +60,14 @@ Mismatched versions fail fast rather than misbehaving.
 
 `capabilities` reports optional pieces of the machine the app cannot discover on
 its own. `ytDlp: false` means ladder tier 4 is gone, leaving only `VISIONOS`
-and the 360p floor (§3.5), so age-restricted or Vevo videos fail with
+and the 360p floor (§3.5), so Vevo videos fail with
 `STREAM_UNAVAILABLE` and no way for the UI to say why. The sidecar also warns about it at startup — a missing
 fallback that removes a capability without removing anything visible is exactly
 the kind of degradation this protocol makes explicit rather than leaving to be
-inferred from a video that will not play.
+inferred from a video that will not play. Age-restricted content is not
+affected by `ytDlp: false` — its retry (§3.5, `architecture.md` A12, F48)
+never shells out to yt-dlp; a signed-in account clears it, or does not,
+independent of whether yt-dlp is installed.
 
 ---
 
@@ -1134,9 +1137,17 @@ keep theirs while not being in the ladder:
    refuse the open-ended range ffmpeg always sends (F10), so this tier could
    resolve a video but never play it. `architecture.md` §2.4
 3. *Not in the ladder.* SABR → local DASH bridge — Phase 2, unbuilt
-4. `yt-dlp` subprocess with PO token provider — age-restricted, Vevo, edge cases
+4. `yt-dlp` subprocess — Vevo, other edge cases an anonymous client refuses
 5. itag 18 progressive, 360p, from an `ANDROID` `/player` response — the floor:
    usually present, **not guaranteed** (F9); sets `qualityDegraded`
+
+**Age-restricted content is not a ladder tier — it is one retry, after the
+ladder above has already declined every tier with `AGE_VERIFICATION_REQUIRED`,
+and only when the account has a cookie.** `age-restricted.ts` builds one
+throwaway `WEB_CREATOR` session carrying the cookie and a PO token as
+in-memory strings, never a file, and tries the video once more. It is the one
+deliberate exception to the anonymous-resolution rule the ladder above holds
+to everywhere else (`architecture.md` A5, A12, F48).
 
 **Nothing in this ladder deciphers.** `VISIONOS` and `ANDROID` URLs carry no
 `n`, and yt-dlp runs its own transform. Every address still passes through the
@@ -1657,21 +1668,28 @@ you're not a bot" after ~180 resolutions in an hour. `playback.open` answers
 
 **`AGE_VERIFICATION_REQUIRED` is the age gate the note above says is "a
 different problem" — decided 2026-09-28 for `docs/todo.md` 54,
-`architecture.md` A12, F46.** Not terminal, for the same reason `RATE_LIMITED`
-isn't: the ladder keeps going past it, and only a run that both saw the gate
-and found nothing below it (yt-dlp included) answers this code instead of
-`STREAM_UNAVAILABLE`.
+`architecture.md` A12, F46, F48.** Not terminal, for the same reason
+`RATE_LIMITED` isn't: the ladder keeps going past it, and only a run that both
+saw the gate and found nothing below it (yt-dlp included) answers this code
+instead of `STREAM_UNAVAILABLE`.
 
-- **`user`, and honestly so — not decoration.** Unlike `VIDEO_UPCOMING` and
-  `VIDEO_MEMBERS_ONLY`, an external condition really can flip the next
-  attempt — F46 found this gate is likely a missing proof-of-origin token
-  rather than a verdict on the account, and that a real one clears it. Which
-  is why the copy stopped claiming to know the cause: `AuthState.isSignedIn`
-  on the client, not anything the envelope carries, decides the slate's
-  wording. Signed out, that is a working "Sign in" button. Signed in, it is a
-  plain "could not be opened" explanation with **no** button, because nothing
-  the app can currently do differently makes a retry succeed — not because the
-  account is presumed unverified.
+**By the time Flutter ever sees this code, the sidecar has already tried the
+fix once, if it could.** F46 found this gate is a missing proof-of-origin
+token, not a verdict on the account; F48 shipped it — `age-restricted.ts`
+retries the video with the account's cookie and a PO token, in memory,
+between the ladder declining and the RPC error going out. So this code
+reaching the app means one of two things: signed out (nothing to retry with),
+or signed in and the retry *also* declined. Either way the client cannot tell
+which, and does not need to — see the next point.
+
+- **`user`, and honestly so — not decoration.** `AuthState.isSignedIn` on the
+  client, not anything the envelope carries, decides the slate's wording.
+  Signed out, that is a working "Sign in" button — signing in gives the
+  sidecar the cookie the retry needs, which it did not have. Signed in, it is
+  a plain "could not be opened" explanation with **no** button: the sidecar
+  already tried the one thing signing in again would attempt, with the
+  account's real cookie, and it still declined — so a second attempt is not
+  offered because nothing changed would make it succeed.
 - **Not `AUTH_REQUIRED`, on purpose** — rejected in A12. That code means
   "sign in and this will work"; F45/F46 found a real, valid, signed-in cookie
   still refused, so signing in is not reliably sufficient here, and a code

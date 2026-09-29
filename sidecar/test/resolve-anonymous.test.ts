@@ -29,8 +29,15 @@
  * `--cookies` flag has no non-file form — which Task 22 §5 forbids outright
  * ("no temp file... do not reintroduce the pattern under a new name"), a file
  * deleted in a `finally` included: the rule guards against a crash between
- * the write and the delete, not an ordinary decline. The checks below are
- * back to the original, unqualified rule with no exception carved out.
+ * the write and the delete, not an ordinary decline.
+ *
+ * **A narrower, in-memory exception replaced it, 2026-09-29 —
+ * `architecture.md` A12, F48, `playback/age-restricted.ts`.** That file's own
+ * doc comment has the reasoning; the shape of the exception is what this file
+ * checks for. `playback/age-restricted.ts` is now in `COOKIE_ALLOWED` below,
+ * and `playback.open`'s handler is allowed to read `browseAuth`'s cookie
+ * *value* — but never `browseAuth.session()`, and every other resolution
+ * entry point stays under the original, unqualified rule.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -51,7 +58,7 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * The three places a cookie may be attached to a session, and why each is allowed.
+ * The four places a cookie may be attached to a session, and why each is allowed.
  *
  * Anything else is a bug this test exists to name.
  */
@@ -69,6 +76,12 @@ const COOKIE_ALLOWED = new Map<string, string>([
     'capture-viewer-state.ts',
     'the other offline capture tool, for the same reason: never on a request path, ' +
       'and it needs the signed-in viewer whose state it is capturing',
+  ],
+  [
+    'playback/age-restricted.ts',
+    'the one deliberate exception — architecture.md A12, F48: a fresh, throwaway ' +
+      'WEB_CREATOR session built only after the anonymous ladder already declined ' +
+      'with AGE_VERIFICATION_REQUIRED, carrying the cookie as a value, never a file',
   ],
 ]);
 
@@ -146,8 +159,11 @@ describe('the resolution path is anonymous', () => {
     // The other shape this could take: not a cookie on `createSession`, but
     // `browseAuth.session()` passed where the resolve session belongs. Every
     // resolution entry point in `rpc/server.ts` takes `getResolveSession()`.
+    //
+    // `playback.open` is checked separately below — it is allowed to touch
+    // `browseAuth`, narrowly, for the age-restricted retry (A12, F48).
     const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
-    for (const method of ['playback.open', 'video.storyboard', 'captions.list', 'captions.get']) {
+    for (const method of ['video.storyboard', 'captions.list', 'captions.get']) {
       const handler = handlerSource(server, method);
       expect(handler.length, `handler for ${method} not found`).toBeGreaterThan(0);
       expect(
@@ -156,5 +172,21 @@ describe('the resolution path is anonymous', () => {
       ).not.toContain('getBrowseSession');
       expect(handler).not.toContain('browseAuth');
     }
+  });
+
+  test('playback.open reads only the cookie value off browseAuth, never the browse session', () => {
+    // The narrow exception itself, checked directly rather than just excluded
+    // from the sweep above — A12, F48, playback/age-restricted.ts. The
+    // resolve session (`getResolveSession()`) must still be what actually
+    // resolves the anonymous ladder, `getBrowseSession`/`browseAuth.session()`
+    // must never appear at all, and the one `browseAuth` reference allowed is
+    // the cookie accessor built for exactly this.
+    const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
+    const handler = handlerSource(server, 'playback.open');
+    expect(handler.length).toBeGreaterThan(0);
+    expect(handler).toContain('getResolveSession()');
+    expect(handler).not.toContain('getBrowseSession');
+    expect(handler).not.toContain('browseAuth.session(');
+    expect(handler).toContain('browseAuth.cookieForAgeVerification');
   });
 });
