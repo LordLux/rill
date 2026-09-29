@@ -12,13 +12,87 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 55.** A new item takes it, and the same edit bumps this line.
+**Next number: 56.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
 ---
 
 ## Now
+
+### 54. An age-restricted video never plays, signed in or not, yt-dlp or not
+
+**Reported 2026-09-28. Reopened 2026-09-29 — the diagnosis it closed on was
+wrong.** `youtu.be/nKVsXpeYbCU` (age-restricted) still does not play. The
+first pass closed this by giving tier 4 (`yt-dlp`) the signed-in account's
+cookie and adding `AGE_VERIFICATION_REQUIRED` as its own error state
+(`architecture.md` A12) — but the cookie change wrote the cookie to a
+temporary file for yt-dlp's `--cookies` flag, which Task 22 §5 forbids
+outright regardless of when the file is deleted, and it has been reverted.
+The dedicated error code and the watch-page slate stay; only the cookie
+delivery was undone.
+
+**The original diagnosis was also probably backwards.** The video plays
+without a prompt on youtube.com with the same account, which an account
+YouTube considers unverified would not do. `architecture.md` F46: YouTube
+answers the identical "confirm your age" / "account age-verification" text
+for two different causes — a genuinely unverified account, and a request
+missing a proof-of-origin token (a BotGuard attestation that it came from a
+real client) — and nothing in the response tells them apart. Confirmed live:
+a local PO-token-generation server (`bgutil-ytdlp-pot-provider`) plus the
+same cookie played the video end to end, real formats to 720p. The watch
+page's signed-in copy no longer claims to know the cause (`player_slates.dart`,
+corrected 2026-09-29) — it said outright that the account needed Google's own
+verification, which turned out to be exactly the kind of confident-but-wrong
+error-text reading this file's own house style warns against.
+
+**The in-process question is answered — `architecture.md` F47, measured
+2026-09-29 — and the answer is yes, with two open costs left to weigh, not
+four unknowns left to research:**
+
+1. ~~Can it run with no external process?~~ Yes — `bgutil-ytdlp-pot-provider`'s
+   core is a plain class (`SessionManager`) with an async `generatePoToken`
+   method; the server wrapper exists for yt-dlp's general user base, most of
+   whom have no JS host, which does not describe this sidecar. Ran unmodified
+   under `bun run` on this project's own pinned Bun (1.1.42).
+2. ~~Does it need a DOM?~~ A `jsdom`-shimmed `globalThis` (`window`,
+   `document`, `navigator`), installed once per process, plus one real fetch
+   of YouTube's homepage for `ytcfg` — not a rendering browser. `canvas` (a
+   native addon) is a dependency and loaded without incident, but whether
+   BotGuard's own challenge actually exercises it was not established from
+   the source alone.
+3. ~~Minting cost?~~ ~600 ms cold (BotGuard init + challenge fetch, once per
+   process, the integrity token good for 12 hours), ~1 ms for a second video
+   in the same process. Comfortably inside the ladder's existing budgets —
+   mint once, reuse per video for the token's TTL, not per open.
+4. Whether it also serves tier 1 (`VISIONOS`) is still open, but structurally
+   plausible rather than unknown: `youtubei.js`'s own session creation already
+   accepts a plain `po_token` string, the exact shape `PoTokenProvider.mint()`
+   already returns.
+
+**What is left before writing the `PoTokenProvider` implementation:**
+
+- The 12.7 s cold **module import** in the scratch probe (jsdom + `canvas` +
+  `bgutils-js` + a bundled `youtubei.js`, all loading fresh) is unmeasured
+  under `bun build --compile`, which bundles differently — load it lazily on
+  first need either way, the existing `await import('../playback/resolve.ts')`
+  pattern in `rpc/server.ts`, not at sidecar startup.
+- `canvas` is a native addon shipping inside the compiled `sidecar.exe` —
+  confirm `bun build --compile` actually packages it correctly (the F47 probe
+  ran uncompiled) before treating this as settled.
+- Once minting works, the cookie question resolves itself the way F46/A12
+  anticipated: an in-process request carries the cookie as a plain string on
+  an ordinary InnerTube call, in memory, the same way the browse session
+  already does — no file, no Task 22 §5 conflict, and tier 4's yt-dlp
+  subprocess may not even be the right place to spend the token at all,
+  versus handing it to `VISIONOS` directly.
+
+**Done when:** a `PoTokenProvider` implementation is written and wired
+through `openPlayback`, the compiled-binary questions above are resolved
+first, and the exact repro video plays for a signed-in account — or, if the
+compiled-binary costs turn out to be prohibitive, that is recorded here and
+in `architecture.md` and the watch page's honest "could not be opened" copy
+is accepted as where this stops for now.
 
 ### 44. Leaving audio-only can wedge: "playing", and nothing moves
 
@@ -889,3 +963,9 @@ watch-page section, not in `protocol.md`.
 
 There is no Task 27 — the `scratch/task27-*.ts` filenames are a naming artefact,
 not a missing spec.
+
+### 55. Controls overlay visibility transitions when dialogs open/close
+
+The progress and controls bar on a video immediately disappears without fading when a dialog (such as the share dialog) is opened. It also immediately appears again without a fade transition when the dialog is closed. Furthermore, it always reappears upon closing the dialog, regardless of whether the controls were open or closed before the dialog was opened.
+
+**Done when:** the controls bar uses a smooth fade transition when disappearing and reappearing around dialogs, and correctly restores its previous visibility state after the dialog is closed.

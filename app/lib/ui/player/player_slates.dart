@@ -296,13 +296,21 @@ class MembersOnlySlate extends ConsumerWidget {
 /// `retry` is `user` either way (`playback_controller.dart`'s
 /// [PlaybackState.isAgeVerificationRequired]) — but the two are different
 /// problems for the viewer: signed out, the next step is *this app's* sign-in
-/// flow, so the action is "Sign in", not "Try again". Signed in, this app
-/// already tried tier 4 with the account's real cookie and YouTube still
-/// refused — `resolve.ts`'s `tierYtDlp`, measured live 2026-09-28 — which
-/// means the account itself has not completed YouTube's own age-verification.
-/// Nothing this app can do fixes that, so a *Try again* here would be the
-/// same broken promise `docs/todo.md` 54 reported in the first place: offer
-/// no button rather than one that cannot work.
+/// flow, so the action is "Sign in", not "Try again".
+///
+/// **Signed in, the copy does not claim to know the cause — corrected
+/// 2026-09-29, `architecture.md` F46.** An earlier version said outright that
+/// the *account* needed Google's own age-verification and that signing in
+/// again would not help. That was this app's own diagnosis after one live
+/// test, not something YouTube's response actually says — and it turned out
+/// to be the wrong half of a real ambiguity: YouTube answers with the exact
+/// same wording whether the true cause is an unverified account or a missing
+/// proof-of-origin token, and the two need different fixes. Overclaiming the
+/// first one is exactly the mistake this slate exists to avoid repeating, so
+/// the signed-in copy now says only what is known — the video could not be
+/// opened, and it may be a restriction this app cannot currently clear — with
+/// no *Try again*, because there is still nothing this build can do differently
+/// on a retry.
 class AgeVerificationRequiredSlate extends ConsumerWidget {
   const AgeVerificationRequiredSlate({super.key, required this.playback});
 
@@ -357,7 +365,7 @@ class AgeVerificationRequiredSlate extends ConsumerWidget {
                 const SizedBox(height: 4),
                 Text(
                   isSignedIn
-                      ? "YouTube needs this account to complete its own age-verification before this will play — signing in again here won't do it."
+                      ? "This video couldn't be opened. It may be a restriction this app can't currently clear."
                       : 'Sign in to watch this video.',
                   style: TextStyle(
                     color: tokens.onScrim,

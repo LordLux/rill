@@ -23,12 +23,14 @@
  * "just pass `browseAuth.session()`" is a one-line change that would look like
  * a simplification.
  *
- * **One exception, added 2026-09-28 for `todo.md` 54 — `architecture.md`
- * A12.** `playback.open` reads `browseAuth.cookieForYtDlp()`, a plain string
- * for tier 4's `yt-dlp` subprocess. That is not a `createSession` cookie and
- * not `browseAuth.session()`, so the checks below still enforce the InnerTube
- * resolve session's anonymity and CPN isolation (A5) in full — see the test
- * itself for exactly what is and is not allowed.
+ * **A cookie-for-yt-dlp exception was tried and reverted, 2026-09-28 —
+ * `architecture.md` F46, A12, `todo.md` 54.** Handing tier 4's `yt-dlp`
+ * subprocess the browse cookie meant writing it to a temp file — yt-dlp's
+ * `--cookies` flag has no non-file form — which Task 22 §5 forbids outright
+ * ("no temp file... do not reintroduce the pattern under a new name"), a file
+ * deleted in a `finally` included: the rule guards against a crash between
+ * the write and the delete, not an ordinary decline. The checks below are
+ * back to the original, unqualified rule with no exception carved out.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -144,17 +146,6 @@ describe('the resolution path is anonymous', () => {
     // The other shape this could take: not a cookie on `createSession`, but
     // `browseAuth.session()` passed where the resolve session belongs. Every
     // resolution entry point in `rpc/server.ts` takes `getResolveSession()`.
-    //
-    // **One narrow, deliberate exception — `architecture.md` A12, `todo.md`
-    // 54, 2026-09-28.** `playback.open` also reads `browseAuth.cookieForYtDlp()`,
-    // a plain string handed only to tier 4's `yt-dlp` subprocess
-    // (`playback/resolve.ts`'s `PlaybackDeps.cookie`), which is not an
-    // InnerTube session and has no CPN to bridge — A5, which this file's
-    // opening comment invokes, is about *that* system, not about giving an
-    // external tool the signed-in account's cookie. `browseAuth.session()`
-    // itself, and `getBrowseSession`, stay forbidden everywhere below: the
-    // resolve `session` these handlers pass to `openPlayback`/etc. must still
-    // be the anonymous one.
     const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
     for (const method of ['playback.open', 'video.storyboard', 'captions.list', 'captions.get']) {
       const handler = handlerSource(server, method);
@@ -163,27 +154,7 @@ describe('the resolution path is anonymous', () => {
         handler,
         `${method} must resolve through getResolveSession(), never the browse session`,
       ).not.toContain('getBrowseSession');
-      expect(handler, `${method} must never touch browseAuth.session()`).not.toContain(
-        'browseAuth.session(',
-      );
-
-      const browseAuthUses = [...handler.matchAll(/\bbrowseAuth\.(\w+)/g)].map((m) => m[1]);
-      const allowed = method === 'playback.open' ? ['cookieForYtDlp'] : [];
-      const unexpected = browseAuthUses.filter((use) => !allowed.includes(use!));
-      expect(
-        unexpected,
-        `${method} references browseAuth in a way this test does not recognise as tier 4's ` +
-          `cookie-for-yt-dlp exception: ${unexpected.join(', ')}`,
-      ).toEqual([]);
+      expect(handler).not.toContain('browseAuth');
     }
-  });
-
-  test('playback.open still hands tier 4 the account cookie', () => {
-    // The positive half of the exception above — without it, quietly dropping
-    // the cookie plumbing would pass every check in this file while silently
-    // undoing the fix `todo.md` 54 asked for.
-    const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
-    const handler = handlerSource(server, 'playback.open');
-    expect(handler).toContain('browseAuth.cookieForYtDlp()');
   });
 });

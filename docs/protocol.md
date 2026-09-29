@@ -1134,8 +1134,7 @@ keep theirs while not being in the ladder:
    refuse the open-ended range ffmpeg always sends (F10), so this tier could
    resolve a video but never play it. `architecture.md` §2.4
 3. *Not in the ladder.* SABR → local DASH bridge — Phase 2, unbuilt
-4. `yt-dlp` subprocess with PO token provider, and the browse account's cookie
-   when signed in (`architecture.md` A12) — age-restricted, Vevo, edge cases
+4. `yt-dlp` subprocess with PO token provider — age-restricted, Vevo, edge cases
 5. itag 18 progressive, 360p, from an `ANDROID` `/player` response — the floor:
    usually present, **not guaranteed** (F9); sets `qualityDegraded`
 
@@ -1658,29 +1657,25 @@ you're not a bot" after ~180 resolutions in an hour. `playback.open` answers
 
 **`AGE_VERIFICATION_REQUIRED` is the age gate the note above says is "a
 different problem" — decided 2026-09-28 for `docs/todo.md` 54,
-`architecture.md` A12.** Not terminal, for the same reason `RATE_LIMITED`
-isn't: tier 4 (`yt-dlp`) now carries the signed-in account's cookie (A12), and
-a genuinely age-verified account can clear a gate the anonymous InnerTube
-tiers never could — so the ladder keeps going, and only a run that both saw
-the gate and found nothing below it (yt-dlp included) answers this code
-instead of `STREAM_UNAVAILABLE`.
+`architecture.md` A12, F46.** Not terminal, for the same reason `RATE_LIMITED`
+isn't: the ladder keeps going past it, and only a run that both saw the gate
+and found nothing below it (yt-dlp included) answers this code instead of
+`STREAM_UNAVAILABLE`.
 
 - **`user`, and honestly so — not decoration.** Unlike `VIDEO_UPCOMING` and
   `VIDEO_MEMBERS_ONLY`, an external condition really can flip the next
-  attempt: signing in, if the app was anonymous, or completing YouTube's own
-  account age-verification on youtube.com, if it was not. Which of those two
-  applies is not something this code alone can say — it is `AuthState.isSignedIn`
-  on the client, not anything the envelope carries — so the watch page reads
-  both and picks the slate's wording and action itself. Signed out, that is a
-  working "Sign in" button. Signed in, it is an explanation with **no** button:
-  this app already tried tier 4 with the real cookie and YouTube still
-  refused, so a retry affordance here is the same broken promise `todo.md` 54
-  reported, just wearing a new code.
+  attempt — F46 found this gate is likely a missing proof-of-origin token
+  rather than a verdict on the account, and that a real one clears it. Which
+  is why the copy stopped claiming to know the cause: `AuthState.isSignedIn`
+  on the client, not anything the envelope carries, decides the slate's
+  wording. Signed out, that is a working "Sign in" button. Signed in, it is a
+  plain "could not be opened" explanation with **no** button, because nothing
+  the app can currently do differently makes a retry succeed — not because the
+  account is presumed unverified.
 - **Not `AUTH_REQUIRED`, on purpose** — rejected in A12. That code means
-  "sign in and this will work"; F45 measured a real, valid, signed-in cookie
-  still refused with "YouTube is requiring account age-verification", so
-  signing in is not always sufficient here, and a code cannot honestly claim
-  it is.
+  "sign in and this will work"; F45/F46 found a real, valid, signed-in cookie
+  still refused, so signing in is not reliably sufficient here, and a code
+  cannot honestly claim it is.
 - **Deliberately not merged with `RATE_LIMITED`, even though both start from
   the same `LOGIN_REQUIRED` status.** They read different prose (`resolve.ts`'s
   `assertPlayable`, "not a bot" vs. "confirm your age") for a reason: one is a
