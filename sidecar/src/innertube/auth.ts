@@ -106,6 +106,25 @@ export class BrowseAuth {
     return this.#cookie !== undefined;
   }
 
+  /**
+   * The cookie value itself — the one deliberate crack in "this class never
+   * hands it out". `architecture.md` A12, `todo.md` 54.
+   *
+   * Its only caller is `playback/age-restricted.ts`, and only after the
+   * anonymous ladder has already declined a video with
+   * `AGE_VERIFICATION_REQUIRED`. It gets the *string*, never `session()` — the
+   * browse `Session`/`Innertube` object stays exactly as unreachable from
+   * resolution as it always was, because handing over the object (not the
+   * value) is what would actually bridge the two clients' CPNs, caches and
+   * revisions into one (A5). A string passed once to build one throwaway
+   * `Innertube.create` call and then dropped is not that: it crosses the
+   * process's own memory, never a file, and `redact.ts` still strikes it from
+   * every log and error envelope regardless of who is holding it.
+   */
+  get cookieForAgeVerification(): string | undefined {
+    return this.#cookie;
+  }
+
   /** The last measured state, or `null` if `verify` has never run. */
   get lastVerifiedState(): AuthState | null {
     return this.#verified;

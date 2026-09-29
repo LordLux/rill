@@ -62,6 +62,13 @@ const BROKEN_ID = 'broken1';
  * not that the video would not open.
  */
 const RATE_LIMITED_ID = 'ratelimited1';
+/**
+ * An account-level age gate that survived every tier — `AGE_VERIFICATION_REQUIRED`,
+ * `docs/todo.md` 54, `architecture.md` A12. `retry: "user"` like `RATE_LIMITED`:
+ * which action the watch page offers (Sign in vs. a plain explanation) is
+ * `AuthState.isSignedIn`, not anything this response carries.
+ */
+const AGE_VERIFICATION_ID = 'ageverify1';
 const MEMBERS_ID = 'members1';
 const MEMBERS_LOCALE_ID = 'memberslocale1';
 /** Members-only, and nothing anywhere knows the channel's name. */
@@ -266,6 +273,17 @@ rl.on('line', (line) => {
           error: {
             code: 'RATE_LIMITED',
             message: 'ratelimited1: YouTube is throttling this connection',
+            retry: 'user',
+          },
+        }) + '\n');
+        return;
+      }
+      if (req.params?.videoId === AGE_VERIFICATION_ID) {
+        process.stdout.write(JSON.stringify({
+          id: req.id,
+          error: {
+            code: 'AGE_VERIFICATION_REQUIRED',
+            message: 'ageverify1: YouTube requires account age-verification',
             retry: 'user',
           },
         }) + '\n');

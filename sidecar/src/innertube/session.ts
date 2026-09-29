@@ -70,8 +70,20 @@ export interface SessionOptions {
    * Stream resolution passes `MWEB` here, but the client that matters is the one
    * named per `/player` call — tier 1 asks as `VISIONOS` through this same
    * session, and youtubei.js rewrites `context.client` before sending.
+   *
+   * `WEB_CREATOR` is the one other value in use, and it is not a resolution
+   * tier: it is the age-restricted path's own throwaway session
+   * (`playback/age-restricted.ts`, `architecture.md` A12), built fresh per
+   * call rather than shared — see that file for why.
    */
-  clientType?: 'WEB' | 'MWEB';
+  clientType?: 'WEB' | 'MWEB' | 'WEB_CREATOR';
+  /**
+   * A proof-of-origin token to present at session creation.
+   *
+   * Only the age-restricted path sets this today — `po-token.ts` mints it,
+   * and `Innertube.create` accepts it as a plain string. `architecture.md` F48.
+   */
+  poToken?: string;
   /** Required for decipher. Only turn off for captures that never touch /player. */
   retrievePlayer?: boolean;
   /** A stale cached session survives a cookie rotation and hides F7. Off by default. */
@@ -112,6 +124,7 @@ export async function createSession(options: SessionOptions | string = {}): Prom
   const {
     cookie,
     clientType = 'WEB',
+    poToken,
     retrievePlayer = true,
     cache = false,
     serverVisitorId = true,
@@ -119,9 +132,12 @@ export async function createSession(options: SessionOptions | string = {}): Prom
 
   installInterpreter();
 
+  const CLIENT_TYPES = { WEB: ClientType.WEB, MWEB: ClientType.MWEB, WEB_CREATOR: ClientType.WEB_CREATOR };
+
   const innertube = await Innertube.create({
     ...(cookie ? { cookie } : {}),
-    client_type: clientType === 'MWEB' ? ClientType.MWEB : ClientType.WEB,
+    ...(poToken ? { po_token: poToken } : {}),
+    client_type: CLIENT_TYPES[clientType],
     device_category: 'desktop',
     retrieve_player: retrievePlayer,
     enable_session_cache: cache,
@@ -241,11 +257,16 @@ export async function refreshVisitorId(session: Session): Promise<string> {
  * `WEB` existed so `video.info` could read a duration; that would have been a
  * second `/player` round trip per open, and `video.info` now shares tier 1's
  * `VISIONOS` response instead. See `video/info.ts`.
+ *
+ * `WEB_CREATOR` is the age-restricted path's client, not a ladder tier —
+ * `playback/age-restricted.ts`, `architecture.md` A12, F48. The PO token it
+ * uses was minted and verified for `WEB_CREATOR` specifically; nothing here
+ * has tested whether it transfers to another client.
  */
-export type PlayerClient = 'WEB' | 'MWEB' | 'VISIONOS' | 'ANDROID';
+export type PlayerClient = 'WEB' | 'MWEB' | 'VISIONOS' | 'ANDROID' | 'WEB_CREATOR';
 
 /** Every value of `PlayerClient`, for anything that has to sweep them all. */
-export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'VISIONOS', 'ANDROID'];
+export const PLAYER_CLIENTS: readonly PlayerClient[] = ['WEB', 'MWEB', 'VISIONOS', 'ANDROID', 'WEB_CREATOR'];
 
 /**
  * The payload a raw `/player` call needs.

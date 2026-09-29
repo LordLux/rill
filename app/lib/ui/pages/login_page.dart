@@ -92,6 +92,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   /// on a feed the user was never signed in to.
   bool _handingOff = false;
 
+  /// A degraded result reached a dead end — offer a way out instead of just
+  /// prose, added 2026-09-30.
+  ///
+  /// Distinct from [_handingOff]: this is what the cover shows once it is
+  /// up, not whether it is up. The button calls [_retry], which is the only
+  /// thing that can move this screen forward again once [_finished] has
+  /// stopped the poll — without it, a degraded session left the user on a
+  /// message with no button and a `robots.txt` page underneath with nothing
+  /// left to click either.
+  bool _canRetry = false;
+
   String _message = 'Waiting for you to sign in…';
 
   @override
@@ -157,9 +168,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           // The cookies exist and YouTube will not honour them. Retrying the
           // same jar every two seconds would spend requests forever, so stop
           // and say so — this is `retry: no` wearing a different hat.
+          //
+          // **Stays covered — no `_uncover()`.** The page underneath is
+          // `robots.txt` (see `_signIn`): a dead end with nothing left to do
+          // on it, so uncovering here just showed the user that instead of
+          // the explanation, with the "try signing in again" instruction
+          // sitting below a page it was not talking about. `_canRetry`
+          // swaps the spinner for an actual way to act on that instruction.
           _finished = true;
           _poll?.cancel();
-          _uncover();
+          setState(() => _canRetry = true);
           _setMessage(
             'YouTube returned an empty feed for this session. '
             'Try signing in again, or with a different account.',
@@ -183,15 +201,40 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   /// Put the web page back on screen.
   ///
-  /// **Every outcome except success has to do this**, and forgetting it is a
-  /// worse bug than the flash of `robots.txt` the cover exists to prevent: the
-  /// messages for the other outcomes all say some version of "keep going" or
-  /// "try again", and both refer to a page the cover is hiding. Only
-  /// `authenticated` may leave the cover up, because from there the next thing
-  /// that happens is the route closing.
+  /// **Every outcome that means "keep going in the window above" has to do
+  /// this** — `anonymous`/`unknown`, and the cookie-check failure — because
+  /// their messages refer to a page the cover is hiding and the user
+  /// actually needs to see it to act on them. `authenticated` and `degraded`
+  /// are the two that do not: `authenticated` because the next thing that
+  /// happens is the route closing, and `degraded` because — corrected
+  /// 2026-09-30 — the page underneath by then is `robots.txt`, a dead end
+  /// uncovering only used to flash up for no reason; see the `degraded` case
+  /// in [_checkCookies] and [_canRetry].
   void _uncover() {
     if (!mounted || !_handingOff) return;
     setState(() => _handingOff = false);
+  }
+
+  /// Start over: back to the sign-in page, polling again.
+  ///
+  /// The only way out of a [_canRetry] state. `_finished` blocks
+  /// [_checkCookies] outright, so it has to come back down along with
+  /// [_checking]; the poll timer was cancelled on the way into `degraded`
+  /// (`_checkCookies`), so it has to be recreated, not just trusted to still
+  /// be running. Reloading `_signIn` matters as much as the flags — without
+  /// it the WebView is still parked on `robots.txt`, and the next poll tick
+  /// would just read the same jar and land right back here.
+  void _retry() {
+    setState(() {
+      _canRetry = false;
+      _finished = false;
+      _checking = false;
+      _handingOff = false;
+    });
+    _poll?.cancel();
+    _poll = Timer.periodic(_pollInterval, (_) => _checkCookies());
+    _setMessage('Waiting for you to sign in…');
+    unawaited(_controller?.loadUrl(urlRequest: URLRequest(url: _signIn)));
   }
 
   void _setMessage(String message) {
@@ -257,17 +300,27 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const SizedBox(
-                            width: 32,
-                            height: 32,
-                            child: CircularProgressIndicator(strokeWidth: 3),
-                          ),
+                          if (_canRetry)
+                            Icon(Icons.error_outline, size: 32, color: scheme.error)
+                          else
+                            const SizedBox(
+                              width: 32,
+                              height: 32,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            ),
                           const SizedBox(height: 20),
-                          Text(
-                            _message,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: scheme.onSurface, fontSize: 16),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              _message,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: scheme.onSurface, fontSize: 16),
+                            ),
                           ),
+                          if (_canRetry) ...[
+                            const SizedBox(height: 20),
+                            FilledButton(onPressed: _retry, child: const Text('Try again')),
+                          ],
                         ],
                       ),
                     ),
@@ -275,30 +328,39 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               ],
             ),
           ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            color: scheme.surfaceContainerHighest,
-            child: Row(
-              children: [
-                if (busy)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _message,
-                    style: TextStyle(color: scheme.onSurfaceVariant),
+          // **Not shown once `_canRetry` is up.** The cover already carries
+          // this exact message, front and center, next to the button that
+          // acts on it — repeating it down here in a narrow strip below the
+          // fold is how a real failure ended up reading as background noise
+          // rather than something to act on (2026-09-30). Every other state
+          // this bar covers (waiting, checking, "not signed in yet") has no
+          // competing copy of the message anywhere else, so it keeps this
+          // bar for those.
+          if (!_canRetry)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: scheme.surfaceContainerHighest,
+              child: Row(
+                children: [
+                  if (busy)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _message,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

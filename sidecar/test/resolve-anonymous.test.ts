@@ -22,6 +22,22 @@
  * plumb anywhere. Now there is a `BrowseAuth` object holding a live cookie, and
  * "just pass `browseAuth.session()`" is a one-line change that would look like
  * a simplification.
+ *
+ * **A cookie-for-yt-dlp exception was tried and reverted, 2026-09-28 —
+ * `architecture.md` F46, A12, `todo.md` 54.** Handing tier 4's `yt-dlp`
+ * subprocess the browse cookie meant writing it to a temp file — yt-dlp's
+ * `--cookies` flag has no non-file form — which Task 22 §5 forbids outright
+ * ("no temp file... do not reintroduce the pattern under a new name"), a file
+ * deleted in a `finally` included: the rule guards against a crash between
+ * the write and the delete, not an ordinary decline.
+ *
+ * **A narrower, in-memory exception replaced it, 2026-09-29 —
+ * `architecture.md` A12, F48, `playback/age-restricted.ts`.** That file's own
+ * doc comment has the reasoning; the shape of the exception is what this file
+ * checks for. `playback/age-restricted.ts` is now in `COOKIE_ALLOWED` below,
+ * and `playback.open`'s handler is allowed to read `browseAuth`'s cookie
+ * *value* — but never `browseAuth.session()`, and every other resolution
+ * entry point stays under the original, unqualified rule.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -42,7 +58,7 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * The three places a cookie may be attached to a session, and why each is allowed.
+ * The four places a cookie may be attached to a session, and why each is allowed.
  *
  * Anything else is a bug this test exists to name.
  */
@@ -61,6 +77,12 @@ const COOKIE_ALLOWED = new Map<string, string>([
     'the other offline capture tool, for the same reason: never on a request path, ' +
       'and it needs the signed-in viewer whose state it is capturing',
   ],
+  [
+    'playback/age-restricted.ts',
+    'the one deliberate exception — architecture.md A12, F48: a fresh, throwaway ' +
+      'WEB_CREATOR session built only after the anonymous ladder already declined ' +
+      'with AGE_VERIFICATION_REQUIRED, carrying the cookie as a value, never a file',
+  ],
 ]);
 
 /** Every `createSession({...})` call in `src/`, with the file it is in. */
@@ -77,6 +99,21 @@ function createSessionCalls(): Array<{ file: string; args: string }> {
     }
   }
   return out;
+}
+
+/**
+ * One `else if (method === '...')` branch's source, from its match to the
+ * next branch (or end of file). A fixed-size window undercounts a handler
+ * with a long comment before its code — measured directly: `playback.open`'s
+ * own cookie-for-yt-dlp line sits 2250 characters past the match, past the
+ * 1400-character window this file used before 2026-09-28, so that window
+ * would have let the reference go unseen rather than flag it.
+ */
+function handlerSource(server: string, method: string): string {
+  const start = server.indexOf(`method === '${method}'`);
+  if (start === -1) return '';
+  const next = server.indexOf('} else if (method ===', start + 1);
+  return server.slice(start, next === -1 ? undefined : next);
 }
 
 describe('the resolution path is anonymous', () => {
@@ -122,12 +159,12 @@ describe('the resolution path is anonymous', () => {
     // The other shape this could take: not a cookie on `createSession`, but
     // `browseAuth.session()` passed where the resolve session belongs. Every
     // resolution entry point in `rpc/server.ts` takes `getResolveSession()`.
+    //
+    // `playback.open` is checked separately below — it is allowed to touch
+    // `browseAuth`, narrowly, for the age-restricted retry (A12, F48).
     const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
-    for (const method of ['playback.open', 'video.storyboard', 'captions.list', 'captions.get']) {
-      const handler = server.slice(
-        server.indexOf(`method === '${method}'`),
-        server.indexOf(`method === '${method}'`) + 1400,
-      );
+    for (const method of ['video.storyboard', 'captions.list', 'captions.get']) {
+      const handler = handlerSource(server, method);
       expect(handler.length, `handler for ${method} not found`).toBeGreaterThan(0);
       expect(
         handler,
@@ -135,5 +172,21 @@ describe('the resolution path is anonymous', () => {
       ).not.toContain('getBrowseSession');
       expect(handler).not.toContain('browseAuth');
     }
+  });
+
+  test('playback.open reads only the cookie value off browseAuth, never the browse session', () => {
+    // The narrow exception itself, checked directly rather than just excluded
+    // from the sweep above — A12, F48, playback/age-restricted.ts. The
+    // resolve session (`getResolveSession()`) must still be what actually
+    // resolves the anonymous ladder, `getBrowseSession`/`browseAuth.session()`
+    // must never appear at all, and the one `browseAuth` reference allowed is
+    // the cookie accessor built for exactly this.
+    const server = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
+    const handler = handlerSource(server, 'playback.open');
+    expect(handler.length).toBeGreaterThan(0);
+    expect(handler).toContain('getResolveSession()');
+    expect(handler).not.toContain('getBrowseSession');
+    expect(handler).not.toContain('browseAuth.session(');
+    expect(handler).toContain('browseAuth.cookieForAgeVerification');
   });
 });
