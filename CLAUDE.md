@@ -724,6 +724,23 @@ the answer.
   the app's side, since the process fails before it can print anything.
   Diagnosing this needs running `sidecar.exe` directly in a terminal on the
   machine in question, not trusting the app's generic wrapper message.
+- **A second `import()` of an already-broken module does not reject the way
+  the first one did — measured 2026-09-30, compiled, against a deliberately
+  reverted `css-tree` patch.** A dynamic `import()` whose target module threw
+  during evaluation rejects the first time, predictably. Every `import()` of
+  that *same* module specifier after that — even from an unrelated call
+  site, even much later — resolves successfully instead, with every named
+  export `undefined`. Nothing throws at the import line the second time; the
+  failure only surfaces later, wherever the code first tries to call or
+  construct one of those `undefined` exports, as a bare `TypeError` with no
+  clue it came from an import. A `try`/`catch` wrapped around a dynamic
+  import on the reasonable assumption that a caught first failure means a
+  correctly-caught path every time is wrong: check what actually came back
+  (`if (!theExport) throw ...`) rather than trusting that reaching the code
+  after the `await` means the import succeeded. `architecture.md` F50 has
+  the specific case this was found in (`po-token.ts`'s dynamic import in
+  `rpc/server.ts`) and `sidecar/test/po-token-scope.test.ts` the regression
+  test.
 
 ## Current state
 
