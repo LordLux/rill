@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import type { Session } from '../innertube/session.ts';
 import { browseAuth, HOME_BROWSE_ID } from '../innertube/auth.ts';
-import { RpcError, isRpcError, messageOf, nameOf } from '../errors.ts';
+import { RpcError, hasCode, isRpcError, messageOf, nameOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { redact } from '../redact.ts';
 import { announceCapabilities } from '../capabilities.ts';
@@ -441,11 +441,33 @@ async function handleRequest(request: RpcRequest) {
       // resolution ladder — see `OpenParams.playlistId`.
       const playlistId = optionalString(params, 'playlistId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
+      const { botguardPoTokenProvider } = await import('../playback/po-token.ts');
       const session = await getResolveSession();
-      const result = await openPlayback(
-        { session },
-        { videoId, preload: params?.preload === true, playlistId },
-      );
+      const openParams = { videoId, preload: params?.preload === true, playlistId };
+      let result;
+      try {
+        result = await openPlayback({ session, poTokens: botguardPoTokenProvider }, openParams);
+      } catch (error) {
+        // The one deliberate exception to "resolution never sees a cookie" —
+        // `architecture.md` A12, `playback/age-restricted.ts` has the reasoning
+        // and the reverted alternative this replaces. Reads the cookie *value*
+        // off `browseAuth`, never browseAuth's own session accessor —
+        // resolve-anonymous.test.ts asserts that distinction holds. Only
+        // reached once the anonymous ladder has already declined every tier,
+        // and only with a cookie in hand.
+        const cookie = browseAuth.cookieForAgeVerification;
+        if (!hasCode(error, 'AGE_VERIFICATION_REQUIRED') || cookie === undefined) throw error;
+        const { resolveAgeRestricted } = await import('../playback/age-restricted.ts');
+        const retried = await resolveAgeRestricted({
+          videoId,
+          cookie,
+          poTokens: botguardPoTokenProvider,
+          preload: openParams.preload,
+          playlistId: openParams.playlistId,
+        });
+        if (retried === null) throw error;
+        result = retried;
+      }
       emitResponse(id, result);
     } else if (method === 'video.info') {
       const videoId = requireString(params, 'videoId', 'video.info');
@@ -657,6 +679,18 @@ export function startRpcServer() {
   emitEvent('event.ready', {
     protocolVersion: 1,
     capabilities
+  });
+
+  // Fire-and-forget, strictly after `event.ready` above — never before it.
+  // `warm()` builds the shared BotGuard minter (~812ms cold, compiled;
+  // `architecture.md` F48) so that cost lands here instead of on the first
+  // video's open. Not awaited: `rpc.test.ts` asserts `event.ready` under
+  // 500ms, and this must not be able to make that assertion false by
+  // existing. Import is dynamic for the same reason every other heavy module
+  // here is — this file must not pay for the resolution graph before
+  // anything asks for it.
+  void import('../playback/po-token.ts').then(({ botguardPoTokenProvider }) => {
+    botguardPoTokenProvider.warm();
   });
 
   // No `output`. stdout is the protocol (hard invariant 3), and handing it to

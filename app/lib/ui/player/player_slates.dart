@@ -289,7 +289,8 @@ class MembersOnlySlate extends ConsumerWidget {
   }
 }
 
-/// An account-level age gate — `AGE_VERIFICATION_REQUIRED`, `docs/todo.md` 54.
+/// An account-level age gate — `AGE_VERIFICATION_REQUIRED`,
+/// `architecture.md` A12, F46, F48 (formerly `docs/todo.md` 54, closed).
 ///
 /// **Two copies for one code, chosen by [AuthState.isSignedIn], not by
 /// anything on [PlaybackState].** The sidecar cannot tell these apart — its
@@ -305,12 +306,16 @@ class MembersOnlySlate extends ConsumerWidget {
 /// test, not something YouTube's response actually says — and it turned out
 /// to be the wrong half of a real ambiguity: YouTube answers with the exact
 /// same wording whether the true cause is an unverified account or a missing
-/// proof-of-origin token, and the two need different fixes. Overclaiming the
-/// first one is exactly the mistake this slate exists to avoid repeating, so
-/// the signed-in copy now says only what is known — the video could not be
-/// opened, and it may be a restriction this app cannot currently clear — with
-/// no *Try again*, because there is still nothing this build can do differently
-/// on a retry.
+/// proof-of-origin token, and the two need different fixes.
+///
+/// **Reaching this code signed in now means the sidecar already tried the
+/// fix, not that nothing exists — F48.** `age-restricted.ts` retries the
+/// video once, in-process, with the account's own cookie and a PO token,
+/// between the ladder declining and this error ever reaching the app. So a
+/// signed-in viewer seeing this slate is seeing the outcome *after* that
+/// retry, not before it — which is exactly why there is still no *Try
+/// again* here: the one thing a manual retry could try, the sidecar already
+/// did, with real credentials, before this widget ever built.
 class AgeVerificationRequiredSlate extends ConsumerWidget {
   const AgeVerificationRequiredSlate({super.key, required this.playback});
 

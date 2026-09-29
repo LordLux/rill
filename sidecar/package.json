@@ -17,6 +17,8 @@
     "check": "tsc --noEmit && eslint . && bun test"
   },
   "dependencies": {
+    "bgutils-js": "^4.0.3",
+    "jsdom": "^29.1.1",
     "youtubei.js": "^18.0.0"
   },
   "devDependencies": {
@@ -25,6 +27,9 @@
     "eslint": "^9.14.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.13.0"
+  },
+  "patchedDependencies": {
+    "css-tree@3.2.1": "patches/css-tree@3.2.1.patch"
   },
   "engines": {
     "bun": ">=1.1"
