@@ -447,15 +447,19 @@ async function handleRequest(request: RpcRequest) {
       let result;
       try {
         // No `poTokens` here — the anonymous ladder stays token-free, on
-        // purpose. F49: attaching a PO token to VISIONOS's *signed stream
-        // URL* (as opposed to the /player metadata call, which tolerated it
-        // fine — F48) broke real playback for an ordinary, non-age-gated
-        // video: mpv could not open the stream at all. `/player` accepting a
-        // token is not evidence the videoplayback edge does; only the
-        // age-restricted retry below, on its own WEB_CREATOR session, is
-        // verified end to end. Do not wire `botguardPoTokenProvider` in here
-        // again without a real playback test proving otherwise, not just an
-        // `OK` status.
+        // purpose. F49: a report of mpv failing to open an ordinary,
+        // non-age-gated video's stream, immediately after this line attached
+        // a PO token to it, was suggestive but never independently confirmed
+        // as caused by the token specifically (revised 2026-09-30 — this
+        // exact mpv failure text has occurred before, rarely, with no token
+        // involved). The scope pullback does not depend on that one incident
+        // being the cause: F48 only ever verified a token attached to
+        // VISIONOS through the /player metadata response, never through a
+        // real stream fetch, and `age-restricted.ts`'s own WEB_CREATOR
+        // session is the only path verified end to end. Do not wire
+        // `botguardPoTokenProvider` in here again without a real playback
+        // test proving the actual videoplayback edge tolerates it, not just
+        // an `OK` status.
         result = await openPlayback({ session }, openParams);
       } catch (error) {
         // The one deliberate exception to "resolution never sees a cookie" —
