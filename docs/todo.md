@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 58.** A new item takes it, and the same edit bumps this line.
+**Next number: 83.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -403,6 +403,156 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
 
+### 58. Playlists do not play: clicking one does nothing
+
+Reported 2026-10-01. A `PlaylistItem` tile (feed, search) opens nothing. Mixes
+play because they have their own path (`mix.start` / `mix.extend`,
+`startMixFromTile` in `open_video.dart`, `architecture.md` F24); playlists have
+none. `playlist.get` is in `protocol.md` §3.3 marked **not implemented**, and
+Guard 2 (`sidecar/test/contract-docs.test.ts`) keeps that marking honest, so the
+handler and the removal of the marking land in the same change.
+
+- **Sidecar:** `playlist.get {playlistId, continuation?}` → items and
+  continuation. Unlike a mix (F24), a playlist is finite and pages with real
+  continuations. Measure the response first (`/browse` with `VL<id>`, or `/next`
+  with `playlistId`); a community reference is a hypothesis (`CLAUDE.md`).
+- **Queue:** start from the first item (or the tapped one) and load further pages
+  as the queue nears its end, the way a mix extends.
+- **Reporting:** pass the `playlistId` to `/player` so `playback.report` carries
+  `list=` (F25), as mixes do.
+- **Unavailable or private entries** are skipped, never a dead end.
+
+**Done when:** a playlist plays from its tile, the queue holds it in order and
+keeps loading past the first page, and a watch inside it is reported with `list=`.
+
+### 59. Playlist detail page
+
+The page youtube.com opens with "View full playlist": cover, title, owner, video
+count, visibility, description, share, play all, shuffle, and every video.
+**Depends on item 58's `playlist.get`**; measure which header fields come back
+for a public, an unlisted, a private and the viewer's own playlist. The viewer's
+own playlists add editing (title, visibility, removing a video):
+`action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
+anything else is measured first. Share reuses `share_dialog.dart`.
+
+**Done when:** every playlist tile has a way to open the page, the page shows the
+header and the whole list with paging, and the owner-only controls appear only on
+the viewer's own playlists.
+
+### 60. History screen
+
+`feed.history` is specified in `protocol.md` and marked not implemented. Wanted:
+a page listing watch history that scrolls back through continuations, and a
+**search** over it if YouTube offers one to this client. youtube.com's history
+page has a search box, but whether the `FEhistory` browse takes a query from the
+`WEB` client is unmeasured. Signed-in only; signed out it says why
+(`signedInActionBlocker`). youtube.com also has "remove from history" and
+"pause history": record them, build them only if they measure cheap.
+
+**Done when:** a history page reachable from the rail pages back through real
+history, search works or the page says it is unavailable, and the protocol
+marking is gone.
+
+### 61. Channel (profile) pages
+
+Nothing opens a channel. Clicking a channel's name or avatar should open its
+page: banner, avatar, name, handle, subscribers, subscribe button, and tabs
+(Home, Videos, Live, Playlists, …) — **never Shorts**, as everywhere. Needs a
+sidecar method, measured first: the `/browse {browseId: UC…}` response and each
+tab's `params`. Reuse `SubscribeButton` and what the artist panel
+(`artist_panel_card.dart`) already draws.
+
+**Done when:** every channel name and avatar (feed, search, watch page, comments)
+opens the page, the Videos tab pages, and subscribing follows the identity rules
+(Task 31).
+
+### 62. The artist badge is missing on queue items and tiles
+
+The verified badge shows everywhere; the **artist** badge only where the response
+itself says so. Queue rows never get it (a mix panel row carries no badge at
+all, F24), and media tiles no longer do (they used to; YouTube may have stopped
+sending the flag with the tile). The cache cannot fill the gap yet:
+`verified_channels_controller.dart` stores channel ids seen **verified**, and
+`ChannelBadge` only ever warms it from `isVerified`. `isArtistChannel` is never
+cached, so which badge a channel has is lost.
+
+**Fix:** record the badge kind in the cache (verified or artist; keep the id key
+and the LRU, and migrate the stored list), warm it from every surface that does
+report `isArtistChannel` (the watch page, the artist panel), and have
+`ChannelBadge` read it. Before blaming YouTube for the tiles, compare a fresh
+capture with an older fixture: a parser change could have dropped the flag.
+
+**Done when:** a channel seen as an artist anywhere shows the artist badge in the
+queue and on tiles, with a test for the cache storing and returning the kind.
+
+### 63. Watch page: the skeleton and the loading layout disagree
+
+The watch page loads in two visible stages, the skeleton (`watch_skeleton.dart`)
+and then the real page with placeholders while `video.info` is still out, and
+the two do not line up, so the content jumps between them. Make the skeleton
+match the loaded page's geometry (title block, channel row, action pills,
+description, rail) in every layout (normal and theatre, wide and narrow), or drop
+one of the two stages.
+
+**Done when:** skeleton → placeholders → data with nothing moving except content
+appearing, checked in the running app in each layout.
+
+### 64. Queue auto-scroll scrolls the watch page
+
+When the queue advances, `queue_panel.dart` (`Scrollable.ensureVisible`, around
+line 192) brings the new row into view. `ensureVisible` scrolls **every**
+ancestor `Scrollable`, so it scrolls the watch page too and the page jumps down.
+Scroll only the queue's own list (its controller, or an `ensureVisible` limited
+to the queue's scrollable) and leave the page alone.
+
+**Done when:** the current row stays visible in the queue as it advances, the
+page's offset does not move, and a widget test asserts the second.
+
+### 65. Player: the background shows outside the rounded corners
+
+With the controls bar open, the player's background shows a few pixels outside
+its corner radius. Likely the controls' backdrop or gradient is clipped
+differently from the video (or not at all), or the two clips anti-alias
+differently. Everything inside the rounded player should sit under one clip
+(`player_shell.dart`, `controls.dart`).
+
+**Done when:** nothing shows outside the radius with the controls open or closed,
+at 100 % and 150 % display scaling.
+
+### 66. Rail: the collapsed view lacks entries the expanded one has
+
+`page_wrapper.dart`'s rail shows things expanded that it does not offer
+collapsed. List both, decide what each should hold (youtube.com's mini guide is a
+deliberate subset), and make sure nothing important is unreachable from the
+collapsed rail.
+
+**Done when:** every destination in the expanded rail is reachable collapsed, or
+its absence is a decision written in the code.
+
+### 67. Comments: selectable text, clickable links and timestamps
+
+Comment text cannot be selected, its links do nothing, and its timestamps
+(`1:23`) do nothing. The text already arrives as runs (`CommentTextRun`,
+`CommentStyleRun`, `CommentCommandRun`, `CLAUDE.md` DTO block), so the commands
+are there. Wanted: selectable with the mouse (a `SelectionArea`); a link opens in
+the browser, or in the app when it is a YouTube link (`domain/youtube_link.dart`
+parses those); a timestamp seeks the current video when the comment belongs to
+it.
+
+**Done when:** all three work in the running app, with a widget test for a
+timestamp seeking and a link being dispatched.
+
+### 68. Search: filter chips
+
+youtube.com shows chips above search results (All, Videos, Unwatched, Recently
+uploaded, Live, …). rill has the full filters dialog (`SearchFilters`, Task 20)
+but no chips. Measure where they come from in the `/search` response (probably
+tokens, like the home chips) and draw them like the home chip bar. No Shorts
+chip.
+
+**Done when:** the chips YouTube returns for a query show above the results, and
+choosing one reloads through its token.
+
 ---
 
 ## Low priority
@@ -722,6 +872,134 @@ The progress and controls bar on a video immediately disappears without fading w
 
 **Done when:** the controls bar uses a smooth fade transition when disappearing and reappearing around dialogs, and correctly restores its previous visibility state after the dialog is closed.
 
+### 69. App settings page
+
+There is no settings screen. The account menu's **Settings** entry is a
+placeholder (`account_button.dart`, `onTap: () {}`), item 16 is blocked on it,
+and the accent colour is still a debug control (`accent_debug_button.dart`).
+Build the page, and move into it what is app-wide rather than per-video, starting
+with the player's settings menu (`settings_menu.dart`): decide entry by entry
+what stays with the video (quality, speed, this video's captions) and what moves
+(defaults, caption style, audio-only defaults, updates). Persist with
+`SharedPreferences`, like the existing preferences.
+
+**Done when:** the account menu opens the page, item 16 is unblocked, the accent
+picker lives there, and nothing is set in two places.
+
+### 70. Miniplayer redesign
+
+**Depends on items 12 and 13** (caption legibility at small sizes; caption drag
+disabled by mount point). Item 13 already says to settle it first. Then the
+redesign: size (item 12 mentions ~600 px), controls, and how it opens and closes.
+
+**Done when:** redesigned and built, with 12 and 13 done before it.
+
+### 71. Storyboard previews on progress-bar hover
+
+Hovering the progress bar should show the frame at that time, as on youtube.com.
+The pieces exist: `video.storyboard` and `storyboard_sheets.dart` fetch and
+slice the sprite sheets. Hover previews stopped using them because the smallest
+level is 48×27 and upscales badly (Task 15), so use the **largest** level the
+spec offers. Some videos have no storyboard: show just the time there.
+
+**Done when:** hovering the bar shows the right frame for the time under the
+cursor, sharp at the preview's size, and falls back to the time alone.
+
+### 72. Cover colour for tile hover and mix stacks
+
+Use the cover's dominant colour for a tile's hover container and for the stacked
+cards behind mix tiles, instead of the fixed colour. Sample it from a small decode
+once per image, cache it by URL, and keep the current colour until it is ready:
+it must not cost a frame while scrolling.
+
+**Done when:** both take the cover's colour, and a profile build shows no scroll
+jank from it.
+
+### 73. App icon, in the UI and in Windows
+
+`RillLogo` (`topbar.dart`) is a placeholder mark, and the window, taskbar and
+`.exe` icon is the runner's `app/windows/runner/resources/app_icon.ico`. Design
+the icon once, then apply it everywhere: `RillLogo`, the `.ico` (16–256 px), the
+installer, and any artwork fallback that uses the app icon (SMTC, taskbar).
+
+**Done when:** one icon, in every one of those places.
+
+### 74. Account menu: make the placeholder entries work
+
+Most entries in the account menu (`account_button.dart`) have `onTap: () {}`:
+Appearance (device theme / Light / Dark), Display language, Restricted Mode,
+Location, Keyboard shortcuts, Settings, Help, Send feedback, Google Account and
+Switch account.
+
+1. **Appearance.** The app is dark only (`app_theme.dart` builds
+   `Brightness.dark`), so Light and "use device theme" need a light theme first.
+   Persist the choice.
+2. **Keyboard shortcuts.** A sheet listing `shortcuts.dart`'s bindings, generated
+   from the same table so it cannot drift.
+3. **Google Account.** Open `myaccount.google.com` in the browser.
+4. **Restricted Mode.** Find how YouTube applies it for this client (a
+   request-context flag or a preference cookie are the likely candidates).
+   Measure it, then send it on every request while it is on.
+5. **Location.** InnerTube's `gl` (region) changes what the feed shows. Offer it
+   if the sidecar's requests honour `gl`, measured.
+6. **Settings** is item 69, **Switch account** item 75, **Display language**
+   item 82. **Help** and **Send feedback**: point them somewhere real (the
+   repository's issues page) or remove them.
+
+**Done when:** no entry is a silent no-op: each works, opens its item, or is gone.
+
+### 75. Switch account
+
+The account menu's **Switch account** is a placeholder. One Google login can
+hold several accounts and brand channels; switching changes which identity the
+same login speaks for. Measure how youtube.com switches (which request, which
+header or cookie changes), then decide: switch within one login, or keep several
+logins. Everything Task 31 added for identity changes applies.
+
+**Done when:** switching shows the other account's feed and account state without
+signing out, and switching back restores the first.
+
+### 76. Load the SVG icons as `.si` with jovial_svg
+
+The SVG icons are drawn with `flutter_svg` (`channel_badge.dart`,
+`share_dialog.dart`, `assets/icons/`), which parses them at runtime. `jovial_svg`
+can precompile them to its `.si` format, which loads faster. Convert at build
+time with a script (not by hand), swap the widgets, and measure on a badge-heavy
+feed scroll before keeping it.
+
+**Done when:** no runtime SVG parsing, the `.si` files are generated from the
+`.svg` sources, and the measured difference is written down.
+
+### 77. Audio-only fullscreen: rethink the queue for wide screens
+
+In fullscreen audio-only mode the queue does not suit a 16:9 screen. Rework the
+wide layout of `audio_mode_view.dart` (queue beside the artwork rather than under
+it; how many rows show), leaving the windowed layout as it is.
+
+**Done when:** fullscreen audio-only on a 16:9 screen uses the width, checked in
+the running app.
+
+### 78. Audio-only: artwork inside a vinyl record
+
+**Near future.** An option in audio-only mode to show the cover inside a spinning
+vinyl record. The whole vinyl UI was built and tested as a spike in
+`scratch/vinyl_spike`, **which is gitignored** (`scratch/` in `.gitignore`), so it
+exists only on the author's machine. Bring the code into `app/lib` with tests,
+rather than depending on the spike, and make it a setting (item 69).
+
+**Done when:** the option exists, the vinyl code is in the repo with tests, and
+nothing references `scratch/`.
+
+### 79. Notifications
+
+**Near future.** The top bar's bell (`topbar.dart`, `_NotificationButton`) is
+drawn disabled on purpose: there is no notification source. Measure YouTube's
+notification endpoints for the signed-in `WEB` client (the list, the unread count,
+marking as read), add the sidecar method and its protocol entry, then give the
+bell its count and a panel. Signed-in only.
+
+**Done when:** the bell shows the real unread count and opens the real list.
+
 ---
 
 ## Triggered — read when one of these fires
@@ -771,4 +1049,29 @@ Its central claim becomes false the moment freezed 4 lands. A stale version
 number is harmless; a stale causal explanation sends the next person down the
 wrong path.
 
+---
 
+## Far future — ideas, not commitments
+
+### 80. SponsorBlock
+
+Skip sponsor segments using the community SponsorBlock database. A third-party
+service, so: **off by default and opt-in** (item 69). Use its privacy-preserving
+lookup, which takes a hash prefix of the video id so the server never learns
+exactly which video is playing. Skips go through the engine's seek, with a short
+"Skipped sponsor" notice and an undo.
+
+### 81. Return YouTube Dislike
+
+Show a dislike count from the Return YouTube Dislike API. Third-party, and it is
+sent the video id itself, so **off by default and opt-in**, and the number is
+labelled as an estimate.
+
+### 82. Display language
+
+Possible, in two halves. YouTube's own text (shelf titles, chip labels, view
+counts, relative dates, "Highlighted comment") follows the request's `hl`
+parameter, so the sidecar can ask for another language. The app's own strings
+are inline English today and need Flutter localisation (ARB files and
+`flutter_localizations`) — a full pass over every screen. Dates and numbers the
+app formats itself follow the same locale.
