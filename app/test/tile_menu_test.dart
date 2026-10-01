@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/auth_controller.dart';
 import 'package:rill/ui/open_video.dart';
 import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/widgets/media_tile.dart';
@@ -78,7 +79,22 @@ class TileFor extends ConsumerWidget {
   }
 }
 
-Widget harness(Widget tile) => ProviderScope(
+/// An [AuthController] parked in one state. The tile gates its account-only
+/// entries on it (Task 31 §4), so a harness has to say who is watching.
+class _FixedAuth extends AuthController {
+  _FixedAuth(this.initial);
+
+  final AuthStatus initial;
+
+  @override
+  AuthState build() => AuthState(status: initial);
+}
+
+Widget harness(Widget tile, {AuthStatus auth = AuthStatus.authenticated}) => ProviderScope(
+      // Keyed so a test can swap the account by pumping a second harness: an
+      // override factory that changes does not rebuild a notifier already made.
+      key: ValueKey(auth),
+      overrides: [authProvider.overrideWith(() => _FixedAuth(auth))],
       child: MaterialApp(
         home: Scaffold(body: Center(child: SizedBox(width: 320, child: tile))),
       ),
@@ -202,6 +218,57 @@ void main() {
 
       final entry = tester.widget<MenuItemButton>(find.widgetWithText(MenuItemButton, 'Save to Watch Later'));
       expect(entry.onPressed, isNull);
+    });
+  });
+
+  group('account-only entries are disabled and say why (Task 31 §4)', () {
+    // They used to be pressable signed out: the round trip came back
+    // AUTH_REQUIRED and a toast said "Sign in to save to Watch Later".
+    Future<Map<String, bool>> pressable(WidgetTester tester, AuthStatus auth) async {
+      await tester.pumpWidget(harness(TileFor(video()), auth: auth));
+      await openMenu(tester);
+      return {
+        for (final label in ['Add to queue', 'Save to Watch Later', 'Save to playlist…', 'Share'])
+          label: tester.widget<MenuItemButton>(find.widgetWithText(MenuItemButton, label)).onPressed != null,
+      };
+    }
+
+    testWidgets('signed out, saving is disabled and the rest is not', (tester) async {
+      expect(await pressable(tester, AuthStatus.anonymous), {
+        'Add to queue': true,
+        'Save to Watch Later': false,
+        'Save to playlist…': false,
+        'Share': true,
+      });
+      final tips = tester.widgetList<Tooltip>(find.byType(Tooltip)).map((t) => t.message);
+      expect(tips, contains('Sign in to save videos'));
+    });
+
+    testWidgets('degraded says the session expired instead', (tester) async {
+      await pressable(tester, AuthStatus.degraded);
+      final tips = tester.widgetList<Tooltip>(find.byType(Tooltip)).map((t) => t.message);
+      expect(tips, contains('Your session expired. Sign in again to save videos'));
+    });
+
+    testWidgets('signed in, every entry is live and none carries the reason', (tester) async {
+      expect((await pressable(tester, AuthStatus.authenticated)).values, everyElement(isTrue));
+      final tips = tester.widgetList<Tooltip>(find.byType(Tooltip)).map((t) => t.message);
+      expect(tips.where((t) => t?.contains('Sign in') ?? false), isEmpty);
+    });
+
+    testWidgets('the hover Watch Later button follows the account', (tester) async {
+      IconButton button() => tester.widget<IconButton>(find.widgetWithIcon(IconButton, Icons.schedule));
+      var taps = 0;
+
+      await tester.pumpWidget(harness(MediaTile(spec: spec, onWatchLater: () => taps++), auth: AuthStatus.anonymous));
+      expect(button().onPressed, isNull);
+      expect(button().tooltip, 'Sign in to save videos');
+      expect((button().icon as Icon).color!.a, closeTo(0.38, 0.01));
+
+      await tester.pumpWidget(harness(MediaTile(spec: spec, onWatchLater: () => taps++)));
+      expect(button().onPressed, isNotNull);
+      expect(button().tooltip, 'Watch later');
+      expect((button().icon as Icon).color!.a, closeTo(1.0, 0.01));
     });
   });
 

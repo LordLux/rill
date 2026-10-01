@@ -253,6 +253,102 @@ void main() {
 
   });
 
+  group('CommentsSection — an identity change loads the list again (Task 31 §3)', () {
+    // The rows fetched under one identity carry that identity's vote tokens (and
+    // its like state), so a sign-in or sign-out starts the list over from page one
+    // through the same generation guard a re-sort uses.
+    ProviderContainer containerOf(WidgetTester tester) =>
+        ProviderScope.containerOf(tester.element(find.byType(CommentsSection)));
+
+    testWidgets('signing in drops the rows, asks for the first page again, and shows what it returns', (tester) async {
+      // Mutation: remove the `ref.listen(authIdentityProvider)` trigger and the
+      // anonymous rows stay, no second page is asked for, and this fails.
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source, auth: AuthStatus.anonymous));
+      source.issued.single.completer.complete(
+        CommentsResult(items: [comment('anon-1'), comment('anon-2')], continuation: 'more'),
+      );
+      await tester.pump();
+      expect(text('anon-1'), findsOneWidget);
+
+      containerOf(tester).read(authProvider.notifier).adoptVerifiedState('authenticated');
+      await tester.pump();
+
+      expect(source.issued, hasLength(2));
+      expect(source.issued.last.continuation, 'init-A', reason: 'page one, not the continuation the old rows were on');
+      expect(text('anon-'), findsNothing, reason: 'the other identity\'s rows are gone at once');
+      expect(find.text('Show more comments'), findsNothing);
+
+      source.issued.last.completer.complete(CommentsResult(items: [comment('acct-1')]));
+      await tester.pump();
+      expect(text('acct-1'), findsOneWidget);
+      expect(text('anon-'), findsNothing);
+    });
+
+    testWidgets('a vote on a row that came after the sign-in is live', (tester) async {
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source, auth: AuthStatus.anonymous));
+      source.issued.single.completer.complete(CommentsResult(items: [comment('anon-1')]));
+      await tester.pump();
+
+      containerOf(tester).read(authProvider.notifier).adoptVerifiedState('authenticated');
+      await tester.pump();
+      source.issued.last.completer.complete(CommentsResult(items: [comment('acct-1')]));
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.thumb_up_alt_outlined));
+      await tester.pump();
+
+      expect(source.writes, [('rate', 'LIKE')]);
+    });
+
+    testWidgets('signing out drops the account\'s rows the same way', (tester) async {
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source));
+      source.issued.single.completer.complete(
+        CommentsResult(items: [comment('acct-1', myRating: 'like')]),
+      );
+      await tester.pump();
+      expect(find.byIcon(Icons.thumb_up), findsOneWidget);
+
+      containerOf(tester).read(authProvider.notifier).adoptVerifiedState('anonymous');
+      await tester.pump();
+
+      expect(source.issued, hasLength(2));
+      expect(text('acct-1'), findsNothing);
+      source.issued.last.completer.complete(CommentsResult(items: [comment('anon-1')]));
+      await tester.pump();
+      expect(find.byIcon(Icons.thumb_up), findsNothing, reason: 'the old account\'s like is not drawn on anonymous rows');
+    });
+
+    testWidgets('a page still in flight for the old identity is not merged', (tester) async {
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source, auth: AuthStatus.anonymous));
+      final stale = source.issued.single;
+
+      containerOf(tester).read(authProvider.notifier).adoptVerifiedState('authenticated');
+      await tester.pump();
+      stale.completer.complete(CommentsResult(items: [comment('stale-1')]));
+      await tester.pump();
+
+      expect(text('stale-1'), findsNothing);
+      expect(source.cancelled, contains(stale.id));
+    });
+
+    testWidgets('an unchanged identity does not reload', (tester) async {
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source));
+      source.issued.single.completer.complete(CommentsResult(items: [comment('acct-1')]));
+      await tester.pump();
+
+      containerOf(tester).read(authProvider.notifier).adoptVerifiedState('authenticated');
+      await tester.pump();
+
+      expect(source.issued, hasLength(1));
+      expect(text('acct-1'), findsOneWidget);
+    });
+  });
+
   group('CommentsSection — leaving', () {
     testWidgets('a section that goes away mid-load releases the sidecar', (tester) async {
       final source = FakeCommentsSource();

@@ -688,6 +688,13 @@ the answer.
   "hearted" values**: the creator's own view of a video they own says
   `..._HEARTED_EDITABLE`, and the first version of this read only the plain one.
   `architecture.md` F33, F35.
+- **Account-derived state is re-read on an identity change, never taken from a
+  response cached under the other identity — Task 31, 2026-10-01.** `isSubscribed`,
+  `myRating`, playlist membership and a comment's vote params are the viewer's, and
+  nothing in the response says whose. `authIdentityProvider` is the value to watch
+  (`videoInfoProvider`, `playlistMembershipProvider`, `AccountActions` and
+  `CommentsSection` do), and the UI masks the state to "none" the moment there is no
+  account rather than waiting for the re-fetch.
 - **A viewer-state field is untested until a fixture holds the state —
   measured 2026-09-20.** `creatorHearted`, `isLiked` and
   `PlaylistMembership.containsVideo` were each wrong with an all-green suite,

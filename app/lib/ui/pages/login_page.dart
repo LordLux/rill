@@ -7,7 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/auth/web_session_cookies.dart';
 import '../../data/auth/youtube_cookies.dart';
+import '../../theme/screen_values.dart';
 import '../auth_controller.dart';
+import '../widgets/titlebar_button.dart';
+import '../widgets/topbar.dart';
+import '../widgets/window_controls.dart';
 
 /// Sign in to YouTube, and return whether it worked.
 ///
@@ -33,7 +37,12 @@ Future<bool> showLoginFlow(BuildContext context) async {
 /// Google adds next — happens in something that implements the web, rather than
 /// in something this project would have to keep reimplementing.
 class LoginPage extends ConsumerStatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({super.key, @visibleForTesting this.webViewBuilder});
+
+  /// Replaces the WebView. `flutter test` cannot host a WebView2 platform view,
+  /// so the retry logic (Task 31 §1) is only reachable with one swapped in.
+  /// [onLoadStop] is what the real one calls when a page finishes loading.
+  final Widget Function(BuildContext context, VoidCallback onLoadStop)? webViewBuilder;
 
   @override
   ConsumerState<LoginPage> createState() => _LoginPageState();
@@ -78,6 +87,25 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   /// passkey flow can finish inside one page with an XHR and never fire another
   /// `onLoadStop`. Two seconds is far below human speed and costs one CDP call.
   static const Duration _pollInterval = Duration(seconds: 2);
+
+  /// The waits before each *extra* sign-in attempt after a `degraded` answer —
+  /// so at most `_retryBackoff.length + 1` attempts, and then the message.
+  ///
+  /// Two, not "until it works": a `degraded` answer is a real one and a session
+  /// YouTube genuinely refuses would otherwise spend requests forever (the
+  /// reasoning on the `degraded` case below). Measured 2026-10-01 by hand: the
+  /// first attempt after a fresh login answered `degraded` twice running and
+  /// *Try again* then succeeded with no second Google login. Whether the jar was
+  /// still incomplete or YouTube had not honoured the session yet is unknown —
+  /// `_logAttempt` is there to say (`todo.md` 56).
+  static const List<Duration> _retryBackoff = [Duration(milliseconds: 1500), Duration(seconds: 3)];
+
+  /// Time since this page opened, for the diagnostic lines.
+  final Stopwatch _sinceOpened = Stopwatch()..start();
+
+  /// When the jar was first seen holding the required cookies, so a log line can
+  /// say how long the session had been there before YouTube was asked about it.
+  Duration? _firstComplete;
 
   Timer? _poll;
   InAppWebViewController? _controller;
@@ -129,13 +157,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (_checking || _finished || !mounted) return;
     _checking = true;
     try {
-      final jar = await ref.read(webSessionCookiesProvider).read();
+      var jar = await ref.read(webSessionCookiesProvider).read();
       if (!hasSessionCookies(jar.keys)) {
         // Names only, never values (§5). This line is the whole diagnostic for
         // "the flow finished and nothing happened".
-        stderr.writeln('rill auth: jar not ready — ${describe(jar)}');
+        stderr.writeln('rill auth: jar not ready (+${_since(_sinceOpened.elapsed)}) — ${describe(jar)}');
         return;
       }
+      _firstComplete ??= _sinceOpened.elapsed;
 
       // **Cover the WebView the instant the cookies exist.**
       //
@@ -154,8 +183,37 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       if (mounted) setState(() => _handingOff = true);
 
       _setMessage('Checking with YouTube…');
-      final status = await ref.read(authProvider.notifier).signIn(cookieHeader(jar));
-      if (!mounted) return;
+
+      // **Bounded retry on `degraded`** (Task 31 §1). Every attempt is a real
+      // `auth.setCookie` — a count of home tiles — and the cookie is stored only
+      // by `signIn` on `authenticated`, so retrying never trusts cookie presence
+      // (hard invariant 5) and never persists anything unverified. The jar is
+      // read afresh each time: the same header again would only repeat a
+      // verdict the jar may already have outgrown.
+      var status = AuthStatus.unknown;
+      for (var attempt = 0; ; attempt++) {
+        _logAttempt(attempt, jar);
+        status = await ref.read(authProvider.notifier).signIn(cookieHeader(jar));
+        if (!mounted) return;
+        if (status != AuthStatus.degraded || attempt >= _retryBackoff.length) break;
+
+        stderr.writeln(
+          'rill auth: attempt ${attempt + 1} answered degraded — '
+          'trying again in ${_retryBackoff[attempt].inMilliseconds} ms',
+        );
+        await Future<void>.delayed(_retryBackoff[attempt]);
+        if (!mounted) return;
+        jar = await ref.read(webSessionCookiesProvider).read();
+        if (!mounted) return;
+        if (!hasSessionCookies(jar.keys)) {
+          // The session cookies went away between attempts — not a verdict from
+          // YouTube about this jar. Go back to waiting; the poll is still running.
+          stderr.writeln('rill auth: jar lost its session cookies — ${describe(jar)}');
+          _uncover();
+          _setMessage('Not signed in yet — continue in the window above.');
+          return;
+        }
+      }
 
       switch (status) {
         case AuthStatus.authenticated:
@@ -198,6 +256,25 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       _checking = false;
     }
   }
+
+  /// One line per sign-in attempt: which cookie *names* the jar held and how long
+  /// the page and the session had existed. Names only, never values (§5).
+  ///
+  /// This is what tells the two candidate causes of `degraded`-on-first-try
+  /// apart: a jar missing `LOGIN_INFO` or `__Secure-*` at attempt 1 and complete
+  /// at attempt 2 is an incomplete jar; the same names at both, flipping from
+  /// degraded to authenticated, is YouTube not yet honouring the session.
+  void _logAttempt(int attempt, Map<String, String> jar) {
+    final complete = _firstComplete;
+    stderr.writeln(
+      'rill auth: sign-in attempt ${attempt + 1}/${_retryBackoff.length + 1} '
+      'at +${_since(_sinceOpened.elapsed)}'
+      '${complete == null ? '' : ' (jar complete since +${_since(complete)})'} '
+      '— ${describe(jar)} | names: ${(jar.keys.toList()..sort()).join(', ')}',
+    );
+  }
+
+  static String _since(Duration d) => '${(d.inMilliseconds / 1000).toStringAsFixed(1)}s';
 
   /// Put the web page back on screen.
   ///
@@ -273,15 +350,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final busy = ref.watch(authProvider.select((s) => s.isBusy));
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sign in to YouTube'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          tooltip: 'Cancel',
-          // Cancellation leaves the app exactly as it was — nothing has been
-          // written by the time this can be pressed.
-          onPressed: () => Navigator.of(context).pop(false),
-        ),
+      // This route covers the app's top bar, which is where the window controls
+      // live — so it carries its own, from the same provider (Task 31 §5).
+      appBar: _LoginTitleBar(
+        // Cancellation leaves the app exactly as it was — nothing has been
+        // written by the time this can be pressed.
+        onCancel: () => Navigator.of(context).pop(false),
       ),
       body: Column(
         children: [
@@ -372,6 +446,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   /// `Stack` rather than a replacement — the distinction the crash note on
   /// `_signIn` turns on.
   Widget _webView() {
+    final builder = widget.webViewBuilder;
+    if (builder != null) return builder(context, () => unawaited(_checkCookies()));
     return InAppWebView(
       initialUrlRequest: URLRequest(url: _signIn),
       initialSettings: InAppWebViewSettings(
@@ -404,6 +480,78 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       onPermissionRequest: (_, request) async => PermissionResponse(
         resources: request.resources,
         action: PermissionResponseAction.DENY,
+      ),
+    );
+  }
+}
+
+/// The login page's stand-in for the top bar it covers: cancel, the title, a
+/// drag region and the window buttons.
+///
+/// Nothing is drawn here that `TopBar` does not already draw — the drag region
+/// and the cluster come from [windowControlsProvider], the same seam, so the
+/// page and the bar cannot grow two sets of buttons. Present in the error state
+/// too, since the bar belongs to the route and not to what the body shows.
+class _LoginTitleBar extends ConsumerWidget implements PreferredSizeWidget {
+  const _LoginTitleBar({required this.onCancel});
+
+  final VoidCallback onCancel;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(ScreenValues.titlebarsHeight);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final controls = ref.watch(windowControlsProvider);
+
+    return SizedBox(
+      height: ScreenValues.titlebarsHeight,
+      child: Stack(
+        children: [
+          Positioned.fill(child: controls.dragRegion()),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: TitleBarIconButton(
+                      icon: Icons.close,
+                      tooltip: 'Cancel',
+                      onTap: onCancel,
+                      scheme: theme.colorScheme,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  RillLogo(scheme: theme.colorScheme),
+                ],
+              ),
+              const SizedBox(width: 12),
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Container(height: 2.5, width: 10, decoration: BoxDecoration(color: theme.colorScheme.onSurface.withValues(alpha: .5), borderRadius: BorderRadius.circular(10))),
+              ),
+              const SizedBox(width: 12),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  'Sign in to YouTube',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              // Empty, so the drag region underneath receives the pan.
+              const Spacer(),
+              controls.buttons(theme),
+            ],
+          ),
+        ],
       ),
     );
   }

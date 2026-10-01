@@ -102,6 +102,20 @@ const CAPTIONS_FAIL_ID = 'capsfail1';
  */
 const ACTION_FAIL_ID = 'actionfail1';
 
+/**
+ * Task 31. Two videos whose `video.info` depends on *who is asking*, the way the
+ * real response does: while the fake is `authenticated` the account follows
+ * `SUBSCRIBED_ID`'s channel and has liked `LIKED_ID`; otherwise (signed out, or
+ * degraded) neither is true. Every other id keeps its constant answer, so no
+ * pre-existing test sees a change.
+ */
+const SUBSCRIBED_ID = 'subbed1';
+const LIKED_ID = 'likedacct1';
+
+/** Every `video.info` the fake has answered, in order — Task 31 §2's "was the
+ *  open video re-fetched on an identity change". */
+const infoCalls: string[] = [];
+
 /** Per-video like/dislike state, mutable so a rating round-trips into the
  *  next `video.info` — 'LIKE' | 'DISLIKE' | 'INDIFFERENT', matching the real
  *  sidecar's `likeStatus` vocabulary (`sidecar/src/parser/video.ts`). */
@@ -238,6 +252,8 @@ rl.on('line', (line) => {
               accountAvatarUrl: null,
             },
       }) + '\n');
+    } else if (req.method === 'test.infoLog') {
+      process.stdout.write(JSON.stringify({ id: req.id, result: { calls: infoCalls } }) + '\n');
     } else if (req.method === 'test.authLog') {
       process.stdout.write(JSON.stringify({
         id: req.id,
@@ -371,6 +387,7 @@ rl.on('line', (line) => {
       process.stdout.write(JSON.stringify({ id: req.id, result: {} }) + '\n');
     } else if (req.method === 'video.info') {
       const videoId = req.params?.videoId;
+      infoCalls.push(videoId);
       process.stdout.write(JSON.stringify({
         id: req.id,
         result: {
@@ -387,8 +404,10 @@ rl.on('line', (line) => {
           publishedText: '16 years ago',
           publishedDateText: 'Dec 6, 2009',
           likeText: '1.1M',
-          myRating: ratings[videoId] === 'LIKE' ? 'like' : ratings[videoId] === 'DISLIKE' ? 'dislike' : 'none',
-          isSubscribed: false,
+          myRating: ratings[videoId] === 'LIKE' || (videoId === LIKED_ID && authState === 'authenticated')
+            ? 'like'
+            : ratings[videoId] === 'DISLIKE' ? 'dislike' : 'none',
+          isSubscribed: videoId === SUBSCRIBED_ID && authState === 'authenticated',
           badges: [],
           // Empty is the ordinary answer — most videos carry no attribution,
           // so the default payload is the no-music case on purpose.
@@ -630,6 +649,7 @@ rl.on('line', (line) => {
       searchCalls.length = 0;
       suggestCalls.length = 0;
       authCookies.length = 0;
+      infoCalls.length = 0;
       signOuts = 0;
       for (const key of Object.keys(ratings)) delete ratings[key];
       watchLaterMembership.clear();

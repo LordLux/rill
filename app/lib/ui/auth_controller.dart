@@ -293,6 +293,22 @@ class AuthController extends Notifier<AuthState> {
 
 final authProvider = NotifierProvider<AuthController, AuthState>(AuthController.new);
 
+/// Who is signed in, as a value: `(signed in, account handle)`.
+///
+/// **Anything derived from the account must `watch` this and re-read when it
+/// changes** — `AccountActions`, `videoInfoProvider`, `playlistMembershipProvider`
+/// and the comments list all do (Task 31). A response fetched under one identity
+/// carries that identity's `isSubscribed`, `myRating` and vote params, and
+/// nothing about the response says so; reusing it after a sign-in or sign-out
+/// shows the previous viewer's state, silently.
+///
+/// Not [AuthState] itself: `isBusy` flips on every request and would refetch the
+/// open page each time. `degraded` is "not signed in" here, as everywhere else —
+/// [AuthState.isSignedIn] is strictly `authenticated`.
+final authIdentityProvider = Provider<(bool, String?)>(
+  (ref) => ref.watch(authProvider.select((auth) => (auth.isSignedIn, auth.accountHandle))),
+);
+
 /// A counter every auth-sensitive surface watches — Task 22 §6.8.
 ///
 /// Signing in or out changes what `feed.home` and `feed.subscriptions` return,

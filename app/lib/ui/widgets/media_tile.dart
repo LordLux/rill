@@ -6,9 +6,11 @@ import 'tile_badges.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
 import '../../theme/tokens.dart';
+import '../auth_controller.dart';
 import '../hover_preview.dart';
 import 'channel_badge.dart';
 import '../open_video.dart';
+import 'shortcut_tooltip.dart';
 
 // ---- TEMPORARY: unfed tile slots ----
 // Master switch to turn off all placeholder elements at once
@@ -385,16 +387,20 @@ class _MediaTileState extends State<MediaTile> {
     required IconData icon,
     required String tooltip,
     required VoidCallback? onPressed,
+    bool disabled = false,
   }) {
     return IconButton(
       style: IconButton.styleFrom(
         backgroundColor: tokens.scrim.withValues(alpha: 0.7),
+        // Without this a disabled button loses its scrim and the glyph is left
+        // floating over whatever the thumbnail happens to be.
+        disabledBackgroundColor: tokens.scrim.withValues(alpha: 0.7),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
       hoverColor: tokens.scrim,
-      mouseCursor: SystemMouseCursors.click,
+      mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
       tooltip: tooltip,
-      icon: Icon(icon, color: tokens.onScrim, size: 23),
+      icon: Icon(icon, color: disabled ? tokens.onScrim.withValues(alpha: 0.38) : tokens.onScrim, size: 23),
       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
       padding: EdgeInsets.zero,
       onPressed: onPressed,
@@ -521,11 +527,23 @@ class _MediaTileState extends State<MediaTile> {
                 ]
               : [
                   if (widget.spec.canWatchLater) ...[
-                    _hoverButton(
-                      tokens: tokens,
-                      icon: Icons.schedule,
-                      tooltip: 'Watch later',
-                      onPressed: widget.onWatchLater,
+                    // Account-only (Task 31 §4): greyed out with the same
+                    // sentence as the watch page's, not pressable and then
+                    // refused after the round trip.
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final blocked = signedInActionBlocker(
+                          ref.watch(authProvider.select((auth) => auth.status)),
+                          'save videos',
+                        );
+                        return _hoverButton(
+                          tokens: tokens,
+                          icon: Icons.schedule,
+                          tooltip: blocked ?? 'Watch later',
+                          onPressed: blocked == null ? widget.onWatchLater : null,
+                          disabled: blocked != null,
+                        );
+                      },
                     ),
                     const SizedBox(height: 8.0),
                   ],
@@ -1144,16 +1162,16 @@ List<TileMenuItem> menuForTile(BuildContext context, WidgetRef ref, FeedItem ite
 /// own hovered state, which stuck once the pointer left the menu —
 /// `subscribe_button.dart` has the account of it, and this is the same
 /// workaround for the same reason.
-class _TileMoreButton extends StatefulWidget {
+class _TileMoreButton extends ConsumerStatefulWidget {
   const _TileMoreButton({required this.items});
 
   final List<TileMenuItem> items;
 
   @override
-  State<_TileMoreButton> createState() => _TileMoreButtonState();
+  ConsumerState<_TileMoreButton> createState() => _TileMoreButtonState();
 }
 
-class _TileMoreButtonState extends State<_TileMoreButton> {
+class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
   int? _hovered;
   final MenuController _menuController = MenuController();
   ScrollPosition? _scrollPosition;
@@ -1181,6 +1199,9 @@ class _TileMoreButtonState extends State<_TileMoreButton> {
     if (_menuController.isOpen) _menuController.close();
   }
 
+  Widget _withBlocker(String? blocker, Widget child) =>
+      blocker == null ? child : ShortcutTooltip(label: blocker, child: child);
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1196,6 +1217,15 @@ class _TileMoreButtonState extends State<_TileMoreButton> {
 
     if (widget.items.isEmpty) return button();
 
+    // An entry that needs an account is disabled and says why while there is
+    // none (Task 31 §4), read here so it follows the account if that changes
+    // while the tile is on screen.
+    final status = ref.watch(authProvider.select((auth) => auth.status));
+    final blockers = [
+      for (final item in widget.items)
+        item.needsAccountTo == null ? null : signedInActionBlocker(status, item.needsAccountTo!),
+    ];
+
     return MenuAnchor(
       controller: _menuController,
       style: MenuStyle(
@@ -1210,26 +1240,29 @@ class _TileMoreButtonState extends State<_TileMoreButton> {
       builder: (context, controller, _) => button(onPressed: () => controller.isOpen ? controller.close() : controller.open()),
       menuChildren: [
         for (var i = 0; i < widget.items.length; i++)
-          MouseRegion(
-            onEnter: (_) => setState(() => _hovered = i),
-            onExit: (_) => setState(() {
-              if (_hovered == i) _hovered = null;
-            }),
-            child: MenuItemButton(
-              style: MenuItemButton.styleFrom(
-                overlayColor: Colors.transparent,
-                backgroundColor: _hovered == i && widget.items[i].onPressed != null
-                    ? scheme.onSurface.withValues(alpha: 0.07)
-                    : null,
-              ),
-              leadingIcon: Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Icon(widget.items[i].icon),
-              ),
-              onPressed: widget.items[i].onPressed,
-              child: Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Text(widget.items[i].label),
+          _withBlocker(
+            blockers[i],
+            MouseRegion(
+              onEnter: (_) => setState(() => _hovered = i),
+              onExit: (_) => setState(() {
+                if (_hovered == i) _hovered = null;
+              }),
+              child: MenuItemButton(
+                style: MenuItemButton.styleFrom(
+                  overlayColor: Colors.transparent,
+                  backgroundColor: _hovered == i && blockers[i] == null && widget.items[i].onPressed != null
+                      ? scheme.onSurface.withValues(alpha: 0.07)
+                      : null,
+                ),
+                leadingIcon: Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(widget.items[i].icon),
+                ),
+                onPressed: blockers[i] == null ? widget.items[i].onPressed : null,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: Text(widget.items[i].label),
+                ),
               ),
             ),
           ),

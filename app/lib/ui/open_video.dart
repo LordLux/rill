@@ -151,10 +151,17 @@ void queueFromTile(WidgetRef ref, FeedItem item) {
 
 /// One entry of a tile's 3-dot menu.
 class TileMenuItem {
-  const TileMenuItem({required this.icon, required this.label, this.onPressed});
+  const TileMenuItem({required this.icon, required this.label, this.onPressed, this.needsAccountTo});
 
   final IconData icon;
   final String label;
+
+  /// Set for an entry that needs an account, completing "Sign in to …" — the
+  /// menu disables it, greys it and says why while there is none (Task 31 §4).
+  /// Decided where the menu is drawn rather than here, because the menu list is
+  /// built once by a call site and an account can come or go while it is on
+  /// screen.
+  final String? needsAccountTo;
 
   /// Null draws the entry disabled — present but not pressable — for an action
   /// this tile does not offer, so the menu keeps the same shape from tile to tile.
@@ -219,11 +226,13 @@ List<TileMenuItem> tileMenuFor(
       icon: Icons.schedule,
       label: 'Save to Watch Later',
       onPressed: canWatchLater ? () => unawaited(addToWatchLater(context, item)) : null,
+      needsAccountTo: 'save videos',
     ),
     TileMenuItem(
       icon: Icons.playlist_add,
       label: 'Save to playlist…',
       onPressed: () => unawaited(showSaveDialog(context, video.id)),
+      needsAccountTo: 'save videos',
     ),
     TileMenuItem(
       icon: Icons.reply,

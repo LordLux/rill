@@ -697,6 +697,10 @@ class _Meta extends ConsumerWidget {
     final title = detail?.title ?? item.title;
     final channel = detail?.channelName ?? item.channelName;
     final avatar = detail?.channelAvatarUrl ?? item.channelAvatarUrl;
+    // Subscription is the account's. Not signed in (or degraded) means none,
+    // immediately — the `/next` snapshot may be from before the sign-out and
+    // the re-fetch is still in flight (Task 31 §2).
+    final signedIn = ref.watch(authIdentityProvider.select((identity) => identity.$1));
 
     final metaWidget = Row(
       mainAxisSize: MainAxisSize.min,
@@ -746,14 +750,14 @@ class _Meta extends ConsumerWidget {
           channelId: detail?.channelId ?? item.channelId,
           // What the user last did wins over the `/next` snapshot, which is as
           // old as the page — see `account_actions.dart`.
-          initiallySubscribed:
-              ref.watch(
-                subscriptionActionsProvider.select(
-                  (actions) => actions[detail?.channelId ?? item.channelId],
-                ),
-              ) ??
-              detail?.isSubscribed ??
-              false,
+          initiallySubscribed: signedIn &&
+              (ref.watch(
+                    subscriptionActionsProvider.select(
+                      (actions) => actions[detail?.channelId ?? item.channelId],
+                    ),
+                  ) ??
+                  detail?.isSubscribed ??
+                  false),
           minHeight: 45,
           onSubscribe: (channelId) =>
               _setSubscribed(context, ref, channelId, subscribe: true),
@@ -974,19 +978,6 @@ class _ActionsState extends ConsumerState<_Actions> {
         : null;
     final likes = detail?.likeText ?? 'Like';
 
-    final rating =
-        ref.watch(
-          ratingActionsProvider.select((actions) => actions[item.id]),
-        ) ??
-        detail?.myRating ??
-        VideoRating.none;
-    final inWatchLater =
-        ref.watch(
-          watchLaterActionsProvider.select((actions) => actions[item.id]),
-        ) ??
-        (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ??
-            false);
-
     // Why the account-requiring controls below are disabled, or null when they
     // are live. These used to be pressable signed out: the optimistic rating
     // applied, the call came back `AUTH_REQUIRED`, and it reverted under a
@@ -996,6 +987,30 @@ class _ActionsState extends ConsumerState<_Actions> {
     final authStatus = ref.watch(authProvider.select((auth) => auth.status));
     final cannotRate = signedInActionBlocker(authStatus, 'rate videos');
     final cannotSave = signedInActionBlocker(authStatus, 'save videos');
+
+    // **A rating and a saved state are the account's, so they read as none the
+    // moment there is no account** (Task 31 §2). Without the mask they came from
+    // `VideoDetail.myRating` and the membership fetch of the signed-in visit,
+    // which nothing re-reads on sign-out until the new fetch lands.
+    final rating = cannotRate != null
+        ? VideoRating.none
+        : ref.watch(
+                ratingActionsProvider.select((actions) => actions[item.id]),
+              ) ??
+              detail?.myRating ??
+              VideoRating.none;
+    // Greyed out when blocked (Task 31 §4): `onTap: null` alone leaves the pill
+    // at full colour, which reads as live.
+    final rateColor = cannotRate != null
+        ? scheme.onSurface.withValues(alpha: _disabledAlpha)
+        : scheme.onSurface;
+    final inWatchLater = cannotSave != null
+        ? false
+        : ref.watch(
+                watchLaterActionsProvider.select((actions) => actions[item.id]),
+              ) ??
+              (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ??
+                  false);
 
     return Wrap(
       spacing: 8,
@@ -1063,7 +1078,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                                 ? Icons.thumb_up
                                 : Icons.thumb_up_outlined,
                             size: 18,
-                            color: scheme.onSurface,
+                            color: rateColor,
                           ),
                           const SizedBox(width: 6),
                           Text(
@@ -1071,7 +1086,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: scheme.onSurface,
+                              color: rateColor,
                             ),
                           ),
                         ],
@@ -1115,7 +1130,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                             ? Icons.thumb_down
                             : Icons.thumb_down_outlined,
                         size: 18,
-                        color: scheme.onSurface,
+                        color: rateColor,
                       ),
                     ),
                   ),
@@ -1144,6 +1159,7 @@ class _ActionsState extends ConsumerState<_Actions> {
             activeIcon: Icons.playlist_add_check,
             activeLabel: 'Save',
             active: _sheet == _OpenSheet.save,
+            disabled: cannotSave != null,
             onTap: cannotSave != null ? null : _openSave,
           ),
         ),
@@ -1159,6 +1175,7 @@ class _ActionsState extends ConsumerState<_Actions> {
             activeLabel: 'Watch Later',
             active: inWatchLater && !_watchLaterSettled,
             marked: inWatchLater && _watchLaterSettled,
+            disabled: cannotSave != null,
             onTap: cannotSave != null
                 ? null
                 : () => _tapWatchLater(inWatchLater),
@@ -1464,6 +1481,10 @@ class _MetaStat extends StatelessWidget {
   }
 }
 
+/// Material's disabled-content alpha — the one the subscribe button's disabled
+/// fill already uses.
+const double _disabledAlpha = 0.38;
+
 /// One pill under the video: an icon, and its label.
 ///
 /// The label is mounted at width zero behind an `Align(widthFactor:)` rather
@@ -1482,9 +1503,15 @@ class _ActionChip extends StatelessWidget {
     this.active = false,
     this.marked = false,
     this.onTap,
+    this.disabled = false,
   });
 
   final IconData icon;
+
+  /// Blocked by the account, not merely inert: drawn at Material's disabled
+  /// alpha (Task 31 §4) so it does not look pressable. A null [onTap] is not
+  /// enough to say so — the read-outs have none and are not disabled.
+  final bool disabled;
 
   /// What a screen reader hears
   final String? semanticLabel;
@@ -1530,11 +1557,13 @@ class _ActionChip extends StatelessWidget {
           scheme.inverseSurface,
           tint,
         )!;
-        final foreground = Color.lerp(
-          scheme.onSurface,
-          scheme.onInverseSurface,
-          tint,
-        )!;
+        final foreground = disabled
+            ? scheme.onSurface.withValues(alpha: _disabledAlpha)
+            : Color.lerp(
+                scheme.onSurface,
+                scheme.onInverseSurface,
+                tint,
+              )!;
 
         // **Driven off the same tween as the fill, inverted.** The settle is one
         // motion — white leaving the middle and arriving at the edge — so the
@@ -1556,8 +1585,8 @@ class _ActionChip extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            mouseCursor: SystemMouseCursors.click,
-            onTap: onTap,
+            mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
+            onTap: disabled ? null : onTap,
             child: SizedBox(
               height: 36,
               child: Padding(

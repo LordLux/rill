@@ -240,6 +240,13 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
       'subscribe',
     );
 
+    // A menu already open when the account goes away must not outlive it.
+    if (blocked != null && _menuController.isOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _menuController.isOpen) _menuController.close();
+      });
+    }
+
     if (!_subscribed) {
       final button = FilledButton(
         onPressed: widget.channelId == null || _subscribing || blocked != null ? null : _subscribe,
@@ -254,7 +261,10 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
               tapTargetSize: widget.dense ? MaterialTapTargetSize.shrinkWrap : null,
               textStyle: widget.textStyle,
             ).copyWith(
-              mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+              // Click while it can be pressed, the basic arrow while blocked or busy,
+              // as the like and dislike pills do. A fixed `click` here pointed at a
+              // disabled button.
+              mouseCursor: WidgetStateMouseCursor.clickable,
             ),
         child: _subscribing
             ? SizedBox(
@@ -279,18 +289,26 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
       ),
       animated: true,
       builder: (context, controller, child) => FilledButton.tonal(
-        onPressed: () => controller.isOpen ? controller.close() : controller.open(),
+        // The menu is the way to unsubscribe, which needs an account just as
+        // subscribing does — and a degraded session reaches here looking exactly
+        // like a signed-in one (Task 31 §2).
+        onPressed: blocked != null ? null : () => controller.isOpen ? controller.close() : controller.open(),
         style:
             FilledButton.styleFrom(
               backgroundColor: widget.background ?? scheme.surfaceContainerHighest,
               foregroundColor: widget.foreground ?? scheme.onSurface,
+              disabledBackgroundColor: (widget.background ?? scheme.surfaceContainerHighest).withValues(alpha: 0.38),
+              disabledForegroundColor: (widget.foreground ?? scheme.onSurface).withValues(alpha: 0.38),
               shape: const StadiumBorder(),
               padding: const EdgeInsets.symmetric(horizontal: 16),
               minimumSize: Size(0, widget.minHeight),
               tapTargetSize: widget.dense ? MaterialTapTargetSize.shrinkWrap : null,
               textStyle: widget.textStyle,
             ).copyWith(
-              mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+              // Click while it can be pressed, the basic arrow while blocked or busy,
+              // as the like and dislike pills do. A fixed `click` here pointed at a
+              // disabled button.
+              mouseCursor: WidgetStateMouseCursor.clickable,
             ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

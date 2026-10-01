@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 57.** A new item takes it, and the same edit bumps this line.
+**Next number: 58.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -57,38 +57,67 @@ and it is a guess until a real occurrence says otherwise.
 
 ## Soon
 
-### 56. Sign-in and sign-out rough edges, found in the task 30 hand-off check
+### 56. Sign-in and sign-out: two questions left after Task 31
 
-Observed by the user 2026-10-01 signing in and out by hand on the patched release
-build (`architecture.md` F27). Reported from using the app, not yet reproduced or
-read in code; the file pointers are where to start, not findings.
+Task 31 (`docs/tasks/31-sign-in-edges.md`) fixed the five rough edges the user
+found on 2026-10-01: the first sign-in landing on the empty-feed message, no window
+buttons on the login page, sign-out leaving the old account's state on the open
+page, blocked actions looking enabled, and comment votes on rows loaded signed out.
+The user checked all five by hand on a release build the same day, and they hold.
+Two causes are still unknown; neither blocks anything.
 
-1. **The first sign-in attempt lands on "YouTube returned an empty feed for this
-   session"** (`login_page.dart:182`), twice in a row. *Try again* then signs in
-   with no second Google login, so the cookie was good and `auth.verify` counted
-   zero tiles too early or against a not-yet-accepted session. Fix: one automatic
-   retry of the verify before showing the error, so the user never sees it when
-   a second look succeeds. Unknown whether it predates the F27 patch (which only
-   touches teardown, so unlikely); not compared against the unpatched build.
-2. **The login page has no window buttons.** The window controls
-   (`widgets/window_controls.dart`) must be present on every page, including the
-   login page and its error state. Check the other full-screen pages too.
-3. **Sign-out leaves the subscribe button showing the old state.** Watching a
-   channel you are subscribed to and signing out keeps "Subscribed" and its
-   all / personalised / none / unsubscribe menu live. When the next video loads
-   the button is correctly disabled, so the signed-out state exists; it is just
-   not applied to the page already open. It should flip to *Subscribe*, disabled
-   and visibly greyed, the moment sign-out finishes.
-4. **Signed-out like / dislike / save / Watch Later are inert with a "Sign in to
-   …" tooltip but look enabled.** Grey them out like the disabled subscribe
-   button should be.
-5. **Comments loaded while signed out ignore like / dislike after sign-in.** The
-   buttons respond but nothing happens. Replies expanded afterwards and comments
-   paged in afterwards work, so what is stale is on the already-loaded rows,
-   plausibly the vote params (`likeParams` and the other three), which are absent
-   or unusable for an anonymous fetch (`CLAUDE.md`: "present anonymously too — not
-   permission"). Re-fetching the comments on sign-in, or reading the params at tap
-   time, are the likely fixes.
+1. **Why the first sign-in answered `degraded` — not reproduced since.** Two fresh
+   sign-ins after the fix (2026-10-01) were both `authenticated` on attempt 1, so
+   the bounded retry in `login_page.dart` never ran and the log has nothing to
+   compare yet. Both successful jars held `APISID, HSID, SAPISID, SID, SSID` and
+   the `__Secure-1P*` / `__Secure-3P*` cookies, and **no `LOGIN_INFO`**: so
+   `LOGIN_INFO` is not needed, and its absence is not the test for an incomplete
+   jar. When a `rill auth: attempt 1 answered degraded` line turns up, compare
+   that attempt's full name list with the next one's: different names mean the jar
+   was incomplete; the same names mean YouTube had not honoured the session yet.
+   Record the answer in `architecture.md` and keep or drop the retry accordingly.
+2. **Comment votes: which failure it was is unmeasured.** The list is now
+   re-fetched on every identity change, so a vote is always made on rows fetched
+   under the identity voting, and the user confirmed votes stick. What the old
+   failure was — (a) null params, (b) an RPC error or (c) an RPC success YouTube
+   did not record — was not measured: it needs the burner account's `YT_COOKIE`
+   (fetch a page anonymously, call `action.rateComment` with its params signed in,
+   re-fetch, read `myRating`, undo). From the code, (a) is ruled out (the params are
+   present on anonymous pages) and (b) would have shown a snackbar, so (c) is the
+   likeliest. If the probe confirms it, that is `architecture.md` F51: a success
+   that did not land.
+
+A third point from the task report was checked and dropped: it said a mix tile
+tapped while signed out "fails after the round trip with *Sign in to play
+mixes*". Nothing showed that. `architecture.md` F24 measured anonymous mixes
+working, `mix.start` runs on the browse session, which is anonymous when signed
+out, and that string is only the message `startMixFromTile` would show if the
+call ever answered `AUTH_REQUIRED`.
+
+### 57. Signing out makes Google ask for 2-step verification every time
+
+Reported by the user 2026-10-01: after a sign-out, the next sign-in asks for
+2-step verification again even when "Don't ask again on this device" was ticked
+minutes earlier. The cause is by design. `AuthController.signOut` clears the
+**whole** WebView2 cookie jar (`auth_controller.dart`: "leaving it means the next
+sign-in shows no account picker and silently reuses this account"), and Google
+keeps its trusted-device mark in that jar too, so every sign-in after a sign-out
+looks like a new device.
+
+**The option:** on sign-out, delete only the session cookies (the ones
+`hasSessionCookies` and `cookieHeader` read) and keep the rest. Google would still
+ask for the account and password, because the session is gone, but could skip
+2-step verification for an account that ticked the box.
+- **Measure first** which cookie names actually survive a sign-out on
+  google.com and youtube.com, and which one carries the device trust. Do not guess
+  the names.
+- **The cost to weigh:** on a shared computer, the next person signing into *that
+  same* Google account here skips the second step. They still need the password.
+  That is how a normal browser behaves after "Don't ask again".
+
+**Done when:** a sign-out followed by a sign-in to the same account does not ask
+for the second step, and no session cookie survives the sign-out; or the user
+decides to keep the full wipe, and this says why.
 
 ### 39. Comments: four gaps left after replies, delete and the comment box
 

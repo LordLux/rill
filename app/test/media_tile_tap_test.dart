@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/auth_controller.dart';
 import 'package:rill/ui/open_video.dart';
 import 'package:rill/ui/widgets/media_tile.dart';
 
@@ -26,6 +27,11 @@ const TileSpec spec = TileSpec(
   canAddToQueue: true,
   primaryLine: 'Channel',
 );
+
+class _SignedIn extends AuthController {
+  @override
+  AuthState build() => const AuthState(status: AuthStatus.authenticated);
+}
 
 /// Put the mouse over the tile so the hover actions become hittable.
 Future<void> hoverTile(WidgetTester tester) async {
@@ -60,6 +66,8 @@ void main() {
     var watchLater = 0;
 
     await tester.pumpWidget(ProviderScope(
+      // Watch Later is account-only and is disabled without one (Task 31 §4).
+      overrides: [authProvider.overrideWith(_SignedIn.new)],
       child: MaterialApp(
         home: Scaffold(
           body: SizedBox(

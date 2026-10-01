@@ -201,7 +201,23 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
   /// video it was showing — its threads, sort, count and, the one that bites, the
   /// comment box's token, which encodes that video's id: a comment written here
   /// would have been posted to the previous video.
-  void _resetForNewVideo() {
+  void _resetForNewVideo() => _reload();
+
+  /// An identity change drops the list and loads it again from the first page
+  /// (Task 31 §3). The vote tokens on rows fetched under the other identity are
+  /// that identity's — present on an anonymous page, and plausibly not recorded
+  /// by YouTube for the account that signed in afterwards (unmeasured, `todo.md`
+  /// 56) — and the same rows are also the previous account's like state after a
+  /// sign-out. A
+  /// re-sort already does this through the generation guard; this is the same
+  /// path, with the thread state dropped because it belonged to the other
+  /// identity too.
+  ///
+  /// `widget.initialContinuation` is the page-one token of the detail this
+  /// section was given. Continuations are not session-bound (pages paged in
+  /// after a sign-in, from tokens an anonymous page issued, vote correctly), so
+  /// the old one is fine even if the re-fetched detail has not landed yet.
+  void _reload() {
     _generation++;
     _cancelInFlight();
     _threads.clear();
@@ -889,6 +905,10 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(authIdentityProvider, (previous, next) {
+      if (previous != next) _reload();
+    });
+
     // A video with comments on and none yet still shows the box: it is how the
     // first one gets written. Nothing to show only when there is nothing to
     // read *and* nothing to write with.
@@ -1451,16 +1471,20 @@ class _VoteButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Explicit, because the count is a `Text` and inherits the ambient text
+    // style, not the disabled `IconTheme` the button gives its icon — so it was
+    // left at full colour next to a greyed thumb (Task 31 §4).
+    final color = onPressed == null ? scheme.onSurface.withValues(alpha: 0.38) : (active ? scheme.primary : null);
     return IconButton(
       mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
       icon: label == null
-          ? Icon(icon, size: 14, color: active ? scheme.primary : null)
+          ? Icon(icon, size: 14, color: color)
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 14, color: active ? scheme.primary : null),
+                Icon(icon, size: 14, color: color),
                 const SizedBox(width: 4),
-                Text(label!, style: TextStyle(fontSize: 12, color: active ? scheme.primary : null)),
+                Text(label!, style: TextStyle(fontSize: 12, color: color)),
               ],
             ),
       tooltip: tooltip,
