@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 56.** A new item takes it, and the same edit bumps this line.
+**Next number: 57.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -56,6 +56,39 @@ and it is a guess until a real occurrence says otherwise.
 ---
 
 ## Soon
+
+### 56. Sign-in and sign-out rough edges, found in the task 30 hand-off check
+
+Observed by the user 2026-10-01 signing in and out by hand on the patched release
+build (`architecture.md` F27). Reported from using the app, not yet reproduced or
+read in code; the file pointers are where to start, not findings.
+
+1. **The first sign-in attempt lands on "YouTube returned an empty feed for this
+   session"** (`login_page.dart:182`), twice in a row. *Try again* then signs in
+   with no second Google login, so the cookie was good and `auth.verify` counted
+   zero tiles too early or against a not-yet-accepted session. Fix: one automatic
+   retry of the verify before showing the error, so the user never sees it when
+   a second look succeeds. Unknown whether it predates the F27 patch (which only
+   touches teardown, so unlikely); not compared against the unpatched build.
+2. **The login page has no window buttons.** The window controls
+   (`widgets/window_controls.dart`) must be present on every page, including the
+   login page and its error state. Check the other full-screen pages too.
+3. **Sign-out leaves the subscribe button showing the old state.** Watching a
+   channel you are subscribed to and signing out keeps "Subscribed" and its
+   all / personalised / none / unsubscribe menu live. When the next video loads
+   the button is correctly disabled, so the signed-out state exists; it is just
+   not applied to the page already open. It should flip to *Subscribe*, disabled
+   and visibly greyed, the moment sign-out finishes.
+4. **Signed-out like / dislike / save / Watch Later are inert with a "Sign in to
+   …" tooltip but look enabled.** Grey them out like the disabled subscribe
+   button should be.
+5. **Comments loaded while signed out ignore like / dislike after sign-in.** The
+   buttons respond but nothing happens. Replies expanded afterwards and comments
+   paged in afterwards work, so what is stale is on the already-loaded rows,
+   plausibly the vote params (`likeParams` and the other three), which are absent
+   or unusable for an anonymous fetch (`CLAUDE.md`: "present anonymously too — not
+   permission"). Re-fetching the comments on sign-in, or reading the params at tap
+   time, are the likely fixes.
 
 ### 39. Comments: four gaps left after replies, delete and the comment box
 
@@ -156,24 +189,19 @@ which at one level reads as a slight offset rather than as structure. The user
 asked for this 2026-09-21 with a reference screenshot of youtube.com's own
 rendering.
 
-**Blocked on real nesting, decided 2026-09-21.** The list is *flat* in two
-senses and both have to be fixed first, or the lines would be drawing a
-fictional tree. (Update 2026-09-21: The structural depth is now provided by the parser and the tree is flat but carries real depth. Next step: implement the visual L-shaped rules in the Flutter app using `Comment.depth`).
-2. **The widget list is flat by design.** F34 turned the section into one
-   `SliverList.builder` over `_flatten()`'s `[thread, reply, reply, …, footer]`
-   rows, so replies build lazily and a scrolled-away row costs nothing. A rule
-   spanning a thread and its replies spans sibling rows that are never all built
-   at once, and no widget owns the span.
+**What is left is the drawing.** The structural prerequisite landed 2026-09-21:
+the parser provides real depth, so the flat list carries `Comment.depth` and the
+rules can be drawn from it. The constraint on how:
 
-(2) is not a bug and must not be undone — the F34 numbers say what owning-the-
-subtree cost (a 500-reply thread took 345 ms to re-expand). (1) is the real
-prerequisite: **`Comment` needs a depth, carried from `replyLevel`, and the
-client needs to keep it.** Do that first, together with item 1 above (a reply's
-own "Show more replies"), which is where deeper nesting first becomes reachable
-at all. Only then is there anything for a line to describe.
+**The widget list is flat by design.** F34 turned the section into one
+`SliverList.builder` over `_flatten()`'s `[thread, reply, reply, …, footer]`
+rows, so replies build lazily and a scrolled-away row costs nothing. A rule
+spanning a thread and its replies spans sibling rows that are never all built
+at once, and no widget owns the span. That is not a bug and must not be undone —
+the F34 numbers say what owning-the-subtree cost (a 500-reply thread took 345 ms
+to re-expand).
 
-**Then, and only then, the drawing.** Two approaches, and the implementer
-picks — neither is prescribed:
+Two approaches, and the implementer picks — neither is prescribed:
 
 - **Per-row, stateless.** Each row paints only its own slice: one vertical
   segment per ancestor that still has a sibling below it, plus the elbow into
@@ -186,7 +214,7 @@ picks — neither is prescribed:
   geometry the list only knows after layout and has to stay correct while rows
   are recycled, which is the part that usually goes wrong.
 
-**Done when:** a comment carries a real depth end to end; a thread with replies
+**Done when:** a thread with replies
 shows a continuous rule from the thread to its last reply and no further, at
 every depth the data actually contains; it survives scrolling a long thread in
 and out of the viewport; the F34 measurements are re-run and the per-frame build
@@ -433,7 +461,8 @@ in whichever renderer is active. Worth measuring rather than assuming, because
 the two renderers may need different levers to reach the same result: mpv scales
 subtitles relative to the window by default, while `LibassLayer` renders at the
 document's `PlayRes` and scales down. That measurement is also a good early test
-of whether the two-renderer setting (item 13) can hold parity.
+of whether the two renderers can hold parity: `LibassLayer` on the main player,
+mpv on previews (`architecture.md` §2.9).
 
 The miniplayer redesign to ~600 px shrinks this problem but does not remove it.
 
@@ -507,40 +536,6 @@ nowhere is how Task 04 §1 disappeared for two months.
 - `app/lib/ui/player/shortcuts.dart:147` — `// TODO add end and home for seeking
   to the start and end of the video`
 
-### 30. Decide what to do about the exit-time `0xC0000602`
-
-The cause is known and recorded as `architecture.md` F27: at DLL unload,
-`flutter_inappwebview_windows` releases a static `Compositor` that CoreMessaging
-can no longer serve, and the process fails fast. It happens on some exits, not
-all, after the app has finished shutting down, so nothing is lost — the cost is
-an Application-log crash event. Low priority for that reason.
-
-Two ways out, neither tried:
-
-- **Upgrade the plugin.** The app is on `flutter_inappwebview_windows` 0.6.0
-  (via `flutter_inappwebview` 6.1.5). Check whether a later release destroys the
-  compositor at plugin teardown instead of in a static destructor.
-- **End the process without DLL teardown.** After the engine has shut down, the
-  runner (`app/windows/runner/main.cpp`) would call
-  `TerminateProcess(GetCurrentProcess(), exitCode)`. That skips *every* DLL's
-  exit-time cleanup, not just the plugin's — confirm nothing (mpv, the sidecar
-  pipe, settings writes) relies on it first.
-
-Before choosing, confirm the other three logged crashes (2026-09-09 04:01 and 04:17,
-2026-09-10 18:40) are the same one as 17:41 — only one dump was read. If a dump
-is taken for that, it holds the session cookie: read it, delete it, never
-attach it.
-
-The release log now records it: the launcher's last line reads
-`CRASHED with code 0xC0000602`. On 2026-09-17 two of two ordinary window
-closes of a scratch release build ended that way, as did the user's own close
-of a long-running release app and 5 of 5 `RILL_CONTROLS_PROBE` exits
-(`exit(0)`) — more often than the Application log's four events suggested,
-so "some exits" is closer to "most".
-
-**Done when:** one of the two is done and a stretch of closes leaves no
-`0xC0000602` event, or the crash is accepted and F27 says so.
-
 ### 32. Local crash capture with Crashpad
 
 Nothing inside the process can catch the crashes seen so far. A fast fail
@@ -552,12 +547,13 @@ happened and its code, and whatever was printed before it — but not the stack,
 which is what named the cause of F28.
 
 Found 2026-09-17: `HKCU\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\rill.exe`
-exists with `DumpType = 2`, so every rill crash — the exit-time one of item 30
-included — currently writes a **full** dump, with the session cookie, to
+exists with `DumpType = 2`, so every rill crash — the exit-time one of F27
+included, until it was fixed — currently writes a **full** dump, with the session cookie, to
 `%LOCALAPPDATA%\CrashDumps`. That dump is how F28 was solved, and it is also a
 cookie on disk after every close. **Kept deliberately (decided 2026-09-17)**
 until this item lands: the stack is worth more than the risk, and the rule
-stands — read a dump, then delete it, never attach it.
+stands — read a dump, then delete it, never attach it. Ordinary exits no
+longer produce dumps (`architecture.md` F27, fixed 2026-10-01).
 
 Crashpad — directly, or through `sentry-native` with uploading disabled — runs
 an out-of-process handler and registers a WER runtime exception module
@@ -565,7 +561,7 @@ an out-of-process handler and registers a WER runtime exception module
 writes a minidump to a folder the app chooses.
 
 **The dump is the problem to design around.** A minidump can carry the session
-cookie (see item 30). So: symbolise it into a text stack as soon as it exists —
+cookie (see above). So: symbolise it into a text stack as soon as it exists —
 `flutter_windows.dll.pdb` ships in the FVM engine artefacts, and the runner's
 PDB comes from the build — then delete the dump, and keep only the text. The
 symbolising step needs those PDBs at hand, which a user's machine does not
@@ -672,10 +668,24 @@ app, and so will the runners once `windows-2022` is retired. `CL=/D_SILENCE_…`
 the environment would let it compile as an interim, but the plugins still depend on
 a feature Microsoft has announced it will remove.
 
+**Checked 2026-10-01 (task 30).** Neither plugin has a fix to take.
+
+- **`flutter_inappwebview_windows`.** The exit-crash fix (a vendored 0.6.0, F27)
+  does not touch this. Its `CMakeLists.txt` does not set `/await` in 0.6.0 or in
+  0.7.0-beta.3, and neither version's `windows/` tree mentions `coroutine`, so the
+  23 errors above most likely come in through C++/WinRT's headers under Flutter's
+  C++17 mode rather than from the plugin asking for it — an inference, not
+  verified. Visual Studio 2026 is not installed here (`Microsoft Visual
+  Studio\18` holds no toolchain), so no build was tried.
+- **`flutter_media_session`.** Not ours: published by `wyrin.dev`, repository
+  `wyrindev/flutter-media-session`. 3.0.8 (the app is on 3.0.5) still has
+  `target_compile_options(... "/await")` at `windows/CMakeLists.txt:45`, so a
+  version bump does not help. Needs a patch upstream, a vendored fix, or a
+  replacement.
+
 **Done when:** the app builds on a Visual Studio 2026 toolchain without a
 suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
-replacing them. `flutter_media_session` should be checked first, in case it is
-ours.
+replacing them.
 
 ### 55. Controls overlay visibility transitions when dialogs open/close
 
@@ -732,9 +742,4 @@ Its central claim becomes false the moment freezed 4 lands. A stale version
 number is harmless; a stale causal explanation sends the next person down the
 wrong path.
 
----
-
-## Documentation backlog
-
-These are edits, not investigations. Grouped because they are one sitting.
 

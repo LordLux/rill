@@ -127,6 +127,14 @@ Each entry lists: DLL filename, MSYS2 package, version, license, upstream URL, a
     Upstream: https://sourceware.org/libffi/
     Recipe:   https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libffi
 
+20. flutter_inappwebview_windows (source, built into rill.exe — not a DLL)
+    Package: flutter_inappwebview_windows 0.6.0, Copyright 2023 Lorenzo Pichilli
+    License: Apache-2.0 (full text: third_party/flutter_inappwebview_windows/LICENSE)
+    Upstream: https://github.com/pichillilorenzo/flutter_inappwebview
+    Modified: one change, marked "rill patch (F27)" in
+              windows/in_app_webview/in_app_webview_manager.cpp (the compositor
+              is released in ~InAppWebViewManager instead of at DLL unload).
+
 
 LGPL-2.1 COMPLIANCE NOTES
 -------------------------
