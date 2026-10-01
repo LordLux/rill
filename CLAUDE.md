@@ -322,6 +322,8 @@ rill check                      # flutter test guard + lint gate
 # run `rill --help` for the full surface; `rill` works from any directory
 ```
 
+**Environment variables** are documented in `docs/configuration.md`.
+
 **Generated code is not committed.** `*.g.dart` and `*.freezed.dart` are
 gitignored, so a fresh clone does not compile until `build_runner` has run —
 `setup.bat` does it once, and it has to be re-run after changing any `freezed`
@@ -578,14 +580,17 @@ the answer.
   2026-09-09 fix undocumented. Tested out and removed 2026-09-16: without them
   the solver picked identical versions, and codegen and both app gates passed.
   `dependency_overrides` is now empty on purpose.
-- **Captions render through mpv/libass, from ASS the sidecar generates.** Flutter
-  draws none. `architecture.md` §2.9 and `protocol.md` §3.8; the pipeline is
-  `sidecar/src/captions/`. Measured 2026-08-18 against the bundled libmpv:
-  `sub-add` costs 12–36 ms and **does not rebuild the video texture**, so a
-  caption toggle is free where a quality switch costs 0.55–12 s (F19). A quality
-  switch *does* drop the track, and `MediaKitEngine.open(retainSubtitle: true)`
-  is what puts it back — with a control proving a reopen without the flag loses
-  it.
+- **Captions render through `LibassLayer` — Flutter, driving the vendored libass
+  0.17 via FFI.** The sidecar generates ASS (`sidecar/src/captions/`), and
+  `LibassLayer` (`app/lib/ui/player/libass_layer.dart`) calls libass to render
+  glyph bitmaps, painting them with `RawImage` and backgrounds with
+  `CustomPaint`. mpv's own subtitle path (`sub-add`) is disabled: `LibassLayer`
+  sets `setSubtitleVisible(false)` on mount, so there is exactly one renderer
+  and no way to draw captions twice. `architecture.md` §2.9 and `protocol.md`
+  §3.8. Hover previews are the exception: they run on a separate
+  `MediaKitEngine` with no `LibassLayer` mounted, so previews use mpv's
+  `sub-add` directly. A quality switch drops the track, and
+  `MediaKitEngine.open(retainSubtitle: true)` is what puts it back.
 - **`fmt=ytt` answers HTTP 404, and a `WEB` caption URL answers 200 with no
   body.** Two things that look like bugs and are not. YTT is not a fetchable
   format: its styling model *is* the `pens` / `wsWinStyles` / `wpWinPositions`
@@ -593,14 +598,15 @@ the answer.
   `timedtext` URLs with `exp=xpe`, which makes every one of them return an empty
   body — so the empty-list fallback asks **`MWEB`**, whose URLs work. A `WEB`
   fallback would fill a language picker in which nothing renders.
-- **media_kit does not use libass unless you tell it to, and mounts a second
-  caption renderer if you don't stop it.** `PlayerConfiguration.libass` defaults
-  to `false` → `sub-ass=no` *and* `sub-visibility=no`, so mpv strips every tag
-  and draws nothing; `Video` then paints mpv's plain `sub-text` with a Flutter
-  `TextStyle`. Both settings live in `engine.dart` (`kLibassEnabled`,
-  `kNoFlutterSubtitles`) and each alone is wrong — one draws captions twice, the
-  other draws none. **This is invisible on a plain track**, which is why it
-  survived two tasks: it only shows when a track carries styling.
+- **media_kit's own caption renderer is disabled, and the setting is
+  load-bearing.** `engine.dart` sets `kLibassEnabled` (→ mpv `sub-ass=yes`,
+  which `LibassLayer` needs to receive styled events) and
+  `kNoFlutterSubtitles` (→ mpv's own `sub-text` stream is not consumed, so
+  Flutter's built-in caption overlay never mounts). Without both, one of two
+  things happens: captions draw twice (mpv and LibassLayer), or mpv strips
+  every ASS tag and draws tag-stripped plain text while LibassLayer gets
+  nothing. **This was invisible on a plain track** — measured 2026-08-18: it
+  only shows when a track carries styling.
 - **A styled caption is more than one event, and merging them is the whole of
   Task 18.** YouTube composites it: an invisible-glyph pen contributing a drop
   shadow over a visible pen contributing the outline — 240 of `L-BgxLtMxh0`'s 257
@@ -753,5 +759,9 @@ dated observations, not permanent properties.
 
 ## Deferred items
 
+- **Task 19 §14 lists six open caption items**: stale in-flight render flash,
+  windowed/theatre one-frame flicker, dead `subtitleTextStream`
+  (`engine.dart:143,483`), no karaoke track rendered end to end, and authored
+  background colour not painted.
 - `ShortcutTooltip`'s plain tooltips show with no delay (the layout-crash risk described in architecture.md §2.8).
 - `deletePlaylist` does not assert that the delete actually succeeded (`assertSucceeded`).

@@ -302,7 +302,10 @@ a genuinely unplayable video, before tier 1 declines as it would have anyway.
 ### 2.4 Playback
 
 media_kit (libmpv) receives two URLs — video and audio — and merges them via
-`--audio-file`. No local media proxy in Phase 1.
+`audio-files` (`audio-add … select`, F15). The shipped options are in
+`app/lib/ui/debug_constants.dart:22` (`request_size` and `short_seek_size`,
+both 1 MB), not in `sidecar/src/playback/mpv-options.ts` (which is imported
+only by `probe-playback.ts`). No local media proxy in Phase 1.
 
 **Resolved 2026-08-02.** F10 left this open; F11, F12 and F13 close it, and the
 answer needs none of the three options that were on the table.
@@ -629,9 +632,12 @@ one frame at a pointer position is what its ~6 s spacing is actually good for.
 `video.storyboard` and its substitution were measured against real responses and
 verified by fetching, and re-deriving that would be expensive.
 
-There is no CC button on a preview. Captions do not exist anywhere in this app
-yet; they are their own task, where the watch page gets them too, and a dead
-control is worse than no control.
+Previews have a CC toggle (`hover_preview.dart:toggleCaptions()`,
+`media_tile.dart:508–520`). They fetch with `allowFallback: false`, so a hover
+never pays for the MWEB fallback's second `/player` — the button appears only
+when the cached tier-1 response carried a track list. The original note (before
+Task 18 landed captions) read: "There is no CC button on a preview. Captions do
+not exist anywhere in this app yet; they are their own task."
 
 ### 2.7 Player controls
 
@@ -733,10 +739,11 @@ controls actually are. Fullscreen adds the same gradient mirrored at the top,
 carrying the title and channel — fullscreen hides the watch page, which was the
 only thing on screen that said what was playing.
 
-**Captions are a disabled button, not a reserved gap.** The gap read as a missing
-control. A disabled button says "later"; a live one that did nothing would lie.
-This reverses task 16's "leave a gap rather than shipping a dead one" at the
-user's request.
+**The caption button is live or absent, never disabled.** When `captions.list`
+has answered and the track list is non-empty, the button toggles captions
+(`controls.dart:628–646`); when the list is empty, the button is omitted
+entirely — not disabled. The original policy (before Task 18) was a disabled
+button as placeholder; Task 16's gap was reversed by the user's request.
 
 **The theatre icon reports state; every other icon reports action.** Theatre has
 no glyph anyone recognises, so the icon is more useful as a status than as an
@@ -912,6 +919,17 @@ it — that is what makes the mini-player and background audio properties of the
 structure rather than features. The watch page, the mini-player and the
 fullscreen layer each mount the *same* `Video` widget; moving between them
 creates and frees nothing. Only one may be mounted at a time.
+
+**One caption layer, three mount points, positioned by
+`CompositedTransformFollower`.** `LibassLayer` is mounted once in
+`player_shell.dart:382–401`, outside all three video mount-point branches, and
+follows the video texture through `engine.videoLayerLink` via a
+`LayerLinkFollower` wrapper. This is the counterpart of the one-texture rule:
+the caption layer does not know which mount point the video is in, and a
+per-mount-point renderer selection is expensive — it would mean unmounting or
+hiding `LibassLayer` and flipping `engine.setSubtitleVisible` in exact
+antiphase at every route transition, which is §2.9's draw-twice / draw-nothing
+bug on a hot path.
 
 **Nothing above the `Navigator` has an `Overlay`.** The mini-player and the
 fullscreen layer are drawn there, so a `tooltip:` on any of their buttons throws
@@ -1101,10 +1119,12 @@ and unavailable slates, in all three places a slate can appear.
   its own shape whatever `fit` says, and that is what the square was showing
   around.
 
-### 2.9 Captions render through libass, not Flutter
+### 2.9 Captions render through LibassLayer (Flutter + libass FFI)
 
-**Decided 2026-08-18.** The sidecar converts every caption format to ASS and
-hands mpv a subtitle track. Flutter draws no captions.
+**Decided 2026-08-18, revised by phase 5 (2026-08-21).** The sidecar converts
+every caption format to ASS. `LibassLayer` renders it in Flutter through an
+own FFI binding against the vendored libass 0.17 — mpv's subtitle path is
+disabled.
 
 **The alternative was a Flutter overlay, and it was tried and rolled back.** It
 works for plain text and cannot ever work for **YTT** — YouTube's own caption
@@ -1129,6 +1149,19 @@ hinge: evaluating `dart_libass` is what surfaced `ASS_Image` carrying the
 exact rendered box per glyph — the fact that makes leaving the ghost-and-
 estimate approach for a direct FFI binding the same argument as adopting the
 ghost in the first place, rather than its reversal.
+
+**The project vendors twenty libass DLLs (~11 MB), and that is a different bet
+from the one §2.4 rejected for libmpv.** `app/windows/libass_bundle/` holds
+libass 0.17.5 plus its dependency tree (freetype, harfbuzz, fribidi, fontconfig,
+glib, iconv, brotli, libstdc++, libwinpthread, zlib and others), globbed into
+the build at `app/windows/CMakeLists.txt:93` and loaded at runtime by
+`app/lib/ui/player/libass/dll_search.dart`. §2.4 rejected vendoring a newer
+libmpv because it meant "owning a binary and an unexercised API-version
+surface" — a risk that grows with the binary's scope. libass is a smaller bet:
+it has one job (render ASS), and the project exercises exactly that job on
+every caption and on every frame of the preview player. fribidi is LGPL-2.1;
+`THIRD_PARTY_LICENSES` at the repo root (every package, version, licence and
+MSYS2 recipe) is the compliance record.
 
 The pipeline is `fetch → parse → cues → group (ASR only) → ASS`, with one
 intermediate model (`sidecar/src/captions/cues.ts`) as its waist. Every styling
@@ -1319,7 +1352,7 @@ showing cue; and the ASS-native alternative — put the box back in the document
 — is the one this section's "What phase 5 deleted" already walked back, because
 `BorderStyle: 3` replaces the outline rather than sitting behind it, so a
 background sharing an event with the text would silently kill every edge style
-again. Measured 2026-08-20 (§2.10's sample): **0 of 23 tracks across 20 ordinary
+again. Measured 2026-08-20 (the "Who draws a caption" sample): **0 of 23 tracks across 20 ordinary
 videos were styled at all**; every styled track in this project's corpus is a
 caption-art demo (`L-BgxLtMxh0`, `1S7uIQmkRzk`, `8Oos6D4_Bjo`). **What would
 change this:** a styled track with a real, non-demo authored background turning
@@ -1330,10 +1363,10 @@ difficulty, and right now the frequency is zero.
 
 Draggable captions need three things libass will not hand over: a rounded box, the
 caption's on-screen rectangle for a hit target and a hover cursor, and text
-metrics. That reopened §2.9, and the answer is **unchanged — libass draws every
-caption, Flutter draws none.** Flutter measures the same string only to place an
-*invisible* hit rectangle; a few pixels of slop on a hit target is imperceptible,
-and rounded corners are given up (above).
+metrics. That reopened §2.9, and phase 5 settled it: `LibassLayer` renders every
+caption in Flutter through the libass FFI binding (the hit rectangle comes from
+the `ASS_Image` bounding box, not from `measureText`). Rounded corners are given
+up (above).
 
 **The reason is a measurement, not a preference, and it is the opposite of the
 intuition.** Sampled 2026-08-20 across 34 ordinary videos off live search — 20 had
@@ -1511,8 +1544,8 @@ instrument, one outward bias, applied in the two places a position is decided** 
 and no cue list on the wire, which would have re-created the "two representations
 of one caption" shape this project has already been bitten by.
 
-`captions.get` therefore gained a `layout` field in its result (eight numbers per
-*track*, sent rather than duplicated as constants in Flutter) and three optional
+`captions.get` therefore gained a `layout` field in its result (eleven fields per
+*track* (one string, ten numbers), sent rather than duplicated as constants in Flutter) and three optional
 parameters — `style`, `offset`, `metrics`. Phase 5 took `metrics` back off;
 `layout` and the other two remain. `protocol.md` §3.8 has the shapes.
 

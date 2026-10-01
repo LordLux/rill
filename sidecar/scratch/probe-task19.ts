@@ -1,6 +1,12 @@
 /**
  * Task 19 end to end: real caption tracks, real documents, real libass.
  *
+ * **Needs a release build of this checkout (`.\rill build`) and network
+ * access.** It loads the bundled `libmpv-2.dll` from
+ * `app/build/windows/x64/runner/Release/` and fetches real tracks. Position is
+ * checked on rendered pixels; colour is checked in the document (inline `\c&H`
+ * tags), not on pixels.
+ *
  * Everything the feature does to a caption happens between `captions.get` and
  * the pixels libass draws, and both ends of that are reachable offline-ish from
  * here — the sidecar fetches a genuine YouTube track, and the *bundled*
@@ -27,7 +33,11 @@ import { createSession } from '../src/innertube/session.ts';
 import { getCaptionTrack, listCaptionTracks } from '../src/captions/service.ts';
 import type { CaptionStyle } from '../src/captions/style.ts';
 
-const DLL = 'C:/Projects/NativeYouTube/app/build/windows/x64/runner/Release/libmpv-2.dll';
+const DLL = path.join(import.meta.dir, '..', '..', 'app', 'build', 'windows', 'x64', 'runner', 'Release', 'libmpv-2.dll');
+if (!fs.existsSync(DLL)) {
+  console.error(`no release build at ${DLL}: run .\\rill build first`);
+  process.exit(1);
+}
 const WIDTH = 1920;
 const HEIGHT = 1080;
 
