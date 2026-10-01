@@ -1718,7 +1718,7 @@ class _Description extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(12),
@@ -1782,7 +1782,7 @@ class _Description extends StatelessWidget {
                 },
               ),
               if (isOverflowing || expanded) ...[
-                const SizedBox(height: 1),
+                const SizedBox(height: 3),
                 GestureDetector(
                   onTap: onToggle,
                   child: MouseRegion(

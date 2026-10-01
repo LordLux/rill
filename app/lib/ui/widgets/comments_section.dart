@@ -1187,13 +1187,14 @@ class CommentTile extends ConsumerWidget {
                 ],
                 if (onReply != null) ...[
                   const SizedBox(width: 8),
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: TextButton(
-                      style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2), minimumSize: const Size(50, 35)),
-                      onPressed: onReply,
-                      child: const Text('Reply', style: TextStyle(fontSize: 12)),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      enabledMouseCursor: SystemMouseCursors.click,
+                      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                      minimumSize: const Size(50, 35),
                     ),
+                    onPressed: onReply,
+                    child: const Text('Reply', style: TextStyle(fontSize: 12)),
                   ),
                 ],
                 // Copy, revealed by hovering anywhere on the comment.
