@@ -4,6 +4,7 @@ import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
 import '../domain/playlist_membership.dart';
 import '../domain/video_detail.dart';
+import 'auth_controller.dart';
 
 /// `video.info` for one video (`protocol.md` §3.3).
 ///
@@ -16,7 +17,15 @@ import '../domain/video_detail.dart';
 /// The error is left to propagate. `AsyncValue.error` carries the `RpcException`
 /// itself, so the watch page can read its `retry` field and decide between a
 /// retry affordance and an honest dead end (§4).
+///
+/// **Re-fetched on every identity change** (Task 31). `isSubscribed` and
+/// `myRating` are the signing-in viewer's, so the response cached from before a
+/// sign-in says "Subscribe" for a channel the account follows, and the one from
+/// before a sign-out keeps saying "Subscribed". The previous value stays readable
+/// while the new one loads (`AsyncValue.value` survives a rebuild), so the page
+/// does not blank and nothing downstream reopens playback.
 final videoInfoProvider = FutureProvider.family<VideoDetail, String>((ref, videoId) async {
+  ref.watch(authIdentityProvider);
   final response = await RpcClient.instance.call('video.info', {'videoId': videoId});
   return VideoDetail.fromJson(response as Map<String, dynamic>);
 });
@@ -61,6 +70,7 @@ Future<({List<FeedItem> items, String? continuation})> fetchRelated(
 /// business demanding a sign-in nobody asked for yet.
 final playlistMembershipProvider =
     FutureProvider.family<List<PlaylistMembership>, String>((ref, videoId) async {
+  ref.watch(authIdentityProvider); // membership is the account's, not the video's
   final response = await RpcClient.instance.call('playlist.forVideo', {'videoId': videoId})
       as Map<String, dynamic>;
   return (response['playlists'] as List<dynamic>? ?? [])

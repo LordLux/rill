@@ -239,6 +239,66 @@ void main() {
       expect(tips, contains('Your session expired. Sign in again to subscribe'));
     });
 
+    testWidgets('degraded and subscribed: the menu cannot be opened (Task 31 §2)', (tester) async {
+      // Mutation: drop the `blocked` check from the subscribed branch and the
+      // pill opens the all / personalised / none / unsubscribe menu on a session
+      // YouTube no longer honours.
+      await tester.pumpWidget(
+        _harness(
+          const SubscribeButton(channelId: 'chan_1', initiallySubscribed: true),
+          auth: AuthStatus.degraded,
+        ),
+      );
+
+      expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
+      await tester.tap(find.text('Subscribed'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unsubscribe'), findsNothing);
+      expect(find.text('Personalized'), findsNothing);
+      final tips = tester.widgetList<Tooltip>(find.byType(Tooltip)).map((t) => t.message);
+      expect(tips, contains('Your session expired. Sign in again to subscribe'));
+    });
+
+    testWidgets('signed out and subscribed is greyed, like the Subscribe pill', (tester) async {
+      await tester.pumpWidget(
+        _harness(
+          const SubscribeButton(channelId: 'chan_1', initiallySubscribed: true),
+          auth: AuthStatus.anonymous,
+        ),
+      );
+
+      final button = tester.widget<FilledButton>(find.byType(FilledButton));
+      expect(button.style!.backgroundColor!.resolve({WidgetState.disabled})!.a, closeTo(0.38, 0.01));
+      expect(button.style!.foregroundColor!.resolve({WidgetState.disabled})!.a, closeTo(0.38, 0.01));
+    });
+
+    testWidgets('a menu already open when the session goes away is closed', (tester) async {
+      final container = ProviderContainer(
+        overrides: [authProvider.overrideWith(() => _FixedAuth(const AuthState(status: AuthStatus.authenticated)))],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: buildRillTheme(kDefaultAccent),
+            home: const Scaffold(
+              body: Center(child: SubscribeButton(channelId: 'chan_1', initiallySubscribed: true)),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Subscribed'));
+      await tester.pumpAndSettle();
+      expect(find.text('Unsubscribe'), findsOneWidget);
+
+      container.read(authProvider.notifier).adoptVerifiedState('degraded');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unsubscribe'), findsNothing);
+    });
+
     testWidgets('authenticated, it is live and carries no blocker tooltip', (tester) async {
       await tester.pumpWidget(_harness(const SubscribeButton(channelId: 'chan_1')));
 

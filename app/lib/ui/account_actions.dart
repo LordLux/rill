@@ -36,7 +36,7 @@ class AccountActions<K, V> extends Notifier<Map<K, V>> {
   Map<K, V> build() {
     // Watching the identity, not the whole state: `isBusy` and friends change
     // constantly and must not wipe the store.
-    ref.watch(authProvider.select((auth) => (auth.isSignedIn, auth.accountHandle)));
+    ref.watch(authIdentityProvider);
     return const {};
   }
 

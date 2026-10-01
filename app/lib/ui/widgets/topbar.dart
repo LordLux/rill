@@ -103,7 +103,7 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    _RillLogo(scheme: scheme),
+                    RillLogo(scheme: scheme),
                     const SizedBox(width: 12),
                   ],
                 ),
@@ -146,8 +146,8 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
 // Logo
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _RillLogo extends StatelessWidget {
-  const _RillLogo({required this.scheme});
+class RillLogo extends StatelessWidget {
+  const RillLogo({super.key, required this.scheme});
   final ColorScheme scheme;
 
   @override
