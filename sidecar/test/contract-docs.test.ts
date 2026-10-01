@@ -384,3 +384,161 @@ test('the client check can actually fail', () => {
   expect(`resolve as \`${invented}\` at tier 1`.match(CLIENT_TOKEN)).toContain(invented);
   expect(HISTORICAL.test(`resolve as \`${invented}\` at tier 1`)).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// 3. Every method is implemented, documented, and called
+// ---------------------------------------------------------------------------
+
+function scanProtocolMethods(text: string): Set<string> {
+  const methods = new Set<string>();
+  for (const m of text.matchAll(/^\s*\|([^|]+)\|([^|]*)\|([^|]*)\|/gm)) {
+    const col1 = m[1]!;
+    const resultCol = m[3]!;
+    if (resultCol.includes('**not implemented**')) continue;
+    
+    for (const match of col1.matchAll(/`([^`]+)`/g)) {
+      if (match[1]!.includes('.')) {
+        methods.add(match[1]!);
+      }
+    }
+  }
+  return methods;
+}
+
+function scanServerHandlers(text: string): Set<string> {
+  const handlers = new Set<string>();
+  for (const m of text.matchAll(/if \(method === '([^']+)'\)/g)) {
+    handlers.add(m[1]!);
+  }
+  return handlers;
+}
+
+const DYNAMIC_ALLOWLIST = [
+  { file: 'account_actions.dart', expression: 'method', reason: 'Dispatches like/dislike/removeRating from an enum' },
+  { file: 'feed_controller.dart', expression: 'config.method', reason: 'Dispatches feed types (feed.home, subscriptions, etc.)' },
+  { file: 'watch.dart', expression: 'subscribe', reason: 'Ternary between action.subscribe and action.unsubscribe' },
+];
+
+function scanDartCalls(files: Array<{name: string, content: string}>, namespaces: Set<string>): Set<string> {
+  const calls = new Set<string>();
+  
+  for (const {name, content} of files) {
+    for (const m of content.matchAll(/(?:RpcClient\.instance|rpc)\.call(?:Cancelable)?\(\s*([^,)\s]+)/g)) {
+      const arg = m[1]!;
+      if (arg.startsWith("'") || arg.startsWith('"')) {
+        const method = arg.replace(/['"]/g, '');
+        calls.add(method);
+      } else {
+        const basename = name.split('/').pop()!;
+        const allowed = DYNAMIC_ALLOWLIST.find(e => e.file === basename && e.expression === arg);
+        if (!allowed) {
+          throw new Error(`Dynamic call site found in ${basename} not in allowlist: .call(${arg})`);
+        }
+      }
+    }
+    
+    for (const m of content.matchAll(/['"]([a-zA-Z]+\.[a-zA-Z0-9]+)['"]/g)) {
+      const literal = m[1]!;
+      const parts = literal.split('.');
+      if (parts.length === 2 && namespaces.has(parts[0]!)) {
+        calls.add(literal);
+      }
+    }
+  }
+  return calls;
+}
+
+describe('method existence in protocol.md, server.ts, and Dart calls', () => {
+  const protocolMd = doc('docs/protocol.md');
+  const serverTs = readFileSync(join(SRC, 'rpc', 'server.ts'), 'utf8');
+  const APP_LIB = join(ROOT, 'app', 'lib');
+  
+  const dartFiles = sourceFiles(APP_LIB)
+    .filter((p) => p.endsWith('.dart'))
+    .map(p => ({
+      name: p.replace(/\\/g, '/'),
+      content: readFileSync(p, 'utf8')
+    }));
+
+  const protocolMethods = scanProtocolMethods(protocolMd);
+  const serverHandlers = scanServerHandlers(serverTs);
+  
+  const namespaces = new Set([...serverHandlers].map(m => m.split('.')[0]!));
+  const dartCalls = scanDartCalls(dartFiles, namespaces);
+
+  test('found enough items to be checking something real', () => {
+    expect(protocolMethods.size).toBeGreaterThanOrEqual(20);
+    expect(serverHandlers.size).toBeGreaterThanOrEqual(20);
+    expect(dartCalls.size).toBeGreaterThanOrEqual(10);
+  });
+
+  test('Direction 1: Every method in protocol.md has a handler in server.ts', () => {
+    const missing: string[] = [];
+    for (const method of protocolMethods) {
+      if (!serverHandlers.has(method)) {
+        missing.push(`protocol.md specifies ${method} but it has no handler in server.ts`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  test('Direction 2: Every method the Dart client calls has a handler', () => {
+    const missing: string[] = [];
+    for (const method of dartCalls) {
+      if (method === '$cancel' || method.startsWith('event.')) continue;
+      if (!serverHandlers.has(method)) {
+        missing.push(`Dart client calls ${method} but it has no handler in server.ts`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  test('Direction 3: Every handler in server.ts appears in protocol.md', () => {
+    const missing: string[] = [];
+    for (const method of serverHandlers) {
+      if (method === '$cancel' || method.startsWith('event.')) continue;
+      if (!protocolMethods.has(method)) {
+        missing.push(`server.ts handles ${method} but it is undocumented in protocol.md`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('mutation controls', () => {
+  test('a renamed handler would be caught (direction 3)', () => {
+    const syntheticServer = `} else if (method === 'x.y2') {`;
+    const handlers = scanServerHandlers(syntheticServer);
+    const protocol = new Set(['x.y']);
+    const missing = [...handlers].filter(m => !protocol.has(m) && m !== '$cancel' && !m.startsWith('event.'));
+    expect(missing).toEqual(['x.y2']);
+  });
+
+  test('a Dart call with a digit in the name would be caught (direction 2)', () => {
+    const syntheticDart = `rpc.call('secret.handler2', args);`;
+    const calls = scanDartCalls([{name: 'test.dart', content: syntheticDart}], new Set(['secret']));
+    const server = new Set(['secret.handler']);
+    const missing = [...calls].filter(m => !server.has(m));
+    expect(missing).toEqual(['secret.handler2']);
+  });
+
+  test('a protocol row with a digit would be caught (direction 1)', () => {
+    const syntheticProtocol = `| \`x.y2\` | {} | {} |`;
+    const methods = scanProtocolMethods(syntheticProtocol);
+    const server = new Set(['x.y']);
+    const missing = [...methods].filter(m => !server.has(m));
+    expect(missing).toEqual(['x.y2']);
+  });
+
+  test('a not implemented row is correctly ignored', () => {
+    const syntheticProtocol = `| \`x.y\` | {} | {} — **not implemented** |`;
+    const methods = scanProtocolMethods(syntheticProtocol);
+    expect(methods.size).toBe(0);
+  });
+  
+  test('empty scans fail (scanner returns 0 items)', () => {
+    expect(scanServerHandlers('no handlers here').size).toBe(0);
+    expect(scanProtocolMethods('no table here').size).toBe(0);
+    expect(scanDartCalls([{name: 'test.dart', content: 'no calls here'}], new Set()).size).toBe(0);
+  });
+});

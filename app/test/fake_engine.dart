@@ -122,8 +122,12 @@ class FakeEngine implements PlaybackEngine {
     subtitles.add(ass);
   }
 
+  bool? subtitleVisible;
+
   @override
-  Future<void> setSubtitleVisible(bool visible) async {}
+  Future<void> setSubtitleVisible(bool visible) async {
+    subtitleVisible = visible;
+  }
 
   /// What a test pushes to stand in for mpv's `sub-text`.
   ///

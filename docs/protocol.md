@@ -171,8 +171,8 @@ unreachable by reading the source and silent when it happens.
 | --- | --- | --- |
 | `feed.home` | `{chipToken?, continuation?}` | `{chips[], items[], continuation?}` |
 | `feed.subscriptions` | `{continuation?}` | `{items[], continuation?}` |
-| `feed.watchLater` | `{continuation?}` | `{items[], continuation?}` |
-| `feed.history` | `{continuation?}` | `{items[], continuation?}` |
+| `feed.watchLater` | `{continuation?}` | `{items[], continuation?}` — **not implemented** |
+| `feed.history` | `{continuation?}` | `{items[], continuation?}` — **not implemented** |
 | `subscriptions.channels` | `{continuation?}` | `{items[], continuation?}` — Task 21 §4 |
 
 `continuation` is a parameter on every list method rather than a separate
@@ -201,7 +201,7 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
 | `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
 | `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
-| `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?}` |
+| `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?, artist?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
 **`playlist.get` is specified and does not exist.** There is no handler for it
@@ -209,6 +209,11 @@ in `rpc/server.ts` — calling it answers `Unknown method`. The row stays becaus
 the shape is still the intended one, but it is marked so the table cannot be
 read as a list of things that work. Found while implementing Task 26, which hit
 the same thing with `mix.start`.
+
+**`feed.watchLater` and `feed.history` are specified and do not exist,** the same
+way `playlist.get` above is. Watch Later and history are reachable today only as
+writes (`action.addToWatchLater` / `action.removeFromPlaylist`); the feed
+surfaces are intended but not built.
 
 #### Comments — Task 27
 
@@ -986,7 +991,7 @@ so no row ever carried a token. Whether a playlist that holds the same video twi
 gets an entry-id form instead was not measured; the opaque-token design does not
 depend on the answer.
 
-### 3.9 Playlists — the save dialog
+### 3.4b Playlists — the save dialog
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -1371,7 +1376,7 @@ hand, and *give me this one* is a fetch.
 {"trackId": "a.en", "languageCode": "en", "format": "ass",
  "content": "[Script Info]
 …", "cueCount": 402,
- // Task 19. Eight numbers per *track*, not per cue.
+ // Task 19. Eleven fields per *track* (one string, ten numbers), not per cue.
  "layout": {"fontFamily": "Arial", "fontSize": 48,
             "playResX": 1920, "playResY": 1080, "margin": 60,
             "outlineWidth": 2.5, "boxPadding": 6,

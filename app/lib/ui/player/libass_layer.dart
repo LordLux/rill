@@ -77,7 +77,7 @@ class _TrackWrapper {
   _TrackWrapper(this.ptr);
 }
 
-class _RawImage {
+class RawAssImage {
   final TransferableTypedData pixels;
   final int w;
   final int h;
@@ -85,7 +85,7 @@ class _RawImage {
   final double y;
   final int type;
 
-  _RawImage(this.pixels, this.w, this.h, this.x, this.y, this.type);
+  RawAssImage(this.pixels, this.w, this.h, this.x, this.y, this.type);
 }
 
 class _SubtitleImage {
@@ -109,6 +109,11 @@ class _SubtitleImage {
 class LibassLayer extends ConsumerStatefulWidget {
   final double aspectRatio;
   const LibassLayer({super.key, required this.aspectRatio});
+
+  @visibleForTesting
+  static List<RawAssImage> renderIsolateForTesting(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
+    return _LibassLayerState.renderIsolateForTesting(rendererPtr, trackPtr, nowMs, padX, padY);
+  }
 
   @override
   ConsumerState<LibassLayer> createState() => _LibassLayerState();
@@ -402,11 +407,16 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     }
   }
 
-  static Future<List<_RawImage>> _runRenderIsolate(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
+  static Future<List<RawAssImage>> _runRenderIsolate(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
     return Isolate.run(() => _renderIsolate(rendererPtr, trackPtr, nowMs, padX, padY));
   }
 
-  static List<_RawImage> _renderIsolate(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
+  @visibleForTesting
+  static List<RawAssImage> renderIsolateForTesting(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
+    return _renderIsolate(rendererPtr, trackPtr, nowMs, padX, padY);
+  }
+
+  static List<RawAssImage> _renderIsolate(int rendererPtr, int trackPtr, int nowMs, double padX, double padY) {
     // Never the first `libass-9.dll` open in this process — `_setupAss` above
     // already succeeded (via `openLibass()`, fallback included) before
     // anything schedules a render. `SetDllDirectoryW` is process-wide and this
@@ -422,8 +432,9 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     final imagePtr = bindings.ass_render_frame(renderer, track, nowMs, changePtr);
     malloc.free(changePtr);
 
-    final rawImages = <_RawImage>[];
+    final rawImages = <RawAssImage>[];
     Pointer<ASS_Image> current = imagePtr;
+
 
     while (current != nullptr) {
       final img = current.ref;
@@ -449,7 +460,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
           }
         }
 
-        rawImages.add(_RawImage(
+        rawImages.add(RawAssImage(
           TransferableTypedData.fromList([rgbaPixels]),
           img.w,
           img.h,
