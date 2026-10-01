@@ -99,6 +99,14 @@ dependency_overrides:
     path: ../third_party/media_kit_video
   silky_scroll:
     path: ../third_party/silky_scroll
+  # `flutter_inappwebview_windows` is vendored at 0.6.0 — what `flutter_inappwebview`
+  # 6.1.5 resolved to — with one fix, marked `rill patch (F27)` in
+  # `windows/in_app_webview/in_app_webview_manager.cpp`: the compositor static was
+  # released at DLL unload, which failed fast on most exits. 0.7.0-beta.3 works around
+  # it with a leaked AddRef but also needs a pre-release platform interface, so it is
+  # not a drop-in. Drop this entry once a stable release fixes the teardown.
+  flutter_inappwebview_windows:
+    path: ../third_party/flutter_inappwebview_windows
   # **Otherwise empty on purpose. Do not add an override to make the tree
   # resolve.**
   #
