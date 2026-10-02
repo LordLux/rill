@@ -51,7 +51,13 @@ class _CommentComposerState extends State<CommentComposer> {
 
   void _changed() => setState(() {});
 
-  bool get _open => _focus.hasFocus || _controller.text.isNotEmpty || _posting;
+  /// Focus is anywhere in the composer — the field *or* its Cancel and Comment
+  /// buttons. It used to be the field's own focus alone, so Tab from the field
+  /// onto Cancel made the buttons disappear (the field no longer had focus),
+  /// focus snapped back, and a keyboard user could never reach either of them.
+  bool _focusWithin = false;
+
+  bool get _open => _focusWithin || _focus.hasFocus || _controller.text.isNotEmpty || _posting;
 
   /// Whitespace alone is not a comment, and a second tap while one is out must
   /// not post it twice.
@@ -80,7 +86,14 @@ class _CommentComposerState extends State<CommentComposer> {
   @override
   Widget build(BuildContext context) {
     final avatarUrl = widget.avatarUrl;
-    return Row(
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      includeSemantics: false,
+      onFocusChange: (has) {
+        if (_focusWithin != has) setState(() => _focusWithin = has);
+      },
+      child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         CircleAvatar(
@@ -157,6 +170,7 @@ class _CommentComposerState extends State<CommentComposer> {
           ),
         ),
       ],
+    ),
     );
   }
 }

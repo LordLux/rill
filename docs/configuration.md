@@ -52,6 +52,9 @@ This document lists all the environment variables read across the Rill project (
 | `RILL_CAPTIONS_PROBE` | `ui/player/captions_probe.dart` | Launch the captions probe |
 | `RILL_CAPTIONS_MEDIA` | `ui/player/captions_probe.dart` | Media file for captions probe |
 | `RILL_CONTROLS_PROBE` | `ui/player/controls_probe.dart` | Launch the controls probe |
+| `RILL_SEMANTICS_PROBE` | `ui/semantics_probe.dart` | Scripted run with semantics on; count `Failed to update ui::AXTree` per step in the release log (`architecture.md` F51). `RILL_SEMANTICS_PROBE_VIDEO=<id>` picks the video |
+| `RILL_FOCUS_PROBE` | `ui/focus_probe.dart` | `feed` or `watch`: walk Tab through the real app and log each stop, with `OFFSCREEN` and `NAMELESS` markers. `RILL_FOCUS_PROBE_STOPS`, `RILL_FOCUS_PROBE_REVERSE=1`, `RILL_FOCUS_PROBE_VIDEO=<id>`, `RILL_FOCUS_PROBE_DWELL=<ms>` (wait at each stop and log whether the player bar is still up). `hover` sweeps a mouse pointer over the feed, watch page and miniplayer; `openclick` rests the pointer on a tile (`RILL_FOCUS_PROBE_AT=<x>,<y>` as window fractions), clicks it and waits. `RILL_FOCUS_PROBE_SIZE=1700x950` resizes first. Semantics are on in every mode (`architecture.md` F52) |
+| `RILL_SEMANTICS_DUMP` | `ui/semantics_probe.dart` | `1`: semantics on, and the whole semantics tree (with node ids) written once a second to `%TEMP%\rill-semantics-ring-0..15.txt`. An `AXTree` error names only a node id; find that id in the file written at that moment (`architecture.md` F51) |
 | `RILL_PROBE_PHASES` | `probe_comments.dart` | Phases for comments probe |
 | `RILL_PROBE_OUT` | `probe_comments.dart` | Output path for comments probe |
 

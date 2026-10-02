@@ -394,6 +394,7 @@ class _ShareTargetState extends State<_ShareTarget> {
               shape: const CircleBorder(),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
+                customBorder: const CircleBorder(), // the focus ring is a circle too
                 onHover: (hovered) => setState(() => _isHovered = hovered),
                 onTap: widget.onTap,
                 child: SizedBox(

@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import '../feed_controller.dart';
+import '../focus_surface.dart';
 import '../open_video.dart';
+import '../../data/connectivity.dart';
 import '../../data/rpc/client.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
@@ -106,6 +110,14 @@ class _FeedViewState extends ConsumerState<FeedView> {
 
     final state = ref.watch(widget.provider);
 
+    // Back online with the feed showing an error: try again without being asked.
+    ref.listen(isOnlineProvider, (previous, next) {
+      if (previous?.value != false || next.value != true) return;
+      final current = ref.read(widget.provider);
+      if (current.error == null) return;
+      ref.read(widget.provider.notifier).load(chipToken: current.selectedToken, query: current.query, filters: current.filters);
+    });
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -189,7 +201,10 @@ class _FeedViewState extends ConsumerState<FeedView> {
               Icon(Icons.error_outline, color: scheme.error, size: 48),
               const SizedBox(height: 16),
               Text(
-                'Error loading feed:\n${state.error}',
+                connectionProblemMessage(
+                  offline: ref.watch(isOnlineProvider).value == false,
+                  raw: 'Error loading feed:\n${state.error}',
+                ),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: scheme.error),
               ),
@@ -199,13 +214,17 @@ class _FeedViewState extends ConsumerState<FeedView> {
               if (state.errorRetry != RpcRetryMode.no) ...[
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () => ref
-                      .read(widget.provider.notifier)
-                      .load(
-                        chipToken: state.selectedToken,
-                        query: state.query,
-                        filters: state.filters,
-                      ),
+                  onPressed: () {
+                    // The launch-time sign-in restore may have failed for the same reason.
+                    unawaited(ref.read(authProvider.notifier).resyncIfUnknown());
+                    ref
+                        .read(widget.provider.notifier)
+                        .load(
+                          chipToken: state.selectedToken,
+                          query: state.query,
+                          filters: state.filters,
+                        );
+                  },
                   child: const Text('Retry'),
                 ),
               ],
@@ -768,47 +787,146 @@ class ChannelTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    switch (size) {
-      case ChannelTileSize.small:
-        return _buildSmall(context);
-      case ChannelTileSize.wide:
-        return _buildWide(context);
-    }
+    // A group of its own — the tile, then its Subscribe button — so Tab goes channel
+    // by channel through a grid rather than across a row.
+    return FocusSurface(
+      child: switch (size) {
+        ChannelTileSize.small => _buildSmall(context),
+        ChannelTileSize.wide => _buildWide(context),
+      },
+    );
   }
 
   Widget _buildWide(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Flexible(
-            flex: 0,
-            fit: FlexFit.loose,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Align(
-                alignment: Alignment.center,
-                child: CircleAvatar(
-                  radius: 64,
-                  backgroundImage: channel.avatarUrl.isEmpty ? null : NetworkImage(channel.avatarUrl),
-                  onBackgroundImageError: channel.avatarUrl.isEmpty ? null : (error, stackTrace) {},
-                  child: channel.avatarUrl.isEmpty ? const Icon(Icons.person, size: 64) : null,
+    return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {},
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Flexible(
+              flex: 0,
+              fit: FlexFit.loose,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Align(
+                  alignment: Alignment.center,
+                  child: CircleAvatar(
+                    radius: 64,
+                    backgroundImage: channel.avatarUrl.isEmpty ? null : NetworkImage(channel.avatarUrl),
+                    onBackgroundImageError: channel.avatarUrl.isEmpty ? null : (error, stackTrace) {},
+                    child: channel.avatarUrl.isEmpty ? const Icon(Icons.person, size: 64) : null,
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 1,
-            child: Row(
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 1,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                channel.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 20,
+                                ),
+                              ),
+                            ),
+                            ChannelBadge(
+                              channelId: channel.id,
+                              isArtistChannel: channel.isArtistChannel,
+                              isVerified: channel.isVerified,
+                              size: 16,
+                              paddingLeft: 6,
+                            ),
+                          ],
+                        ),
+                        if (channel.subscriberText != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            channel.subscriberText!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                        if (channel.descriptionSnippet != null && channel.descriptionSnippet!.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            channel.descriptionSnippet!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  SubscribeButton(
+                    key: ValueKey(channel.id),
+                    channelId: channel.id,
+                    initiallySubscribed: assumeSubscribed,
+                  ),
+                  const SizedBox(width: 24),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSmall(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(28),
+      onTap: () {},
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
               children: [
+                CircleAvatar(
+                  radius: 32,
+                  backgroundImage: channel.avatarUrl.isEmpty ? null : NetworkImage(channel.avatarUrl),
+                  onBackgroundImageError: channel.avatarUrl.isEmpty ? null : (error, stackTrace) {},
+                  child: channel.avatarUrl.isEmpty ? const Icon(Icons.person, size: 32) : null,
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -820,7 +938,7 @@ class ChannelTile extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontWeight: FontWeight.w500,
-                                fontSize: 20,
+                                fontSize: 16,
                               ),
                             ),
                           ),
@@ -828,27 +946,15 @@ class ChannelTile extends StatelessWidget {
                             channelId: channel.id,
                             isArtistChannel: channel.isArtistChannel,
                             isVerified: channel.isVerified,
-                            size: 16,
-                            paddingLeft: 6,
+                            size: 14,
+                            paddingLeft: 4,
                           ),
                         ],
                       ),
                       if (channel.subscriberText != null) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 2),
                         Text(
                           channel.subscriberText!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: scheme.onSurfaceVariant,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                      if (channel.descriptionSnippet != null && channel.descriptionSnippet!.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          channel.descriptionSnippet!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -860,111 +966,36 @@ class ChannelTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
-                SubscribeButton(
-                  key: ValueKey(channel.id),
-                  channelId: channel.id,
-                  initiallySubscribed: assumeSubscribed,
-                ),
-                const SizedBox(width: 24),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSmall(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 32,
-                backgroundImage: channel.avatarUrl.isEmpty ? null : NetworkImage(channel.avatarUrl),
-                onBackgroundImageError: channel.avatarUrl.isEmpty ? null : (error, stackTrace) {},
-                child: channel.avatarUrl.isEmpty ? const Icon(Icons.person, size: 32) : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            channel.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w500,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                        ChannelBadge(
-                          channelId: channel.id,
-                          isArtistChannel: channel.isArtistChannel,
-                          isVerified: channel.isVerified,
-                          size: 14,
-                          paddingLeft: 4,
-                        ),
-                      ],
-                    ),
-                    if (channel.subscriberText != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        channel.subscriberText!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: scheme.onSurfaceVariant,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ],
+            if (channel.descriptionSnippet != null && channel.descriptionSnippet!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                channel.descriptionSnippet!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  fontSize: 12,
                 ),
               ),
             ],
-          ),
-          if (channel.descriptionSnippet != null && channel.descriptionSnippet!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              channel.descriptionSnippet!,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: scheme.onSurfaceVariant,
-                fontSize: 12,
+      
+            const SizedBox(height: 16.0),
+      
+            const Spacer(flex: 2),
+      
+            SizedBox(
+              height: 36,
+              width: double.infinity,
+              child: SubscribeButton(
+                key: ValueKey(channel.id),
+                channelId: channel.id,
+                initiallySubscribed: assumeSubscribed,
               ),
             ),
           ],
-
-          const SizedBox(height: 16.0),
-
-          const Spacer(flex: 2),
-
-          SizedBox(
-            height: 36,
-            width: double.infinity,
-            child: SubscribeButton(
-              key: ValueKey(channel.id),
-              channelId: channel.id,
-              initiallySubscribed: assumeSubscribed,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

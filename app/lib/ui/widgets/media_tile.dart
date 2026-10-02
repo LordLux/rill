@@ -7,6 +7,8 @@ import '../../domain/feed_item.dart';
 import '../../theme/screen_values.dart';
 import '../../theme/tokens.dart';
 import '../auth_controller.dart';
+import '../focus_ring.dart';
+import '../focus_surface.dart';
 import '../hover_preview.dart';
 import 'channel_badge.dart';
 import '../open_video.dart';
@@ -284,6 +286,23 @@ class MediaTile extends StatefulWidget {
 
 class _MediaTileState extends State<MediaTile> {
   bool isHovering = false;
+
+  /// Keyboard focus on the tile itself, for the ring. `FocusableActionDetector`
+  /// reports it only for a keyboard-reached focus, so a click never draws one.
+  bool _showFocusRing = false;
+
+  /// Hover's visual lift — the growing animation and the highlighted background —
+  /// for a pointer *or* keyboard focus. The hover-only buttons stay on
+  /// `isHovering` alone: they are not Tab stops, so showing them on focus would
+  /// draw controls the keyboard cannot reach.
+  bool get _lifted => isHovering || _showFocusRing;
+
+  /// Keyboard focus asks for the preview the way hovering the thumbnail does.
+  bool _focusPreview = false;
+
+  /// The tile draws its own ring (it has to grow with the hover animation), so the
+  /// app-wide `FocusRing` leaves it alone.
+  final FocusNode _tileFocus = RinglessFocusNode(debugLabel: 'media tile');
   bool isHoveringThumbnail = false;
 
   /// This tile's preview slot. The shared [HoverPreview] writes to at most one across the grid,
@@ -324,6 +343,7 @@ class _MediaTileState extends State<MediaTile> {
     _previewStateTimer?.cancel();
     _stopPreview();
     _slot.dispose();
+    _tileFocus.dispose();
     super.dispose();
   }
 
@@ -344,7 +364,7 @@ class _MediaTileState extends State<MediaTile> {
 
       final bool isActuallyPlaying = _isPreviewing(_slot.value);
       final bool shouldPlay =
-          isHoveringThumbnail || (isHoveringButtons && isActuallyPlaying);
+          isHoveringThumbnail || _focusPreview || (isHoveringButtons && isActuallyPlaying);
 
       if (shouldPlay && !_wantsPreview) {
         _wantsPreview = true;
@@ -498,11 +518,16 @@ class _MediaTileState extends State<MediaTile> {
 
     return AnimatedOpacity(
       opacity: isHovering ? 1 : 0,
+      // These buttons carry tooltips, which are showing as the pointer leaves: skipped
+      // semantics over a live overlay is the F51 orphan.
+      alwaysIncludeSemantics: true,
       duration: const Duration(milliseconds: 100),
       child: IgnorePointer(
         // Faded-out buttons must not swallow clicks meant for the tile underneath.
         ignoring: !isHovering,
-        child: Column(
+        // Never a Tab stop: the 3-dot menu has the same actions, and a stop on a
+        // button that only appears under the pointer is a ghost.
+        child: ExcludeFocus(child: Column(
           children: playing != null
               ? [
                   _hoverButton(
@@ -555,7 +580,7 @@ class _MediaTileState extends State<MediaTile> {
                       onPressed: widget.onAddToQueue,
                     ),
                 ],
-        ),
+        )),
       ),
     );
   }
@@ -580,7 +605,7 @@ class _MediaTileState extends State<MediaTile> {
             if (widget.spec.isStackedCards) ...[
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 100),
-                top: isHovering ? -14 : -8,
+                top: _lifted ? -14 : -8,
                 left: 24,
                 right: 24,
                 bottom: 8,
@@ -593,7 +618,7 @@ class _MediaTileState extends State<MediaTile> {
               ),
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 100),
-                top: isHovering ? -7 : -4,
+                top: _lifted ? -7 : -4,
                 left: 12,
                 right: 12,
                 bottom: 4,
@@ -1021,7 +1046,7 @@ class _MediaTileState extends State<MediaTile> {
           bottomArea,
         );
         final bool isShort = widget.spec.isShort || widget.layout == MediaTileLayout.shorts;
-        final EdgeInsets hoverExpansion = isHovering
+        final EdgeInsets hoverExpansion = _lifted
             ? isShort
                   ? EdgeInsets.all(-10.0).copyWith(top: -9.0) // Shorts
                   : widget.layout == MediaTileLayout.standard
@@ -1029,11 +1054,32 @@ class _MediaTileState extends State<MediaTile> {
                       : EdgeInsets.all(-4.0) // Wide
             : EdgeInsets.zero;
 
-        return MouseRegion(
+        // A tile is its own Tab group — the tile, then its buttons — so Tab goes
+        // tile by tile instead of across every button in a row of the grid. And a
+        // stop in its own right: Enter opens it, which a bare `GestureDetector`
+        // left to the mouse.
+        return FocusSurface(
+          child: MouseRegion(
           onEnter: (_) => _onEnterTile(),
           onExit: (_) => _onExitTile(),
           cursor: SystemMouseCursors.click,
-          child: GestureDetector(
+          child: FocusableActionDetector(
+            focusNode: _tileFocus,
+            enabled: widget.onTap != null,
+            actions: {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (_) {
+                  widget.onTap?.call();
+                  return null;
+                },
+              ),
+            },
+            onShowFocusHighlight: (show) {
+              setState(() => _showFocusRing = show);
+              _focusPreview = show;
+              _updatePreviewState();
+            },
+            child: GestureDetector(
             onTap: widget.onTap,
             // Opaque so the whole tile — including the gaps between its children —
             // is a target. `deferToChild` would leave the padding dead, which reads
@@ -1053,10 +1099,11 @@ class _MediaTileState extends State<MediaTile> {
                     duration: const Duration(milliseconds: 100),
                     curve: Curves.easeInOut,
                     decoration: BoxDecoration(
-                      color: isHovering
+                      color: _lifted
                           ? scheme.surfaceContainerHighest.withValues(alpha: 0.75)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(16),
+                      border: _showFocusRing ? Border.all(color: scheme.primary, width: 2) : null,
                     ),
                   ),
                 ),
@@ -1068,6 +1115,8 @@ class _MediaTileState extends State<MediaTile> {
                 ),
               ],
             ),
+          ),
+          ),
           ),
         );
       },
@@ -1176,6 +1225,12 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
   final MenuController _menuController = MenuController();
   ScrollPosition? _scrollPosition;
 
+  /// What the menu hands focus to and gets it back from: opening moves focus to
+  /// the first entry, and `MenuAnchor` returns it to the button on close only
+  /// when it is told which node the button is (`childFocusNode`).
+  final FocusNode _buttonFocus = FocusNode(debugLabel: 'tile menu button');
+  final FocusNode _firstItemFocus = FocusNode(debugLabel: 'tile menu first entry');
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -1192,11 +1247,22 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
     try {
       _scrollPosition?.removeListener(_onScroll);
     } catch (_) {}
+    _buttonFocus.dispose();
+    _firstItemFocus.dispose();
     super.dispose();
   }
 
   void _onScroll() {
     if (_menuController.isOpen) _menuController.close();
+  }
+
+  void _toggle(MenuController controller) {
+    if (controller.isOpen) {
+      controller.close();
+      return;
+    }
+    controller.open();
+    KeyboardNavigation.focusAfterOpen(_firstItemFocus, stillWanted: () => mounted && controller.isOpen);
   }
 
   Widget _withBlocker(String? blocker, Widget child) =>
@@ -1208,7 +1274,8 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
 
     Widget button({VoidCallback? onPressed}) => IconButton(
       key: tileMoreButtonKey,
-      icon: Icon(Icons.more_vert, size: 21, color: scheme.onSurface),
+      focusNode: _buttonFocus,
+      icon: Icon(Icons.more_vert, size: 21, color: scheme.onSurface, semanticLabel: 'More actions'),
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
       mouseCursor: SystemMouseCursors.click,
@@ -1228,6 +1295,12 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
 
     return MenuAnchor(
       controller: _menuController,
+      childFocusNode: _buttonFocus,
+      // Escape or a pick closes it, and focus is handed back to the button unless
+      // the pick moved it somewhere on purpose (a dialog it opened).
+      onClose: () {
+        if (mounted && _firstItemFocus.hasFocus) _buttonFocus.requestFocus();
+      },
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
         shape: const WidgetStatePropertyAll(
@@ -1237,7 +1310,7 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
       ),
       animated: false,
       alignmentOffset: const Offset(0, 8),
-      builder: (context, controller, _) => button(onPressed: () => controller.isOpen ? controller.close() : controller.open()),
+      builder: (context, controller, _) => button(onPressed: () => _toggle(controller)),
       menuChildren: [
         for (var i = 0; i < widget.items.length; i++)
           _withBlocker(
@@ -1247,7 +1320,9 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
               onExit: (_) => setState(() {
                 if (_hovered == i) _hovered = null;
               }),
-              child: MenuItemButton(
+              // A full-bleed row of the menu: the ring sits inside it, not as a gap.
+              child: FocusRingShape(inflate: -1, child: MenuItemButton(
+                focusNode: i == 0 ? _firstItemFocus : null,
                 style: MenuItemButton.styleFrom(
                   overlayColor: Colors.transparent,
                   backgroundColor: _hovered == i && blockers[i] == null && widget.items[i].onPressed != null
@@ -1263,7 +1338,7 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
                   padding: const EdgeInsets.only(right: 16),
                   child: Text(widget.items[i].label),
                 ),
-              ),
+              )),
             ),
           ),
       ],

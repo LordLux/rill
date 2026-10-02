@@ -18,6 +18,7 @@ import '../../domain/playback_source.dart';
 import '../../domain/caption_style.dart';
 import '../audio_mode_controller.dart';
 import '../captions_controller.dart';
+import '../focus_ring.dart';
 import '../playback_controller.dart';
 
 const Key playerSettingsButtonKey = ValueKey('player-settings-button');
@@ -249,7 +250,13 @@ class _SettingsMenuFadeState extends State<SettingsMenuFade> {
         duration: settingsMenuFade,
         curve: Curves.easeOut,
         child: widget.child,
-        builder: (context, opacity, child) => Opacity(opacity: opacity, child: child),
+        // `alwaysIncludeSemantics`: a `Slider` in here must never have its
+        // semantics skipped (`architecture.md` F51).
+        builder: (context, opacity, child) => Opacity(
+          opacity: opacity,
+          alwaysIncludeSemantics: true,
+          child: child,
+        ),
       ),
     );
   }
@@ -294,6 +301,32 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   /// Root and Quality are both top levels — quality has its own button and is
   /// not reached through the root — so moving between them is sideways and gets
   /// no slide at all. Only *More options* is under anything.
+  /// Focus is held by the menu while it is open, so Tab stays inside it and
+  /// Escape (which closes it) hands focus back to the button that opened it.
+  final FocusScopeNode _scope = FocusScopeNode(debugLabel: 'player settings menu');
+
+  /// Moves focus to the menu's first row — for a keyboard user only. A click that
+  /// opened the menu has no use for a focused row, and one would steal focus from
+  /// wherever it was.
+  void _takeFocus() {
+    if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scope.requestFocus();
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _takeFocus();
+  }
+
+  @override
+  void dispose() {
+    _scope.dispose();
+    super.dispose();
+  }
+
   static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions || page == SettingsPage.captionStyle ? 1 : 0;
 
   @override
@@ -306,6 +339,8 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
       // happening, so this wants no `setState`.
       _direction = (_depthOf(page) - _depthOf(_shown)).toDouble();
       _shown = page;
+      // The row that had focus is on the page that just left.
+      _takeFocus();
     }
 
     // Keyed off the enum rather than by hand, so the key the transition compares
@@ -322,74 +357,84 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
       },
     );
 
-    return Align(
-      // Bottom-aligned inside whatever height the `Positioned` allows, so the
-      // panel grows upward from the button it belongs to.
-      alignment: Alignment.bottomRight,
-      child: MouseRegion(
-        child: Stack(
-            children: [
-              const Positioned.fill(child: AbsorbPointer()),
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {}, // Absorb taps so they don't fall through to the video
-                child: Material(
-                  key: settingsMenuPanelKey,
-                  elevation: 8,
-                  color: scheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(12),
-                  clipBehavior: Clip.antiAlias,
-                  child: AnimatedSize(
-                    duration: settingsMenuMorph,
-                    curve: Curves.easeOutCubic,
-                    // From the bottom-right corner, which is the corner pinned to the
-                    // button — so growing a taller page pushes the top edge up and leaves
-                    // the anchor where it was.
-                    alignment: Alignment.bottomRight,
-                    child: AnimatedSwitcher(
+    // Every row fills the panel edge to edge, so the ring sits inside it.
+    return FocusRingShape(
+      inflate: -1,
+      child: FocusScope(
+        node: _scope,
+        child: Align(
+          // Bottom-aligned inside whatever height the `Positioned` allows, so the
+          // panel grows upward from the button it belongs to.
+          alignment: Alignment.bottomRight,
+          child: MouseRegion(
+            child: Stack(
+              children: [
+                const Positioned.fill(child: AbsorbPointer()),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {}, // Absorb taps so they don't fall through to the video
+                  child: Material(
+                    key: settingsMenuPanelKey,
+                    elevation: 8,
+                    color: scheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    clipBehavior: Clip.antiAlias,
+                    child: AnimatedSize(
                       duration: settingsMenuMorph,
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      // **The box follows the incoming page, not the larger of the two.**
-                      // The default `Stack` takes its biggest child's size, so coming
-                      // back from the tall ladder it would hold that height and snap down
-                      // at the end, leaving the `AnimatedSize` to morph after the slide
-                      // instead of with it. Positioning the outgoing children takes them
-                      // out of the sizing; no `bottom`, so they overflow rather than
-                      // being squashed into the new page's box on the way out.
-                      layoutBuilder: (currentChild, previousChildren) => Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          for (final previous in previousChildren) Positioned(top: 0, left: 0, right: 0, child: previous),
-                          ?currentChild,
-                        ],
+                      curve: Curves.easeOutCubic,
+                      // From the bottom-right corner, which is the corner pinned to the
+                      // button — so growing a taller page pushes the top edge up and leaves
+                      // the anchor where it was.
+                      alignment: Alignment.bottomRight,
+                      child: AnimatedSwitcher(
+                        duration: settingsMenuMorph,
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        // **The box follows the incoming page, not the larger of the two.**
+                        // The default `Stack` takes its biggest child's size, so coming
+                        // back from the tall ladder it would hold that height and snap down
+                        // at the end, leaving the `AnimatedSize` to morph after the slide
+                        // instead of with it. Positioning the outgoing children takes them
+                        // out of the sizing; no `bottom`, so they overflow rather than
+                        // being squashed into the new page's box on the way out.
+                        layoutBuilder: (currentChild, previousChildren) => Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            // The outgoing page is not focusable: while it fades, focus must go to
+                            // the page that replaced it, not stay on a row about to vanish.
+                            for (final previous in previousChildren) Positioned(top: 0, left: 0, right: 0, child: ExcludeFocus(child: previous)),
+                            ?currentChild,
+                          ],
+                        ),
+                        transitionBuilder: (child, animation) {
+                          // **`transitionBuilder` is called for both directions and is not
+                          // told which**, so the child's own key is what distinguishes them.
+                          // It matters: on a push the new page has to come from the right
+                          // *and the old one leave to the left*. Reusing one tween — the
+                          // obvious reading of the API, since the outgoing animation runs in
+                          // reverse — sends the old page back out the way the new one came
+                          // in, which is the gesture for a pop played over a push.
+                          final entering = child.key == ValueKey(_shown.name);
+                          final from = (entering ? _direction : -_direction) * _travel;
+                          return FadeTransition(
+                            opacity: animation,
+                            alwaysIncludeSemantics: true,
+                            child: SlideTransition(
+                              position: Tween<Offset>(begin: Offset(from, 0), end: Offset.zero).animate(animation),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: child,
                       ),
-                      transitionBuilder: (child, animation) {
-                        // **`transitionBuilder` is called for both directions and is not
-                        // told which**, so the child's own key is what distinguishes them.
-                        // It matters: on a push the new page has to come from the right
-                        // *and the old one leave to the left*. Reusing one tween — the
-                        // obvious reading of the API, since the outgoing animation runs in
-                        // reverse — sends the old page back out the way the new one came
-                        // in, which is the gesture for a pop played over a push.
-                        final entering = child.key == ValueKey(_shown.name);
-                        final from = (entering ? _direction : -_direction) * _travel;
-                        return FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: Tween<Offset>(begin: Offset(from, 0), end: Offset.zero).animate(animation),
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: child,
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+      ),
     );
   }
 }
