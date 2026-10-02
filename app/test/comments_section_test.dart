@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsAction;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:rill/ui/focus_ring.dart' show KeyboardNavigation;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/comments_source.dart';
@@ -184,6 +186,8 @@ Future<void> scrollTo(WidgetTester tester, {required bool bottom}) async {
 int builtTiles() => find.byType(CommentTile).evaluate().length;
 
 void main() {
+  setUp(KeyboardNavigation.install);
+
   group('CommentsSection — a re-sort supersedes the page in flight', () {
     /// Page 1 of the "Top" sort is in, and "Show more comments" has been
     /// tapped: `more-top` is out. Returns it.
@@ -804,6 +808,8 @@ void main() {
       );
       expect(button.onPressed, isNotNull, reason: 'focusable only if it is a live button');
 
+      // Revealed by keyboard navigation only: a click that focuses it shows nothing.
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       Focus.of(tester.element(find.byIcon(Icons.link))).requestFocus();
       await tester.pump();
 
@@ -827,6 +833,7 @@ void main() {
         reason: 'hidden: a screen reader can reach it but not activate it',
       );
 
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       Focus.of(tester.element(find.byIcon(Icons.link))).requestFocus();
       // Settled, not pumped: `Opacity` at exactly 0 drops the subtree from
       // semantics on its own, so the action only comes back once the fade has

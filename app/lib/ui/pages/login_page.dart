@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -349,93 +350,101 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final scheme = Theme.of(context).colorScheme;
     final busy = ref.watch(authProvider.select((s) => s.isBusy));
 
-    return Scaffold(
-      // This route covers the app's top bar, which is where the window controls
-      // live — so it carries its own, from the same provider (Task 31 §5).
-      appBar: _LoginTitleBar(
-        // Cancellation leaves the app exactly as it was — nothing has been
-        // written by the time this can be pressed.
-        onCancel: () => Navigator.of(context).pop(false),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _webView(),
-                // The cover. Opaque and on top rather than replacing the
-                // WebView, so the platform view underneath is never resized or
-                // disposed while it is still finishing work — see `_handingOff`.
-                if (_handingOff)
-                  ColoredBox(
-                    color: scheme.surface,
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_canRetry)
-                            Icon(Icons.error_outline, size: 32, color: scheme.error)
-                          else
-                            const SizedBox(
-                              width: 32,
-                              height: 32,
-                              child: CircularProgressIndicator(strokeWidth: 3),
-                            ),
-                          const SizedBox(height: 20),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32),
-                            child: Text(
-                              _message,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: scheme.onSurface, fontSize: 16),
-                            ),
-                          ),
-                          if (_canRetry) ...[
-                            const SizedBox(height: 20),
-                            FilledButton(onPressed: _retry, child: const Text('Try again')),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+    // Escape cancels, exactly as the Cancel button does. `autofocus` gives the key
+    // somewhere to arrive when nothing inside the page holds focus.
+    return CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.of(context).pop(false)},
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          // This route covers the app's top bar, which is where the window controls
+          // live — so it carries its own, from the same provider (Task 31 §5).
+          appBar: _LoginTitleBar(
+            // Cancellation leaves the app exactly as it was — nothing has been
+            // written by the time this can be pressed.
+            onCancel: () => Navigator.of(context).pop(false),
           ),
-          // **Not shown once `_canRetry` is up.** The cover already carries
-          // this exact message, front and center, next to the button that
-          // acts on it — repeating it down here in a narrow strip below the
-          // fold is how a real failure ended up reading as background noise
-          // rather than something to act on (2026-09-30). Every other state
-          // this bar covers (waiting, checking, "not signed in yet") has no
-          // competing copy of the message anywhere else, so it keeps this
-          // bar for those.
-          if (!_canRetry)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              color: scheme.surfaceContainerHighest,
-              child: Row(
-                children: [
-                  if (busy)
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else
-                    Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _message,
-                      style: TextStyle(color: scheme.onSurfaceVariant),
-                    ),
-                  ),
-                ],
+          body: Column(
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _webView(),
+                    // The cover. Opaque and on top rather than replacing the
+                    // WebView, so the platform view underneath is never resized or
+                    // disposed while it is still finishing work — see `_handingOff`.
+                    if (_handingOff)
+                      ColoredBox(
+                        color: scheme.surface,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_canRetry)
+                                Icon(Icons.error_outline, size: 32, color: scheme.error)
+                              else
+                                const SizedBox(
+                                  width: 32,
+                                  height: 32,
+                                  child: CircularProgressIndicator(strokeWidth: 3),
+                                ),
+                              const SizedBox(height: 20),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 32),
+                                child: Text(
+                                  _message,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: scheme.onSurface, fontSize: 16),
+                                ),
+                              ),
+                              if (_canRetry) ...[
+                                const SizedBox(height: 20),
+                                FilledButton(onPressed: _retry, child: const Text('Try again')),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-        ],
+              // **Not shown once `_canRetry` is up.** The cover already carries
+              // this exact message, front and center, next to the button that
+              // acts on it — repeating it down here in a narrow strip below the
+              // fold is how a real failure ended up reading as background noise
+              // rather than something to act on (2026-09-30). Every other state
+              // this bar covers (waiting, checking, "not signed in yet") has no
+              // competing copy of the message anywhere else, so it keeps this
+              // bar for those.
+              if (!_canRetry)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  color: scheme.surfaceContainerHighest,
+                  child: Row(
+                    children: [
+                      if (busy)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _message,
+                          style: TextStyle(color: scheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

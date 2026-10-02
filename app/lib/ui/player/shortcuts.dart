@@ -4,11 +4,13 @@ library;
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/material.dart' show Slider;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../captions_controller.dart';
 import '../playback_controller.dart';
+import '../focus_surface.dart';
 import '../player_shell.dart';
 import 'settings_menu.dart';
 import 'view_mode.dart';
@@ -97,6 +99,38 @@ bool textEntryHasFocus() {
   final context = FocusManager.instance.primaryFocus?.context;
   if (context == null) return false;
   return context.findAncestorWidgetOfExactType<EditableText>() != null;
+}
+
+/// Whether the keyboard user has Tabbed onto a control that handles Space.
+///
+/// The player's handler is global and runs before the focus tree, so without
+/// this a focused button never sees Space — it would pause the video instead,
+/// and a control reached by Tab could not be pressed with the key that presses
+/// it. **Only for focus reached by keyboard** (`highlightMode` is `traditional`):
+/// a button that was merely *clicked* keeps focus too, and Space after a click
+/// has always meant pause. `k` pauses either way, and no other key is touched.
+bool keyboardFocusHandlesActivate() {
+  if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return false;
+  final context = FocusManager.instance.primaryFocus?.context;
+  if (context == null) return false;
+  final action = Actions.maybeFind<ActivateIntent>(context);
+  return action != null && action.isEnabled(const ActivateIntent());
+}
+
+bool _isArrow(LogicalKeyboardKey key) =>
+    key == LogicalKeyboardKey.arrowLeft ||
+    key == LogicalKeyboardKey.arrowRight ||
+    key == LogicalKeyboardKey.arrowUp ||
+    key == LogicalKeyboardKey.arrowDown;
+
+/// Whether the focused widget uses the arrow keys itself: a `Slider`, or anything
+/// under an [ArrowKeyClaim]. Keyboard focus only, as above.
+bool focusClaimsArrows() {
+  if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return false;
+  final context = FocusManager.instance.primaryFocus?.context;
+  if (context == null) return false;
+  return context.findAncestorWidgetOfExactType<Slider>() != null ||
+      context.findAncestorWidgetOfExactType<ArrowKeyClaim>() != null;
 }
 
 /// A key press, as a player action — or null for everything else.
@@ -218,6 +252,33 @@ class PlayerShortcuts extends ConsumerStatefulWidget {
 }
 
 class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
+  /// What had focus when F6 moved it into the miniplayer, for F6 to give back.
+  FocusNode? _beforeMiniPlayer;
+
+  /// F6, Windows' "next pane": into the miniplayer, and out again. Nothing to do
+  /// when the miniplayer is not on screen.
+  bool _toggleMiniPlayerFocus() {
+    final shown = ref.read(playbackProvider).item != null &&
+        ref.read(currentRouteProvider) != watchRouteName &&
+        !ref.read(playerViewProvider).fullscreen;
+    if (!shown) return false;
+
+    final scope = ref.read(miniPlayerScopeProvider);
+    if (scope.hasFocus) {
+      final before = _beforeMiniPlayer;
+      _beforeMiniPlayer = null;
+      if (before != null && before.context != null && before.canRequestFocus) {
+        before.requestFocus();
+      } else {
+        scope.unfocus();
+      }
+    } else {
+      _beforeMiniPlayer = FocusManager.instance.primaryFocus;
+      scope.requestFocus();
+    }
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -231,10 +292,18 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
   }
 
   bool _onKey(KeyEvent event) {
+    // Before the text-field gate: F6 is not a character, and leaving the search
+    // box for the miniplayer is exactly when it is wanted.
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.f6) return _toggleMiniPlayerFocus();
+
     if (textEntryHasFocus()) return false;
 
     final shortcut = resolvePlayerShortcut(event);
     if (shortcut == null) return false;
+    // Space is the one key a focused control also wants (see above).
+    if (event.logicalKey == LogicalKeyboardKey.space && keyboardFocusHandlesActivate()) return false;
+    // So are the arrows, for a focused slider or reorder handle.
+    if (_isArrow(event.logicalKey) && focusClaimsArrows()) return false;
 
     // Nothing to control. Returning false leaves the key to the rest of the app
     // rather than swallowing every space bar on a page with no video on it.

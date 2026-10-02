@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../theme/app_theme.dart'
-    show tooltipBubbleDecoration, tooltipBubbleForeground, tooltipBubbleShade, tooltipBubbleTextStyle;
+import '../../theme/app_theme.dart' show tooltipBubbleDecoration, tooltipBubbleForeground, tooltipBubbleShade, tooltipBubbleTextStyle;
 import '../player/shortcuts.dart' show PlayerAction, playerActionKeyLabel;
 
 /// A tooltip reading [label], with the current keybinding for [action]
@@ -15,16 +14,26 @@ import '../player/shortcuts.dart' show PlayerAction, playerActionKeyLabel;
 /// it) falls back to a plain text-only tooltip rather than a badge with
 /// nothing in it.
 class ShortcutTooltip extends StatelessWidget {
-  const ShortcutTooltip({super.key, required this.label, this.action, required this.child});
+  const ShortcutTooltip({
+    super.key,
+    required this.label,
+    this.action,
+    this.silent = false,
+    required this.child,
+  });
 
   final String label;
   final PlayerAction? action;
+
+  /// Draws the bubble with no semantics of its own ([_SilentTooltip]). For the player's
+  /// control bar, where the Material tooltip's overlay node reaches the accessibility
+  /// bridge orphaned (F51).
+  final bool silent;
   final Widget child;
 
-  @override
-  Widget build(BuildContext context) {
-    final keyLabel = action == null ? null : playerActionKeyLabel[action];
-    if (keyLabel == null) {
+  Widget _tip({required Duration wait, required InlineSpan message, bool plain = false}) {
+    if (silent) return _SilentTooltip(label: label, hoverDelay: wait, message: message, child: child);
+    if (plain) {
       return Tooltip(
         message: label,
         preferBelow: false,
@@ -33,24 +42,39 @@ class ShortcutTooltip extends StatelessWidget {
         child: child,
       );
     }
+    return Tooltip(
+      preferBelow: false,
+      decoration: tooltipBubbleDecoration,
+      waitDuration: wait,
+      richMessage: message,
+      child: child,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyLabel = action == null ? null : playerActionKeyLabel[action];
+    if (keyLabel == null)
+      return _tip(
+        wait: Duration.zero,
+        plain: true,
+        message: TextSpan(text: label, style: tooltipBubbleTextStyle),
+      );
 
     final keys = keyLabel.split('+');
     if (keys.length < 2) {
-      return Tooltip(
-        preferBelow: false,
-        decoration: tooltipBubbleDecoration,
-        waitDuration: const Duration(milliseconds: 300),
-        richMessage: TextSpan(
+      return _tip(
+        wait: const Duration(milliseconds: 300),
+        message: TextSpan(
           style: tooltipBubbleTextStyle,
           children: [
             TextSpan(text: '$label  '),
             WidgetSpan(alignment: PlaceholderAlignment.middle, child: _KeyBadge(keys.first)),
           ],
         ),
-        child: child,
       );
     }
-    
+
     final shortcut = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -68,16 +92,69 @@ class ShortcutTooltip extends StatelessWidget {
       ],
     );
 
-    return Tooltip(
-      preferBelow: false,
-      decoration: tooltipBubbleDecoration,
-      waitDuration: const Duration(milliseconds: 300),
-      richMessage: TextSpan(
+    return _tip(
+      wait: const Duration(milliseconds: 300),
+      message: TextSpan(
         style: tooltipBubbleTextStyle,
         children: [
           TextSpan(text: '$label  '),
           WidgetSpan(alignment: PlaceholderAlignment.middle, child: shortcut),
         ],
+      ),
+    );
+  }
+}
+
+/// A tooltip whose bubble has **no semantics**: the Material one puts a node for it in the
+/// overlay, and shown from under the player's control bar (opacity, slide, ignore-pointer)
+/// that node reached the Windows accessibility bridge without a parent — a burst of
+/// `Failed to update ui::AXTree … will not be in the tree` for as long as it was up
+/// (`architecture.md` F51). Every control already carries its own label, so a screen
+/// reader loses nothing; the bubble is for the pointer.
+///
+/// Drawn like the Material desktop tooltip, above its target.
+class _SilentTooltip extends StatelessWidget {
+  const _SilentTooltip({
+    required this.label,
+    required this.hoverDelay,
+    required this.message,
+    required this.child,
+  });
+
+  /// What assistive technology is told, on the anchor — the part of a tooltip that is not the bubble.
+  final String label;
+  final Duration hoverDelay;
+  final InlineSpan message;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // Not wrapped in `ExcludeSemantics`: that would drop the *control* under the tooltip from
+    // the semantics tree, not just the bubble.
+    return RawTooltip(
+      semanticsTooltip: label,
+      hoverDelay: hoverDelay,
+      positionDelegate: (c) => positionDependentBox(
+        size: c.overlaySize,
+        childSize: c.tooltipSize,
+        target: c.target,
+        verticalOffset: c.targetSize.height / 2 + 4,
+        preferBelow: false,
+      ),
+      tooltipBuilder: (context, animation) => ExcludeSemantics(
+        child: FadeTransition(
+          opacity: animation,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 24),
+            child: DecoratedBox(
+              decoration: tooltipBubbleDecoration,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Text.rich(message, style: tooltipBubbleTextStyle),
+              ),
+            ),
+          ),
+        ),
       ),
       child: child,
     );

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../theme/screen_values.dart';
+import '../focus_surface.dart';
 
 const double referenceAspect = ScreenValues.normalAspectRatio;
 
@@ -150,10 +151,12 @@ class WatchLayout extends StatelessWidget {
     final slivers = <Widget>[];
 
     if (theatrePlayer != null) {
-      slivers.add(SliverToBoxAdapter(
-        key: const ValueKey('watch-layout/theatrePlayer'),
-        child: theatrePlayer,
-      ));
+      slivers.add(
+        SliverToBoxAdapter(
+          key: const ValueKey('watch-layout/theatrePlayer'),
+          child: FocusTraversalOrder(order: WatchFocusOrder.player, child: theatrePlayer),
+        ),
+      );
     }
 
     if (g.isTwoColumn) {
@@ -170,7 +173,13 @@ class WatchLayout extends StatelessWidget {
                 maxExtent: g.mainContainerWidth,
                 sliver: SliverMainAxisGroup(
                   slivers: [
-                    if (normalPlayer != null) SliverToBoxAdapter(child: normalPlayer),
+                    if (normalPlayer != null)
+                      SliverToBoxAdapter(
+                        child: FocusTraversalOrder(
+                          order: WatchFocusOrder.player,
+                          child: normalPlayer,
+                        ),
+                      ),
                     SliverMainAxisGroup(
                       key: const ValueKey('watch-layout/metadata'),
                       slivers: metadataSlivers,

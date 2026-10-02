@@ -9,6 +9,7 @@ import '../../data/update/update_config.dart';
 import '../../domain/update/update_state.dart';
 import '../../domain/ytdlp/ytdlp_state.dart';
 import '../auth_controller.dart';
+import '../focus_ring.dart';
 import '../pages/login_page.dart';
 import '../update_controller.dart';
 import '../ytdlp_controller.dart';
@@ -44,10 +45,19 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
 
   OverlayEntry? _entry;
 
+  /// The button's own focus, so closing the menu can hand it back.
+  final FocusNode _buttonFocus = FocusNode(debugLabel: 'account button');
+
+  /// The open menu's scope: Tab cycles inside it and cannot reach the page
+  /// behind, which a bare `OverlayEntry` otherwise lets it do.
+  final FocusScopeNode _menuScope = FocusScopeNode(debugLabel: 'account menu');
+
   @override
   void dispose() {
     _entry?.remove();
     _entry = null;
+    _buttonFocus.dispose();
+    _menuScope.dispose();
     super.dispose();
   }
 
@@ -75,6 +85,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
       builder: (_) => Theme(
         data: capturedTheme,
         child: _AccountMenuOverlay(
+          scope: _menuScope,
           auth: auth,
           menuTop: topLeft.dy + buttonSize.height,
           onDismiss: _dismiss,
@@ -92,9 +103,14 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     overlayState.insert(_entry!);
   }
 
+  /// Closes the menu, and gives focus back to the button **only if the menu had
+  /// it.** An outside click dismisses through the same path, and the click
+  /// already moved focus to whatever was clicked — taking it back would undo that.
   void _dismiss() {
+    final hadFocus = _menuScope.hasFocus;
     _entry?.remove();
     _entry = null;
+    if (hadFocus && mounted) _buttonFocus.requestFocus();
   }
 
   @override
@@ -173,6 +189,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
     return TapRegion(
       groupId: 'account_menu',
       child: TitleBarWidgetButton(
+        focusNode: _buttonFocus,
         tooltip: auth.isSignedIn
             ? (needsAttention ? '${auth.displayName} — needs attention' : auth.displayName)
             : (auth.status == AuthStatus.degraded
@@ -210,6 +227,7 @@ enum _AccountMenuPage { root, appearance, language, restrictedMode, location, up
 /// in. Direction is derived in [build] the same way [PlayerSettingsMenu] does it.
 class _AccountMenuOverlay extends StatefulWidget {
   const _AccountMenuOverlay({
+    required this.scope,
     required this.auth,
     required this.menuTop,
     required this.onDismiss,
@@ -217,6 +235,7 @@ class _AccountMenuOverlay extends StatefulWidget {
     required this.onSignOut,
   });
 
+  final FocusScopeNode scope;
   final AuthState auth;
   final double menuTop;
   final VoidCallback onDismiss;
@@ -253,6 +272,11 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    // Explicit rather than `FocusScope(autofocus: true)`, which does nothing
+    // while the button that opened this still holds the parent scope's focus.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.scope.requestFocus();
+    });
   }
 
   @override
@@ -295,7 +319,13 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
         // Does NOT consume the outside click — it passes through to whatever is
         // behind the overlay. See AccountButton's class-level doc.
         onTapOutside: (_) => widget.onDismiss(),
-        child: Material(
+        child: FocusRingShape(
+          inflate: -1, // rows fill the panel edge to edge
+          child: FocusScope(
+          node: widget.scope,
+          child: FocusTraversalGroup(
+            policy: ReadingOrderTraversalPolicy(),
+            child: Material(
           elevation: 8,
           borderRadius: const BorderRadius.all(Radius.circular(16)),
           color: popupColor,
@@ -362,6 +392,9 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
             ),
           ),
         ),
+            ),
+          ),
+          ),
       ),
     );
   }
