@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 83.** A new item takes it, and the same edit bumps this line.
+**Next number: 85.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -84,7 +84,8 @@ Two causes are still unknown; neither blocks anything.
    (fetch a page anonymously, call `action.rateComment` with its params signed in,
    re-fetch, read `myRating`, undo). From the code, (a) is ruled out (the params are
    present on anonymous pages) and (b) would have shown a snackbar, so (c) is the
-   likeliest. If the probe confirms it, that is `architecture.md` F51: a success
+   likeliest. If the probe confirms it, it is the next free `architecture.md`
+   finding (F51 went to Task 32's AXTree cause): a success
    that did not land.
 
 A third point from the task report was checked and dropped: it said a mix tile
@@ -487,6 +488,47 @@ chip.
 
 **Done when:** the chips YouTube returns for a query show above the results, and
 choosing one reloads through its token.
+
+### 84. Videos with AI dubs can play in the wrong language
+
+Reported 2026-10-01. Some videos open with a dubbed audio track instead of the
+original. Example: `MLgrNktS67c` (Xisumavoid, English only) played in another
+language in rill, and correctly on youtube.com. It carries dozens of audio
+tracks, most of them YouTube's automatic AI dubs.
+
+**The cause is visible in the code.** `rankAudio` (`playback/resolve.ts`) picks
+the audio by DRC, then stereo before surround, then **bitrate**. It knows nothing
+about languages, and the parser keeps no track information at all
+(`parser/player.ts` maps `isDrc` and nothing like it), so with dozens of
+same-itag tracks whichever has the highest bitrate wins. Each adaptive audio
+format describes its track: an `audioTrack` object (display name, id, an
+is-default flag) and track tags in the URL (`xtags`: original, dubbed or
+auto-dubbed, and the language). Which of these the `VISIONOS` response actually
+carries is unmeasured. Check the other ladder tiers (yt-dlp, the itag 18 floor)
+too.
+
+**Wanted, in order:**
+
+1. **Original audio by default.** Parse the track fields into `PlayerFormat`,
+   and rank the original (or the track YouTube marks as the default) first.
+   This alone fixes the report.
+2. **An "Audio track" entry in the player's settings menu,** as youtube.com has,
+   to switch track for the current video. Signing every track's URL up front is
+   wasteful with dozens of them, so list the tracks and sign the chosen one on
+   demand. That is a new protocol method or a `PlaybackSource` field, measured
+   and specified first.
+3. **Later, with the settings page (item 69):** a switch to "play a dubbed track
+   in my language when there is one" (off by default), and an ordered list of
+   preferred languages. youtube.com keeps its version of these at
+   `youtube.com/account_playback`. Measure whether the account's own setting can
+   be read for the signed-in user; otherwise keep it local.
+
+**Done when:** `MLgrNktS67c` and a few other multi-track videos play their
+original audio on every tier. A test with a fixture holding several tracks shows
+the original ranked first even when a dub has a higher bitrate. Mutation: rank by
+bitrate alone, and the test fails.
+
+(Added 2026-10-01 as item 83; that edit was lost when Task 32 rewrote this file, and the number went to its follow-ups, so this is 84.)
 
 ---
 
