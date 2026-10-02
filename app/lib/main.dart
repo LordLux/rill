@@ -17,6 +17,8 @@ import 'theme/accent.dart';
 import 'theme/app_theme.dart';
 import 'ui/audio_delay_probe.dart';
 import 'ui/audio_mode_controller.dart';
+import 'ui/focus_probe.dart';
+import 'ui/focus_ring.dart';
 import 'ui/hide_queue_controller.dart';
 
 import 'ui/auth_controller.dart';
@@ -31,11 +33,13 @@ import 'ui/player/controls_probe.dart';
 import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
+import 'ui/semantics_probe.dart';
 import 'ui/update_controller.dart';
 import 'ui/ytdlp_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  KeyboardNavigation.install();
   // First, so nothing below can print a cookie or an error the log misses.
   // `YT_COOKIE` is the development path's cookie (the sidecar reads it too).
   installErrorLogging();
@@ -144,6 +148,9 @@ Future<void> main() async {
   runControlsProbe(container);
   runLaunchProbe(container);
   runCaptionsProbe(container);
+  runSemanticsProbe(container);
+  runSemanticsDump();
+  runFocusProbe(container);
 }
 
 /// Run the audio-delay probe and exit.
@@ -262,7 +269,7 @@ class RillApp extends ConsumerWidget {
         // *second* engine rather than the shell's: previewing on that one would open media over
         // whatever is paused there and take its position with it.
         engineFactory: () => createEngine('preview'),
-        child: PlayerShell(child: child ?? const SizedBox.shrink()),
+        child: FocusRing(child: PlayerShell(child: child ?? const SizedBox.shrink())),
       ),
       home: const FeedPage(),
     );

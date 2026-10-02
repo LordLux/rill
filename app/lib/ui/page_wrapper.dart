@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
 import '../theme/screen_values.dart';
+import 'focus_surface.dart';
+import 'mini_player_stop.dart';
 import 'pages/all_subscriptions.dart' show allSubscriptionsRouteName;
 import 'pages/subscriptions.dart';
 import 'player_shell.dart'
@@ -44,13 +46,73 @@ class PageWrapper extends ConsumerStatefulWidget {
   final Widget title;
   final List<Widget>? actions;
 
-  const PageWrapper({super.key, required this.body, required this.title, this.actions});
+  /// Whether the page's own first control exists yet. The watch page's is the
+  /// player's, which only mounts once the video has loaded; landing keyboard focus
+  /// before that would pick the first thing that *is* there (the Like button).
+  final bool landingReady;
+
+  const PageWrapper({super.key, required this.body, required this.title, this.actions, this.landingReady = true});
 
   @override
   ConsumerState<PageWrapper> createState() => _PageWrapperState();
 }
 
 class _PageWrapperState extends ConsumerState<PageWrapper> {
+  /// A zero-size marker at the very front of the page content (order 0, ahead of
+  /// every numbered surface). Not a Tab stop; it exists so "the first thing Tab
+  /// would reach in the content" can be asked of the real traversal policy instead
+  /// of guessed from the widget tree.
+  final FocusNode _landing = FocusNode(debugLabel: 'page content start', skipTraversal: true);
+
+  @override
+  void initState() {
+    super.initState();
+    // Reached from the keyboard, a new page starts with focus on its own content —
+    // not back at the title bar, which is three groups of Tab away. Not the first
+    // page (nothing opened it) and not after a pointer (focus is not shown).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && ModalRoute.of(context)?.isFirst == false) _landOnContent(attempt: 0);
+    });
+  }
+
+  /// Focus the first focusable thing in the content, waiting a moment for pages that
+  /// fill in after they open (a feed fetches before it has a tile).
+  void _landOnContent({required int attempt}) {
+    if (!mounted) return;
+    if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return;
+    // The user already moved on, or focus is somewhere inside this page.
+    final scope = FocusScope.of(context);
+    if (scope.focusedChild != null) return;
+    if (!widget.landingReady) {
+      if (attempt < 48) Future<void>.delayed(const Duration(milliseconds: 250), () => _landOnContent(attempt: attempt + 1));
+      return;
+    }
+    // Let the marker take part in the walk for one step: focus it, ask for the next
+    // stop, and put it back out of the walk.
+    _landing
+      ..skipTraversal = false
+      ..requestFocus();
+    final moved = _landing.nextFocus();
+    _landing.skipTraversal = true;
+    final landed = FocusManager.instance.primaryFocus;
+    if (moved && landed != null && !identical(landed, _landing) && _landing.context != null) {
+      // Only a stop inside this page's content counts — the walk may have wrapped
+      // round to the title bar when the content has nothing focusable yet.
+      final inContent = landed.ancestors.contains(_landing.parent);
+      if (inContent) return;
+    }
+    _landing.unfocus();
+    if (attempt < 12) {
+      Future<void>.delayed(const Duration(milliseconds: 250), () => _landOnContent(attempt: attempt + 1));
+    }
+  }
+
+  @override
+  void dispose() {
+    _landing.dispose();
+    super.dispose();
+  }
+
   void _toggleDrawer() => ref.read(drawerStateProvider.notifier).toggle();
 
   void _openSubscriptions() {
@@ -109,7 +171,11 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
     final currentRoute = ref.watch(currentRouteProvider);
     final showBack = currentRoute != null && currentRoute != homeRouteName;
 
-    return Scaffold(
+    // Tab order is by `ShellFocusOrder`, not by where `appBar` and `body` happen
+    // to sit in the tree: title bar, rail, search, top-bar actions, page.
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Scaffold(
       appBar: TopBar(
         toggleDrawer: _toggleDrawer,
         showBackButton: showBack,
@@ -118,8 +184,12 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // First in the Tab order wherever the miniplayer is on screen.
+          const MiniPlayerStop(),
           // The inline drawer that pushes content instead of overlaying it
-          AnimatedContainer(
+          FocusSurface(
+            order: ShellFocusOrder.rail,
+            child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
             // 240px wide when open, 72px wide (mini drawer) when closed.
@@ -176,24 +246,37 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
               ),
             ),
           ),
+          ),
 
           // The actual page content, under the required-update banner when
           // there is one (architecture.md §2.14).
           Expanded(
-            child: Column(
-              children: [
-                const UpdateBanner(),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadiusGeometry.only(topLeft: Radius.circular(10)),
-                    child: widget.body,
+            child: FocusSurface(
+              order: ShellFocusOrder.content,
+              // The watch page numbers its columns (`WatchFocusOrder`); every other
+              // page has no numbers and is read in reading order.
+              ordered: true,
+              child: Column(
+                children: [
+                  // See [_landing].
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(0),
+                    child: Focus(focusNode: _landing, child: const SizedBox.shrink()),
                   ),
-                ),
-              ],
+                  const UpdateBanner(),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadiusGeometry.only(topLeft: Radius.circular(10)),
+                      child: widget.body,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
       ),
+    ),
     );
   }
 }
@@ -266,6 +349,9 @@ class _DrawerItem extends StatelessWidget {
                         child: AnimatedOpacity(
                           duration: _animDuration,
                           curve: _animCurve,
+                          // Semantics are never skipped at 0: anything with an overlay inside (a tooltip)
+                          // would be left an orphan (F51).
+                          alwaysIncludeSemantics: true,
                           opacity: !isOpen ? 1.0 : 0.0,
                           child: AnimatedSlide(
                             duration: _animDuration,
@@ -296,6 +382,7 @@ class _DrawerItem extends StatelessWidget {
                   child: AnimatedOpacity(
                     duration: _animDuration,
                     curve: _animCurve,
+                    alwaysIncludeSemantics: true, // F51
                     opacity: isOpen ? 1.0 : 0.0,
                     child: AnimatedSlide(
                       duration: _animDuration,

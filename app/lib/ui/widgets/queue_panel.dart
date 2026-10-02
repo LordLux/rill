@@ -1,11 +1,14 @@
 import 'dart:math' as math;
 
+import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
+import '../focus_ring.dart';
+import '../focus_surface.dart';
 import '../queue_controller.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
@@ -470,7 +473,9 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header
-            Material(
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(0),
+              child: Material(
               color: Colors.transparent,
               child: Ink(
                 key: _headerKey,
@@ -576,6 +581,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOutCubic,
                           child: IconButton(
+                            tooltip: _expanded ? 'Collapse queue' : 'Expand queue',
                             icon: Icon(Icons.keyboard_arrow_up),
                             color: scheme.onSurfaceVariant,
                             onPressed: _clearing ? null : () => _onCollapse(),
@@ -586,6 +592,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                   ),
                 ),
               ),
+            ),
             ),
             // Queue List
             AnimatedCrossFade(
@@ -610,10 +617,14 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                       onReorderItem: (oldIndex, target) => controller.reorder(oldIndex, target),
                       itemBuilder: (context, index) {
                         final entry = queue.entries[index];
-                        return _QueueItemTile(
+                        return FocusTraversalOrder(
+                          key: ValueKey(_itemKeys.putIfAbsent(entry, GlobalKey.new)),
+                          order: NumericFocusOrder(1.0 + index),
+                          child: _QueueItemTile(
                           key: _itemKeys.putIfAbsent(entry, GlobalKey.new),
                           entry: entry,
                           index: index,
+                          itemCount: queue.entries.length,
                           isCurrent: index == queue.currentIndex,
                           scheme: scheme,
                           controller: controller,
@@ -621,7 +632,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           removeAnimation: _removing[entry],
                           clearing: _clearing,
                           onRemove: () => _requestRemove(entry, controller),
-                        );
+                        ));
                       },
                     );
                   },
@@ -668,7 +679,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       );
     }
 
-    return panel;
+    // Ordered: the header (with Clear and collapse), then each row in turn. Reading
+    // order alone went by on-screen position, which in a scrolling list skipped
+    // rows, and walked backwards through the header before the row above.
+    return FocusSurface(ordered: true, child: panel);
   }
 
   Widget _mixSubtitle(Widget? icon, Text textWidget) {
@@ -833,6 +847,7 @@ class _QueueItemTile extends StatefulWidget {
     required super.key,
     required this.entry,
     required this.index,
+    required this.itemCount,
     required this.isCurrent,
     required this.scheme,
     required this.controller,
@@ -844,6 +859,7 @@ class _QueueItemTile extends StatefulWidget {
 
   final QueueEntry entry;
   final int index;
+  final int itemCount;
   final bool isCurrent;
   final ColorScheme scheme;
   final QueueController controller;
@@ -869,6 +885,49 @@ class _QueueItemTile extends StatefulWidget {
 
 class _QueueItemTileState extends State<_QueueItemTile> {
   bool _isHovered = false;
+
+  /// Keyboard focus is somewhere in this row, so the remove button shows as it
+  /// does under the pointer — a button that only exists while hovered cannot be
+  /// Tabbed to.
+  bool _focusWithin = false;
+
+  /// Only while the user is navigating by keyboard: focus a click left on the row
+  /// must not leave Remove showing.
+  bool _keyboard = KeyboardNavigation.active;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onMode);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onMode);
+    super.dispose();
+  }
+
+  void _onMode(FocusHighlightMode mode) {
+    final on = mode == FocusHighlightMode.traditional;
+    if (mounted && on != _keyboard) setState(() => _keyboard = on);
+  }
+
+  /// Up and Down on the reorder handle move the row one place. The handle keeps
+  /// focus: the row's `State` follows its entry's key to the new index.
+  KeyEventResult _onHandleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowUp && widget.index > 0) {
+      widget.controller.reorder(widget.index, widget.index - 1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown && widget.index < widget.itemCount - 1) {
+      widget.controller.reorder(widget.index, widget.index + 1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) return KeyEventResult.handled;
+    return KeyEventResult.ignored;
+  }
 
   /// The duration / LIVE / STATION pill, scaled down for the queue row's
   /// 72×40 thumbnail. Same source of truth as the grid tiles
@@ -905,10 +964,20 @@ class _QueueItemTileState extends State<_QueueItemTile> {
   Widget build(BuildContext context) {
     final inert = widget.clearing || widget.removing;
 
-    Widget tile = MouseRegion(
+    // The row fills the panel edge to edge, so the ring sits inside it.
+    Widget tile = FocusRingShape(
+      inflate: -1,
+      child: MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: Stack(
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        includeSemantics: false,
+        onFocusChange: (has) {
+          if (_focusWithin != has) setState(() => _focusWithin = has);
+        },
+        child: Stack(
         children: [
           ListTile(
             selected: widget.isCurrent,
@@ -971,7 +1040,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
               children: [
                 AnimatedCrossFade(
                   duration: const Duration(milliseconds: 50),
-                  crossFadeState: !inert && _isHovered ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                  crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
                   firstChild: Tooltip(
                     message: 'Remove',
                     waitDuration: const Duration(milliseconds: 300),
@@ -987,11 +1056,25 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                   secondChild: const SizedBox.shrink(),
                 ),
                 if (!inert)
-                  ReorderableDragStartListener(
-                    index: widget.index,
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.grab,
-                      child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                  // Focusable, with Up/Down to reorder: the keyboard's way of doing
+                  // what dragging does. `ArrowKeyClaim` stops the player's seek and
+                  // volume shortcuts taking the arrows first.
+                  ArrowKeyClaim(
+                    child: Focus(
+                      onKeyEvent: _onHandleKey,
+                      child: Semantics(
+                        label: 'Reorder. Use the up and down arrow keys to move this video.',
+                        child: ReorderableDragStartListener(
+                          index: widget.index,
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.grab,
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
               ],
@@ -1007,6 +1090,8 @@ class _QueueItemTileState extends State<_QueueItemTile> {
               child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
             ),
         ],
+        ),
+      ),
       ),
     );
 
@@ -1028,6 +1113,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
               alignment: Alignment.topCenter,
               heightFactor: 1.0 - collapse,
               child: Opacity(
+                alwaysIncludeSemantics: true, // F51: tooltips inside, and the row reaches 0
                 opacity: 1.0 - slide,
                 child: FractionalTranslation(
                   translation: Offset(slide * 0.5, 0),
@@ -1051,6 +1137,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
           // is the mirror of the dismiss: slide in from the right.
           final t = Curves.easeInCubic.transform(anim.value);
           return Opacity(
+            alwaysIncludeSemantics: true, // F51
             opacity: 1.0 - t,
             child: FractionalTranslation(
               translation: Offset(t * 0.5, 0),

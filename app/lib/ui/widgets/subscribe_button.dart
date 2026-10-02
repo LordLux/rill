@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth_controller.dart';
+import '../focus_ring.dart';
 import 'shortcut_tooltip.dart';
 
 /// How much of a subscribed channel's upload activity notifies the user —
@@ -126,6 +127,21 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
   final MenuController _menuController = MenuController();
   ScrollPosition? _scrollPosition;
 
+  /// Opening the menu moves focus to its first entry, and closing it hands focus
+  /// back to the button (`MenuAnchor` does the second only when it is told which
+  /// node the button is). `media_tile.dart`'s `_TileMoreButton` is the same.
+  final FocusNode _buttonFocus = FocusNode(debugLabel: 'subscribed button');
+  final FocusNode _firstItemFocus = FocusNode(debugLabel: 'subscribed menu first entry');
+
+  void _toggleMenu(MenuController controller) {
+    if (controller.isOpen) {
+      controller.close();
+      return;
+    }
+    controller.open();
+    KeyboardNavigation.focusAfterOpen(_firstItemFocus, stillWanted: () => mounted && controller.isOpen);
+  }
+
   /// Driven only by a `MouseRegion`'s own `onEnter`/`onExit` on each menu
   /// item, not by `MenuItemButton`'s built-in `WidgetState.hovered`. The
   /// built-in state stuck once a menu item was hovered and the pointer left
@@ -154,6 +170,8 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
     try {
       _scrollPosition?.removeListener(_onScroll);
     } catch (_) {}
+    _buttonFocus.dispose();
+    _firstItemFocus.dispose();
     super.dispose();
   }
 
@@ -282,6 +300,10 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
 
     final subscribed = MenuAnchor(
       controller: _menuController,
+      childFocusNode: _buttonFocus,
+      onClose: () {
+        if (mounted && _firstItemFocus.hasFocus) _buttonFocus.requestFocus();
+      },
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(widget.background ?? scheme.surfaceContainerHighest),
         shape: WidgetStatePropertyAll(const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12)))),
@@ -289,10 +311,11 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
       ),
       animated: true,
       builder: (context, controller, child) => FilledButton.tonal(
+        focusNode: _buttonFocus,
         // The menu is the way to unsubscribe, which needs an account just as
         // subscribing does — and a degraded session reaches here looking exactly
         // like a signed-in one (Task 31 §2).
-        onPressed: blocked != null ? null : () => controller.isOpen ? controller.close() : controller.open(),
+        onPressed: blocked != null ? null : () => _toggleMenu(controller),
         style:
             FilledButton.styleFrom(
               backgroundColor: widget.background ?? scheme.surfaceContainerHighest,
@@ -328,7 +351,8 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
             onExit: (_) => setState(() {
               if (_hoveredLevel == level) _hoveredLevel = null;
             }),
-            child: MenuItemButton(
+            child: FocusRingShape(inflate: -1, child: MenuItemButton(
+              focusNode: level == SubscriptionNotificationLevel.values.first ? _firstItemFocus : null,
               style: MenuItemButton.styleFrom(
                 overlayColor: Colors.transparent,
                 backgroundColor: level == _level
@@ -344,13 +368,13 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
                 padding: const EdgeInsets.only(right: 16),
                 child: Text(level.label),
               ),
-            ),
+            )),
           ),
         const Divider(height: 1),
         MouseRegion(
           onEnter: (_) => setState(() => _unsubscribeHovered = true),
           onExit: (_) => setState(() => _unsubscribeHovered = false),
-          child: MenuItemButton(
+          child: FocusRingShape(inflate: -1, child: MenuItemButton(
             style: MenuItemButton.styleFrom(
               overlayColor: Colors.transparent,
               backgroundColor: _unsubscribeHovered ? scheme.onSurface.withValues(alpha: 0.08) : null,
@@ -361,7 +385,7 @@ class _SubscribeButtonState extends ConsumerState<SubscribeButton> {
             ),
             onPressed: _unsubscribe,
             child: const Text('Unsubscribe'),
-          ),
+          )),
         ),
       ],
     );

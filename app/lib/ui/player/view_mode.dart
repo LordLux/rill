@@ -17,6 +17,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../playback_controller.dart';
@@ -107,5 +108,49 @@ class PlayerViewController extends Notifier<PlayerViewState> {
   }
 }
 
-final playerViewProvider =
-    NotifierProvider<PlayerViewController, PlayerViewState>(PlayerViewController.new);
+final playerViewProvider = NotifierProvider<PlayerViewController, PlayerViewState>(PlayerViewController.new);
+
+/// Which of the two places the player's *controls* may be mounted in right now: [layer] (the
+/// fullscreen layer above the `Navigator`) or [page] (the watch page).
+///
+/// **The two are never mounted in the same frame.** The control bar and its anchors carry
+/// `GlobalKey`s, so a bar unmounted from the page and mounted in the fullscreen layer in one
+/// frame is *moved*: Flutter reuses its elements and render objects, and with them its
+/// semantics nodes, now under a different parent. The Windows accessibility bridge cannot take
+/// a node that changes parent inside one update and answers every update after it with
+/// `Failed to update ui::AXTree … will not be in the tree` (`architecture.md` F51; measured on
+/// entering fullscreen). So the side being left unmounts in one frame, and the side being
+/// entered mounts in the next, as fresh nodes.
+@immutable
+class PlayerLayerGate {
+  const PlayerLayerGate({this.layer = false, this.page = true});
+
+  final bool layer;
+  final bool page;
+
+  @override
+  bool operator ==(Object other) => other is PlayerLayerGate && other.layer == layer && other.page == page;
+
+  @override
+  int get hashCode => Object.hash(layer, page);
+}
+
+class PlayerLayerGateController extends Notifier<PlayerLayerGate> {
+  @override
+  PlayerLayerGate build() {
+    ref.listen(playerViewProvider.select((view) => view.fullscreen), (previous, next) {
+      state = const PlayerLayerGate(layer: false, page: false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!ref.mounted) return;
+        // Whatever the mode is *now*: it may have flipped again in the frame between.
+        final fullscreen = ref.read(playerViewProvider).fullscreen;
+        state = PlayerLayerGate(layer: fullscreen, page: !fullscreen);
+      });
+      WidgetsBinding.instance.scheduleFrame();
+    });
+    final fullscreen = ref.read(playerViewProvider).fullscreen;
+    return PlayerLayerGate(layer: fullscreen, page: !fullscreen);
+  }
+}
+
+final playerLayerGateProvider = NotifierProvider<PlayerLayerGateController, PlayerLayerGate>(PlayerLayerGateController.new);

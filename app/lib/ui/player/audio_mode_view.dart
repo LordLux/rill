@@ -226,7 +226,10 @@ class AudioModeView extends ConsumerWidget {
                             child: Material(
                               color: Theme.of(context).colorScheme.surfaceContainerHighest,
                               borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                              child: Tooltip(
+                              // After the player's bar, before the queue itself (Tab order, F52).
+                              child: FocusTraversalOrder(
+                                order: const NumericFocusOrder(3),
+                                child: Tooltip(
                                 message: hideQueue ? 'Show queue' : 'Hide queue',
                                 child: InkWell(
                                   mouseCursor: SystemMouseCursors.click,
@@ -237,6 +240,7 @@ class AudioModeView extends ConsumerWidget {
                                     color: Theme.of(context).tokens.onScrim.withValues(alpha: 0.7),
                                   ),
                                 ),
+                              ),
                               ),
                             ),
                           ),
@@ -261,15 +265,22 @@ class AudioModeView extends ConsumerWidget {
                             padding: const EdgeInsets.only(top: top, bottom: bottom),
                             child: SizedBox(
                               width: geometry.railWidth,
-                              child: EmbeddedQueuePanel(
-                                maxHeight: max(
-                                  0.0,
-                                  constraints.maxHeight - top - bottom - 21,
+                              // Slid off screen while hidden: nothing in it may take Tab.
+                              child: ExcludeFocus(
+                                excluding: hideQueue,
+                                child: FocusTraversalOrder(
+                                  order: const NumericFocusOrder(4),
+                                  child: EmbeddedQueuePanel(
+                                    maxHeight: max(
+                                      0.0,
+                                      constraints.maxHeight - top - bottom - 21,
+                                    ),
+                                    borderRadius: BorderRadius.horizontal(
+                                      left: Radius.circular(12),
+                                    ),
+                                    onCollapse: () => ref.read(hideQueueProvider.notifier).setMode(true),
+                                  ),
                                 ),
-                                borderRadius: BorderRadius.horizontal(
-                                  left: Radius.circular(12),
-                                ),
-                                onCollapse: () => ref.read(hideQueueProvider.notifier).setMode(true),
                               ),
                             ),
                           );

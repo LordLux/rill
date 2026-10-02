@@ -26,19 +26,22 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show GestureBinding, PointerDeviceKind, PointerScrollEvent, PointerSignalEvent, PointerUpEvent, kDoubleTapTimeout;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HardwareKeyboard;
+import 'package:flutter/services.dart' show HardwareKeyboard, KeyDownEvent, KeyEvent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playback/engine.dart';
 import '../../domain/playback_source.dart';
 import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
+import 'volume_bar.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
 import '../audio_mode_controller.dart';
 import '../player_shell.dart';
 import '../queue_controller.dart';
 import '../video_info.dart';
+import '../focus_ring.dart' show KeyboardNavigation;
+import '../focus_surface.dart';
 import '../widgets/shortcut_tooltip.dart';
 import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
@@ -171,10 +174,61 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
       _restartHideTimer();
     });
     _restartHideTimer();
+    HardwareKeyboard.instance.addHandler(_onKey);
+    FocusManager.instance.addHighlightModeListener(_onHighlightMode);
+  }
+
+  /// Tab after a click, or Escape after Tab, changes whether the focused control
+  /// counts as "selected by keyboard" without moving focus, so no focus event says
+  /// so: the countdown has to be re-decided here.
+  void _onHighlightMode(FocusHighlightMode mode) {
+    if (!mounted) return;
+    if (mode == FocusHighlightMode.traditional && _focusInside && !_visible) {
+      _wake();
+      return;
+    }
+    _restartHideTimer();
+  }
+
+  /// Keyboard focus is on the bar, a submenu or anything else in here, so the bar
+  /// stays up exactly as it does while the pointer is over it. **Keyboard focus
+  /// only:** a control that was merely clicked keeps focus too, and the bar has
+  /// always hidden after a click.
+  bool _focusInside = false;
+
+  /// The observer's own node, so "is focus in here" can be *asked* at any moment. The
+  /// focus event only says it changed: a control that already holds focus when this
+  /// widget is rebuilt around it (a layout swap, a quality switch) is never reported,
+  /// and the bar then hid under a selected control.
+  final FocusNode _focusProbe = FocusNode(debugLabel: 'player controls', canRequestFocus: false, skipTraversal: true);
+
+  bool get _keyboardInside => (_focusInside || _focusProbe.hasFocus) && FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  void _onFocusInsideChanged(bool has) {
+    if (_focusInside == has) return;
+    _focusInside = has;
+    // Focus reaching a hidden bar shows it (and `_keyboardInside` then keeps it up).
+    if (has && !_visible && KeyboardNavigation.active) {
+      _wake();
+      return;
+    }
+    _restartHideTimer();
+  }
+
+  /// Any key brings the bar back. Hidden controls are not focusable, so without
+  /// this the first Tab after they auto-hide would skip them and a keyboard user
+  /// could never find them again; with it, that Tab shows them and the next one
+  /// lands. Never claims the event.
+  bool _onKey(KeyEvent event) {
+    if (event is KeyDownEvent && !_visible) _wake();
+    return false;
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    FocusManager.instance.removeHighlightModeListener(_onHighlightMode);
+    _focusProbe.dispose();
     _hideTimer?.cancel();
     _doubleClickWindow?.cancel();
     unawaited(_playingSubscription?.cancel());
@@ -200,12 +254,17 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   void _restartHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = null;
-    if (!_playing || ref.read(playerMenuProvider).open || _hoveredClickables > 0 || _busyShown) {
+    if (!_playing || ref.read(playerMenuProvider).open || _hoveredClickables > 0 || _busyShown || _keyboardInside) {
       _setVisible(true);
       return;
     }
     _hideTimer = Timer(autoHideDelay, () {
       if (!mounted) return;
+      // Asked again now: whatever was true when the countdown started may not be.
+      if (_keyboardInside) {
+        _restartHideTimer();
+        return;
+      }
       _setVisible(false);
     });
   }
@@ -309,7 +368,19 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
       if (previous == true && next == false) _restartHideTimer();
     });
 
-    return Listener(
+    // Ordered: the progress bar and controls first, then whatever the slates hold (in
+    // fullscreen, the queue's toggle and the queue). Reading order alone put a queue sliding
+    // in at the top of the screen before the controls at the bottom.
+    return FocusSurface(
+      ordered: true,
+      child: Focus(
+        focusNode: _focusProbe,
+        // No semantics node: this `Focus` only watches focus, and the node it would
+        // add above the whole player brings the Slider/OverlayPortal fault back
+        // (`architecture.md` F51) — measured, ~1 450 AXTree errors a run.
+        includeSemantics: false,
+        onFocusChange: _onFocusInsideChanged,
+        child: Listener(
       onPointerSignal: _onPointerSignal,
       child: MouseRegion(
         // The pointer disappears with the controls, as it does in every video
@@ -335,12 +406,16 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             // `MouseRegion` above it was the real blocker — and the gate cost
             // tap-to-pause and double-click-to-fullscreen for nothing. The
             // layout now sits above this instead.
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _onTap,
-              child: const SizedBox.expand(),
+            Semantics(
+              button: true,
+              label: 'Play or pause',
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _onTap,
+                child: const SizedBox.expand(),
+              ),
             ),
-            if (widget.child != null) widget.child!,
+            if (widget.child != null) FocusTraversalOrder(order: const NumericFocusOrder(2.5), child: widget.child!),
             // Above the click surface so it paints over the cover, but
             // pointer-transparent — a spinner that swallowed the click to
             // play/pause would take the control away exactly when the player is
@@ -411,6 +486,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                 right: 6,
                 bottom: 52,
                 child: AnimatedOpacity(
+                  alwaysIncludeSemantics: true,
                   opacity: _visible ? 1 : 0,
                   duration: _fadeDuration(_visible),
                   curve: Curves.easeIn,
@@ -506,8 +582,12 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               left: 0,
               right: 0,
               bottom: 0,
+              // `alwaysIncludeSemantics` here and on the vertical column: the Sliders
+              // in here must never have their semantics skipped while hidden
+              // (architecture.md F51).
               child: AnimatedOpacity(
                 key: playerControlsBarKey,
+                alwaysIncludeSemantics: true,
                 opacity: _visible ? 1 : 0,
                 duration: _fadeDuration(_visible),
                 curve: Curves.easeIn,
@@ -515,12 +595,20 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   offset: Offset.zero.translate(0, _visible ? 0 : 0.15),
                   duration: _fadeDuration(_visible),
                   curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                  // **Focusable while hidden, and focusing it shows it**
+                  // (`_onFocusInsideChanged`). It was `ExcludeFocus` while hidden, but
+                  // Tab runs in the same key event that wakes the bar, so it found the
+                  // controls still excluded and skipped them: every walk of the watch
+                  // page started at the queue instead of the player.
                   child: IgnorePointer(
                     ignoring: !_visible,
                     child: GestureDetector(
                       // Absorbs. A click on the bar's background is not a click on
                       // the video, and must not pause it.
                       behavior: HitTestBehavior.opaque,
+                      // Not a semantic tap target: its tap node *merges* its descendants,
+                      // which is where a control's tooltip overlay was grafted (F51).
+                      excludeFromSemantics: true,
                       onTap: () {},
                       child: DecoratedBox(
                         decoration: BoxDecoration(
@@ -534,9 +622,12 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                             ],
                           ),
                         ),
-                        child: Material(
+                        child: FocusTraversalOrder(
+                          order: const NumericFocusOrder(1),
+                          child: Material(
                           type: MaterialType.transparency,
                           child: _isVertical ? _buildVerticalBar(context) : (ref.watch(audioModeProvider) ? _buildAudioBar(context) : _buildBar(context)),
+                        ),
                         ),
                       ),
                     ),
@@ -546,6 +637,8 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             ),
           ],
         ),
+      ),
+      ),
       ),
     );
   }
@@ -865,6 +958,7 @@ class _ControlIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).tokens;
     return ShortcutTooltip(
+      silent: true, // F51
       label: label,
       action: action,
       child: IconButton(
@@ -1478,7 +1572,16 @@ class _VolumeState extends ConsumerState<_Volume> {
         final volume = (snapshot.data ?? 100).clamp(0.0, 100.0);
         final open = _open && !widget.compact;
 
-        return MouseRegion(
+        // Focus opens it as the pointer does: Tab onto the speaker shows the
+        // slider, and the next Tab lands on it. Without this a keyboard user
+        // could never change the volume — the slider is not mounted while closed.
+        return Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          includeSemantics: false,
+          // Only for the keyboard: focus a click left behind opens nothing.
+          onFocusChange: (has) => has ? (KeyboardNavigation.active ? _enter() : null) : _exit(),
+          child: MouseRegion(
           // One region over the button *and* the slider, so travelling from one
           // to the other never leaves it.
           onEnter: (_) => _enter(),
@@ -1499,31 +1602,27 @@ class _VolumeState extends ConsumerState<_Volume> {
               ClipRect(
                 child: Padding(
                   padding: const EdgeInsets.only(left: 42),
-                  child: AnimatedSize(
+                  child: AnimatedContainer(
                     duration: const Duration(milliseconds: 140),
-                    curve: Curves.easeOut,
-                    child: SizedBox(
-                      key: playerVolumeSliderKey,
-                      width: open ? 120 : 0,
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6, pressedElevation: 5),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-                          thumbSize: const WidgetStatePropertyAll<Size?>(Size(2, 6)),
-                          inactiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                        ),
-                        child: ShortcutTooltip(
-                          label: 'Volume: ${volume.round()}%',
-                          child: Slider(
-                            value: volume,
-                            max: 100,
-                            onChanged: (next) {
-                              widget.onChanged();
-                              unawaited(ref.read(playbackProvider.notifier).setVolume(next));
-                            },
-                          ),
+                    key: playerVolumeSliderKey,
+                    width: open ? 120 : 0,
+                    height: 40,
+                    child: ShortcutTooltip(
+                      silent: true,
+                      label: 'Volume: ${volume.round()}%',
+                      // Not mounted while collapsed, so Tab cannot land on it. Not a
+                      // Material `Slider`: that one's value-indicator `OverlayPortal`
+                      // double-parents its semantics node here (§F51).
+                      child: AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 140),
+                        crossFadeState: open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                        firstChild: const SizedBox.shrink(), 
+                        secondChild: VolumeBar(
+                          value: volume,
+                          onChanged: (next) {
+                            widget.onChanged();
+                            unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                          },
                         ),
                       ),
                     ),
@@ -1532,6 +1631,7 @@ class _VolumeState extends ConsumerState<_Volume> {
               ),
             ],
           ),
+        ),
         );
       },
     );
@@ -1582,7 +1682,12 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
       builder: (context, snapshot) {
         final volume = (snapshot.data ?? 100).clamp(0.0, 100.0);
 
-        return MouseRegion(
+        return Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          includeSemantics: false,
+          onFocusChange: (has) => has ? (KeyboardNavigation.active ? _enter() : null) : _exit(),
+          child: MouseRegion(
           onEnter: (_) => _enter(),
           onExit: (_) => _exit(),
           child: Column(
@@ -1600,24 +1705,18 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
                       padding: const EdgeInsets.only(top: 9),
                       child: RotatedBox(
                         quarterTurns: 3,
-                        child: SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                          ),
-                          child: ShortcutTooltip(
-                            label: 'Volume: ${volume.round()}%',
-                            child: Slider(
-                              value: volume,
-                              max: 100,
-                              onChanged: (next) {
-                                widget.onChanged();
-                                unawaited(ref.read(playbackProvider.notifier).setVolume(next));
-                              },
-                            ),
-                          ),
+                        child: ShortcutTooltip(
+                          silent: true,
+                          label: 'Volume: ${volume.round()}%',
+                          child: !_open
+                              ? const SizedBox.shrink()
+                              : VolumeBar(
+                                  value: volume,
+                                  onChanged: (next) {
+                                    widget.onChanged();
+                                    unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                                  },
+                                ),
                         ),
                       ),
                     ),
@@ -1636,6 +1735,7 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
               ),
             ],
           ),
+        ),
         );
       },
     );
@@ -1684,6 +1784,7 @@ class _MenuButton extends StatelessWidget {
     final tokens = Theme.of(context).tokens;
 
     return ShortcutTooltip(
+      silent: true, // F51
       label: label,
       action: action,
       child: IconButton(

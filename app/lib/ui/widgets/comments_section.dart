@@ -13,6 +13,8 @@ import '../../data/comments_source.dart';
 import '../../data/rpc/client.dart';
 import '../../theme/tokens.dart';
 import '../auth_controller.dart';
+import '../focus_ring.dart' show KeyboardNavigation;
+import '../focus_surface.dart';
 import '../open_video.dart' show copyToClipboard;
 import '../playback_controller.dart';
 import 'comment_composer.dart';
@@ -924,12 +926,16 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
     final rows = _flatten();
     final indexByKey = {for (var i = 0; i < rows.length; i++) rows[i].key: i};
 
+    // Tab order inside the section: the sort chips, then the box to write in, then
+    // the comments, then "Show more comments" — the order they are drawn in.
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
       sliver: SliverMainAxisGroup(
         slivers: [
           if (_commentCount != null || (_chips != null && _chips!.isNotEmpty))
-            SliverToBoxAdapter(
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(4.0),
+              child: SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 16.0),
                 child: Row(
@@ -960,18 +966,25 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
                 ),
               ),
             ),
+            ),
           if (_createParams != null)
-            SliverToBoxAdapter(
-              key: const ValueKey('comment-composer'),
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 24),
-                child: CommentComposer(avatarUrl: avatarUrl, onPost: _postComment),
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(4.1),
+              child: SliverToBoxAdapter(
+                key: const ValueKey('comment-composer'),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: CommentComposer(avatarUrl: avatarUrl, onPost: _postComment),
+                ),
               ),
             ),
-          SliverList.builder(
-            itemCount: rows.length,
-            itemBuilder: (context, index) => _buildRow(rows, index),
-            findChildIndexCallback: (key) => indexByKey[key],
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(4.2),
+            child: SliverList.builder(
+              itemCount: rows.length,
+              itemBuilder: (context, index) => _buildRow(rows, index),
+              findChildIndexCallback: (key) => indexByKey[key],
+            ),
           ),
           if (_loading)
             const SliverToBoxAdapter(
@@ -981,26 +994,32 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
               ),
             )
           else if (_error)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Center(
-                  child: TextButton(
-                    onPressed: () => _fetch(),
-                    child: const Text('Tap to retry'),
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(4.3),
+              child: SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: TextButton(
+                      onPressed: () => _fetch(),
+                      child: const Text('Tap to retry'),
+                    ),
                   ),
                 ),
               ),
             )
           else if (_continuation != null)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: TextButton(
-                    onPressed: () => _fetch(),
-                    child: const Text('Show more comments'),
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(4.3),
+              child: SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: TextButton(
+                      onPressed: () => _fetch(),
+                      child: const Text('Show more comments'),
+                    ),
                   ),
                 ),
               ),
@@ -1086,7 +1105,10 @@ class CommentTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    return _HoverScope(
+    // Each comment is its own Tab group — vote, reply, copy link, its replies
+    // toggle — so Tab finishes one comment before starting the next, instead of
+    // sorting every button in the thread by where it sits on screen.
+    return FocusSurface(child: _HoverScope(
       builder: (hovering) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1124,9 +1146,11 @@ class CommentTile extends ConsumerWidget {
                           ),
                         if (comment.publishedText != null) ...[
                           const SizedBox(width: 8),
-                          SelectableText(
-                            comment.publishedText!,
-                            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                          NoTabSelectionArea(
+                            child: Text(
+                              comment.publishedText!,
+                              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                            ),
                           ),
                         ],
                         if (comment.deleteParams != null) ...[
@@ -1163,7 +1187,10 @@ class CommentTile extends ConsumerWidget {
                   icon: comment.myRating == 'like' ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
                   tooltip: voteDisabledReason ?? (comment.myRating == 'like' ? 'Remove like' : 'Like'),
                   active: comment.myRating == 'like',
-                  onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'like' ? 'none' : 'like'),
+                  // While a vote is out the button stays *enabled* and ignores the press:
+                  // a disabled button cannot hold focus, and a keyboard user who had just
+                  // voted was thrown to the previous comment.
+                  onPressed: onRate == null ? null : (rating ? () {} : () => onRate!(comment.myRating == 'like' ? 'none' : 'like')),
                   label: comment.likeCount,
                 ),
                 // const SizedBox(width: 4),
@@ -1173,7 +1200,7 @@ class CommentTile extends ConsumerWidget {
                   icon: comment.myRating == 'dislike' ? Icons.thumb_down : Icons.thumb_down_alt_outlined,
                   tooltip: voteDisabledReason ?? (comment.myRating == 'dislike' ? 'Remove dislike' : 'Dislike'),
                   active: comment.myRating == 'dislike',
-                  onPressed: onRate == null || rating ? null : () => onRate!(comment.myRating == 'dislike' ? 'none' : 'dislike'),
+                  onPressed: onRate == null ? null : (rating ? () {} : () => onRate!(comment.myRating == 'dislike' ? 'none' : 'dislike')),
                 ),
                 if (comment.creatorHearted) ...[
                   const SizedBox(width: 4),
@@ -1187,13 +1214,14 @@ class CommentTile extends ConsumerWidget {
                 ],
                 if (onReply != null) ...[
                   const SizedBox(width: 8),
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: TextButton(
-                      style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2), minimumSize: const Size(50, 35)),
-                      onPressed: onReply,
-                      child: const Text('Reply', style: TextStyle(fontSize: 12)),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      enabledMouseCursor: SystemMouseCursors.click,
+                      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                      minimumSize: const Size(50, 35),
                     ),
+                    onPressed: onReply,
+                    child: const Text('Reply', style: TextStyle(fontSize: 12)),
                   ),
                 ],
                 // Copy, revealed by hovering anywhere on the comment.
@@ -1227,7 +1255,7 @@ class CommentTile extends ConsumerWidget {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -1280,14 +1308,34 @@ class _RevealOnHoverOrFocusState extends State<_RevealOnHoverOrFocus> {
   bool _focused = false;
 
   @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onMode);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onMode);
+    super.dispose();
+  }
+
+  // Keyboard focus reveals it; focus a click left behind does not.
+  void _onMode(FocusHighlightMode mode) {
+    if (mounted && _focused) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
       valueListenable: widget.hovering,
       builder: (context, hovering, child) {
-        final visible = hovering || _focused;
+        final visible = hovering || (_focused && KeyboardNavigation.active);
         return AnimatedOpacity(
           opacity: visible ? 1 : 0,
           duration: const Duration(milliseconds: 120),
+          // Its Tooltip's overlay is visited while the button's own semantics are
+          // skipped at opacity 0, which is the F51 orphan.
+          alwaysIncludeSemantics: true,
           // Invisible and still clickable is worse than absent — the pointer
           // would find a button nobody can see.
           child: IgnorePointer(ignoring: !visible, child: child),
@@ -1296,6 +1344,11 @@ class _RevealOnHoverOrFocusState extends State<_RevealOnHoverOrFocus> {
       // Outside the builder so it is not rebuilt as the opacity changes; the
       // `Focus` here reports its descendants' focus, which is the button's.
       child: Focus(
+        // Reports focus, never takes it: a plain `Focus` is itself a Tab stop, and
+        // this one sat in front of the button it watches as a stop with no action.
+        canRequestFocus: false,
+        skipTraversal: true,
+        includeSemantics: false,
         // Guarded: focus can move *while* this is being unmounted — a list row
         // scrolling out from under a focused button is the ordinary case — and
         // `setState` on a defunct State throws during teardown. That is F38's
@@ -1413,7 +1466,7 @@ class _CommentText extends ConsumerWidget {
             // platform menu. `SelectionArea` rather than `SelectableText.rich`
             // because the span carries `TapGestureRecognizer`s for links and
             // timestamps, and those keep working under it.
-            SelectionArea(
+            NoTabSelectionArea(
               child: RichText(
                 text: span,
                 maxLines: expanded ? null : 4,
@@ -1423,9 +1476,8 @@ class _CommentText extends ConsumerWidget {
             if (isOverflowing)
               MouseRegion(
                 cursor: SystemMouseCursors.click,
-                child: GestureDetector(
+                child: KeyboardTap(
                   onTap: onToggle,
-                  behavior: HitTestBehavior.opaque,
                   child: Padding(
                     padding: const EdgeInsets.only(top: 4.0, bottom: 4.0, right: 16.0),
                     child: Text(
@@ -1475,9 +1527,10 @@ class _VoteButton extends StatelessWidget {
     // style, not the disabled `IconTheme` the button gives its icon — so it was
     // left at full colour next to a greyed thumb (Task 31 §4).
     final color = onPressed == null ? scheme.onSurface.withValues(alpha: 0.38) : (active ? scheme.primary : null);
+    final noLabel = label == null || label!.isEmpty;
     return IconButton(
       mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      icon: label == null
+      icon: noLabel
           ? Icon(icon, size: 14, color: color)
           : Row(
               mainAxisSize: MainAxisSize.min,
@@ -1489,7 +1542,7 @@ class _VoteButton extends StatelessWidget {
             ),
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
-      padding: label == null ? EdgeInsets.symmetric(horizontal: 6, vertical: 2) : EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      padding: noLabel ? EdgeInsets.symmetric(horizontal: 6, vertical: 2) : EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       constraints: const BoxConstraints(minHeight: 35),
       onPressed: onPressed,
     );

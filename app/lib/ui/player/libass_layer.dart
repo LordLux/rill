@@ -290,7 +290,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         }
 
         if (_assRenderer == null || _assTrack == null || _padded == null || _lastWidth == null) {
-          debugPrint('[${_ts()}] LibassLayer: skipping render. renderer: ${_assRenderer != null}, track: ${_assTrack != null}, padded: ${_padded != null}, lastWidth: $_lastWidth');
+          // debugPrint('[${_ts()}] LibassLayer: skipping render. renderer: ${_assRenderer != null}, track: ${_assTrack != null}, padded: ${_padded != null}, lastWidth: $_lastWidth');
           continue;
         }
 

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/feed_item.dart';
 import '../theme/tokens.dart';
 import 'audio_mode_controller.dart';
+import 'mini_player_stop.dart';
 import 'pages/watch.dart';
 import 'playback_controller.dart';
 import 'player/audio_art_surface.dart';
@@ -270,6 +272,43 @@ class _LayerLinkFollowerState extends State<LayerLinkFollower> {
   }
 }
 
+/// The miniplayer's focus scope. It lives above the `Navigator`, and Tab never
+/// leaves a route's scope for the root's, so without a key for it the
+/// miniplayer's buttons are unreachable from the keyboard. F6 moves focus in and
+/// back (`PlayerShortcuts`) — Windows' own "next pane".
+final miniPlayerScopeProvider = Provider<FocusScopeNode>((ref) {
+  final node = FocusScopeNode(debugLabel: 'miniplayer');
+  ref.onDispose(node.dispose);
+  return node;
+});
+
+/// Whether the miniplayer is on screen: something is loaded, and this is not the
+/// watch page (which has the real player) or fullscreen.
+final miniPlayerShownProvider = Provider<bool>((ref) {
+  final bool hasItem;
+  try {
+    hasItem = ref.watch(playbackProvider.select((p) => p.item != null));
+  } on Object {
+    // No playback engine (a surface under test, or the app before it is set up): no miniplayer.
+    return false;
+  }
+  final onWatch = ref.watch(currentRouteProvider) == watchRouteName;
+  final fullscreen = ref.watch(playerViewProvider.select((v) => v.fullscreen));
+  return hasItem && !onWatch && !fullscreen;
+});
+
+KeyEventResult _miniPlayerTab(FocusNode scope, KeyEvent event) {
+  if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.tab) return KeyEventResult.ignored;
+  final focus = FocusManager.instance.primaryFocus;
+  final context = scope.context;
+  if (focus == null || context == null) return KeyEventResult.ignored;
+  final forward = !HardwareKeyboard.instance.isShiftPressed;
+  final policy = FocusTraversalGroup.of(context);
+  final edge = forward ? policy.findLastFocus(scope, ignoreCurrentFocus: true) : policy.findFirstFocus(scope, ignoreCurrentFocus: true);
+  if (!identical(edge, focus)) return KeyEventResult.ignored;
+  return MiniPlayerStop.leave(forward: forward) ? KeyEventResult.handled : KeyEventResult.ignored;
+}
+
 void openWatch(WidgetRef ref, VideoItem item) => openWatchIn(_containerOf(ref), item);
 
 void showWatchPage(WidgetRef ref) => showWatchPageIn(_containerOf(ref));
@@ -318,6 +357,8 @@ class PlayerShell extends ConsumerWidget {
     final playback = ref.watch(playbackProvider);
     final onWatchPage = ref.watch(currentRouteProvider) == watchRouteName;
     final view = ref.watch(playerViewProvider);
+    // Watched unconditionally, so the gate exists before the first toggle and sees it.
+    final layerReady = ref.watch(playerLayerGateProvider.select((g) => g.layer));
     final fullscreen = view.fullscreen && playback.item != null;
     final showMini = playback.item != null && !onWatchPage && !fullscreen;
     final engine = ref.read(playbackEngineProvider);
@@ -332,7 +373,8 @@ class PlayerShell extends ConsumerWidget {
         child: Stack(
           children: [
             Positioned.fill(child: child),
-            if (fullscreen) const Positioned.fill(child: _FullscreenPlayer()),
+            // One frame after the page's controls have gone (`PlayerLayerGate`).
+            if (fullscreen && layerReady) const Positioned.fill(child: _FullscreenPlayer()),
             if (showMini)
               Positioned(
                 left: 16,
@@ -340,7 +382,15 @@ class PlayerShell extends ConsumerWidget {
                 bottom: 16,
                 child: Align(
                   alignment: Alignment.bottomRight,
-                  child: MiniPlayer(),
+                  // A scope of its own, because Tab cannot leave a route's scope for
+                  // this one — F6 is how the keyboard gets here (`shortcuts.dart`).
+                  child: FocusScope(
+                    node: ref.watch(miniPlayerScopeProvider),
+                    // Tab off either end of the miniplayer's controls goes back to the
+                    // page (`MiniPlayerStop`), instead of wrapping inside the scope.
+                    onKeyEvent: (scope, event) => _miniPlayerTab(scope, event),
+                    child: MiniPlayer(),
+                  ),
                 ),
               ),
             // The only caption renderer (§2.9). It hides mpv's own on mount, so
@@ -420,15 +470,58 @@ class _BelowTopBarClipper extends CustomClipper<Rect> {
   bool shouldReclip(covariant _BelowTopBarClipper oldClipper) => oldClipper.top != top;
 }
 
-class _FullscreenPlayer extends ConsumerWidget {
+/// The player above the `Navigator`.
+///
+/// **A focus scope that takes focus on entry and gives it back on exit.** It is a
+/// plain sibling of the page in a `Stack`, so without one the page underneath —
+/// covered, but still focusable — stayed in the Tab walk and nothing moved focus
+/// into the player. Entering puts focus in the player's controls; Tab then cycles
+/// inside; leaving restores whatever had focus before (when that is still
+/// there to take it).
+class _FullscreenPlayer extends ConsumerStatefulWidget {
   const _FullscreenPlayer();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_FullscreenPlayer> createState() => _FullscreenPlayerState();
+}
+
+class _FullscreenPlayerState extends ConsumerState<_FullscreenPlayer> {
+  final FocusScopeNode _scope = FocusScopeNode(debugLabel: 'fullscreen player');
+
+  /// What had focus before this mounted; where focus goes back to. Read in
+  /// `initState`, not lazily: by `dispose` focus is already inside the player.
+  FocusNode? _before;
+
+  @override
+  void initState() {
+    super.initState();
+    _before = FocusManager.instance.primaryFocus;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scope.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    final before = _before;
+    _scope.dispose();
+    // After this frame: the page underneath is rebuilt as this unmounts.
+    if (before != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (before.context != null && before.canRequestFocus) before.requestFocus();
+      });
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final engine = ref.read(playbackEngineProvider);
 
-    return ColoredBox(
+    return FocusScope(
+      node: _scope,
+      child: ColoredBox(
       color: theme.tokens.scrim,
       child: Overlay(
         initialEntries: [
@@ -452,6 +545,7 @@ class _FullscreenPlayer extends ConsumerWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -520,9 +614,12 @@ class MiniPlayer extends ConsumerWidget {
                     initialData: engine.playing,
                     builder: (context, snapshot) => IconButton(
                       mouseCursor: SystemMouseCursors.click,
+                      // `semanticLabel`, not `tooltip:` — this sits above the `Navigator`,
+                      // which has no `Overlay` to host one (architecture.md §2.8).
                       icon: Icon(
                         (snapshot.data ?? false) ? Icons.pause : Icons.play_arrow,
                         color: scheme.onSurface,
+                        semanticLabel: (snapshot.data ?? false) ? 'Pause' : 'Play',
                       ),
                       // Nothing to play in a premiere, a members-only video or a
                       // failure — the controller would ignore the press anyway.
@@ -531,7 +628,7 @@ class MiniPlayer extends ConsumerWidget {
                   ),
                   IconButton(
                     mouseCursor: SystemMouseCursors.click,
-                    icon: Icon(Icons.close, color: scheme.onSurfaceVariant),
+                    icon: Icon(Icons.close, color: scheme.onSurfaceVariant, semanticLabel: 'Close'),
                     onPressed: () => ref.read(playbackProvider.notifier).stop(),
                   ),
                 ],

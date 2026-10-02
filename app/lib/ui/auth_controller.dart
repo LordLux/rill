@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 
+import '../data/connectivity.dart';
 import '../data/auth/credential_store.dart';
 import '../data/auth/web_session_cookies.dart';
 import '../data/log_capture.dart';
@@ -124,7 +126,21 @@ String? signedInActionBlocker(AuthStatus status, String verb) => switch (status)
 /// measurement said. Nothing here maps "we have a cookie" to `authenticated`.
 class AuthController extends Notifier<AuthState> {
   @override
-  AuthState build() => const AuthState();
+  AuthState build() {
+    // The launch-time restore needs the network; a restore that failed for lack of
+    // one is repeated when it comes back, instead of staying "signed out" with the
+    // user's own feed on screen.
+    ref.listen(isOnlineProvider, (previous, next) {
+      if (previous?.value == false && next.value == true) unawaited(resyncIfUnknown());
+    });
+    return const AuthState();
+  }
+
+  /// Repeats [restore] if the first one never got an answer.
+  Future<void> resyncIfUnknown() async {
+    if (state.status != AuthStatus.unknown || state.isBusy) return;
+    await restore();
+  }
 
   CredentialStore get _store => ref.read(credentialStoreProvider);
   WebSessionCookies get _jar => ref.read(webSessionCookiesProvider);
