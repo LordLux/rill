@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 
 import 'package:async/async.dart' show StreamGroup;
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ import '../page_wrapper.dart';
 import '../player_shell.dart' show currentRouteProvider, watchRouteName;
 import '../audio_mode_controller.dart';
 import '../auth_controller.dart';
+import '../focus_surface.dart';
 import '../playback_controller.dart';
 import '../now_playing_art.dart';
 import '../player/audio_backdrop.dart';
@@ -67,8 +69,7 @@ final _aspectRatioProvider = StreamProvider.autoDispose<double>((ref) async* {
   double? decodedRatio() {
     final width = engine.width;
     final height = engine.height;
-    if (width == null || height == null || width <= 0 || height <= 0)
-      return null;
+    if (width == null || height == null || width <= 0 || height <= 0) return null;
     return width / height;
   }
 
@@ -133,8 +134,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
 
     final scheme = Theme.of(context).colorScheme;
     final playback = ref.watch(playbackProvider);
-    final item =
-        ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
+    final item = ref.watch(queueProvider.select((q) => q.current)) ?? playback.item;
     final startingMix = ref.watch(queueProvider.select((q) => q.startingMixId));
 
     final watchVideoWidget = Row(
@@ -176,6 +176,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     return PageWrapper(
       title: watchVideoWidget,
       actions: const [],
+      landingReady: !playback.isLoading,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final theatre = ref.watch(playerViewProvider.select((view) => view.theatre));
@@ -215,83 +216,109 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                   rounded: !theatre,
                 ),
                 theatreBackground: theatre ? theme.tokens.scrim : null,
+                // Tab order, whichever layout: player, queue, metadata, comments,
+                // related (`WatchFocusOrder`). The two columns put the queue and the
+                // related videos in the same rail, so each part says where it goes.
                 metadataSlivers: [
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _Meta(item: item, info: info),
-                          const SizedBox(height: 10),
-                          if (detail != null)
-                            _Description(
-                              detail: detail,
-                              expanded: _descriptionExpanded,
-                              onToggle: () => setState(
-                                () => _descriptionExpanded =
-                                    !_descriptionExpanded,
-                              ),
+                  FocusTraversalOrder(
+                    order: WatchFocusOrder.meta,
+                    child: SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 4, 32),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Subscribe and the actions row first, then the description
+                            // (its links, then "Show more") — not by position, which put
+                            // "Show more" ahead of the Subscribe button.
+                            FocusTraversalOrder(
+                              order: WatchFocusOrder.meta,
+                              child: _Meta(item: item, info: info),
                             ),
-                        ],
+                            const SizedBox(height: 10),
+                            if (detail != null)
+                              FocusTraversalOrder(
+                                order: WatchFocusOrder.description,
+                                child: _Description(
+                                  detail: detail,
+                                  expanded: _descriptionExpanded,
+                                  onToggle: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                   if (geometry.isTwoColumn) ...[
                     if (detail != null && detail.commentsContinuation != null)
-                      CommentsSection(
-                        videoId: item.id,
-                        initialContinuation: detail.commentsContinuation!,
+                      FocusTraversalOrder(
+                        order: WatchFocusOrder.comments,
+                        child: CommentsSection(
+                          videoId: item.id,
+                          initialContinuation: detail.commentsContinuation!,
+                        ),
                       ),
                     if (detail != null && detail.commentsContinuation == null)
-                      _commentsDisabledSliver(item, scheme),
+                      FocusTraversalOrder(
+                        order: WatchFocusOrder.comments,
+                        child: _commentsDisabledSliver(item, scheme),
+                      ),
                   ] else ...[
                     // Fixed max height and collapsible on its own (queue_panel.dart),
                     // so it never creates the kind of scroll wall the tab switch
                     // below exists to avoid — safe to leave inline.
                     if (queueHasItems)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 24, 4, 0),
-                          child: embeddedQueue,
+                      FocusTraversalOrder(
+                        order: WatchFocusOrder.queue,
+                        child: SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 24, 4, 0),
+                            child: embeddedQueue,
+                          ),
                         ),
                       ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 24, 4, 12),
-                        child: Wrap(
-                          spacing: 8,
-                          children: [
-                            ChoiceChip(
-                              label: const Text('Up Next'),
-                              selected: _narrowTab == 0,
-                              onSelected: (_) => setState(() => _narrowTab = 0),
-                            ),
-                            ChoiceChip(
-                              label: const Text('Comments'),
-                              selected: _narrowTab == 1,
-                              onSelected: (_) => setState(() => _narrowTab = 1),
-                            ),
-                          ],
+                    FocusTraversalOrder(
+                      order: WatchFocusOrder.tabs,
+                      child: SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 24, 4, 12),
+                          child: Wrap(
+                            spacing: 8,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Up Next'),
+                                selected: _narrowTab == 0,
+                                onSelected: (_) => setState(() => _narrowTab = 0),
+                              ),
+                              ChoiceChip(
+                                label: const Text('Comments'),
+                                selected: _narrowTab == 1,
+                                onSelected: (_) => setState(() => _narrowTab = 1),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                     if (_narrowTab == 0)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 4, 32),
-                          child: TweenAnimationBuilder<double>(
-                            key: const ValueKey('related'),
-                            tween: Tween(begin: 0, end: 1),
-                            duration: const Duration(milliseconds: 200),
-                            builder: (context, opacity, child) =>
-                                Opacity(opacity: opacity, child: child),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: _relatedSection(
-                                detail,
-                                item.id,
-                                asGrid: true,
+                      FocusTraversalOrder(
+                        order: WatchFocusOrder.related,
+                        child: SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 4, 32),
+                            child: TweenAnimationBuilder<double>(
+                              key: const ValueKey('related'),
+                              tween: Tween(begin: 0, end: 1),
+                              duration: const Duration(milliseconds: 200),
+                              builder: (context, opacity, child) => Opacity(opacity: opacity, alwaysIncludeSemantics: true, child: child), // F51
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: _relatedSection(
+                                  detail,
+                                  item.id,
+                                  asGrid: true,
+                                ),
                               ),
                             ),
                           ),
@@ -299,13 +326,19 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                       )
                     else ...[
                       if (detail != null && detail.commentsContinuation != null)
-                        CommentsSection(
-                          key: const ValueKey('comments'),
-                          videoId: item.id,
-                          initialContinuation: detail.commentsContinuation!,
+                        FocusTraversalOrder(
+                          order: WatchFocusOrder.comments,
+                          child: CommentsSection(
+                            key: const ValueKey('comments'),
+                            videoId: item.id,
+                            initialContinuation: detail.commentsContinuation!,
+                          ),
                         ),
                       if (detail != null && detail.commentsContinuation == null)
-                        _commentsDisabledSliver(item, scheme),
+                        FocusTraversalOrder(
+                          order: WatchFocusOrder.comments,
+                          child: _commentsDisabledSliver(item, scheme),
+                        ),
                     ],
                   ],
                 ],
@@ -316,8 +349,14 @@ class _WatchPageState extends ConsumerState<WatchPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          embeddedQueue,
-                          ..._relatedSection(detail, item.id),
+                          FocusTraversalOrder(order: WatchFocusOrder.queue, child: embeddedQueue),
+                          FocusTraversalOrder(
+                            order: WatchFocusOrder.related,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: _relatedSection(detail, item.id),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -507,9 +546,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       _toast('Saved to Watch Later');
     } on RpcException catch (e) {
       _toast(
-        e.code == 'AUTH_REQUIRED'
-            ? 'Sign in to save to Watch Later'
-            : e.message,
+        e.code == 'AUTH_REQUIRED' ? 'Sign in to save to Watch Later' : e.message,
       );
     } on Object catch (e) {
       _toast('$e');
@@ -585,8 +622,7 @@ class _PlayerSurface extends ConsumerWidget {
             top: 24,
             right: 24,
             child: Tooltip(
-              message:
-                  'Audio-only stream unavailable.\nConsuming video bandwidth.',
+              message: 'Audio-only stream unavailable.\nConsuming video bandwidth.',
               child: Icon(
                 Icons.warning_amber_rounded,
                 color: scheme.error,
@@ -638,18 +674,18 @@ class _PlayerSurface extends ConsumerWidget {
             isAudioOnly || playback.isRestoringVideo ? ref.watch(nowPlayingBackdropProvider) : null,
           ),
 
-          if (playback.isLoading)
-            Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
+          if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           Builder(
             builder: (context) {
-              if (!playback.isLoading && !fullscreen && isTopWatchPage) {
+              // `page`: not in the frame the fullscreen layer is leaving (`PlayerLayerGate`).
+              if (!playback.isLoading && !fullscreen && isTopWatchPage && ref.watch(playerLayerGateProvider.select((g) => g.page))) {
                 return PlayerControls(
                   engine: engine,
                   actualAspectRatio: ratio,
                   child: const PlayerSlates(showQueue: false),
                 );
               }
-              
+
               if (playback.isLoading) return const SizedBox.shrink();
               return const PlayerSlates(showQueue: false);
             },
@@ -715,7 +751,7 @@ class _Meta extends ConsumerWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SelectionArea(
+            NoTabSelectionArea(
               child: Row(
                 children: [
                   Text(
@@ -728,8 +764,7 @@ class _Meta extends ConsumerWidget {
                   ),
                   ChannelBadge(
                     channelId: detail?.channelId ?? item.channelId,
-                    isArtistChannel:
-                        detail?.isArtistChannel ?? item.isArtistChannel,
+                    isArtistChannel: detail?.isArtistChannel ?? item.isArtistChannel,
                     isVerified: detail?.isVerified ?? item.isVerified,
                     size: 14,
                     paddingLeft: 4,
@@ -750,19 +785,16 @@ class _Meta extends ConsumerWidget {
           channelId: detail?.channelId ?? item.channelId,
           // What the user last did wins over the `/next` snapshot, which is as
           // old as the page — see `account_actions.dart`.
-          initiallySubscribed: signedIn &&
-              (ref.watch(
-                    subscriptionActionsProvider.select(
-                      (actions) => actions[detail?.channelId ?? item.channelId],
-                    ),
-                  ) ??
-                  detail?.isSubscribed ??
-                  false),
+          initiallySubscribed:
+              signedIn &&
+              (
+                ref.watch(subscriptionActionsProvider.select((actions) => actions[detail?.channelId ?? item.channelId]))
+                ?? detail?.isSubscribed
+                ?? false
+              ),
           minHeight: 45,
-          onSubscribe: (channelId) =>
-              _setSubscribed(context, ref, channelId, subscribe: true),
-          onUnsubscribe: (channelId) =>
-              _setSubscribed(context, ref, channelId, subscribe: false),
+          onSubscribe: (channelId) => _setSubscribed(context, ref, channelId, subscribe: true),
+          onUnsubscribe: (channelId) => _setSubscribed(context, ref, channelId, subscribe: false),
         ),
       ],
     );
@@ -772,7 +804,7 @@ class _Meta extends ConsumerWidget {
       mainAxisSize: MainAxisSize.max,
       mainAxisAlignment: MainAxisAlignment.start,
       children: [
-        SelectionArea(
+        NoTabSelectionArea(
           child: Text(
             title,
             style: TextStyle(
@@ -1006,11 +1038,11 @@ class _ActionsState extends ConsumerState<_Actions> {
         : scheme.onSurface;
     final inWatchLater = cannotSave != null
         ? false
-        : ref.watch(
-                watchLaterActionsProvider.select((actions) => actions[item.id]),
-              ) ??
-              (membership.value?.any((p) => p.id == 'WL' && p.containsVideo) ??
-                  false);
+        : ref.watch(watchLaterActionsProvider.select((actions) => actions[item.id]))
+            ?? (
+                membership.value?.any((p) => p.id == 'WL' && p.containsVideo)
+                ?? false
+              );
 
     return Wrap(
       spacing: 8,
@@ -1049,8 +1081,7 @@ class _ActionsState extends ConsumerState<_Actions> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ShortcutTooltip(
-                label:
-                    cannotRate ??
+                label: cannotRate ??
                     (rating == VideoRating.like ? 'Remove like' : 'Like'),
                 child: Material(
                   color: Colors.transparent,
@@ -1058,7 +1089,9 @@ class _ActionsState extends ConsumerState<_Actions> {
                     mouseCursor: _ratingBusy || cannotRate != null
                         ? SystemMouseCursors.basic
                         : SystemMouseCursors.click,
-                    onTap: _ratingBusy || cannotRate != null
+                    // Stays enabled while a vote is out (`_setRating` ignores the press): a
+                    // disabled control cannot hold keyboard focus.
+                    onTap: cannotRate != null
                         ? null
                         : () => _setRating(VideoRating.like),
                     borderRadius: const BorderRadius.horizontal(
@@ -1112,7 +1145,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                     mouseCursor: _ratingBusy || cannotRate != null
                         ? SystemMouseCursors.basic
                         : SystemMouseCursors.click,
-                    onTap: _ratingBusy || cannotRate != null
+                    onTap: cannotRate != null
                         ? null
                         : () => _setRating(VideoRating.dislike),
                     borderRadius: const BorderRadius.horizontal(
@@ -1166,9 +1199,7 @@ class _ActionsState extends ConsumerState<_Actions> {
 
         // Watch Later
         ShortcutTooltip(
-          label:
-              cannotSave ??
-              (inWatchLater ? 'Remove from Watch Later' : 'Watch Later'),
+          label: cannotSave ?? (inWatchLater ? 'Remove from Watch Later' : 'Watch Later'),
           child: _ActionChip(
             icon: Icons.schedule,
             activeIcon: Icons.check,
@@ -1176,9 +1207,7 @@ class _ActionsState extends ConsumerState<_Actions> {
             active: inWatchLater && !_watchLaterSettled,
             marked: inWatchLater && _watchLaterSettled,
             disabled: cannotSave != null,
-            onTap: cannotSave != null
-                ? null
-                : () => _tapWatchLater(inWatchLater),
+            onTap: cannotSave != null ? null : () => _tapWatchLater(inWatchLater),
           ),
         ),
 
@@ -1247,9 +1276,7 @@ class _ActionsState extends ConsumerState<_Actions> {
   /// the mechanism §5 built for the save dialog.
   Future<void> _tapWatchLater(bool currentlyInWatchLater) {
     if (_savingWatchLater) return Future.value();
-    return currentlyInWatchLater
-        ? _removeFromWatchLater()
-        : _saveToWatchLater();
+    return currentlyInWatchLater ? _removeFromWatchLater() : _saveToWatchLater();
   }
 
   /// Latches first, asks after, and puts it back if the answer is no.
@@ -1278,9 +1305,7 @@ class _ActionsState extends ConsumerState<_Actions> {
         'videoId': videoId,
       });
     } on RpcException catch (e) {
-      failure = e.code == 'AUTH_REQUIRED'
-          ? 'Sign in to save to Watch Later'
-          : e.message;
+      failure = e.code == 'AUTH_REQUIRED' ? 'Sign in to save to Watch Later' : e.message;
     } catch (e) {
       failure = '$e';
     }
@@ -1296,12 +1321,9 @@ class _ActionsState extends ConsumerState<_Actions> {
     // A failure is reported even if the user has moved on — it is about their
     // account, and swallowing it leaves them believing the save worked. Success
     // confirmations are only for the video still on screen.
-    if (failure != null)
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    if (failure != null) messenger.showSnackBar(SnackBar(content: Text(failure)));
 
-    if (!mounted ||
-        generation != _videoGeneration ||
-        widget.item.id != videoId) {
+    if (!mounted || generation != _videoGeneration || widget.item.id != videoId) {
       return failure == null;
     }
 
@@ -1378,11 +1400,9 @@ class _ActionsState extends ConsumerState<_Actions> {
       container.invalidate(playlistMembershipProvider(videoId));
     }
 
-    if (failure != null)
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    if (failure != null) messenger.showSnackBar(SnackBar(content: Text(failure)));
 
-    if (!mounted || generation != _videoGeneration || widget.item.id != videoId)
-      return;
+    if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
 
     setState(() => _savingWatchLater = false);
     if (failure == null) _say('Removed from Watch Later');
@@ -1406,8 +1426,7 @@ class _ActionsState extends ConsumerState<_Actions> {
     );
     if (failure != null) messenger.showSnackBar(SnackBar(content: Text(failure)));
 
-    if (!mounted || generation != _videoGeneration || widget.item.id != videoId)
-      return;
+    if (!mounted || generation != _videoGeneration || widget.item.id != videoId) return;
 
     setState(() => _ratingBusy = false);
   }
@@ -1465,7 +1484,7 @@ class _MetaStat extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: scheme.onSurface),
           const SizedBox(width: 6),
-          SelectionArea(
+          NoTabSelectionArea(
             child: Text(
               text,
               style: TextStyle(
@@ -1585,6 +1604,8 @@ class _ActionChip extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
+            // The pill's own shape, so the focus ring is a pill too.
+            customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
             onTap: disabled ? null : onTap,
             child: SizedBox(
@@ -1711,8 +1732,7 @@ class _Description extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final description = detail.description;
-    if (description == null || description.isEmpty)
-      return const SizedBox.shrink();
+    if (description == null || description.isEmpty) return const SizedBox.shrink();
 
     final style = TextStyle(fontSize: 13, color: scheme.onSurface, height: 1.4);
 
@@ -1734,25 +1754,23 @@ class _Description extends StatelessWidget {
           final isOverflowing = measured.overflowing;
           final fullHeight = measured.full + 8; // padding
 
-          final fullTextWidget = SelectionArea(
-            child: _LinkifiedText(
-              text: description,
-              baseStyle: style,
-              linkStyle: style.copyWith(color: scheme.primary),
-            ),
+          // Links are Tab stops while they are on screen: the ones in the three
+          // visible lines when collapsed, all of them once expanded.
+          final fullTextWidget = LinkifiedText(
+            text: description,
+            baseStyle: style,
+            linkStyle: style.copyWith(color: scheme.primary),
           );
 
-          final collapsedTextWidget = SelectionArea(
-            child: _LinkifiedText(
-              text: description,
-              baseStyle: style,
-              linkStyle: style.copyWith(
-                color: scheme.primary,
-                decoration: TextDecoration.underline,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+          final collapsedTextWidget = LinkifiedText(
+            text: description,
+            baseStyle: style,
+            linkStyle: style.copyWith(
+              color: scheme.primary,
+              decoration: TextDecoration.underline,
             ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
           );
 
           return Column(
@@ -1766,8 +1784,7 @@ class _Description extends StatelessWidget {
                   end: expanded ? fullHeight : collapsedHeight,
                 ),
                 builder: (context, height, child) {
-                  final isFullyCollapsed =
-                      height == collapsedHeight && !expanded;
+                  final isFullyCollapsed = height == collapsedHeight && !expanded;
                   return SizedBox(
                     height: height,
                     child: ClipRect(
@@ -1783,7 +1800,7 @@ class _Description extends StatelessWidget {
               ),
               if (isOverflowing || expanded) ...[
                 const SizedBox(height: 3),
-                GestureDetector(
+                KeyboardTap(
                   onTap: onToggle,
                   child: MouseRegion(
                     cursor: SystemMouseCursors.click,
@@ -1815,8 +1832,9 @@ void _openInBrowser(String url) {
   unawaited(launchUrl(uri, mode: LaunchMode.externalApplication));
 }
 
-class _LinkifiedText extends StatefulWidget {
-  const _LinkifiedText({
+class LinkifiedText extends StatefulWidget {
+  const LinkifiedText({
+    super.key,
     required this.text,
     required this.baseStyle,
     required this.linkStyle,
@@ -1831,13 +1849,43 @@ class _LinkifiedText extends StatefulWidget {
   final TextOverflow? overflow;
 
   @override
-  State<_LinkifiedText> createState() => _LinkifiedTextState();
+  State<LinkifiedText> createState() => LinkifiedTextState();
 }
 
-class _LinkifiedTextState extends State<_LinkifiedText> {
+class LinkifiedTextState extends State<LinkifiedText> {
   final List<TapGestureRecognizer> _recognizers = [];
   late TextSpan _span;
   static final RegExp _urlRegex = RegExp(r'(https?:\/\/[^\s)]+)');
+
+  /// Where each link sits in the text, for the focus targets laid over them: a
+  /// `TextSpan` cannot take focus, so a keyboard user could not reach any link.
+  final List<({int start, int end, String url})> _links = [];
+  final GlobalKey _paragraphKey = GlobalKey();
+  List<({Rect rect, String url})> _targets = const [];
+
+  /// Measures the links once the paragraph is laid out, and keeps those that are
+  /// actually showing — under `maxLines` the rest are clipped away, and a Tab stop
+  /// on text nobody can see would be a ghost.
+  void _measureLinks() {
+    if (!mounted) return;
+    final render = _paragraphKey.currentContext?.findRenderObject();
+    if (render is! RenderParagraph || !render.hasSize) return;
+    final targets = <({Rect rect, String url})>[];
+    for (final link in _links) {
+      final boxes = render.getBoxesForSelection(TextSelection(baseOffset: link.start, extentOffset: link.end));
+      if (boxes.isEmpty) continue;
+      var rect = boxes.first.toRect();
+      for (final box in boxes.skip(1)) {
+        rect = rect.expandToInclude(box.toRect());
+      }
+      if (rect.bottom > render.size.height + 1) continue;
+      targets.add((rect: rect, url: link.url));
+    }
+    final same = targets.length == _targets.length &&
+        [for (var i = 0; i < targets.length; i++) targets[i].rect == _targets[i].rect && targets[i].url == _targets[i].url]
+            .every((equal) => equal);
+    if (!same) setState(() => _targets = targets);
+  }
 
   @override
   void initState() {
@@ -1846,7 +1894,7 @@ class _LinkifiedTextState extends State<_LinkifiedText> {
   }
 
   @override
-  void didUpdateWidget(_LinkifiedText oldWidget) {
+  void didUpdateWidget(LinkifiedText oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.text != widget.text ||
         oldWidget.baseStyle != widget.baseStyle ||
@@ -1871,6 +1919,7 @@ class _LinkifiedTextState extends State<_LinkifiedText> {
 
   void _buildSpan() {
     final List<TextSpan> spans = [];
+    _links.clear();
     int start = 0;
     for (final match in _urlRegex.allMatches(widget.text)) {
       if (match.start > start) {
@@ -1882,8 +1931,8 @@ class _LinkifiedTextState extends State<_LinkifiedText> {
         );
       }
       final url = match.group(0)!;
-      final recognizer = TapGestureRecognizer()
-        ..onTap = () => _openInBrowser(url);
+      _links.add((start: match.start, end: match.end, url: url));
+      final recognizer = TapGestureRecognizer()..onTap = () => _openInBrowser(url);
       _recognizers.add(recognizer);
       spans.add(
         TextSpan(
@@ -1905,10 +1954,36 @@ class _LinkifiedTextState extends State<_LinkifiedText> {
 
   @override
   Widget build(BuildContext context) {
-    return Text.rich(
-      _span,
-      maxLines: widget.maxLines,
-      overflow: widget.overflow,
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureLinks());
+    return Stack(
+      children: [
+        NoTabSelectionArea(
+          child: Builder(
+            builder: (context) => RichText(
+              key: _paragraphKey,
+              text: _span,
+              maxLines: widget.maxLines,
+              overflow: widget.overflow ?? TextOverflow.clip,
+              textScaler: MediaQuery.textScalerOf(context),
+              selectionRegistrar: SelectionContainer.maybeOf(context),
+              selectionColor: DefaultSelectionStyle.of(context).selectionColor,
+            ),
+          ),
+        ),
+        for (final target in _targets)
+          Positioned.fromRect(
+            rect: target.rect,
+            // Keyboard only: the pointer goes through to the span's own recognizer,
+            // so a drag that starts on a link can still select text.
+            child: IgnorePointer(
+              child: KeyboardTap(
+                label: target.url,
+                onTap: () => _openInBrowser(target.url),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

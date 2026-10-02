@@ -72,7 +72,7 @@ class ScreenValues {
   static const double railButtonWidth = 64.0;
   
   /// The border radius of a button in the left rail when it is selected
-  static const double railItemBorderRadiusSelected = 10.0;
+  static const double railItemBorderRadiusSelected = 6.0;
   /// The border radius of a button in the left rail when it is not selected
   static const double railItemBorderRadius = 6.0;
 }

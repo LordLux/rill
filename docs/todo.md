@@ -309,71 +309,6 @@ the ordinary list. Tests: the token builder (mutation-checked, including "field
 absent → target not first"), the parser's `isLinked`, and a widget test for badge
 and pulse. Run the app and say what you saw — both layouts.
 
-### 37. The engine cannot build the semantics tree: `AXTree` update fails, repeatedly
-
-A release run on 2026-09-18 logged **2 146** copies of
-
-```
-[ERROR:flutter/shell/platform/common/accessibility_bridge.cc(114)]
-Failed to update ui::AXTree, error: Nodes left pending by the update: 1312
-```
-
-(`%LOCALAPPDATA%\rill\logs\rill-20260918-055603-68288.log`). The engine
-rejects the whole update, so the accessibility tree it hands Windows stays
-**stale** — a screen reader, Narrator, or any UI automation would read the old
-tree, and the count (1312 pending nodes) says the app sends a large update the
-bridge cannot reconcile, not that one widget is wrong.
-
-**What the log shows.** Nothing until 05:57:49, then bursts that line up with
-opening a video (441 in the first hour, 1 596 in the next, then silence while
-the app sat idle for seven hours). So it follows a real semantics change, not a
-timer. Not reproduced deliberately yet.
-
-**Where to start:**
-
-1. Reproduce with semantics on (a screen reader running, or
-   `SemanticsBinding.instance.ensureSemantics()`), and narrow which surface
-   emits it — the watch page and the feed are the two that change wholesale.
-2. architecture.md §2.8's note (2026-09-18) that `TabBarView` fails on its own with
-   `!semantics.parentDataDirty` is the one semantics problem this repo has
-   already met; check whether this is the same shape.
-3. The app has almost no explicit semantics (three `Semantics`/`ExcludeSemantics`
-   uses, in the two skeletons and the top bar), so the tree is whatever the
-   widget tree implies — worth knowing before adding more.
-
-Related: item 38 is the keyboard half of the same surface.
-
-**Done when:** the cause is known and either fixed or recorded, and a run that
-exercises the watch page and the feed logs no `AXTree` error.
-
-### 38. Give the shell real focus traversal groups
-
-`FocusTraversalGroup` occurs **nowhere** in `app/lib`, and focus is handled ad
-hoc: the search field's own `FocusNode` (`topbar.dart:284`), one `ExcludeFocus`
-around the back arrow (`topbar.dart:80`), and one `autofocus` in the save
-dialog. Tab order is therefore whatever the widget tree happens to be, across a
-shell that has a custom titlebar, a rail, a feed, the player's overlay controls,
-the queue panel and transient overlays (account menu, search suggestions, save
-dialog).
-
-What that costs today, to be confirmed surface by surface rather than assumed:
-
-- **Order:** Tab walks the titlebar, rail and content in tree order, which is
-  not reading order, and the window controls are in that walk.
-- **Traps:** the account menu and the save dialog are overlays; nothing keeps
-  focus inside them, and nothing returns focus to what opened them.
-- **Player:** the controls overlay is focusable while hidden, and space/`k`
-  already go through `shortcuts.dart`, which checks `textEntryHasFocus()` — so
-  focus and the shortcut layer have to agree.
-- **Fullscreen and the miniplayer** change which surface should own focus.
-
-**Do this with item 37**, not separately: both are about the structure the app
-exposes to assistive tech, and a traversal group is also a semantics boundary.
-
-**Done when:** each surface is a deliberate group with a stated order, overlays
-trap and restore focus, and a test walks Tab through the watch page and the
-feed and asserts the order.
-
 ### 33. Playback opens paused while media_kit says it is playing
 
 Seen 2026-09-17 in a release build that had been running for a while, and
@@ -1075,3 +1010,31 @@ parameter, so the sidecar can ask for another language. The app's own strings
 are inline English today and need Flutter localisation (ARB files and
 `flutter_localizations`) — a full pass over every screen. Dates and numbers the
 app formats itself follow the same locale.
+
+### 83. Keyboard and screen-reader follow-ups from Task 32
+
+What `docs/tasks/32` found and deliberately left, each one small:
+
+- **Check with a screen reader.** Narrator has not read any of this
+  (`docs/tasks/32` §6). The AXTree errors are gone from the release log, which
+  says the tree is being delivered, not that it reads well.
+- **Vertical-video layout.** The two `Slider` fixes (architecture.md F51) were
+  applied to the vertical control column too but never driven live — the probe
+  has no vertical video. Run `RILL_SEMANTICS_PROBE=1 RILL_SEMANTICS_PROBE_VIDEO=<a
+  Short's id>` and count.
+- **Other `MenuAnchor` and dialogs.** The tile menu and subscribe menu now move
+  focus in and return it; `accent_debug_button.dart`'s `MenuAnchor` has the same
+  gap and was not touched (it is a debug control). The delete-comment dialog is
+  `showDialog`, the same mechanism as the tested ones, with no test of its own.
+- **Not walked in the real app:** the queue (the probe has no queue), the
+  subscriptions pages, the search results page and the caption-style page's rows,
+  and a video whose description has links. All of it is asserted by test, none of
+  it by `RILL_FOCUS_PROBE`.
+- **The ring and the tile lift were not seen on screen**, only measured. Whether
+  a 2 px primary ring reads well on every surface (over a video, over a scrim, on
+  the rail) is a visual question.
+- **The vertical-video volume slider** mounts above its speaker button, so a Tab
+  onto the speaker opens a slider that sits *before* it in reading order and the
+  next Tab does not land on it. Horizontal layout is correct and tested.
+- **The comment box's Escape** does not cancel (Cancel does); the filters dialog
+  and the player's submenus close on Escape through their own paths.

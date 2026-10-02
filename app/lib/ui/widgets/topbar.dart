@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/screen_values.dart';
+import '../focus_surface.dart';
 import '../pages/search_results.dart';
 import '../search_suggest_controller.dart';
 import 'account_button.dart';
@@ -52,7 +53,9 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── LEFT: menu + optional back + logo ───────────────────────
-              Padding(
+              FocusSurface(
+                order: ShellFocusOrder.titleBar,
+                child: Padding(
                 padding: const EdgeInsets.only(left: 4),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -74,13 +77,18 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
                           duration: const Duration(milliseconds: 220),
                           curve: Curves.easeOutCubic,
                           opacity: showBackButton ? 1.0 : 0.0,
+                          // Never skipped at 0: the button's tooltip is showing when it is
+                          // clicked, and an overlay visited under skipped semantics is the F51
+                          // orphan — a Back click was enough to freeze the accessibility tree.
+                          alwaysIncludeSemantics: true,
                           // Collapsed to zero width, the arrow is still in the
-                          // tree with a live `onTap`: without these, Tab stops on
-                          // an invisible button and a screen reader announces it.
+                          // tree: without these, Tab stops on an invisible button
+                          // and it cannot be pressed (`IgnorePointer` also drops the tap
+                          // action from its semantics).
                           child: ExcludeFocus(
                             excluding: !showBackButton,
                             child: ExcludeSemantics(
-                              excluding: !showBackButton,
+                              excluding: false,
                               child: IgnorePointer(
                                 ignoring: !showBackButton,
                                 child: Row(
@@ -108,6 +116,7 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
                   ],
                 ),
               ),
+              ),
 
               // ── CENTER: search bar fills remaining space ─────────────────
               const Expanded(child: SizedBox.shrink()),
@@ -118,13 +127,24 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(width: 8),
-                  _NotificationButton(scheme: scheme),
-                  const SizedBox(width: 8),
-                  const AccountButton(),
+                  FocusSurface(
+                    order: ShellFocusOrder.topBarActions,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _NotificationButton(scheme: scheme),
+                        const SizedBox(width: 8),
+                        const AccountButton(),
+                      ],
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   // Window control buttons — drawn right at the edge so they
-                  // line up with where Windows expects them.
-                  windowControls.buttons(Theme.of(context)),
+                  // line up with where Windows expects them. **Not in the Tab
+                  // walk:** Windows apps leave them to Alt+Space, and four more
+                  // stops before the page would be the first thing every keyboard
+                  // user crosses.
+                  ExcludeFocus(child: windowControls.buttons(Theme.of(context))),
                 ],
               ),
             ],
@@ -132,7 +152,7 @@ class TopBar extends ConsumerWidget implements PreferredSizeWidget {
           Row(
             children: [
               Expanded(child: SizedBox.shrink()),
-              Expanded(child: _CenteredSearch()),
+              Expanded(child: FocusSurface(order: ShellFocusOrder.search, child: _CenteredSearch())),
               Expanded(child: SizedBox.shrink()),
             ],
           ),
@@ -364,7 +384,12 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
             // *down* on a ListTile unfocuses the field and tears down this
             // overlay before the ListTile's onTap ever fires — the tap is lost,
             // and only keyboard selection (which never touches focus) works.
-            child: TextFieldTapRegion(
+            //
+            // **Not focusable:** the field keeps focus while the dropdown is up and
+            // arrow keys move the highlight. A tile that took focus would blur the
+            // field, and a blur closes the dropdown out from under it.
+            child: ExcludeFocus(
+              child: TextFieldTapRegion(
               child: Material(
                 elevation: 4,
                 borderRadius: BorderRadius.circular(12),
@@ -393,6 +418,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                   ),
                 ),
               ),
+            ),
             ),
           ),
         );
@@ -454,8 +480,12 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                     actions: {
                       _CloseSearchIntent: CallbackAction<_CloseSearchIntent>(
                         onInvoke: (_) {
+                          // The combobox pattern: the first Escape closes the
+                          // dropdown and the field keeps focus (it is what opened
+                          // it); a second, with nothing open, lets go.
+                          final dropdownWasOpen = _overlay != null;
                           ref.read(searchSuggestProvider.notifier).close();
-                          _focus.unfocus();
+                          if (!dropdownWasOpen) _focus.unfocus();
                           return null;
                         },
                       ),
@@ -495,22 +525,25 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                 topRight: Radius.circular(40),
                 bottomRight: Radius.circular(40),
               ),
-              child: InkWell(
-                onTap: () => _submit(_controller.text),
-                borderRadius: const BorderRadius.only(
-                  topRight: Radius.circular(40),
-                  bottomRight: Radius.circular(40),
-                ),
-                mouseCursor: SystemMouseCursors.click,
-                child: Container(
-                  width: 48,
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(color: scheme.outlineVariant, width: 1),
-                    ),
+              child: Tooltip(
+                message: 'Search',
+                child: InkWell(
+                  onTap: () => _submit(_controller.text),
+                  borderRadius: const BorderRadius.only(
+                    topRight: Radius.circular(40),
+                    bottomRight: Radius.circular(40),
                   ),
-                  child: Center(
-                    child: Icon(Icons.search, color: scheme.onSurface, size: 20),
+                  mouseCursor: SystemMouseCursors.click,
+                  child: Container(
+                    width: 48,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: scheme.outlineVariant, width: 1),
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.search, color: scheme.onSurface, size: 20),
+                    ),
                   ),
                 ),
               ),

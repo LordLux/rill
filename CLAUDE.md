@@ -754,6 +754,46 @@ the answer.
   the specific case this was found in (`po-token.ts`'s dynamic import in
   `rpc/server.ts`) and `sidecar/test/po-token-scope.test.ts` the regression
   test.
+- **A Material `Slider` must never be built where its semantics are skipped —
+  Task 32, measured 2026-10-01, and nothing in `flutter test` can see it.** At
+  opacity 0, clipped to zero width, or under `ExcludeSemantics`, the `Slider`'s
+  `OverlayPortal` child is still visited and serialises an orphan node; Windows'
+  accessibility bridge rejects the update and then every one after it, so the log
+  fills with `Failed to update ui::AXTree` and the tree is frozen. Fade with
+  `alwaysIncludeSemantics: true` or do not mount it while collapsed. Re-run
+  `RILL_SEMANTICS_PROBE=1` (`ui/semantics_probe.dart`) after touching a `Slider`
+  or a fade above one, and on every Flutter bump. **So does a `Focus` added only
+  to watch focus** — it carries a semantics node by default, and one above the
+  player brought the fault back (~1 450 errors a run, 2026-10-02): an observer is
+  `Focus(canRequestFocus: false, skipTraversal: true, includeSemantics: false)`.
+  **The semantics probe alone proves little: run it with the focus probe**
+  (`RILL_SEMANTICS_PROBE=1 RILL_FOCUS_PROBE=watch`), because the volume `Slider`
+  failed whenever it opened (now `VolumeBar`, not a `Slider`) and an animated
+  `Scrollable.ensureVisible` through the comments failed every frame (now a jump),
+  and neither runs without Tab presses. `architecture.md` F51.
+- **Keyboard navigation is a state: on at Tab, off at any click, off at Escape.**
+  Flutter calls the *mouse* "keyboard-like" (`FocusHighlightMode.traditional`), so
+  anything keyed to it draws and scrolls on clicks. Key it to
+  `KeyboardNavigation.active` instead (`ui/focus_ring.dart`). `architecture.md` F52.
+- **A new surface gets its own `FocusSurface`, and the keyboard cannot reach
+  anything above the `Navigator` — Task 32.** Tab order is declared in
+  `ui/focus_surface.dart`, not inherited from the tree: title bar, rail, search,
+  actions, page, and on the watch page the main column before the rail. Tab never
+  leaves a route's scope, so the miniplayer is reached with F6; `PlayerShortcuts`
+  runs before the focus tree, so Space yields to a control the keyboard walked
+  onto. An overlay is only done when `test/focus_traversal_test.dart`-style
+  checks say focus moves in, Tab stays in, Escape closes it, and focus returns.
+  **A control that exists only while something has focus or the pointer is over it
+  cannot be Tabbed to** (it unmounts as focus moves onto it) — show it while focus
+  is anywhere *inside*, and make hover-only duplicates `ExcludeFocus`. A bare
+  `Focus`, `SelectionArea` or `GestureDetector` is a ghost stop, a missing one, or
+  both; use `KeyboardTap` and `NoTabSelectionArea`. **A disabled control cannot hold
+  focus** — keep a control enabled (and ignore the press) while its action is in
+  flight. The ring is app-wide (`ui/focus_ring.dart`) and takes each control's own
+  shape; a new custom `InkWell` declares `customBorder`/`borderRadius`, and a
+  full-bleed row says `FocusRingShape(inflate: -1)` — do not draw a ring per widget. Walk the real app with
+  `RILL_FOCUS_PROBE=feed|watch` before calling a keyboard change done.
+  `architecture.md` F52.
 
 ## Current state
 

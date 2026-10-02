@@ -25,12 +25,17 @@ class TitleBarWidgetButton extends ConsumerWidget {
     this.onTap,
     this.tooltip,
     this.overrideRadius,
+    this.focusNode,
   });
 
   final Widget child;
   final VoidCallback? onTap;
   final String? tooltip;
   final double? overrideRadius;
+
+  /// For a button that opens something and has to take focus back when it
+  /// closes (`account_button.dart`).
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -45,7 +50,7 @@ class TitleBarWidgetButton extends ConsumerWidget {
     );
 
     if (onTap != null) {
-      content = InkWell(onTap: onTap, borderRadius: br, child: content);
+      content = InkWell(onTap: onTap, borderRadius: br, focusNode: focusNode, child: content);
       if (tooltip != null) content = Tooltip(message: tooltip!, child: content);
     }
 

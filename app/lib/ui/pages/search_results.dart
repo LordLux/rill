@@ -5,6 +5,7 @@ import '../../domain/search_filters.dart';
 import '../../domain/youtube_link.dart';
 import '../../theme/screen_values.dart';
 import '../feed_controller.dart';
+import '../focus_surface.dart';
 import '../page_wrapper.dart';
 import '../player_shell.dart' show openWatch, rootNavigatorKey;
 import '../widgets/artist_panel_card.dart';
@@ -197,7 +198,7 @@ class _SearchFilterBar extends ConsumerWidget {
           const SizedBox(width: 8),
           InkWell(
             onTap: () {
-              showDialog(context: context, builder: (_) => const _SearchFiltersDialog());
+              showDialog(context: context, builder: (_) => const SearchFiltersDialog());
             },
             borderRadius: BorderRadius.circular(16),
             child: Container(
@@ -221,8 +222,8 @@ class _SearchFilterBar extends ConsumerWidget {
   }
 }
 
-class _SearchFiltersDialog extends ConsumerWidget {
-  const _SearchFiltersDialog();
+class SearchFiltersDialog extends ConsumerWidget {
+  const SearchFiltersDialog({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -419,9 +420,10 @@ class _FilterOptionState extends State<_FilterOption> {
       onEnter: (_) => setState(() => _isHovering = true),
       onExit: (_) => setState(() => _isHovering = false),
       cursor: SystemMouseCursors.click,
-      child: GestureDetector(
+      // A Tab stop, so the dialog's options can be reached and pressed from the
+      // keyboard (before, only its close button could).
+      child: KeyboardTap(
         onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0),
           child: AnimatedDefaultTextStyle(

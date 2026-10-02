@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   bitsdojo_window_windows
+  connectivity_plus
   flutter_inappwebview_windows
   flutter_media_session
   flutter_secure_storage_windows

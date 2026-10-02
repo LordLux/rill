@@ -667,9 +667,10 @@ void main() {
     // fighting pointer/hover simulation) triggers the exact call — inserting
     // an `OverlayEntry` — that throws "No Overlay widget found" if none is
     // reachable. If this mounted no `Overlay`, this line throws.
-    final tooltip = find.ancestor(of: find.byKey(playerFullscreenKey), matching: find.byType(Tooltip));
+    // The player's tooltip is a `RawTooltip` with a semantics-free bubble (F51), not a Material one.
+    final tooltip = find.ancestor(of: find.byKey(playerFullscreenKey), matching: find.byType(RawTooltip));
     expect(tooltip, findsOneWidget);
-    tester.state<TooltipState>(tooltip).ensureTooltipVisible();
+    tester.state<RawTooltipState>(tooltip).ensureTooltipVisible();
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -1073,7 +1074,8 @@ void main() {
     // slider collapses out from under a pointer travelling towards it.
     await pumpWatching(tester);
 
-    double sliderWidth() => tester.widget<SizedBox>(find.byKey(playerVolumeSliderKey)).width!;
+    // Its laid-out width (an `AnimatedContainer`), not a widget property.
+    double sliderWidth() => tester.getSize(find.byKey(playerVolumeSliderKey)).width;
     // The clock is the only text on the bar shaped `position / duration`.
     double clockLeft() => tester.getTopLeft(find.textContaining(' / ')).dx;
 
