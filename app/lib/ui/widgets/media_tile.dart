@@ -518,7 +518,8 @@ class _MediaTileState extends State<MediaTile> {
       DurationBadgeTone.music => 'Music Video',
       DurationBadgeTone.normal => spec.isStackedCards ? 'Playlist' : (spec.isShort ? 'Short' : 'Video'),
     };
-    final secondary = spec.isShort ? spec.secondaryLine : null;
+    // Views and age ("1M views • 3y ago"): after who made it, before the badges and the length.
+    final secondary = spec.secondaryLine;
     return [
       ?kind,
       spec.title,
@@ -704,6 +705,9 @@ class _MediaTileState extends State<MediaTile> {
                                   : 1.0,
                               child: Image.network(
                                 widget.spec.thumbnailUrl,
+                                // Not "image": the tile's narration already says what it is, and
+                                // an image node made Narrator add the word to every tile.
+                                excludeFromSemantics: true,
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) =>
                                     Container(

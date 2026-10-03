@@ -4,6 +4,8 @@
 /// the real `WatchPage` inside the real shell.
 library;
 
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -134,6 +136,62 @@ void main() {
         expect(at, greaterThanOrEqualTo(from), reason: '"$anchor" should come after the previous anchor in $walk');
         from = at + 1;
       }
+      finish();
+    });
+
+    for (final fullscreen in [false, true]) {
+      testWidgets('an error slate\'s Try again comes before the player controls${fullscreen ? ' in fullscreen' : ''}', (tester) async {
+        tester.view.physicalSize = const Size(1400, 1000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(UncontrolledProviderScope(container: container, child: const TestApp()));
+        await tester.pumpAndSettle();
+        openWatchIn(container, video('ratelimited1'));
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+        await tester.pumpAndSettle();
+        expect(find.text('Try again'), findsOneWidget, reason: 'the slate is showing');
+        if (fullscreen) {
+          container.read(playerViewProvider.notifier).toggleFullscreen();
+          for (var i = 0; i < 4; i++) {
+            await tester.pump(const Duration(milliseconds: 400));
+          }
+        }
+
+        // Named by what has focus: the button is found by its widget, since a name is the
+        // nearest keyed ancestor's and the slate sits under the page's own key.
+        final walk = <String>[];
+        for (var i = 0; i < 40 && !walk.contains('player-mute'); i++) {
+          await tabThrough(tester, 1);
+          await tester.pump();
+          final onTryAgain = FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<ElevatedButton>() != null ||
+              FocusManager.instance.primaryFocus?.context?.widget is ElevatedButton;
+          walk.add(onTryAgain ? 'TRY-AGAIN' : focused());
+        }
+        final mute = walk.indexOf('player-mute');
+        expect(walk.indexOf('TRY-AGAIN'), allOf(greaterThanOrEqualTo(0), lessThan(mute)), reason: 'Try again before the controls: $walk');
+        finish();
+      });
+    }
+
+    testWidgets('a queue row is named on the node that takes focus, and its handle on its own', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await openWatch(tester, alsoQueue: ['vid-2']);
+      expect(find.bySemanticsLabel('Video vid-1, Fake Channel, now playing'), findsOneWidget);
+      expect(find.bySemanticsLabel('Video vid-2, Fake Channel'), findsOneWidget);
+
+      // The handle's focus is on the handle's node, not on the row's: a screen reader reads the
+      // focused node's name, and it used to read the whole row when the handle had focus.
+      for (var i = 0; i < 80; i++) {
+        await tabThrough(tester, 1);
+        await tester.pump();
+        final reorder = tester.getSemantics(find.bySemanticsLabel('Use the up and down arrows to reorder').first);
+        if (reorder.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue) break;
+        expect(i, lessThan(79), reason: 'the handle took focus at some point');
+      }
+      final rows = tester.getSemantics(find.bySemanticsLabel('Video vid-1, Fake Channel, now playing'));
+      expect(rows.getSemanticsData().flagsCollection.isFocused, isNot(Tristate.isTrue), reason: 'and the row does not claim it too');
+      semantics.dispose();
       finish();
     });
 

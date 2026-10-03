@@ -1031,9 +1031,8 @@ class _QueueItemTileState extends State<_QueueItemTile> {
             ),
             // The row's one name lives on its title, which is what the tile's own tap node
             // merges: a label on a wrapper around the tile never reached it.
-            title: Semantics(
-              label: _rowLabel(),
-              excludeSemantics: true,
+            // The row's name is on the row itself (below).
+            title: ExcludeSemantics(
               child: Text(
                 widget.item.title,
                 maxLines: 1,
@@ -1081,7 +1080,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                     exitDuration: const Duration(milliseconds: 0),
                     child: Semantics(
                       container: true,
-                      label: 'Remove ${widget.item.title} from queue',
+                      label: 'Remove from queue',
                       child: IconButton(
                         mouseCursor: SystemMouseCursors.click,
                         icon: ExcludeSemantics(child: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant)),
@@ -1096,19 +1095,23 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                   // what dragging does. `ArrowKeyClaim` stops the player's seek and
                   // volume shortcuts taking the arrows first.
                   ArrowKeyClaim(
-                    child: Focus(
-                      onKeyEvent: _onHandleKey,
-                      child: Semantics(
-                        container: true,
-                        label: 'Reorder ${widget.item.title}',
-                        hint: 'Use the up and down arrow keys to move it',
+                    // The `Semantics` is the *outer* one: a `Focus` outside it puts its
+                    // focused flag on the row's node, and Narrator then read the whole row
+                    // when the handle was focused.
+                    child: Semantics(
+                      container: true,
+                      label: 'Use the up and down arrows to reorder',
+                      child: Focus(
+                        onKeyEvent: _onHandleKey,
                         child: ReorderableDragStartListener(
                           index: widget.index,
                           child: MouseRegion(
                             cursor: SystemMouseCursors.grab,
                             child: Padding(
                               padding: const EdgeInsets.all(4),
-                              child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                              child: ExcludeSemantics(
+                                child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                              ),
                             ),
                           ),
                         ),
@@ -1132,6 +1135,10 @@ class _QueueItemTileState extends State<_QueueItemTile> {
       ),
       ),
     );
+
+    // The row's name, on the node ReorderableListView puts the focus on (not a child of it): that
+    // is the node Narrator lands on, and it used to be an unnamed "group".
+    tile = Semantics(label: _rowLabel(), child: tile);
 
     // This row's own exit takes precedence over the shared slide.
     final removal = widget.removeAnimation;

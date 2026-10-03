@@ -58,23 +58,23 @@ void main() {
       testWidgets('an ordinary video: kind, title, author, then the length', (tester) async {
         final handle = tester.ensureSemantics();
         await pumpTile(tester, video(), layout: layout);
-        expect(said('Video, The Title, The Channel, 12 minutes and 50 seconds long'), findsOneWidget);
+        expect(said('Video, The Title, The Channel, 1M views • 3y ago, 12 minutes and 50 seconds long'), findsOneWidget);
         handle.dispose();
       });
 
       testWidgets('a music video says so', (tester) async {
         final handle = tester.ensureSemantics();
         await pumpTile(tester, video(music: true), layout: layout);
-        expect(said('Music Video, The Title, The Channel, 12 minutes and 50 seconds long'), findsOneWidget);
+        expect(said('Music Video, The Title, The Channel, 1M views • 3y ago, 12 minutes and 50 seconds long'), findsOneWidget);
         handle.dispose();
       });
 
       testWidgets('live and station say what they are, with no length', (tester) async {
         final handle = tester.ensureSemantics();
         await pumpTile(tester, video(seconds: null, live: true), layout: layout);
-        expect(said('Live, The Title, The Channel'), findsOneWidget);
+        expect(said('Live, The Title, The Channel, 1M views • 3y ago'), findsOneWidget);
         await pumpTile(tester, video(seconds: null, station: true), layout: layout);
-        expect(said('Station, The Title, The Channel'), findsOneWidget);
+        expect(said('Station, The Title, The Channel, 1M views • 3y ago'), findsOneWidget);
         handle.dispose();
       });
 
