@@ -416,7 +416,10 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                 child: const SizedBox.expand(),
               ),
             ),
-            if (widget.child != null) FocusTraversalOrder(order: const NumericFocusOrder(2.5), child: widget.child!),
+            if (widget.child != null) // Before the bar: what the slates hold is a problem the viewer has to act on (Try
+            // again, Notify me, Sign in) and comes first. In fullscreen the queue's toggle and
+            // the queue carry their own larger numbers and still follow the controls.
+            FocusTraversalOrder(order: const NumericFocusOrder(0.5), child: widget.child!),
             // Above the click surface so it paints over the cover, but
             // pointer-transparent — a spinner that swallowed the click to
             // play/pause would take the control away exactly when the player is
