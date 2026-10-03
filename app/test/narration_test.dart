@@ -88,6 +88,17 @@ void main() {
         expect(said('Mix - Some Artist, Some Artist, Another'), findsOneWidget);
         handle.dispose();
       });
+
+      testWidgets('a playlist says how many videos, in the singular for one', (tester) async {
+        final handle = tester.ensureSemantics();
+        FeedItem playlist(int count) =>
+            FeedItem.playlist(kind: 'playlist', id: 'PLabc', title: 'The Title', thumbnailUrl: 'https://example.com/t.jpg', videoCount: count, channelName: 'The Channel');
+        await pumpTile(tester, playlist(1), layout: layout);
+        expect(said('Playlist, The Title, The Channel, 1 video'), findsOneWidget);
+        await pumpTile(tester, playlist(24), layout: layout);
+        expect(said('Playlist, The Title, The Channel, 24 videos'), findsOneWidget);
+        handle.dispose();
+      });
     });
   }
 }

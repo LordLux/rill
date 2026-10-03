@@ -68,7 +68,9 @@ final class KeyboardResync with WidgetsBindingObserver {
     for (final physical in keyboard.physicalKeysPressed.toList()) {
       final stale = actuallyDown == null ? _modifiers.contains(physical) : !actuallyDown.contains(physical.usbHidUsage);
       if (!stale) continue;
-      final logical = keyboard.lookUpLayout(physical) ?? keyboard.logicalKeysPressed.firstOrNull;
+      // The logical key Flutter recorded on press, or nothing: guessing another one makes the
+      // key-up disagree with the press, which `HardwareKeyboard` asserts against.
+      final logical = keyboard.lookUpLayout(physical);
       if (logical == null) continue;
       keyboard.handleKeyEvent(KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero, synthesized: true));
     }

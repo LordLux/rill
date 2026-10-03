@@ -325,94 +325,94 @@ class _DrawerItem extends StatelessWidget {
           label: label,
           selected: isSelected,
           child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(borderRadius),
-          child: AnimatedContainer(
-            duration: _animDuration,
-            curve: _animCurve,
-            height: isOpen ? _openHeight : _closedHeight,
-            child: Row(
-              children: [
-                // Anchored Icon & Vertical Label Container (Fixed Width)
-                SizedBox(
-                  width: _width, // Fixed width for icon and vertical label
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Fixed Icon
-                      Icon(
-                        icon,
-                        size: 26.0,
-                        color: activeColor,
-                      ),
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(borderRadius),
+            child: AnimatedContainer(
+              duration: _animDuration,
+              curve: _animCurve,
+              height: isOpen ? _openHeight : _closedHeight,
+              child: Row(
+                children: [
+                  // Anchored Icon & Vertical Label Container (Fixed Width)
+                  SizedBox(
+                    width: _width, // Fixed width for icon and vertical label
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // Fixed Icon
+                        Icon(
+                          icon,
+                          size: 26.0,
+                          color: activeColor,
+                        ),
 
-                      // Vertical Label (Visible only when CLOSED)
-                      AnimatedClipRect(
-                        open: !isOpen,
-                        horizontal: false,
-                        child: AnimatedOpacity(
-                          duration: _animDuration,
-                          curve: _animCurve,
-                          // Semantics are never skipped at 0: anything with an overlay inside (a tooltip)
-                          // would be left an orphan (F51).
-                          alwaysIncludeSemantics: true,
-                          opacity: !isOpen ? 1.0 : 0.0,
-                          child: AnimatedSlide(
+                        // Vertical Label (Visible only when CLOSED)
+                        AnimatedClipRect(
+                          open: !isOpen,
+                          horizontal: false,
+                          child: AnimatedOpacity(
                             duration: _animDuration,
                             curve: _animCurve,
-                            offset: !isOpen ? Offset.zero : const Offset(0, 0.5),
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 2.0),
-                              child: ExcludeSemantics(
-                                child: Text(
-                                  label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.visible,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: activeColor,
-                                    fontSize: key == const ValueKey('subscriptions') ? 9 : 11.0,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            // Semantics are never skipped at 0: anything with an overlay inside (a tooltip)
+                            // would be left an orphan (F51).
+                            alwaysIncludeSemantics: true,
+                            opacity: !isOpen ? 1.0 : 0.0,
+                            child: AnimatedSlide(
+                              duration: _animDuration,
+                              curve: _animCurve,
+                              offset: !isOpen ? Offset.zero : const Offset(0, 0.5),
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 2.0),
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.visible,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: activeColor,
+                                      fontSize: key == const ValueKey('subscriptions') ? 9 : 11.0,
+                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
-                // Horizontal Label (Visible only when OPEN)
-                Expanded(
-                  child: AnimatedOpacity(
-                    duration: _animDuration,
-                    curve: _animCurve,
-                    alwaysIncludeSemantics: true, // F51
-                    opacity: isOpen ? 1.0 : 0.0,
-                    child: AnimatedSlide(
+                  // Horizontal Label (Visible only when OPEN)
+                  Expanded(
+                    child: AnimatedOpacity(
                       duration: _animDuration,
                       curve: _animCurve,
-                      offset: isOpen ? Offset.zero : const Offset(-0.2, 0),
-                      child: ExcludeSemantics(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: activeColor,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      alwaysIncludeSemantics: true, // F51
+                      opacity: isOpen ? 1.0 : 0.0,
+                      child: AnimatedSlide(
+                        duration: _animDuration,
+                        curve: _animCurve,
+                        offset: isOpen ? Offset.zero : const Offset(-0.2, 0),
+                        child: ExcludeSemantics(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: activeColor,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          ),
+            ),
         ),
       ),
     );

@@ -13,6 +13,39 @@ import 'dart:ui' show ViewFocusEvent;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+/// A key as the log names it. Modifiers, Tab, Enter, Escape, arrows and function keys by name — they
+/// are what a "the keyboard stopped working" report is about — and any printable key as just
+/// `char`, so text typed into a field never reaches the log.
+String _keyName(LogicalKeyboardKey key) {
+  final named = _named.contains(key) || _isFunctionKey(key);
+  return named ? (key.debugName ?? key.keyLabel) : 'char';
+}
+
+bool _isFunctionKey(LogicalKeyboardKey key) =>
+    key.keyId >= LogicalKeyboardKey.f1.keyId && key.keyId <= LogicalKeyboardKey.f24.keyId;
+
+final Set<LogicalKeyboardKey> _named = {
+  LogicalKeyboardKey.altLeft,
+  LogicalKeyboardKey.altRight,
+  LogicalKeyboardKey.alt,
+  LogicalKeyboardKey.controlLeft,
+  LogicalKeyboardKey.controlRight,
+  LogicalKeyboardKey.control,
+  LogicalKeyboardKey.shiftLeft,
+  LogicalKeyboardKey.shiftRight,
+  LogicalKeyboardKey.shift,
+  LogicalKeyboardKey.metaLeft,
+  LogicalKeyboardKey.metaRight,
+  LogicalKeyboardKey.meta,
+  LogicalKeyboardKey.tab,
+  LogicalKeyboardKey.enter,
+  LogicalKeyboardKey.escape,
+  LogicalKeyboardKey.arrowUp,
+  LogicalKeyboardKey.arrowDown,
+  LogicalKeyboardKey.arrowLeft,
+  LogicalKeyboardKey.arrowRight,
+};
+
 void runKeyDiag() {
   if (Platform.environment['RILL_KEY_DIAG'] != '1') return;
   final binding = WidgetsBinding.instance;
@@ -31,8 +64,8 @@ void runKeyDiag() {
     // whose release never arrived (Win+Arrow is eaten by the shell) stays in it, and every
     // shortcut and Tab ignores a press made "with" a modifier.
     if (event is KeyDownEvent) {
-      final down = HardwareKeyboard.instance.logicalKeysPressed.map((k) => k.debugName ?? k.keyLabel).join('+');
-      stderr.writeln('keydiag: ${event.logicalKey.keyLabel.isEmpty ? event.logicalKey.debugName : event.logicalKey.keyLabel} down=[$down] ${where()}');
+      final down = HardwareKeyboard.instance.logicalKeysPressed.map(_keyName).join('+');
+      stderr.writeln('keydiag: ${_keyName(event.logicalKey)} down=[$down] ${where()}');
     }
     return false;
   });

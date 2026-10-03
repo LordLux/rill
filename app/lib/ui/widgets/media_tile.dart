@@ -67,6 +67,10 @@ class TileSpec {
   final bool isStackedCards;
   final bool isShort;
   final String? durationText;
+
+  /// How many videos a playlist or mix holds, where the tile says so — carried as a number so
+  /// the screen reader's "1 video" / "24 videos" is not parsed back out of [durationText].
+  final int? videoCount;
   final DurationBadgeTone durationTone;
   final List<String> badges;
 
@@ -109,6 +113,7 @@ class TileSpec {
     required this.isStackedCards,
     this.isShort = false,
     this.durationText,
+    this.videoCount,
     required this.durationTone,
     required this.badges,
     this.isMembersOnly = false,
@@ -191,7 +196,8 @@ TileSpec? specFor(FeedItem item) {
       // A mix tile usually carries no count at all — YouTube ships the literal
       // word "Mix" where a playlist ships "24 videos" — so the badge is drawn
       // from the tone rather than from text that is normally absent.
-      durationText: m.videoCount != null ? '${m.videoCount} videos' : null,
+      durationText: m.videoCount == null ? null : videoCountLabel(m.videoCount!),
+      videoCount: m.videoCount,
       durationTone: DurationBadgeTone.mix,
       badges: const [],
       canWatchLater: false,
@@ -205,7 +211,8 @@ TileSpec? specFor(FeedItem item) {
       thumbnailUrl: p.thumbnailUrl,
       isStackedCards: true,
       isShort: false,
-      durationText: p.videoCount != null ? '${p.videoCount} videos' : null,
+      durationText: p.videoCount == null ? null : videoCountLabel(p.videoCount!),
+      videoCount: p.videoCount,
       durationTone: DurationBadgeTone.normal,
       badges: const [],
       canWatchLater: false,
@@ -503,13 +510,13 @@ class _MediaTileState extends State<MediaTile> {
   /// as digits ("twelve fifty"), and a mix's badge twice.
   String _narration() {
     final spec = widget.spec;
-    final lengthText = spec.durationText;
-    final isCount = lengthText != null && lengthText.endsWith('videos');
+    final count = spec.videoCount;
     final length = switch (spec.durationTone) {
-      DurationBadgeTone.live || DurationBadgeTone.station || DurationBadgeTone.mix => null,
-      _ when lengthText == null => null,
-      _ when isCount => lengthText,
-      _ => '${spokenClock(lengthText) ?? lengthText} long',
+      DurationBadgeTone.mix => null,
+      _ when count != null => videoCountLabel(count),
+      // Live and station are the `kind` below, not also a length.
+      DurationBadgeTone.live || DurationBadgeTone.station => null,
+      _ => spokenClockLength(spec.durationText),
     };
     final kind = switch (spec.durationTone) {
       DurationBadgeTone.live => 'Live',
@@ -1134,35 +1141,35 @@ class _MediaTileState extends State<MediaTile> {
             child: Semantics(
               label: _narration(),
               child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 100),
-                  curve: Curves.easeInOut,
-                  top: hoverExpansion.top,
-                  bottom: hoverExpansion.bottom,
-                  left: hoverExpansion.left,
-                  right: hoverExpansion.right,
-                  child: AnimatedContainer(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedPositioned(
                     duration: const Duration(milliseconds: 100),
                     curve: Curves.easeInOut,
-                    decoration: BoxDecoration(
-                      color: _lifted
-                          ? scheme.surfaceContainerHighest.withValues(alpha: 0.75)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(16),
-                      border: _showFocusRing ? Border.all(color: scheme.primary, width: 2) : null,
+                    top: hoverExpansion.top,
+                    bottom: hoverExpansion.bottom,
+                    left: hoverExpansion.left,
+                    right: hoverExpansion.right,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 100),
+                      curve: Curves.easeInOut,
+                      decoration: BoxDecoration(
+                        color: _lifted
+                            ? scheme.surfaceContainerHighest.withValues(alpha: 0.75)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                        border: _showFocusRing ? Border.all(color: scheme.primary, width: 2) : null,
+                      ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: isEffectiveWide
-                      ? const EdgeInsets.all(8.0)
-                      : const EdgeInsets.only(bottom: 8.0, top: 2.0),
-                  child: layout,
-                ),
-              ],
-            ),
+                  Padding(
+                    padding: isEffectiveWide
+                        ? const EdgeInsets.all(8.0)
+                        : const EdgeInsets.only(bottom: 8.0, top: 2.0),
+                    child: layout,
+                  ),
+                ],
+              ),
             ),
           ),
           ),
