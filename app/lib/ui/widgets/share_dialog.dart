@@ -186,7 +186,13 @@ class _ShareDialogState extends State<ShareDialog> {
       ),
     ];
 
-    return Dialog(
+    // The dialog's name when it opens; without it Narrator read the first text it found.
+    return Semantics(
+      scopesRoute: true,
+      namesRoute: true,
+      label: 'Share',
+      explicitChildNodes: true,
+      child: Dialog(
       backgroundColor: scheme.surfaceContainerHigh,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
@@ -221,33 +227,39 @@ class _ShareDialogState extends State<ShareDialog> {
                 ),
               ),
               const SizedBox(height: 4),
-              Column(
-                children: [
-                  FilledButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.share, size: 18),
-                    label: const Text('Share via Windows…'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 40),
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+              // Not wired yet, so not narrated at all: nothing to do with it and a
+              // sentence that promises it.
+              ExcludeSemantics(
+                child: Column(
+                  children: [
+                    FilledButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.share, size: 18),
+                      label: const Text('Share via Windows…'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Share this video using the OS share sheet.',
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                  ),
-                ],
+                    const SizedBox(height: 6),
+                    Text(
+                      'Share this video using the OS share sheet.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  // Not "Share" a second time: the title already said it, and
-                  // the label's job here is to separate the row that works from
-                  // the button above it that does not yet.
-                  'Send to',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
+                child: ExcludeSemantics(
+                  child: Text(
+                    // Not "Share" a second time: the title already said it, and
+                    // the label's job here is to separate the row that works from
+                    // the button above it that does not yet.
+                    'Send to',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -279,25 +291,33 @@ class _ShareDialogState extends State<ShareDialog> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          _link,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                        // The address is for the eyes; the button beside it says what it does.
+                        child: ExcludeSemantics(
+                          child: Text(
+                            _link,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       // The one white thing in the dialog, same as the mock and
                       // the same role the pills go to when they are on.
-                      FilledButton(
-                        onPressed: () => _copy(_link, 'Link copied'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: scheme.inverseSurface,
-                          foregroundColor: scheme.onInverseSurface,
-                          minimumSize: const Size(0, 32),
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      Semantics(
+                        label: 'Copy link',
+                        child: FilledButton(
+                          onPressed: () => _copy(_link, 'Link copied'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: scheme.inverseSurface,
+                            foregroundColor: scheme.onInverseSurface,
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                          ),
+                          child: ExcludeSemantics(
+                            child: Transform.translate(offset: const Offset(0, -1), child: const Text('Copy')),
+                          ),
                         ),
-                        child: Transform.translate(offset: const Offset(0, -1), child: const Text('Copy')),
                       ),
                     ],
                   ),
@@ -335,6 +355,7 @@ class _ShareDialogState extends State<ShareDialog> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -393,37 +414,46 @@ class _ShareTargetState extends State<_ShareTarget> {
               color: Colors.transparent,
               shape: const CircleBorder(),
               clipBehavior: Clip.antiAlias,
-              child: InkWell(
+              // The name is given once, on the button; the glyph and the caption below it
+              // are pictures of it.
+              child: Semantics(
+                label: widget.label,
+                child: InkWell(
                 customBorder: const CircleBorder(), // the focus ring is a circle too
                 onHover: (hovered) => setState(() => _isHovered = hovered),
                 onTap: widget.onTap,
-                child: SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: Center(
-                    child: widget.icon != null
-                        ? Icon(widget.icon, size: 22, color: iconColor)
-                        : widget.iconBuilder != null
-                        ? widget.iconBuilder!(iconColor, _isHovered)
-                        : Text(
-                            widget.label,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                              color: iconColor,
+                child: ExcludeSemantics(
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Center(
+                      child: widget.icon != null
+                          ? Icon(widget.icon, size: 22, color: iconColor)
+                          : widget.iconBuilder != null
+                          ? widget.iconBuilder!(iconColor, _isHovered)
+                          : Text(
+                              widget.label,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: iconColor,
+                              ),
                             ),
-                          ),
+                    ),
                   ),
                 ),
+              ),
               ),
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            widget.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ExcludeSemantics(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
           ),
         ],
       ),

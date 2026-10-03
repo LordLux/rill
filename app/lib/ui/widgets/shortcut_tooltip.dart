@@ -19,11 +19,16 @@ class ShortcutTooltip extends StatelessWidget {
     required this.label,
     this.action,
     this.silent = false,
+    this.announce = true,
     required this.child,
   });
 
   final String label;
   final PlayerAction? action;
+
+  /// Whether a [silent] tooltip also names its anchor for assistive technology. Off for a
+  /// control that already says the same thing itself (the volume bar: "Volume 100%").
+  final bool announce;
 
   /// Draws the bubble with no semantics of its own ([_SilentTooltip]). For the player's
   /// control bar, where the Material tooltip's overlay node reaches the accessibility
@@ -32,10 +37,11 @@ class ShortcutTooltip extends StatelessWidget {
   final Widget child;
 
   Widget _tip({required Duration wait, required InlineSpan message, bool plain = false}) {
-    if (silent) return _SilentTooltip(label: label, hoverDelay: wait, message: message, child: child);
+    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: wait, message: message, child: child);
     if (plain) {
       return Tooltip(
         message: label,
+        excludeFromSemantics: !announce,
         preferBelow: false,
         decoration: tooltipBubbleDecoration,
         textStyle: tooltipBubbleTextStyle,
@@ -43,6 +49,7 @@ class ShortcutTooltip extends StatelessWidget {
       );
     }
     return Tooltip(
+      excludeFromSemantics: !announce,
       preferBelow: false,
       decoration: tooltipBubbleDecoration,
       waitDuration: wait,
@@ -121,8 +128,9 @@ class _SilentTooltip extends StatelessWidget {
     required this.child,
   });
 
-  /// What assistive technology is told, on the anchor — the part of a tooltip that is not the bubble.
-  final String label;
+  /// What assistive technology is told, on the anchor — the part of a tooltip that is not the
+  /// bubble. Null: nothing.
+  final String? label;
   final Duration hoverDelay;
   final InlineSpan message;
   final Widget child;

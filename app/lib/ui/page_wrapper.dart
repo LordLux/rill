@@ -319,7 +319,12 @@ class _DrawerItem extends StatelessWidget {
         color: backgroundColor,
         borderRadius: BorderRadius.circular(borderRadius),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        // One name for the item. The two visual labels below (closed and open rail) are
+        // both in the tree, so left alone Narrator read "Home Home".
+        child: Semantics(
+          label: label,
+          selected: isSelected,
+          child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(borderRadius),
           child: AnimatedContainer(
@@ -359,14 +364,16 @@ class _DrawerItem extends StatelessWidget {
                             offset: !isOpen ? Offset.zero : const Offset(0, 0.5),
                             child: Padding(
                               padding: const EdgeInsets.only(top: 2.0),
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                overflow: TextOverflow.visible,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: activeColor,
-                                  fontSize: key == const ValueKey('subscriptions') ? 9 : 11.0,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              child: ExcludeSemantics(
+                                child: Text(
+                                  label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.visible,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: activeColor,
+                                    fontSize: key == const ValueKey('subscriptions') ? 9 : 11.0,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
                                 ),
                               ),
                             ),
@@ -388,13 +395,15 @@ class _DrawerItem extends StatelessWidget {
                       duration: _animDuration,
                       curve: _animCurve,
                       offset: isOpen ? Offset.zero : const Offset(-0.2, 0),
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: activeColor,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      child: ExcludeSemantics(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: activeColor,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
                         ),
                       ),
                     ),
@@ -402,6 +411,7 @@ class _DrawerItem extends StatelessWidget {
                 ),
               ],
             ),
+          ),
           ),
         ),
       ),

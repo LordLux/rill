@@ -10,6 +10,7 @@ import '../../theme/tokens.dart';
 import '../focus_ring.dart';
 import '../focus_surface.dart';
 import '../queue_controller.dart';
+import '../spoken.dart';
 import 'channel_badge.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
 
@@ -960,6 +961,23 @@ class _QueueItemTileState extends State<_QueueItemTile> {
     );
   }
 
+  /// What a screen reader says for the row: title, channel, whether it is playing, length.
+  String _rowLabel() {
+    final tone = durationToneFor(widget.item);
+    final clock = formatVideoDuration(widget.item);
+    final length = switch (tone) {
+      DurationBadgeTone.station => 'Station',
+      DurationBadgeTone.live => 'Live',
+      _ => clock == null ? null : '${spokenClock(clock) ?? clock} long',
+    };
+    return [
+      widget.item.title,
+      widget.item.channelName,
+      if (widget.isCurrent) 'now playing',
+      ?length,
+    ].where((part) => part.isNotEmpty).join(', ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final inert = widget.clearing || widget.removing;
@@ -979,12 +997,16 @@ class _QueueItemTileState extends State<_QueueItemTile> {
         },
         child: Stack(
         children: [
+          // The row is one thing to listen to — "title, channel, duration" — with its Remove
+          // and Reorder as separate nodes of their own (`container: true`); left to merge, the
+          // row read as "group", and the handle read the whole row followed by its hint.
           ListTile(
             selected: widget.isCurrent,
             selectedTileColor: widget.scheme.surfaceContainerHigh,
             mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
-            leading: SizedBox(
+            leading: ExcludeSemantics(
+              child: SizedBox(
               width: 82,
               height: 60,
               child: ClipRRect(
@@ -1006,34 +1028,43 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                 ),
               ),
             ),
-            title: Text(
-              widget.item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 14,
-                color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
+            ),
+            // The row's one name lives on its title, which is what the tile's own tap node
+            // merges: a label on a wrapper around the tile never reached it.
+            title: Semantics(
+              label: _rowLabel(),
+              excludeSemantics: true,
+              child: Text(
+                widget.item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
+                ),
               ),
             ),
-            subtitle: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    widget.item.channelName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+            subtitle: ExcludeSemantics(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      widget.item.channelName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+                    ),
                   ),
-                ),
-                ChannelBadge(
-                  channelId: widget.item.channelId,
-                  isArtistChannel: widget.item.isArtistChannel,
-                  isVerified: widget.item.isVerified,
-                  size: 12,
-                  paddingLeft: 4,
-                ),
-              ],
+                  ChannelBadge(
+                    channelId: widget.item.channelId,
+                    isArtistChannel: widget.item.isArtistChannel,
+                    isVerified: widget.item.isVerified,
+                    size: 12,
+                    paddingLeft: 4,
+                  ),
+                ],
+              ),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1043,14 +1074,19 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                   crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
                   firstChild: Tooltip(
                     message: 'Remove',
+                    excludeFromSemantics: true,
                     waitDuration: const Duration(milliseconds: 300),
                     preferBelow: false,
                     showDuration: const Duration(milliseconds: 800),
                     exitDuration: const Duration(milliseconds: 0),
-                    child: IconButton(
-                      mouseCursor: SystemMouseCursors.click,
-                      icon: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant),
-                      onPressed: widget.onRemove,
+                    child: Semantics(
+                      container: true,
+                      label: 'Remove ${widget.item.title} from queue',
+                      child: IconButton(
+                        mouseCursor: SystemMouseCursors.click,
+                        icon: ExcludeSemantics(child: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant)),
+                        onPressed: widget.onRemove,
+                      ),
                     ),
                   ),
                   secondChild: const SizedBox.shrink(),
@@ -1063,7 +1099,9 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                     child: Focus(
                       onKeyEvent: _onHandleKey,
                       child: Semantics(
-                        label: 'Reorder. Use the up and down arrow keys to move this video.',
+                        container: true,
+                        label: 'Reorder ${widget.item.title}',
+                        hint: 'Use the up and down arrow keys to move it',
                         child: ReorderableDragStartListener(
                           index: widget.index,
                           child: MouseRegion(
