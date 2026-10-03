@@ -532,24 +532,24 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                 child: Semantics(
                   label: 'Submit search',
                   child: InkWell(
-                  onTap: () => _submit(_controller.text),
-                  borderRadius: const BorderRadius.only(
-                    topRight: Radius.circular(40),
-                    bottomRight: Radius.circular(40),
-                  ),
-                  mouseCursor: SystemMouseCursors.click,
-                  child: Container(
-                    width: 48,
-                    decoration: BoxDecoration(
-                      border: Border(
-                        left: BorderSide(color: scheme.outlineVariant, width: 1),
+                    onTap: () => _submit(_controller.text),
+                    borderRadius: const BorderRadius.only(
+                      topRight: Radius.circular(40),
+                      bottomRight: Radius.circular(40),
+                    ),
+                    mouseCursor: SystemMouseCursors.click,
+                    child: Container(
+                      width: 48,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          left: BorderSide(color: scheme.outlineVariant, width: 1),
+                        ),
+                      ),
+                      child: Center(
+                        child: Icon(Icons.search, color: scheme.onSurface, size: 20),
                       ),
                     ),
-                    child: Center(
-                      child: Icon(Icons.search, color: scheme.onSurface, size: 20),
-                    ),
                   ),
-                ),
                 ),
               ),
             ),

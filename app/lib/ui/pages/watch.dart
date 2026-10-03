@@ -1615,56 +1615,56 @@ class _ActionChip extends StatelessWidget {
           child: Semantics(
             label: semanticLabel ?? text,
             child: InkWell(
-            // The pill's own shape, so the focus ring is a pill too.
-            customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-            mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
-            onTap: disabled ? null : onTap,
-            child: ExcludeSemantics(
-              child: SizedBox(
-              height: 36,
-              child: Padding(
-                // 9 + 18 + 9 = the 36 the collapsed pill was already square at.
-                padding: const EdgeInsets.symmetric(horizontal: 9),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      (active || marked) ? (activeIcon ?? icon) : icon,
-                      size: 18,
-                      color: foreground,
-                    ),
-                    if (text != null)
-                      ClipRect(
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween<double>(end: expanded ? 1 : 0),
-                          duration: _chipMorph,
-                          curve: Curves.easeOut,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 8, right: 5),
-                            child: Text(
-                              text,
-                              maxLines: 1,
-                              softWrap: false,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: foreground,
+              // The pill's own shape, so the focus ring is a pill too.
+              customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
+              onTap: disabled ? null : onTap,
+              child: ExcludeSemantics(
+                child: SizedBox(
+                  height: 36,
+                  child: Padding(
+                    // 9 + 18 + 9 = the 36 the collapsed pill was already square at.
+                    padding: const EdgeInsets.symmetric(horizontal: 9),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          (active || marked) ? (activeIcon ?? icon) : icon,
+                          size: 18,
+                          color: foreground,
+                        ),
+                        if (text != null)
+                          ClipRect(
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween<double>(end: expanded ? 1 : 0),
+                              duration: _chipMorph,
+                              curve: Curves.easeOut,
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 8, right: 5),
+                                child: Text(
+                                  text,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: foreground,
+                                  ),
+                                ),
+                              ),
+                              builder: (context, reveal, child) => Align(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: reveal,
+                                child: child,
                               ),
                             ),
                           ),
-                          builder: (context, reveal, child) => Align(
-                            alignment: Alignment.centerLeft,
-                            widthFactor: reveal,
-                            child: child,
-                          ),
-                        ),
-                      ),
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
-            ),
-          ),
           ),
         );
       },

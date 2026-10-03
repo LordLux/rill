@@ -824,20 +824,20 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
                   container: true,
                   label: '${expanded ? 'Hide' : 'Show'} $replyCount ${replyCount == 1 ? 'reply' : 'replies'}',
                   child: TextButton(
-                  style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),
-                  onPressed: () => _toggleReplies(thread),
-                  child: ExcludeSemantics(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(width: 4),
-                        Text(expanded ? 'Hide replies' : (replyCount > 0 ? '$replyCount replies' : 'Show replies')),
-                        const SizedBox(width: 4),
-                        Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16),
-                      ],
+                    style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),
+                    onPressed: () => _toggleReplies(thread),
+                    child: ExcludeSemantics(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(width: 4),
+                          Text(expanded ? 'Hide replies' : (replyCount > 0 ? '$replyCount replies' : 'Show replies')),
+                          const SizedBox(width: 4),
+                          Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16),
+                        ],
+                      ),
                     ),
                   ),
-                ),
                 ),
               ),
           ],
