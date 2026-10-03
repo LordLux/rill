@@ -819,6 +819,9 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
                 padding: const EdgeInsets.only(top: 8.0),
                 // Said as what pressing it does: "Show 5 replies", not the bare "5 replies".
                 child: Semantics(
+                  // `container`, or the label merges into the *comment's* node ("... can confirm,
+                  // Show 962 replies") and the button itself is left nameless.
+                  container: true,
                   label: '${expanded ? 'Hide' : 'Show'} $replyCount ${replyCount == 1 ? 'reply' : 'replies'}',
                   child: TextButton(
                   style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),

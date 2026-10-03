@@ -281,7 +281,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
         _needsRender = false;
         final myRequestId = _renderRequestId;
 
-        debugPrint('[${_ts()}] LibassLayer: _renderLoop starting. currentAss length: ${_currentAss?.length}, targetAss length: ${_targetAss?.length}');
+        // debugPrint('[${_ts()}] LibassLayer: _renderLoop starting. currentAss length: ${_currentAss?.length}, targetAss length: ${_targetAss?.length}');
 
         if (_currentAss != _targetAss) {
           _currentAss = _targetAss;
