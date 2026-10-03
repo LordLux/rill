@@ -14,6 +14,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/gestures.dart';
@@ -88,6 +89,25 @@ Future<void> _probe(ProviderContainer container, String mode) async {
     if (size.length == 2 && size[0] != null && size[1] != null) {
       appWindow.size = Size(size[0]!, size[1]!);
       await _wait(2000);
+    }
+
+    if (mode == 'keystate') {
+      // The Alt+Tab case: Alt goes down in this window and its release goes elsewhere. Does
+      // the platform answer "what is down", and does coming back clear the stale Alt?
+      HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.altLeft, logicalKey: LogicalKeyboardKey.altLeft, timeStamp: Duration.zero));
+      _say('KEYSTATE alt held in Flutter: ${HardwareKeyboard.instance.isAltPressed}');
+      try {
+        final state = await SystemChannels.keyboard.invokeMapMethod<int, int>('getKeyboardState');
+        _say('KEYSTATE platform answers: ${state == null ? 'null' : '${state.length} keys down'}');
+      } on Object catch (error) {
+        _say('KEYSTATE platform query failed: $error');
+      }
+      WidgetsBinding.instance.handleViewFocusChanged(const ViewFocusEvent(viewId: 0, state: ViewFocusState.focused, direction: ViewFocusDirection.undefined));
+      await _wait(500);
+      _say('KEYSTATE after the window got the keyboard back: alt held = ${HardwareKeyboard.instance.isAltPressed}');
+      _say('done');
+      await stderr.flush();
+      return;
     }
 
     if (mode == 'videochange') {
