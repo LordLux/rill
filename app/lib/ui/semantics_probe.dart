@@ -19,6 +19,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -137,7 +138,7 @@ void _dumpTree(String label) {
     out.writeln('${'  ' * depth}#${node.id} rect=${r.left.round()},${r.top.round()} ${r.width.round()}x${r.height.round()} '
         'label="${data.label.replaceAll('\n', ' / ')}" value="${data.value}" tooltip="${data.tooltip}" '
         'hidden=${node.isInvisible} merged=${node.isMergedIntoParent} '
-        'actions=${data.actions}');
+        'actions=${data.actions}${data.flagsCollection.isFocused == Tristate.isTrue ? ' FOCUSED' : ''}');
     node.visitChildren((child) {
       walk(child, depth + 1);
       return true;
