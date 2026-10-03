@@ -14,6 +14,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/gestures.dart';
@@ -26,6 +27,7 @@ import 'player/controls.dart';
 import 'player/view_mode.dart';
 import '../domain/youtube_link.dart';
 import 'player_shell.dart';
+import 'queue_controller.dart';
 void runFocusProbe(ProviderContainer container) {
   final mode = Platform.environment['RILL_FOCUS_PROBE'];
   if (mode == null || mode.isEmpty) return;
@@ -87,6 +89,84 @@ Future<void> _probe(ProviderContainer container, String mode) async {
     if (size.length == 2 && size[0] != null && size[1] != null) {
       appWindow.size = Size(size[0]!, size[1]!);
       await _wait(2000);
+    }
+
+    if (mode == 'keystate') {
+      // The Alt+Tab case: Alt goes down in this window and its release goes elsewhere. Does
+      // the platform answer "what is down", and does coming back clear the stale Alt?
+      HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.altLeft, logicalKey: LogicalKeyboardKey.altLeft, timeStamp: Duration.zero));
+      _say('KEYSTATE alt held in Flutter: ${HardwareKeyboard.instance.isAltPressed}');
+      try {
+        final state = await SystemChannels.keyboard.invokeMapMethod<int, int>('getKeyboardState');
+        _say('KEYSTATE platform answers: ${state == null ? 'null' : '${state.length} keys down'}');
+      } on Object catch (error) {
+        _say('KEYSTATE platform query failed: $error');
+      }
+      WidgetsBinding.instance.handleViewFocusChanged(const ViewFocusEvent(viewId: 0, state: ViewFocusState.focused, direction: ViewFocusDirection.undefined));
+      await _wait(500);
+      _say('KEYSTATE after the window got the keyboard back: alt held = ${HardwareKeyboard.instance.isAltPressed}');
+      _say('done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'videochange') {
+      // Keyboard on a player control, then the video changes (next in the queue, a new video):
+      // do shortcuts and Tab still work, and is focus still on something that exists?
+      openWatchIn(container, placeholderVideoItem('dQw4w9WgXcQ'));
+      container.read(queueProvider.notifier).addToQueue(placeholderVideoItem('9bZkp7q19f0'));
+      container.read(queueProvider.notifier).addToQueue(placeholderVideoItem('kJQP7kiw5Fk'));
+      await _wait(12000);
+
+      void key(LogicalKeyboardKey logical, PhysicalKeyboardKey physical, {bool shift = false}) {
+        if (shift) {
+          HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.shiftLeft, logicalKey: LogicalKeyboardKey.shiftLeft, timeStamp: Duration.zero));
+        }
+        HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero));
+        HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero));
+        if (shift) {
+          HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: PhysicalKeyboardKey.shiftLeft, logicalKey: LogicalKeyboardKey.shiftLeft, timeStamp: Duration.zero));
+        }
+      }
+
+      String focusState() {
+        final f = FocusManager.instance.primaryFocus;
+        final c = f?.context;
+        return 'focus=${f?.debugLabel ?? f.runtimeType} ctx=${c == null ? 'none' : (c.mounted ? 'mounted' : 'UNMOUNTED')} mode=${FocusManager.instance.highlightMode.name}';
+      }
+
+      Future<void> check(String when) async {
+        final before = container.read(playerViewProvider).theatre;
+        key(LogicalKeyboardKey.keyT, PhysicalKeyboardKey.keyT);
+        await _wait(300);
+        final after = container.read(playerViewProvider).theatre;
+        _say('SHORTCUT $when: "t" ${before != after ? 'WORKED' : 'DID NOTHING'}; ${focusState()}');
+        if (after != before) container.read(playerViewProvider.notifier).toggleTheatre();
+        key(LogicalKeyboardKey.tab, PhysicalKeyboardKey.tab);
+        await _wait(300);
+        _say('TAB $when: ${focusState()}');
+      }
+
+      // Walk Tab onto the player's controls first.
+      for (var i = 0; i < 16; i++) {
+        key(LogicalKeyboardKey.tab, PhysicalKeyboardKey.tab);
+        await _wait(150);
+      }
+      _say('KEYBOARD on a control: ${focusState()}');
+      await check('before');
+
+      for (final how in ['Shift+N', 'Shift+N', 'a new video']) {
+        if (how == 'Shift+N') {
+          key(LogicalKeyboardKey.keyN, PhysicalKeyboardKey.keyN, shift: true);
+        } else {
+          openWatchIn(container, placeholderVideoItem('3JZ_D3ELwOQ'));
+        }
+        await _wait(9000);
+        await check('after $how');
+      }
+      _say('done');
+      await stderr.flush();
+      return;
     }
 
     if (mode == 'controlhover') {
