@@ -527,7 +527,11 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
               ),
               child: Tooltip(
                 message: 'Search',
-                child: InkWell(
+                // Said as what it does, not as its tooltip: the field beside it is "Search".
+                excludeFromSemantics: true,
+                child: Semantics(
+                  label: 'Submit search',
+                  child: InkWell(
                   onTap: () => _submit(_controller.text),
                   borderRadius: const BorderRadius.only(
                     topRight: Radius.circular(40),
@@ -545,6 +549,7 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
                       child: Icon(Icons.search, color: scheme.onSurface, size: 20),
                     ),
                   ),
+                ),
                 ),
               ),
             ),

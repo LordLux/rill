@@ -33,6 +33,7 @@ import '../../data/playback/engine.dart';
 import '../../domain/playback_source.dart';
 import '../../domain/player_controls_visibility.dart';
 import '../../theme/tokens.dart';
+import '../spoken.dart';
 import 'volume_bar.dart';
 import '../captions_controller.dart';
 import '../playback_controller.dart';
@@ -1387,6 +1388,9 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
                           value: value,
                           max: max,
                           secondaryTrackValue: bufferedMs.clamp(value, max),
+                          // The position as a duration, not "8%": the value is milliseconds.
+                          semanticFormatterCallback: (v) =>
+                              '${spokenDuration(Duration(milliseconds: v.round()))} of ${spokenDuration(Duration(milliseconds: max.round()))}',
                           onChanged: widget.enabled ? handleDrag : null,
                           onChangeEnd: widget.enabled ? handleDragEnd : null,
                         ),
@@ -1496,6 +1500,7 @@ class _Clock extends StatelessWidget {
 
         return Text(
           '${formatClock(position)} / ${formatClock(duration)}',
+          semanticsLabel: '${spokenDuration(position)} of ${spokenDuration(duration)}',
           // One line, clipped. Inside the `Expanded` above, a narrow bar hands
           // this a tight width, and the default wrap would make the clock two
           // lines tall and take the whole control bar with it.
@@ -1609,6 +1614,7 @@ class _VolumeState extends ConsumerState<_Volume> {
                     height: 40,
                     child: ShortcutTooltip(
                       silent: true,
+                      announce: false, // the bar says "Volume 100%" itself
                       label: 'Volume: ${volume.round()}%',
                       // Not mounted while collapsed, so Tab cannot land on it. Not a
                       // Material `Slider`: that one's value-indicator `OverlayPortal`
@@ -1707,6 +1713,7 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
                         quarterTurns: 3,
                         child: ShortcutTooltip(
                           silent: true,
+                          announce: false,
                           label: 'Volume: ${volume.round()}%',
                           child: !_open
                               ? const SizedBox.shrink()

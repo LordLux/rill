@@ -817,18 +817,24 @@ class _CommentsSectionState extends ConsumerState<CommentsSection> {
             if (replyCount > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
-                child: TextButton(
+                // Said as what pressing it does: "Show 5 replies", not the bare "5 replies".
+                child: Semantics(
+                  label: '${expanded ? 'Hide' : 'Show'} $replyCount ${replyCount == 1 ? 'reply' : 'replies'}',
+                  child: TextButton(
                   style: TextButton.styleFrom(enabledMouseCursor: SystemMouseCursors.click),
                   onPressed: () => _toggleReplies(thread),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(width: 4),
-                      Text(expanded ? 'Hide replies' : (replyCount > 0 ? '$replyCount replies' : 'Show replies')),
-                      const SizedBox(width: 4),
-                      Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16),
-                    ],
+                  child: ExcludeSemantics(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: 4),
+                        Text(expanded ? 'Hide replies' : (replyCount > 0 ? '$replyCount replies' : 'Show replies')),
+                        const SizedBox(width: 4),
+                        Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16),
+                      ],
+                    ),
                   ),
+                ),
                 ),
               ),
           ],

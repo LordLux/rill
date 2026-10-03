@@ -1175,9 +1175,11 @@ class _ActionsState extends ConsumerState<_Actions> {
 
         // Share
         ShortcutTooltip(
+          announce: false,
           label: 'Share',
           child: _ActionChip(
             icon: Icons.reply,
+            semanticLabel: 'Share',
             activeLabel: 'Share',
             active: _sheet == _OpenSheet.share,
             onTap: openShare,
@@ -1186,8 +1188,10 @@ class _ActionsState extends ConsumerState<_Actions> {
 
         // Playlist
         ShortcutTooltip(
+          announce: false,
           label: cannotSave ?? 'Save to playlist',
           child: _ActionChip(
+            semanticLabel: cannotSave ?? 'Save to playlist',
             icon: Icons.playlist_add,
             activeIcon: Icons.playlist_add_check,
             activeLabel: 'Save',
@@ -1199,8 +1203,10 @@ class _ActionsState extends ConsumerState<_Actions> {
 
         // Watch Later
         ShortcutTooltip(
+          announce: false,
           label: cannotSave ?? (inWatchLater ? 'Remove from Watch Later' : 'Watch Later'),
           child: _ActionChip(
+            semanticLabel: cannotSave ?? (inWatchLater ? 'Remove from Watch Later' : 'Watch Later'),
             icon: Icons.schedule,
             activeIcon: Icons.check,
             activeLabel: 'Watch Later',
@@ -1213,6 +1219,7 @@ class _ActionsState extends ConsumerState<_Actions> {
 
         // More
         ShortcutTooltip(
+          announce: false,
           label: 'More',
           child: _ActionChip(
             icon: Icons.more_horiz,
@@ -1603,12 +1610,17 @@ class _ActionChip extends StatelessWidget {
                   ),
           ),
           clipBehavior: Clip.antiAlias,
-          child: InkWell(
+          // The name is said once, here. The glyph, the expanding text and the tooltip all
+          // used to carry it too, and Narrator read it two or three times.
+          child: Semantics(
+            label: semanticLabel ?? text,
+            child: InkWell(
             // The pill's own shape, so the focus ring is a pill too.
             customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
             onTap: disabled ? null : onTap,
-            child: SizedBox(
+            child: ExcludeSemantics(
+              child: SizedBox(
               height: 36,
               child: Padding(
                 // 9 + 18 + 9 = the 36 the collapsed pill was already square at.
@@ -1620,7 +1632,6 @@ class _ActionChip extends StatelessWidget {
                       (active || marked) ? (activeIcon ?? icon) : icon,
                       size: 18,
                       color: foreground,
-                      semanticLabel: semanticLabel ?? text,
                     ),
                     if (text != null)
                       ClipRect(
@@ -1652,6 +1663,8 @@ class _ActionChip extends StatelessWidget {
                 ),
               ),
             ),
+            ),
+          ),
           ),
         );
       },

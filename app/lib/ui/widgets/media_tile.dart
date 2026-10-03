@@ -12,6 +12,7 @@ import '../focus_surface.dart';
 import '../hover_preview.dart';
 import 'channel_badge.dart';
 import '../open_video.dart';
+import '../spoken.dart';
 import 'shortcut_tooltip.dart';
 
 // ---- TEMPORARY: unfed tile slots ----
@@ -493,6 +494,45 @@ class _MediaTileState extends State<MediaTile> {
     );
   }
 
+  /// What a screen reader says for the tile, in the order that matters: what kind of thing it
+  /// is, its title, who made it, then (last) how long it is.
+  ///
+  /// A mix is not announced as one — its title already says "Mix". Live and station say so
+  /// instead of a length, music says "Music Video", an ordinary video says "Video".
+  /// Built here rather than left to merge the tile's texts, which read the duration first,
+  /// as digits ("twelve fifty"), and a mix's badge twice.
+  String _narration() {
+    final spec = widget.spec;
+    final lengthText = spec.durationText;
+    final isCount = lengthText != null && lengthText.endsWith('videos');
+    final length = switch (spec.durationTone) {
+      DurationBadgeTone.live || DurationBadgeTone.station || DurationBadgeTone.mix => null,
+      _ when lengthText == null => null,
+      _ when isCount => lengthText,
+      _ => '${spokenClock(lengthText) ?? lengthText} long',
+    };
+    final kind = switch (spec.durationTone) {
+      DurationBadgeTone.live => 'Live',
+      DurationBadgeTone.station => 'Station',
+      DurationBadgeTone.mix => null,
+      DurationBadgeTone.music => 'Music Video',
+      DurationBadgeTone.normal => spec.isStackedCards ? 'Playlist' : (spec.isShort ? 'Short' : 'Video'),
+    };
+    final secondary = spec.isShort ? spec.secondaryLine : null;
+    return [
+      ?kind,
+      spec.title,
+      spec.primaryLine,
+      ?secondary,
+      if (spec.isMembersOnly) 'Members only',
+      ...spec.badges,
+      ?length,
+    ].where((part) => part.trim().isNotEmpty).join(', ');
+  }
+
+  /// A piece of the tile that [_narration] already says: kept on screen, out of the tree.
+  Widget _quiet(Widget child) => ExcludeSemantics(child: child);
+
   String _getBadgeText(bool isStation, bool isLive, bool isMix) {
     if (isStation) return 'STATION';
     if (isLive) return 'LIVE';
@@ -719,7 +759,7 @@ class _MediaTileState extends State<MediaTile> {
                                 _isPreviewing(session)
                                 ? const SizedBox.shrink()
                                 : child!,
-                            child: _durationBadge(tokens),
+                            child: _quiet(_durationBadge(tokens)),
                           ),
                         ),
                       ),
@@ -786,7 +826,7 @@ class _MediaTileState extends State<MediaTile> {
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            Column(
+            _quiet(Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.start,
           children: [
@@ -872,7 +912,7 @@ class _MediaTileState extends State<MediaTile> {
               isMembersOnly: widget.spec.isMembersOnly,
             ),
           ],
-            ),
+            )),
             Positioned(
               top: -1,
               right: -2,
@@ -914,7 +954,7 @@ class _MediaTileState extends State<MediaTile> {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-            Column(
+            _quiet(Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -1021,7 +1061,7 @@ class _MediaTileState extends State<MediaTile> {
                     ),
                   ),
               ],
-            ),
+            )),
                 Positioned(
                   top: -1,
                   right: -4,
@@ -1085,7 +1125,11 @@ class _MediaTileState extends State<MediaTile> {
             // is a target. `deferToChild` would leave the padding dead, which reads
             // as a tile that only sometimes opens.
             behavior: HitTestBehavior.opaque,
-            child: Stack(
+            // The tile's one name; its buttons (hover actions, the 3-dot menu) stay
+            // separate nodes of their own.
+            child: Semantics(
+              label: _narration(),
+              child: Stack(
               clipBehavior: Clip.none,
               children: [
                 AnimatedPositioned(
@@ -1114,6 +1158,7 @@ class _MediaTileState extends State<MediaTile> {
                   child: layout,
                 ),
               ],
+            ),
             ),
           ),
           ),
