@@ -79,6 +79,39 @@ void main() {
     });
   });
 
+  group('isSignOutCookie', () {
+    test('every cookie the reader depends on is deleted by a sign-out', () {
+      // Task 33 §3. Mutation: drop any name the reader knows from
+      // `kSignOutCookieNames` and this fails — that name would survive a
+      // sign-out and still satisfy, or still be sent by, the next read.
+      for (final name in {...kRequiredCookies, ...kSessionCookies}) {
+        for (final domain in ['.youtube.com', '.google.com']) {
+          expect(isSignOutCookie(name, domain), isTrue, reason: '$name @ $domain');
+        }
+      }
+    });
+
+    test('the country domain is matched by shape, not listed', () {
+      expect(isSignOutCookie('SID', '.google.it'), isTrue);
+      expect(isSignOutCookie('SID', '.google.co.uk'), isTrue);
+      expect(isSignOutCookie('SID', '.google.com.br'), isTrue);
+      expect(isSignOutCookie('LSID', 'accounts.google.com'), isTrue);
+    });
+
+    test('the device-trust mark and the anonymous cookies are kept', () {
+      expect(isSignOutCookie('SMSV', 'accounts.google.com'), isFalse);
+      expect(isSignOutCookie('__Host-GAPS', 'accounts.google.com'), isFalse);
+      expect(isSignOutCookie('OTZ', 'accounts.google.com'), isFalse);
+      expect(isSignOutCookie('PREF', '.youtube.com'), isFalse);
+    });
+
+    test('a session name on a domain that is not Google\'s is not ours to delete', () {
+      expect(isSignOutCookie('SID', '.example.com'), isFalse);
+      expect(isSignOutCookie('SID', '.notgoogle.com'), isFalse);
+      expect(isSignOutCookie('SID', '.google.com.evil.example'), isFalse);
+    });
+  });
+
   group('mergeJars', () {
     test('YouTube wins a collision', () {
       // Both origins carry `SID`, and the value scoped to the host the header

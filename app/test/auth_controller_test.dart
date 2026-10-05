@@ -15,8 +15,10 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/data/auth/cookie_jar_dump.dart';
 import 'package:rill/data/auth/credential_store.dart';
 import 'package:rill/data/auth/web_session_cookies.dart';
+import 'package:rill/data/auth/youtube_cookies.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/ui/auth_controller.dart';
 
@@ -43,6 +45,92 @@ class FakeJar implements WebSessionCookies {
     jar = {};
   }
 }
+
+/// A jar store holding cookies by name and domain — Task 33's fake.
+///
+/// No values: the real listing has none either.
+class FakeJarStore implements JarStore {
+  FakeJarStore(Iterable<(String, String)> cookies, {this.listFails = false, this.deletesIgnored = false})
+      : cookies = [for (final (name, domain) in cookies) _cookie(name, domain)];
+
+  List<JarCookie> cookies;
+  final bool listFails;
+
+  /// A delete that reports success and removes nothing, which is how a
+  /// DevTools-protocol delete that matched no cookie behaves.
+  final bool deletesIgnored;
+  int wipes = 0;
+
+  static JarCookie _cookie(String name, String domain) => JarCookie(
+        name: name,
+        domain: domain,
+        path: '/',
+        isSessionOnly: false,
+        isHttpOnly: true,
+        isSecure: true,
+        isPartitioned: false,
+      );
+
+  Set<String> get names => {for (final c in cookies) '${c.name} @ ${c.domain}'};
+
+  @override
+  Future<List<JarCookie>?> list() async => listFails ? null : [...cookies];
+
+  @override
+  Future<void> delete(JarCookie cookie) async {
+    if (deletesIgnored) return;
+    cookies.removeWhere((c) => c.name == cookie.name && c.domain == cookie.domain);
+  }
+
+  @override
+  Future<void> deleteAll() async {
+    wipes += 1;
+    cookies = [];
+  }
+}
+
+/// The jar's real sign-out rule, over a [FakeJarStore].
+class StoreBackedJar implements WebSessionCookies {
+  StoreBackedJar(this.store);
+
+  final FakeJarStore store;
+
+  @override
+  Future<Map<String, String>> read() async => {};
+
+  @override
+  Future<void> clear() => clearSessionCookies(store);
+}
+
+/// What a signed-in jar held after ticking "Don't ask again" — the user's dump
+/// of 2026-10-06, names and domains (`architecture.md` F53).
+final List<(String, String)> signedInJar = [
+  for (final domain in ['.google.com', '.google.it', '.youtube.com']) ...[
+    ('APISID', domain),
+    ('HSID', domain),
+    ('SAPISID', domain),
+    ('SID', domain),
+    ('SSID', domain),
+    ('__Secure-1PAPISID', domain),
+    ('__Secure-1PSID', domain),
+    ('__Secure-3PAPISID', domain),
+    ('__Secure-3PSID', domain),
+  ],
+  ('SIDCC', '.google.com'),
+  ('__Secure-1PSIDCC', '.google.com'),
+  ('__Secure-3PSIDCC', '.google.com'),
+  ('__Secure-1PSIDTS', '.youtube.com'),
+  ('__Secure-3PSIDTS', '.youtube.com'),
+  ('__Secure-ENID', '.google.com'),
+  ('NID', '.google.it'),
+  ('ACCOUNT_CHOOSER', 'accounts.google.com'),
+  ('LSID', 'accounts.google.com'),
+  ('__Host-1PLSID', 'accounts.google.com'),
+  ('__Host-3PLSID', 'accounts.google.com'),
+  ('OTZ', 'accounts.google.com'),
+  ('SMSV', 'accounts.google.com'),
+  ('__Host-GAPS', 'accounts.google.com'),
+];
 
 late InMemoryCredentialStore store;
 late FakeJar jar;
@@ -249,6 +337,63 @@ void main() {
       expect(store.isEmpty, isTrue);
       expect((await authLog())['signOuts'], 1);
       expect(state.status, AuthStatus.anonymous);
+    });
+
+    group('the WebView jar (Task 33)', () {
+      Future<FakeJarStore> signOutOver(FakeJarStore jarStore) async {
+        await auth.signIn(goodCookie);
+        container = ProviderContainer(overrides: [
+          credentialStoreProvider.overrideWithValue(store),
+          webSessionCookiesProvider.overrideWithValue(StoreBackedJar(jarStore)),
+        ]);
+        await auth.signOut();
+        return jarStore;
+      }
+
+      test('deletes the session set and only the session set', () async {
+        final jarStore = await signOutOver(FakeJarStore(signedInJar));
+
+        expect(jarStore.cookies.where((c) => isSignOutCookie(c.name, c.domain)), isEmpty);
+        // Exactly what stays: the device-trust mark, and what an anonymous
+        // visitor has anyway. A full wipe would leave this empty.
+        expect(jarStore.names, {
+          'SMSV @ accounts.google.com',
+          '__Host-GAPS @ accounts.google.com',
+          'OTZ @ accounts.google.com',
+          '__Secure-ENID @ .google.com',
+          'NID @ .google.it',
+        });
+        expect(jarStore.wipes, 0);
+      });
+
+      test('the other three stores are still cleared', () async {
+        await signOutOver(FakeJarStore(signedInJar));
+        expect(store.isEmpty, isTrue);
+        expect((await authLog())['signOuts'], 1);
+        expect(state.status, AuthStatus.anonymous);
+      });
+
+      test('a session cookie that survives its delete empties the whole jar', () async {
+        // Losing the device mark costs a second step. A surviving session
+        // cookie signs the next person in as this account.
+        final jarStore = await signOutOver(FakeJarStore(signedInJar, deletesIgnored: true));
+        expect(jarStore.wipes, 1);
+        expect(jarStore.cookies, isEmpty);
+      });
+
+      test('a jar that cannot be listed is emptied', () async {
+        final jarStore = await signOutOver(FakeJarStore(signedInJar, listFails: true));
+        expect(jarStore.wipes, 1);
+        expect(jarStore.cookies, isEmpty);
+      });
+
+      test('a jar with no session in it is left alone', () async {
+        final jarStore = await signOutOver(
+          FakeJarStore(const [('SMSV', 'accounts.google.com'), ('PREF', '.youtube.com')]),
+        );
+        expect(jarStore.names, {'SMSV @ accounts.google.com', 'PREF @ .youtube.com'});
+        expect(jarStore.wipes, 0);
+      });
     });
 
     test('signing in again re-verifies rather than reusing the old session', () async {
