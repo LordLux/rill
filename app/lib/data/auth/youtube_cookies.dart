@@ -59,7 +59,9 @@ const Set<String> kSessionCookies = {
 /// has to be deleted (`youtube_cookies_test.dart` holds that).
 ///
 /// Not here, and so kept by a sign-out: `SMSV`, which is the "Don't ask again
-/// on this device" mark, and the cookies an anonymous visitor gets anyway.
+/// on this device" mark; `ACCOUNT_CHOOSER`, so the next sign-in offers the
+/// addresses used here before (it still asks for the password); and the
+/// cookies an anonymous visitor gets anyway.
 const Set<String> kSignOutCookieNames = {
   // The session, on `.youtube.com`, `.google.com` and `.google.<country>`.
   'SID',
@@ -85,7 +87,6 @@ const Set<String> kSignOutCookieNames = {
   '__Host-1PLSID',
   '__Host-3PLSID',
   '__Host-GAPSTS',
-  'ACCOUNT_CHOOSER',
 };
 
 /// `youtube.com`, `google.com` or `google.<country>`, and any host under one.
