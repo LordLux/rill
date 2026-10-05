@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 
 import '../data/connectivity.dart';
+import '../data/auth/cookie_jar_dump.dart';
 import '../data/auth/credential_store.dart';
 import '../data/auth/web_session_cookies.dart';
 import '../data/log_capture.dart';
@@ -227,6 +228,7 @@ class AuthController extends Notifier<AuthState> {
       // page is a round trip per surface for no new information.
       if (status == AuthStatus.authenticated) {
         ref.read(authRefreshProvider.notifier).bump();
+        await dumpCookieJar('after sign-in');
       }
       return status;
     } on Object catch (error) {
@@ -257,6 +259,7 @@ class AuthController extends Notifier<AuthState> {
     // login flow ignoring the user rather than like a sign-out that did not
     // finish.
     await _attempt('WebView2 cookie jar', () => _jar.clear());
+    await dumpCookieJar('after sign-out');
 
     state = const AuthState(status: AuthStatus.anonymous);
     // The fourth thing §5 lists — "any cached feed". Every loaded surface

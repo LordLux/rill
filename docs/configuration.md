@@ -41,6 +41,7 @@ This document lists all the environment variables read across the Rill project (
 | Variable | File | Purpose |
 | --- | --- | --- |
 | `RILL_AUTH_PROBE` | `main.dart`, `ui/auth_probe.dart` | Launch the auth probe |
+| `RILL_COOKIE_DUMP` | `data/auth/cookie_jar_dump.dart` | `1`: log the whole WebView2 cookie jar, every domain, at startup and after each sign-in and sign-out (`cookie-dump [...]:` lines). Names, domains and flags only; the value never leaves the native side |
 | `RILL_AUDIO_PROBE` | `main.dart` | Launch audio delay probe |
 | `RILL_AUDIO_PROBE_VERBOSE` | `main.dart` | Verbose audio probe output |
 | `RILL_AUDIO_PROBE_VIDEO` | `main.dart` | Video id for audio probe |

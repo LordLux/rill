@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../data/auth/cookie_jar_dump.dart';
 import '../data/auth/web_session_cookies.dart';
 import '../data/auth/youtube_cookies.dart';
 
@@ -108,7 +109,10 @@ class _AuthProbeAppState extends State<_AuthProbeApp> {
       }
       check('HttpOnly cookies are readable', flagged.isNotEmpty, 'saw $flagged');
 
+      // With `RILL_COOKIE_DUMP=1`: the whole jar, every domain (Task 33 §1).
+      await dumpCookieJar('auth-probe before clear');
       await source.clear();
+      await dumpCookieJar('auth-probe after clear');
       final after = await source.read();
       stderr.writeln('auth-probe: after clear, jar has ${after.length} cookie(s): '
           '${after.keys.toList()..sort()}');

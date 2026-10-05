@@ -82,6 +82,12 @@ namespace flutter_inappwebview_plugin
               result_->Success(deleted);
             });
         }
+        else if (string_equals(methodName, "getAllCookieNames")) {
+          getAllCookieNames(webViewEnvironment, [result_](const flutter::EncodableValue& cookies)
+            {
+              result_->Success(cookies);
+            });
+        }
         else {
           result_->NotImplemented();
         }
@@ -338,6 +344,54 @@ namespace flutter_inappwebview_plugin
 
     if (failedAndLog(hr) && completionHandler) {
       completionHandler(false);
+    }
+  }
+
+  // rill patch (Task 33): `Network.getAllCookies`, which is not filtered by URL the
+  // way `getCookies` is. The value is dropped here, on the native side, so no
+  // caller can log one. Answers null when the protocol call fails, which is not
+  // the same answer as an empty jar.
+  void CookieManager::getAllCookieNames(WebViewEnvironment* webViewEnvironment, std::function<void(const flutter::EncodableValue&)> completionHandler) const
+  {
+    if (!plugin || !plugin->webViewEnvironmentManager) {
+      if (completionHandler) {
+        completionHandler(make_fl_value());
+      }
+      return;
+    }
+
+    auto hr = webViewEnvironment->getWebView()->CallDevToolsProtocolMethod(L"Network.getAllCookies", L"{}", Callback<ICoreWebView2CallDevToolsProtocolMethodCompletedHandler>(
+      [completionHandler](HRESULT errorCode, LPCWSTR returnObjectAsJson)
+      {
+        if (!succeededOrLog(errorCode)) {
+          if (completionHandler) {
+            completionHandler(make_fl_value());
+          }
+          return S_OK;
+        }
+        std::vector<flutter::EncodableValue> cookies = {};
+        nlohmann::json json = nlohmann::json::parse(wide_to_utf8(returnObjectAsJson));
+        auto jsonCookies = json["cookies"].get<std::vector<nlohmann::json>>();
+        for (auto& jsonCookie : jsonCookies) {
+          cookies.push_back(flutter::EncodableMap{
+            {"name", jsonCookie["name"].get<std::string>()},
+            {"domain", jsonCookie["domain"].get<std::string>()},
+            {"path", jsonCookie["path"].get<std::string>()},
+            {"isHttpOnly", jsonCookie["httpOnly"].get<bool>()},
+            {"isSecure", jsonCookie["secure"].get<bool>()},
+            {"isSessionOnly", jsonCookie["session"].get<bool>()},
+            {"isPartitioned", jsonCookie.contains("partitionKey")}
+            });
+        }
+        if (completionHandler) {
+          completionHandler(flutter::EncodableValue(cookies));
+        }
+        return S_OK;
+      }
+    ).Get());
+
+    if (failedAndLog(hr) && completionHandler) {
+      completionHandler(make_fl_value());
     }
   }
 

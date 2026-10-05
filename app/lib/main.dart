@@ -24,6 +24,7 @@ import 'ui/key_diag.dart';
 import 'ui/keyboard_resync.dart';
 
 import 'ui/auth_controller.dart';
+import 'data/auth/cookie_jar_dump.dart';
 import 'ui/auth_probe.dart';
 import 'ui/debug_player.dart';
 import 'ui/hover_preview.dart';
@@ -146,6 +147,8 @@ Future<void> main() async {
   // `authRefreshProvider` when the answer lands. Anonymous browsing works
   // meanwhile, which is the whole reason it is a supported state.
   unawaited(container.read(authProvider.notifier).restore());
+  // `RILL_COOKIE_DUMP=1`: the WebView2 jar, names only (Task 33 §1).
+  unawaited(dumpCookieJar('startup'));
 
   _openOnLaunch(container);
   runControlsProbe(container);
