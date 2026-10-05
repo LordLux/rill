@@ -27,6 +27,7 @@ class ScrubberBar extends StatefulWidget {
     required this.onChanged,
     required this.onChangeEnd,
     required this.semanticFormatterCallback,
+    this.highlightSpan = (0.0, 1.0),
   });
 
   final double value;
@@ -42,6 +43,10 @@ class ScrubberBar extends StatefulWidget {
   /// What a screen reader is told the position is.
   final String Function(double value) semanticFormatterCallback;
 
+  /// The part of the track, as fractions of it, that lights the thumb's halo while the pointer is over
+  /// it: the current chapter's section, or the whole bar when there are none.
+  final (double, double) highlightSpan;
+
   /// How far a screen reader's increase and decrease actions move the position, in `max` units.
   static const double actionFraction = 0.05;
 
@@ -49,10 +54,58 @@ class ScrubberBar extends StatefulWidget {
   State<ScrubberBar> createState() => _ScrubberBarState();
 }
 
-class _ScrubberBarState extends State<ScrubberBar> {
+class _ScrubberBarState extends State<ScrubberBar> with TickerProviderStateMixin {
   /// Whether a press or drag is in progress, so `onChangeEnd` follows every `onChanged` run.
   bool _active = false;
   double _last = 0;
+
+  /// 0 to 1: the halo around the thumb, which grows while the pointer is on the thumb or on the
+  /// section it is in, or holds it, to say it can be grabbed.
+  late final AnimationController _halo = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
+  late final Animation<double> _haloCurve = CurvedAnimation(parent: _halo, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
+
+  /// 0 to 1: the thumb itself swelling while the pointer is on it or holds it.
+  late final AnimationController _grow = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
+  late final Animation<double> _growCurve = CurvedAnimation(parent: _grow, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
+
+  bool _overThumb = false;
+  bool _overSection = false;
+
+  @override
+  void dispose() {
+    _halo.dispose();
+    _grow.dispose();
+    super.dispose();
+  }
+
+  void _sync() {
+    (_overThumb || _overSection || _active ? _halo.forward() : _halo.reverse());
+    (_overThumb || _active ? _grow.forward() : _grow.reverse());
+  }
+
+  /// Where the pointer is: on the thumb (within a hand's width of its centre), and in the thumb's
+  /// section of the track.
+  void _onHover(PointerEvent event, SliderThemeData theme, double fraction) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final pad = (theme.padding ?? EdgeInsets.zero).resolve(TextDirection.ltr);
+    final width = box.size.width - pad.horizontal;
+    final centre = Offset(pad.left + width * fraction, box.size.height / 2);
+    final over = _enabled && (event.localPosition - centre).distance <= _RenderScrubberTrack.thumbRadius * 2;
+    final at = width <= 0 ? -1.0 : (event.localPosition.dx - pad.left) / width;
+    final section = _enabled && at >= widget.highlightSpan.$1 && at <= widget.highlightSpan.$2;
+    if (over == _overThumb && section == _overSection) return;
+    _overThumb = over;
+    _overSection = section;
+    _sync();
+  }
+
+  void _onExit() {
+    if (!_overThumb && !_overSection) return;
+    _overThumb = false;
+    _overSection = false;
+    _sync();
+  }
 
   bool get _enabled => widget.onChanged != null;
 
@@ -78,7 +131,10 @@ class _ScrubberBarState extends State<ScrubberBar> {
   }
 
   void _change(double dx, SliderThemeData theme) {
-    _active = true;
+    if (!_active) {
+      _active = true;
+      _sync();
+    }
     _last = _valueAt(dx, theme);
     widget.onChanged?.call(_last);
   }
@@ -86,6 +142,7 @@ class _ScrubberBarState extends State<ScrubberBar> {
   void _end() {
     if (!_active) return;
     _active = false;
+    _sync();
     widget.onChangeEnd?.call(_last);
   }
 
@@ -105,7 +162,12 @@ class _ScrubberBarState extends State<ScrubberBar> {
     final up = (value + max * ScrubberBar.actionFraction).clamp(0.0, max);
     final down = (value - max * ScrubberBar.actionFraction).clamp(0.0, max);
 
-    return FocusRingShape(
+    return MouseRegion(
+      opaque: false,
+      cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+      onHover: (event) => _onHover(event, theme, value / max),
+      onExit: (_) => _onExit(),
+      child: FocusRingShape(
       shape: const StadiumBorder(),
       child: Focus(
         canRequestFocus: enabled,
@@ -130,16 +192,22 @@ class _ScrubberBarState extends State<ScrubberBar> {
             onHorizontalDragCancel: enabled ? _end : null,
             child: Padding(
               padding: theme.padding ?? EdgeInsets.zero,
-              child: _ScrubberTrack(
-                theme: theme,
-                enabled: enabled,
-                fraction: value / max,
-                secondaryFraction: (widget.secondaryTrackValue / max).clamp(0.0, 1.0),
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_haloCurve, _growCurve]),
+                builder: (context, _) => _ScrubberTrack(
+                  theme: theme,
+                  enabled: enabled,
+                  fraction: value / max,
+                  secondaryFraction: (widget.secondaryTrackValue / max).clamp(0.0, 1.0),
+                  halo: _haloCurve.value,
+                  grow: _growCurve.value,
+                ),
               ),
             ),
           ),
         ),
       ),
+    ),
     );
   }
 }
@@ -151,15 +219,19 @@ class _ScrubberTrack extends LeafRenderObjectWidget {
     required this.enabled,
     required this.fraction,
     required this.secondaryFraction,
+    required this.halo,
+    required this.grow,
   });
 
   final SliderThemeData theme;
   final bool enabled;
   final double fraction;
   final double secondaryFraction;
+  final double halo;
+  final double grow;
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderScrubberTrack(theme, enabled, fraction, secondaryFraction);
+  RenderObject createRenderObject(BuildContext context) => _RenderScrubberTrack(theme, enabled, fraction, secondaryFraction, halo, grow);
 
   @override
   void updateRenderObject(BuildContext context, _RenderScrubberTrack renderObject) {
@@ -167,14 +239,22 @@ class _ScrubberTrack extends LeafRenderObjectWidget {
       ..theme = theme
       ..enabled = enabled
       ..fraction = fraction
-      ..secondaryFraction = secondaryFraction;
+      ..secondaryFraction = secondaryFraction
+      ..halo = halo
+      ..grow = grow;
   }
 }
 
 class _RenderScrubberTrack extends RenderBox {
-  _RenderScrubberTrack(this._theme, this._enabled, this._fraction, this._secondaryFraction);
+  _RenderScrubberTrack(this._theme, this._enabled, this._fraction, this._secondaryFraction, this._halo, this._grow);
 
-  static const double _thumbRadius = 6;
+  static const double thumbRadius = 6;
+
+  /// How far the halo grows, as a multiple of the thumb.
+  static const double haloScale = 1.75;
+
+  /// How much bigger the thumb is while it is hovered or held.
+  static const double growScale = 1.3;
 
   /// The height with nothing to take it from: what the `Slider` it replaces measured, so the control
   /// bar keeps its height.
@@ -199,6 +279,20 @@ class _RenderScrubberTrack extends RenderBox {
   set fraction(double value) {
     if (value == _fraction) return;
     _fraction = value;
+    markNeedsPaint();
+  }
+
+  double _grow;
+  set grow(double value) {
+    if (value == _grow) return;
+    _grow = value;
+    markNeedsPaint();
+  }
+
+  double _halo;
+  set halo(double value) {
+    if (value == _halo) return;
+    _halo = value;
     markNeedsPaint();
   }
 
@@ -238,7 +332,9 @@ class _RenderScrubberTrack extends RenderBox {
     );
     // No thumb while disabled: there is no position to mark.
     if (_enabled) {
-      context.canvas.drawCircle(thumbCenter, _thumbRadius, Paint()..color = _theme.thumbColor!);
+      // The halo, under the thumb: from nothing to a little wider than it.
+      if (_halo > 0) context.canvas.drawCircle(thumbCenter, thumbRadius * haloScale * _halo, Paint()..color = _theme.thumbColor!.withValues(alpha: 0.5));
+      context.canvas.drawCircle(thumbCenter, thumbRadius * (1 + (growScale - 1) * _grow), Paint()..color = _theme.thumbColor!);
     }
   }
 }

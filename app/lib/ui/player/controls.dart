@@ -1391,6 +1391,13 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
                           padding: pad / 1.5,
                         ),
                         child: ScrubberBar(
+                          // The thumb's halo lights while the pointer is in the section it is in.
+                          highlightSpan: timeline == null
+                              ? (0.0, 1.0)
+                              : (() {
+                                  final span = timeline.segments[timeline.segmentAt(Duration(milliseconds: value.round()))];
+                                  return (span.start, span.end);
+                                })(),
                           value: value,
                           max: max,
                           secondaryTrackValue: bufferedMs.clamp(value, max),
