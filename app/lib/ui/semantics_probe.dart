@@ -39,18 +39,21 @@ void runSemanticsProbe(ProviderContainer container) {
 }
 
 /// `RILL_SEMANTICS_DUMP=1`: turns semantics on and writes the whole semantics tree, with its
-/// node ids, to `%TEMP%\rill-semantics-ring-<0..15>.txt` once a second, oldest overwritten.
+/// node ids, to `%TEMP%\rill-semantics-ring-<n>.txt` once a second, oldest overwritten. It keeps
+/// the last 300 seconds (`RILL_SEMANTICS_DUMP_KEEP=<seconds>` to change it; about 10 KB a file).
 ///
 /// The accessibility bridge's errors name a node id and nothing else; the id is only
 /// meaningful against a tree from the same run. Reproduce the error, then read the files
-/// written around the moment it appeared (their timestamps say which).
+/// written around the moment it appeared (their timestamps say which). Nothing is logged per
+/// dump: a line a second would fill the 10 MB log and push the error's start out of it.
 void runSemanticsDump() {
   if (Platform.environment['RILL_SEMANTICS_DUMP'] != '1') return;
   SemanticsBinding.instance.ensureSemantics();
+  final keep = int.tryParse(Platform.environment['RILL_SEMANTICS_DUMP_KEEP'] ?? '') ?? 300;
   var n = 0;
   Timer.periodic(const Duration(seconds: 1), (_) {
     try {
-      _dumpTree('ring-${n++ % 90}');
+      _dumpTree('ring-${n++ % keep}', quiet: true);
     } on Object catch (error) {
       stderr.writeln('semantics dump failed: $error');
     }
@@ -128,7 +131,7 @@ Offset? _find(bool Function(Widget widget) matches) {
 
 /// The semantics tree as the engine is sent it, ids included, to a file — a
 /// dump of a few thousand lines does not belong in the log.
-void _dumpTree(String label) {
+void _dumpTree(String label, {bool quiet = false}) {
   final root = RendererBinding.instance.renderViews.first.owner?.semanticsOwner?.rootSemanticsNode;
   final path = '${Directory.systemTemp.path}\\rill-semantics-$label.txt';
   final out = StringBuffer();
@@ -151,7 +154,7 @@ void _dumpTree(String label) {
     walk(root, 0);
   }
   File(path).writeAsStringSync(out.toString());
-  _say('tree dumped to $path');
+  if (!quiet) _say('tree dumped to $path');
 }
 
 Future<void> _probe(ProviderContainer container) async {
