@@ -44,6 +44,7 @@ import '../video_info.dart';
 import '../focus_ring.dart' show KeyboardNavigation;
 import '../focus_surface.dart';
 import '../widgets/shortcut_tooltip.dart';
+import 'scrubber_bar.dart';
 import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
 import 'settings_menu.dart';
@@ -1389,7 +1390,7 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
                           disabledActiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
                           padding: pad / 1.5,
                         ),
-                        child: Slider(
+                        child: ScrubberBar(
                           value: value,
                           max: max,
                           secondaryTrackValue: bufferedMs.clamp(value, max),
