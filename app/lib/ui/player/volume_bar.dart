@@ -17,7 +17,7 @@ import '../focus_surface.dart' show ArrowKeyClaim;
 /// Keyboard: arrows and Home/End, and the arrows are claimed (`ArrowKeyClaim`) so
 /// the player's own seek shortcut does not also fire. Screen readers get a slider
 /// with increase/decrease actions.
-class VolumeBar extends StatelessWidget {
+class VolumeBar extends StatefulWidget {
   const VolumeBar({super.key, required this.value, required this.onChanged});
 
   final double value;
@@ -25,7 +25,53 @@ class VolumeBar extends StatelessWidget {
 
   static const double _step = 5;
 
-  void _set(double next) => onChanged(next.clamp(0.0, 100.0));
+  /// The thumb's radius, and how far the halo grows past it as a multiple.
+  static const double _thumbRadius = 6;
+  static const double _haloScale = 1.75;
+
+  @override
+  State<VolumeBar> createState() => _VolumeBarState();
+}
+
+class _VolumeBarState extends State<VolumeBar> with SingleTickerProviderStateMixin {
+  double get value => widget.value;
+
+  static const double _step = VolumeBar._step;
+
+  /// 0 to 1: a halo that grows around the thumb while the pointer is on it or holds it, to say it can
+  /// be grabbed.
+  late final AnimationController _halo = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
+  late final Animation<double> _haloCurve = CurvedAnimation(parent: _halo, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
+  bool _overThumb = false;
+  bool _pressed = false;
+
+  @override
+  void dispose() {
+    _halo.dispose();
+    super.dispose();
+  }
+
+  void _syncHalo() {
+    if (_overThumb || _pressed) {
+      _halo.forward();
+    } else {
+      _halo.reverse();
+    }
+  }
+
+  void _setOver(bool over) {
+    if (over == _overThumb) return;
+    _overThumb = over;
+    _syncHalo();
+  }
+
+  void _setPressed(bool pressed) {
+    if (pressed == _pressed) return;
+    _pressed = pressed;
+    _syncHalo();
+  }
+
+  void _set(double next) => widget.onChanged(next.clamp(0.0, 100.0));
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
@@ -71,7 +117,18 @@ class VolumeBar extends StatelessWidget {
                 double fromDx(double dx) => track <= 0
                     ? value
                     : ((dx - inset) / track * 100).clamp(0.0, 100.0);
-                return GestureDetector(
+                return MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  onHover: (event) {
+                    final thumbX = inset + (track <= 0 ? 0 : track * value / 100);
+                    _setOver((event.localPosition - Offset(thumbX, 20)).distance <= VolumeBar._thumbRadius * 2);
+                  },
+                  onExit: (_) => _setOver(false),
+                  child: Listener(
+                    onPointerDown: (_) => _setPressed(true),
+                    onPointerUp: (_) => _setPressed(false),
+                    onPointerCancel: (_) => _setPressed(false),
+                    child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapDown: (d) => _set(fromDx(d.localPosition.dx)),
                   onHorizontalDragUpdate: (d) =>
@@ -87,8 +144,11 @@ class VolumeBar extends StatelessWidget {
                           context,
                         ).tokens.onScrim.withValues(alpha: 0.25),
                         inset: inset,
+                        halo: _haloCurve,
                       ),
                     ),
+                  ),
+                ),
                   ),
                 );
               },
@@ -106,12 +166,14 @@ class _VolumePainter extends CustomPainter {
     required this.active,
     required this.inactive,
     required this.inset,
-  });
+    required this.halo,
+  }) : super(repaint: halo);
 
   final double fraction;
   final Color active;
   final Color inactive;
   final double inset;
+  final Animation<double> halo;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -124,7 +186,14 @@ class _VolumePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(Offset(left, y), Offset(right, y), track..color = inactive);
     canvas.drawLine(Offset(left, y), Offset(x, y), track..color = active);
-    canvas.drawCircle(Offset(x, y), 6, Paint()..color = active);
+    if (halo.value > 0) {
+      canvas.drawCircle(
+        Offset(x, y),
+        VolumeBar._thumbRadius * VolumeBar._haloScale * halo.value,
+        Paint()..color = active.withValues(alpha: 0.5),
+      );
+    }
+    canvas.drawCircle(Offset(x, y), VolumeBar._thumbRadius, Paint()..color = active);
   }
 
   @override
