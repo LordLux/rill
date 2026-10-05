@@ -663,14 +663,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(container.read(playerViewProvider).fullscreen, isTrue);
 
-    // `ensureTooltipVisible` (the documented way to test a `Tooltip` without
-    // fighting pointer/hover simulation) triggers the exact call — inserting
-    // an `OverlayEntry` — that throws "No Overlay widget found" if none is
-    // reachable. If this mounted no `Overlay`, this line throws.
-    // The player's tooltip is a `RawTooltip` with a semantics-free bubble (F51), not a Material one.
-    final tooltip = find.ancestor(of: find.byKey(playerFullscreenKey), matching: find.byType(RawTooltip));
-    expect(tooltip, findsOneWidget);
-    tester.state<RawTooltipState>(tooltip).ensureTooltipVisible();
+    // The player's tooltip is drawn in the tree, with no overlay (F51), so hovering shows it.
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(playerFullscreenKey)));
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
