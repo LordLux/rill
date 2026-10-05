@@ -676,6 +676,8 @@ void main() {
     // "F" badge is a `WidgetSpan`), so the rendered text is "Exit fullscreen"
     // plus trailing spacing rather than an exact match.
     expect(find.textContaining('Exit fullscreen'), findsOneWidget);
+    // The fullscreen button is at the right edge: its bubble is pushed in, not hung over it.
+    expect(tester.getTopRight(find.textContaining('Exit fullscreen')).dx, lessThanOrEqualTo(tester.view.physicalSize.width));
 
     disposeContainer();
   });
