@@ -111,12 +111,36 @@ class _AuthProbeAppState extends State<_AuthProbeApp> {
 
       // With `RILL_COOKIE_DUMP=1`: the whole jar, every domain (Task 33 §1).
       await dumpCookieJar('auth-probe before clear');
-      await source.clear();
+
+      // Task 33: sign-out deletes cookies one by one, by name and domain. Proved
+      // here on two anonymous cookies — one on a dotted domain, one host-only —
+      // because a delete that matches nothing also reports success.
+      const store = WebView2JarStore();
+      final listed = await store.list() ?? const <JarCookie>[];
+      final targets = [
+        ...listed.where((c) => c.domain.startsWith('.') && !c.isPartitioned).take(1),
+        ...listed.where((c) => !c.domain.startsWith('.') && !c.isPartitioned).take(1),
+      ];
+      for (final target in targets) {
+        await store.delete(target);
+      }
+      final remaining = await store.list() ?? const <JarCookie>[];
+      bool same(JarCookie a, JarCookie b) => a.name == b.name && a.domain == b.domain;
+      check(
+        'one cookie can be deleted by name and domain',
+        targets.length == 2 &&
+            !remaining.any((c) => targets.any((t) => same(c, t))) &&
+            remaining.length == listed.length - targets.length,
+        'deleted ${[for (final t in targets) '${t.name} @ ${t.domain}']}, '
+            '${listed.length} before, ${remaining.length} after',
+      );
+
+      await store.deleteAll();
       await dumpCookieJar('auth-probe after clear');
       final after = await source.read();
       stderr.writeln('auth-probe: after clear, jar has ${after.length} cookie(s): '
           '${after.keys.toList()..sort()}');
-      check('stop condition 2 — sign-out clears the jar', after.isEmpty,
+      check('stop condition 2 — the jar can be emptied', after.isEmpty,
           '${after.length} left');
     } on Object catch (error, stack) {
       stderr.writeln('auth-probe: THREW $error\n$stack');
