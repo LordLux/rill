@@ -15,6 +15,7 @@ import 'package:rill/domain/comment.dart';
 import 'package:rill/domain/feed_item.dart' as domain;
 import 'package:rill/ui/widgets/comment_composer.dart';
 import 'package:rill/ui/widgets/comments_section.dart';
+import 'package:rill/ui/widgets/shortcut_tooltip.dart';
 
 /// A page the widget asked for, held open until the test answers it.
 class IssuedPage {
@@ -714,7 +715,7 @@ void main() {
       await tester.pump();
       expect(source.writes, isEmpty);
 
-      final tooltips = tester.widgetList<Tooltip>(find.byType(Tooltip)).map((t) => t.message).toList();
+      final tooltips = tester.widgetList<ShortcutTooltip>(find.byType(ShortcutTooltip)).map((t) => t.label).toList();
       expect(tooltips, contains('Your session expired. Sign in again to vote'));
     });
 
@@ -724,7 +725,7 @@ void main() {
       source.issued.single.completer.complete(CommentsResult(items: [comment('c1')]));
       await tester.pump();
 
-      final tooltips = tester.widgetList<Tooltip>(find.byType(Tooltip)).map((t) => t.message).toList();
+      final tooltips = tester.widgetList<ShortcutTooltip>(find.byType(ShortcutTooltip)).map((t) => t.label).toList();
       expect(tooltips, contains('Sign in to vote'));
       expect(tooltips, isNot(contains('Your session expired. Sign in again to vote')));
     });

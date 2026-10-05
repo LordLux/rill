@@ -15,6 +15,10 @@ import '../player/shortcuts.dart' show PlayerAction, playerActionKeyLabel;
 /// Passing an [action] with no entry in [playerActionKeyLabel] (or omitting
 /// it) falls back to a plain text-only tooltip rather than a badge with
 /// nothing in it.
+/// Which side of its control an in-tree tooltip opens on. [left] for a control inside something that
+/// clips (a thumbnail's corner), where a bubble above it would be cut off.
+enum TooltipSide { above, left }
+
 class ShortcutTooltip extends StatelessWidget {
   const ShortcutTooltip({
     super.key,
@@ -22,6 +26,7 @@ class ShortcutTooltip extends StatelessWidget {
     this.action,
     this.silent = false,
     this.announce = true,
+    this.side = TooltipSide.above,
     required this.child,
   });
 
@@ -32,6 +37,9 @@ class ShortcutTooltip extends StatelessWidget {
   /// control that already says the same thing itself (the volume bar: "Volume 100%").
   final bool announce;
 
+  /// Where a [silent] bubble opens.
+  final TooltipSide side;
+
   /// Draws the bubble with no semantics of its own ([_SilentTooltip]). For the player's
   /// control bar, where the Material tooltip's overlay node reaches the accessibility
   /// bridge orphaned (F51).
@@ -39,7 +47,7 @@ class ShortcutTooltip extends StatelessWidget {
   final Widget child;
 
   Widget _tip({required Duration wait, required InlineSpan message, bool plain = false}) {
-    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: wait, message: message, child: child);
+    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: wait, message: message, side: side, child: child);
     if (plain) {
       return Tooltip(
         message: label,
@@ -131,8 +139,11 @@ class _SilentTooltip extends StatefulWidget {
     required this.label,
     required this.hoverDelay,
     required this.message,
+    required this.side,
     required this.child,
   });
+
+  final TooltipSide side;
 
   /// What assistive technology is told, on the anchor. Null: nothing.
   final String? label;
@@ -188,6 +199,17 @@ class _SilentTooltipState extends State<_SilentTooltip> {
     if (_shown && mounted) setState(() => _shown = false);
   }
 
+  Widget _bubble() => ConstrainedBox(
+    constraints: const BoxConstraints(minHeight: 24),
+    child: DecoratedBox(
+      decoration: tooltipBubbleDecoration,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text.rich(widget.message, style: tooltipBubbleTextStyle, softWrap: false),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     // Not `ExcludeSemantics` around the whole: that would drop the *control* from the tree.
@@ -203,32 +225,36 @@ class _SilentTooltipState extends State<_SilentTooltip> {
           children: [
             anchor,
             if (_shown)
-              Positioned(
-                top: 0,
-                left: -400,
-                right: -400,
-                child: IgnorePointer(
-                  child: ExcludeSemantics(
-                    child: Align(
-                      alignment: Alignment(_align, 0),
-                      child: FractionalTranslation(
+              if (widget.side == TooltipSide.left)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: -400,
+                  width: 400,
+                  child: IgnorePointer(
+                    child: ExcludeSemantics(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(padding: const EdgeInsets.only(right: 4), child: _bubble()),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Positioned(
+                  top: 0,
+                  left: -400,
+                  right: -400,
+                  child: IgnorePointer(
+                    child: ExcludeSemantics(
+                      child: Align(
+                        alignment: Alignment(_align, 0),
                         // Above the control, with a little air.
-                        translation: const Offset(0, -1.15),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 24),
-                          child: DecoratedBox(
-                            decoration: tooltipBubbleDecoration,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              child: Text.rich(widget.message, style: tooltipBubbleTextStyle, softWrap: false),
-                            ),
-                          ),
-                        ),
+                        child: FractionalTranslation(translation: const Offset(0, -1.15), child: _bubble()),
                       ),
                     ),
                   ),
                 ),
-              ),
           ],
         ),
       ),

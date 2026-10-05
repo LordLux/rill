@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/widgets/queue_panel.dart';
+import 'package:rill/ui/widgets/shortcut_tooltip.dart';
 
 VideoItem video(String id) => VideoItem(
       kind: 'video',
@@ -106,7 +107,7 @@ void main() {
     // click inside one frame of hovering, so this waits the way a pointer does.
     await tester.pump(const Duration(milliseconds: 100));
 
-    final remove = find.descendant(of: row, matching: find.byTooltip('Remove'));
+    final remove = find.descendant(of: row, matching: find.byWidgetPredicate((w) => w is ShortcutTooltip && w.label == 'Remove'));
     expect(remove, findsOneWidget, reason: 'the X is not reachable on this row');
     await tester.tap(remove, warnIfMissed: false);
     await tester.pump();
@@ -183,7 +184,7 @@ void main() {
     // keeps its layout while it slides — so this presses at it three more times
     // the way an impatient user would. `Visibility` makes the hits miss and the
     // panel turns away anything that gets through.
-    final x = find.descendant(of: rowFor('c'), matching: find.byTooltip('Remove'));
+    final x = find.descendant(of: rowFor('c'), matching: find.byWidgetPredicate((w) => w is ShortcutTooltip && w.label == 'Remove'));
     for (var i = 0; i < 3; i++) {
       await tester.tap(x, warnIfMissed: false);
       await tester.pump(const Duration(milliseconds: 20));
@@ -256,7 +257,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100)); // the X's fade-in; see clickRemoveOn
 
-    final x = find.descendant(of: row, matching: find.byTooltip('Remove'));
+    final x = find.descendant(of: row, matching: find.byWidgetPredicate((w) => w is ShortcutTooltip && w.label == 'Remove'));
     await mouse.moveTo(tester.getCenter(x));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
