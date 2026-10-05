@@ -186,9 +186,9 @@ class _SilentTooltipState extends State<_SilentTooltip> {
   Timer? _timer;
   bool _shown = false;
 
-  /// -1 left-aligned to the control, 0 centred, 1 right-aligned: chosen when the bubble is shown,
-  /// from where the control is in the window, so a control at the edge keeps its bubble on screen.
-  double _align = 0;
+  /// Where the control is in the player (or window), taken when the bubble is shown; the bubble is
+  /// measured and placed against it in layout, so a control at an edge keeps its bubble inside.
+  _Span _span = const _Span(-_reach, _reach, 0);
 
   @override
   void dispose() {
@@ -202,26 +202,15 @@ class _SilentTooltipState extends State<_SilentTooltip> {
     _timer = Timer(widget.hoverDelay, () {
       if (!mounted) return;
       final box = context.findRenderObject();
-      var align = 0.0;
+      var span = const _Span(-_reach, _reach, 0);
       if (box is RenderBox && box.attached) {
-        final centre = box.localToGlobal(box.size.center(Offset.zero)).dx;
+        final left = box.localToGlobal(Offset.zero).dx;
         final bounds = TooltipBounds._of(context) ?? (Offset.zero & MediaQuery.sizeOf(context));
-        // Half the bubble, measured from its text (plus its padding and a key badge, if any): only
-        // deciding which side has room.
-        final painter = TextPainter(
-          text: TextSpan(text: widget.message.toPlainText(includeSemanticsLabels: false), style: tooltipBubbleTextStyle),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        final half = (painter.width + 16) / 2;
-        painter.dispose();
-        if (centre + half > bounds.right - 8) {
-          align = 1;
-        } else if (centre - half < bounds.left + 8) {
-          align = -1;
-        }
+        // The room on each side of the control, in its own coordinates.
+        span = _Span(bounds.left - left, bounds.right - left, box.size.width);
       }
       setState(() {
-        _align = align;
+        _span = span;
         _shown = true;
       });
     });
@@ -274,20 +263,15 @@ class _SilentTooltipState extends State<_SilentTooltip> {
                   ),
                 )
               else
-                // Wide enough for any bubble, but only on the side it grows into: at an edge it is
-                // flush with the control, not with the far end of this box.
+                // Zero tall, `_reach` wide each way: the delegate puts the bubble above it and
+                // inside the bounds, whatever its width (a key badge makes that unguessable).
                 Positioned(
                   top: 0,
-                  left: _align > 0 ? -400 : (_align < 0 ? 0 : -400),
-                  right: _align < 0 ? -400 : (_align > 0 ? 0 : -400),
+                  height: 0,
+                  left: -_reach,
+                  right: -_reach,
                   child: IgnorePointer(
-                    child: ExcludeSemantics(
-                      child: Align(
-                        alignment: Alignment(_align, 0),
-                        // Above the control, with a little air.
-                        child: FractionalTranslation(translation: const Offset(0, -1.15), child: _bubble()),
-                      ),
-                    ),
+                    child: ExcludeSemantics(child: CustomSingleChildLayout(delegate: _AboveInside(_span), child: _bubble())),
                   ),
                 ),
           ],
@@ -295,6 +279,44 @@ class _SilentTooltipState extends State<_SilentTooltip> {
       ),
     );
   }
+}
+
+/// How far an in-tree tooltip's layout box reaches either side of its control.
+const double _reach = 2000;
+
+/// The room around a control: its bounds' left and right edges, and its own width, all measured from
+/// the control's left edge.
+class _Span {
+  const _Span(this.left, this.right, this.width);
+
+  final double left;
+  final double right;
+  final double width;
+}
+
+/// Puts a bubble above its control, centred on it, then pushes it back inside the bounds. Measured
+/// in layout, so it needs no guess at the bubble's width.
+class _AboveInside extends SingleChildLayoutDelegate {
+  const _AboveInside(this.span);
+
+  final _Span span;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) => const BoxConstraints(maxWidth: 2 * _reach, maxHeight: 200);
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    const margin = 8.0;
+    final centred = _reach + span.width / 2 - childSize.width / 2;
+    final lo = _reach + span.left + margin;
+    final hi = _reach + span.right - margin - childSize.width;
+    // A bubble wider than the room favours the left edge.
+    final x = hi < lo ? lo : centred.clamp(lo, hi);
+    return Offset(x, -childSize.height - 6);
+  }
+
+  @override
+  bool shouldRelayout(_AboveInside old) => old.span != span;
 }
 
 /// The small rounded-corner box a keybinding sits in.

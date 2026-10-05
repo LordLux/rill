@@ -678,6 +678,24 @@ void main() {
     expect(find.textContaining('Exit fullscreen'), findsOneWidget);
     // The fullscreen button is at the right edge: its bubble is pushed in, not hung over it.
     expect(tester.getTopRight(find.textContaining('Exit fullscreen')).dx, lessThanOrEqualTo(tester.view.physicalSize.width));
+    // The fullscreen button is at the right edge: its bubble is pushed in, not hung over it.
+    expect(tester.getTopRight(find.textContaining('Exit fullscreen')).dx, lessThanOrEqualTo(tester.view.physicalSize.width));
+
+    disposeContainer();
+  });
+
+  testWidgets('a tooltip with a key badge by the left edge stays inside the window', (tester) async {
+    // The bubble is measured in layout, badge included, not guessed from its text.
+    await pumpWatching(tester);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(playerPlayPauseKey)));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Pause'), findsWidgets);
+    expect(tester.getTopLeft(find.textContaining('Pause').last).dx, greaterThanOrEqualTo(0));
 
     disposeContainer();
   });
