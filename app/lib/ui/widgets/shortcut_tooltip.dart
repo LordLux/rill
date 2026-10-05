@@ -15,6 +15,33 @@ import '../player/shortcuts.dart' show PlayerAction, playerActionKeyLabel;
 /// Passing an [action] with no entry in [playerActionKeyLabel] (or omitting
 /// it) falls back to a plain text-only tooltip rather than a badge with
 /// nothing in it.
+/// Marks the region an in-tree tooltip must stay inside — the player, which clips what hangs over
+/// its edge. Without one the window is the limit.
+class TooltipBounds extends StatelessWidget {
+  const TooltipBounds({super.key, required this.child});
+
+  final Widget child;
+
+  static Rect? _of(BuildContext context) {
+    final scope = context.getInheritedWidgetOfExactType<_BoundsScope>();
+    final box = scope?.boundsContext.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  @override
+  Widget build(BuildContext context) => _BoundsScope(boundsContext: context, child: child);
+}
+
+class _BoundsScope extends InheritedWidget {
+  const _BoundsScope({required this.boundsContext, required super.child});
+
+  final BuildContext boundsContext;
+
+  @override
+  bool updateShouldNotify(_BoundsScope old) => false;
+}
+
 /// Which side of its control an in-tree tooltip opens on. [left] for a control inside something that
 /// clips (a thumbnail's corner), where a bubble above it would be cut off.
 enum TooltipSide { above, left }
@@ -178,12 +205,18 @@ class _SilentTooltipState extends State<_SilentTooltip> {
       var align = 0.0;
       if (box is RenderBox && box.attached) {
         final centre = box.localToGlobal(box.size.center(Offset.zero)).dx;
-        final width = MediaQuery.sizeOf(context).width;
-        // Half the bubble, estimated from its text: only deciding which side has room.
-        final half = (widget.message.toPlainText().length * 7.0 + 28) / 2;
-        if (centre + half > width - 8) {
+        final bounds = TooltipBounds._of(context) ?? (Offset.zero & MediaQuery.sizeOf(context));
+        // Half the bubble, measured from its text (plus its padding and a key badge, if any): only
+        // deciding which side has room.
+        final painter = TextPainter(
+          text: TextSpan(text: widget.message.toPlainText(includeSemanticsLabels: false), style: tooltipBubbleTextStyle),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final half = (painter.width + 16) / 2;
+        painter.dispose();
+        if (centre + half > bounds.right - 8) {
           align = 1;
-        } else if (centre - half < 8) {
+        } else if (centre - half < bounds.left + 8) {
           align = -1;
         }
       }
@@ -241,10 +274,12 @@ class _SilentTooltipState extends State<_SilentTooltip> {
                   ),
                 )
               else
+                // Wide enough for any bubble, but only on the side it grows into: at an edge it is
+                // flush with the control, not with the far end of this box.
                 Positioned(
                   top: 0,
-                  left: -400,
-                  right: -400,
+                  left: _align > 0 ? -400 : (_align < 0 ? 0 : -400),
+                  right: _align < 0 ? -400 : (_align > 0 ? 0 : -400),
                   child: IgnorePointer(
                     child: ExcludeSemantics(
                       child: Align(
