@@ -100,6 +100,9 @@ void main() {
 
     test('the device-trust mark and the anonymous cookies are kept', () {
       expect(isSignOutCookie('SMSV', 'accounts.google.com'), isFalse);
+      // The account picker's list. Kept on purpose: it names addresses, and
+      // signs nobody in.
+      expect(isSignOutCookie('ACCOUNT_CHOOSER', 'accounts.google.com'), isFalse);
       expect(isSignOutCookie('__Host-GAPS', 'accounts.google.com'), isFalse);
       expect(isSignOutCookie('OTZ', 'accounts.google.com'), isFalse);
       expect(isSignOutCookie('PREF', '.youtube.com'), isFalse);

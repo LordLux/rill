@@ -358,6 +358,7 @@ void main() {
         // visitor has anyway. A full wipe would leave this empty.
         expect(jarStore.names, {
           'SMSV @ accounts.google.com',
+          'ACCOUNT_CHOOSER @ accounts.google.com',
           '__Host-GAPS @ accounts.google.com',
           'OTZ @ accounts.google.com',
           '__Secure-ENID @ .google.com',
