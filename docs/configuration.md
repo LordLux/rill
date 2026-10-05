@@ -58,7 +58,7 @@ This document lists all the environment variables read across the Rill project (
 | `RILL_FOCUS_PROBE=monkey` | `ui/focus_probe.dart` | A screen reader's hands, at random: presses allow-listed nodes from the semantics tree (never like/subscribe/vote/delete), scrolls, Tabs, opens videos, and logs every step (`MONKEY n: …`) so an `AXTree` error's preceding steps are in the same log. `RILL_MONKEY_SEED=<n>`, `RILL_MONKEY_STEPS=<n>`. About 1 run in 20 reproduced an error (`architecture.md` F51) |
 | `RILL_FOCUS_PROBE=scrollchange` | `ui/focus_probe.dart` | Scrolls the watch page into its comments, Tabs deep into it, then opens another video; eight times |
 | `RILL_FOCUS_PROBE=videochange` | `ui/focus_probe.dart` | Keyboard on a control, then Shift+N twice and a new video; logs whether the `t` shortcut still works and what has focus after each (`SHORTCUT …`, `TAB …`) |
-| `RILL_SEMANTICS_DUMP` | `ui/semantics_probe.dart` | `1`: semantics on, and the whole semantics tree (with node ids) written once a second to `%TEMP%\rill-semantics-ring-0..15.txt`. An `AXTree` error names only a node id; find that id in the file written at that moment (`architecture.md` F51) |
+| `RILL_SEMANTICS_DUMP` | `ui/semantics_probe.dart` | `1`: semantics on, and the whole semantics tree (with node ids) written once a second to `%TEMP%\rill-semantics-ring-<n>.txt`, the last 300 seconds kept (`RILL_SEMANTICS_DUMP_KEEP=<seconds>`), nothing logged per dump. An `AXTree` error names only a node id; find that id in the file written at that moment (`architecture.md` F51) |
 | `RILL_PROBE_PHASES` | `probe_comments.dart` | Phases for comments probe |
 | `RILL_PROBE_OUT` | `probe_comments.dart` | Output path for comments probe |
 
