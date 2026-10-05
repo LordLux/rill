@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/ui/widgets/shortcut_tooltip.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart' as domain;
 import 'package:rill/domain/feed_item.dart' show VideoItem;
@@ -41,6 +42,9 @@ String focused() {
       found = true;
     } else if (widget is Tooltip && widget.message != null) {
       name = widget.message!;
+      found = true;
+    } else if (widget is ShortcutTooltip) {
+      name = widget.label;
       found = true;
     } else if (widget is Semantics && (widget.properties.tooltip ?? '').isNotEmpty) {
       // The player controls' own tooltip, which has no Material `Tooltip` around it (F51).

@@ -417,7 +417,13 @@ class _MediaTileState extends State<MediaTile> {
     required VoidCallback? onPressed,
     bool disabled = false,
   }) {
-    return IconButton(
+    // Drawn in the tree, to the left: the thumbnail clips, and an overlay tooltip's semantics node is
+    // what an AXTree error was traced to (`architecture.md` F51).
+    return ShortcutTooltip(
+      label: tooltip,
+      silent: true,
+      side: TooltipSide.left,
+      child: IconButton(
       style: IconButton.styleFrom(
         backgroundColor: tokens.scrim.withValues(alpha: 0.7),
         // Without this a disabled button loses its scrim and the glyph is left
@@ -427,12 +433,11 @@ class _MediaTileState extends State<MediaTile> {
       ),
       hoverColor: tokens.scrim,
       mouseCursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      tooltip: tooltip,
-      icon: Icon(icon, color: disabled ? tokens.onScrim.withValues(alpha: 0.38) : tokens.onScrim, size: 23),
+      icon: Icon(icon, semanticLabel: tooltip, color: disabled ? tokens.onScrim.withValues(alpha: 0.38) : tokens.onScrim, size: 23),
       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
       padding: EdgeInsets.zero,
       onPressed: onPressed,
-    );
+    ));
   }
 
   /// The duration / LIVE / STATION pill. Scrim family rather than a surface

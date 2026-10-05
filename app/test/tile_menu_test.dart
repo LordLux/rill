@@ -262,12 +262,12 @@ void main() {
 
       await tester.pumpWidget(harness(MediaTile(spec: spec, onWatchLater: () => taps++), auth: AuthStatus.anonymous));
       expect(button().onPressed, isNull);
-      expect(button().tooltip, 'Sign in to save videos');
+      expect((button().icon as Icon).semanticLabel, 'Sign in to save videos');
       expect((button().icon as Icon).color!.a, closeTo(0.38, 0.01));
 
       await tester.pumpWidget(harness(MediaTile(spec: spec, onWatchLater: () => taps++)));
       expect(button().onPressed, isNotNull);
-      expect(button().tooltip, 'Watch later');
+      expect((button().icon as Icon).semanticLabel, 'Watch later');
       expect((button().icon as Icon).color!.a, closeTo(1.0, 0.01));
     });
   });

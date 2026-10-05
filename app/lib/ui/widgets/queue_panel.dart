@@ -12,6 +12,7 @@ import '../focus_surface.dart';
 import '../queue_controller.dart';
 import '../spoken.dart';
 import 'channel_badge.dart';
+import 'shortcut_tooltip.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
@@ -581,11 +582,15 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           turns: _expanded ? 0 : 0.5,
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOutCubic,
-                          child: IconButton(
-                            tooltip: _expanded ? 'Collapse queue' : 'Expand queue',
-                            icon: Icon(Icons.keyboard_arrow_up),
-                            color: scheme.onSurfaceVariant,
-                            onPressed: _clearing ? null : () => _onCollapse(),
+                          child: ShortcutTooltip(
+                            label: _expanded ? 'Collapse queue' : 'Expand queue',
+                            silent: true,
+                            child: IconButton(
+                              // The icon names the button: `IconButton(tooltip:)` used to.
+                              icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
+                              color: scheme.onSurfaceVariant,
+                              onPressed: _clearing ? null : () => _onCollapse(),
+                            ),
                           ),
                         ),
                       ],
@@ -1071,13 +1076,10 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                 AnimatedCrossFade(
                   duration: const Duration(milliseconds: 50),
                   crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                  firstChild: Tooltip(
-                    message: 'Remove',
-                    excludeFromSemantics: true,
-                    waitDuration: const Duration(milliseconds: 300),
-                    preferBelow: false,
-                    showDuration: const Duration(milliseconds: 800),
-                    exitDuration: const Duration(milliseconds: 0),
+                  firstChild: ShortcutTooltip(
+                    label: 'Remove',
+                    silent: true,
+                    announce: false,
                     child: Semantics(
                       container: true,
                       label: 'Remove from queue',
