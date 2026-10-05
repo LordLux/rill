@@ -444,6 +444,37 @@ void main() {
     });
   });
 
+  group('the thumb', () {
+    int circles(WidgetTester tester) {
+      final canvas = TestRecordingCanvas();
+      tester.renderObject(find.byKey(playerScrubberKey)).paint(TestRecordingPaintingContext(canvas), Offset.zero);
+      return canvas.invocations.where((call) => call.invocation.memberName == #drawCircle).length;
+    }
+
+    testBar('the pointer is a click over the bar, and a halo grows only on the thumb', (tester) async {
+      await pumpWatching(tester);
+      await emit(tester, position: const Duration(minutes: 5));
+      final b = bar(tester);
+      final pointer = await mouse(tester);
+
+      await pointer.moveTo(b.at(0.8));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
+      expect(circles(tester), 1, reason: 'just the thumb, away from it');
+
+      await pointer.moveTo(b.at(0.5));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(circles(tester), 2, reason: 'the thumb and its halo, on it');
+
+      await pointer.moveTo(b.at(0.8));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(circles(tester), 1, reason: 'and the halo goes when the pointer does');
+    });
+  });
+
   group('the segments', () {
     testBar('one per chapter, with the gap at each boundary and nowhere else', (tester) async {
       await pumpWatching(tester);
