@@ -92,6 +92,108 @@ Future<void> _probe(ProviderContainer container, String mode) async {
       await _wait(2000);
     }
 
+    if (mode == 'tilebuttons') {
+      // A tile's hover buttons (Watch later, Add to queue) and their tooltips: hover the tile, move
+      // onto a button until its tooltip is up, then leave — onto the next tile, and so on.
+      final binding = GestureBinding.instance;
+      const device = 51;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(600, 500), kind: PointerDeviceKind.mouse, device: device));
+      List<Offset> centers(bool Function(Widget) test) {
+        final found = <Offset>[];
+        void visit(Element element) {
+          if (test(element.widget)) {
+            final box = element.renderObject;
+            if (box is RenderBox && box.attached) found.add(box.localToGlobal(box.size.center(Offset.zero)));
+            return;
+          }
+          element.visitChildren(visit);
+        }
+
+        WidgetsBinding.instance.rootElement?.visitChildren(visit);
+        return found;
+      }
+
+      await _wait(9000);
+      var n = 0;
+      for (var round = 0; round < 12; round++) {
+        final buttons = centers((w) => w is IconButton && (w.tooltip == 'Watch later' || w.tooltip == 'Add to queue'));
+        final visible = buttons.where((b) => b.dx > 0 && b.dy > 60 && b.dy < 900 && b.dx < 1700).toList();
+        if (visible.isEmpty) {
+          _say('TILEBUTTONS $round: no buttons on screen');
+          binding.handlePointerEvent(PointerScrollEvent(position: const Offset(800, 500), scrollDelta: const Offset(0, 300), kind: PointerDeviceKind.mouse, device: device));
+          await _wait(1000);
+          continue;
+        }
+        final target = visible[round % visible.length];
+        // Onto the tile first, so its buttons fade in; then onto the button.
+        binding.handlePointerEvent(PointerHoverEvent(position: target + const Offset(-60, 60), kind: PointerDeviceKind.mouse, device: device));
+        await _wait(500);
+        binding.handlePointerEvent(PointerHoverEvent(position: target, kind: PointerDeviceKind.mouse, device: device));
+        await _wait(1400);
+        _say('TILEBUTTONS ${n++}: tooltip up at $target');
+        // Away, to empty space and to the next tile.
+        binding.handlePointerEvent(PointerHoverEvent(position: const Offset(640, 40), kind: PointerDeviceKind.mouse, device: device));
+        await _wait(700);
+      }
+      _say('TILEBUTTONS done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'accountmenu') {
+      // Hover the account button (its tooltip), open its menu, leave it open a while, close it by
+      // clicking outside and by clicking the button again; ten times.
+      final binding = GestureBinding.instance;
+      const device = 41;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(600, 500), kind: PointerDeviceKind.mouse, device: device));
+      Offset? centerOf(bool Function(Widget) test) {
+        Offset? found;
+        void visit(Element element) {
+          if (found != null) return;
+          if (test(element.widget)) {
+            final box = element.renderObject;
+            if (box is RenderBox && box.attached) found = box.localToGlobal(box.size.center(Offset.zero));
+            return;
+          }
+          element.visitChildren(visit);
+        }
+
+        WidgetsBinding.instance.rootElement?.visitChildren(visit);
+        return found;
+      }
+
+      void click(Offset at) {
+        binding.handlePointerEvent(PointerHoverEvent(position: at, kind: PointerDeviceKind.mouse, device: device));
+        binding.handlePointerEvent(PointerDownEvent(position: at, kind: PointerDeviceKind.mouse, device: device, buttons: kPrimaryButton));
+        binding.handlePointerEvent(PointerUpEvent(position: at, kind: PointerDeviceKind.mouse, device: device));
+      }
+
+      await _wait(8000);
+      for (var cycle = 0; cycle < 10; cycle++) {
+        final at = centerOf((w) => w.runtimeType.toString() == 'AccountButton');
+        if (at == null) {
+          _say('ACCOUNT $cycle: no button');
+          break;
+        }
+        binding.handlePointerEvent(PointerHoverEvent(position: at, kind: PointerDeviceKind.mouse, device: device));
+        await _wait(1500); // tooltip up
+        _say('ACCOUNT $cycle: open at $at');
+        click(at);
+        await _wait(2500 + (cycle % 3) * 2500);
+        if (cycle.isEven) {
+          _say('ACCOUNT $cycle: click outside');
+          click(const Offset(600, 500));
+        } else {
+          _say('ACCOUNT $cycle: click the button again');
+          click(at);
+        }
+        await _wait(2000);
+      }
+      _say('ACCOUNT done');
+      await stderr.flush();
+      return;
+    }
+
     if (mode == 'scrollchange') {
       // The watch page scrolled down into its comments, focus somewhere inside the page, and the
       // video changes: new comments, new related, the old nodes going away under a focused one.
