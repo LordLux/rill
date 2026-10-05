@@ -1080,3 +1080,23 @@ What `docs/tasks/32` found and deliberately left, each one small:
   next Tab does not land on it. Horizontal layout is correct and tested.
 - **The comment box's Escape** does not cancel (Cancel does); the filters dialog
   and the player's submenus close on Escape through their own paths.
+
+### 84. Say "can't reach YouTube" when the connection itself fails
+
+Measured 2026-10-05: with no network, yt-dlp's tier of the playback ladder reports
+`Unable to download API page: … Failed to resolve 'www.youtube.com' ([Errno 11001]
+getaddrinfo failed)`, and the UI shows that text (or "This video would not open")
+instead of saying the connection is the problem.
+
+- **A new RPC error code** for a failure *below HTTP*: DNS (`getaddrinfo`, `ENOTFOUND`),
+  `ECONNREFUSED`, `fetch failed`, and yt-dlp's `Failed to resolve`. Raised only when nothing
+  got through — not for HTTP 4xx/5xx, timeouts or TLS errors, which can be a proxy, a flaky
+  link or a real outage and need their own wording.
+- **Wording:** "Can't reach YouTube. Check your internet connection." — true for no network,
+  filtered DNS, a VPN or a firewall alike. Not "You're offline", which can be wrong.
+  `retry: user`, and keep *Try again* (a single DNS blip is common).
+- **In the playback ladder** it sits next to the throttle check in `resolve.ts`, so a video is
+  not blamed for the connection; tier 2 (yt-dlp) reports through a string and needs a small
+  pattern match.
+- **Check the other paths** (`feed.*`, `search.query`, `video.comments`) surface the same
+  code rather than only playback.
