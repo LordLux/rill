@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/ui/player/scrubber_bar.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/domain/video_detail.dart';
@@ -102,9 +103,9 @@ Future<void> pumpWatching(WidgetTester tester, {List<String> queue = const ['cha
   await settleReal(tester);
 }
 
-/// The scrubber's `Slider`. Its box is the scrubber's box — the `Stack` around
+/// The scrubber's `ScrubberBar`. Its box is the scrubber's box — the `Stack` around
 /// it has no other sized child — and its track is inset by the 8 px padding.
-final Finder scrubber = find.descendant(of: find.byKey(playerScrubberKey), matching: find.byType(Slider));
+final Finder scrubber = find.descendant(of: find.byKey(playerScrubberKey), matching: find.byType(ScrubberBar));
 
 const double trackInset = 8;
 
@@ -163,11 +164,7 @@ List<({Rect rect, Color color})> painted(WidgetTester tester) {
     for (final call in canvas.invocations)
       if (call.invocation.memberName == #drawRect)
         (
-          // The slider's own 8 px padding is carried by the `Slider`'s
-          // `CompositedTransformTarget` as a layer offset, which a recording
-          // context has no layer to apply — so every rect comes back that far
-          // left of where it is on screen.
-          rect: (call.invocation.positionalArguments[0] as Rect).shift(const Offset(trackInset, 0)),
+          rect: (call.invocation.positionalArguments[0] as Rect),
           color: (call.invocation.positionalArguments[1] as Paint).color,
         ),
   ];
