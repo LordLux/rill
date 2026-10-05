@@ -49,42 +49,10 @@ class ScrubberBar extends StatefulWidget {
   State<ScrubberBar> createState() => _ScrubberBarState();
 }
 
-class _ScrubberBarState extends State<ScrubberBar> with SingleTickerProviderStateMixin {
+class _ScrubberBarState extends State<ScrubberBar> {
   /// Whether a press or drag is in progress, so `onChangeEnd` follows every `onChanged` run.
   bool _active = false;
   double _last = 0;
-
-  /// 0 to 1: the halo around the thumb, which grows while the pointer is on the thumb or holds it,
-  /// to say it can be grabbed.
-  late final AnimationController _halo = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
-  late final Animation<double> _haloCurve = CurvedAnimation(parent: _halo, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
-  bool _overThumb = false;
-
-  @override
-  void dispose() {
-    _halo.dispose();
-    super.dispose();
-  }
-
-  void _syncHalo() {
-    if (_overThumb || _active) {
-      _halo.forward();
-    } else {
-      _halo.reverse();
-    }
-  }
-
-  /// Whether the pointer is on the thumb: within a hand's width of its centre.
-  void _onHover(PointerEvent event, SliderThemeData theme, double fraction) {
-    final box = context.findRenderObject();
-    if (box is! RenderBox || !box.hasSize) return;
-    final pad = (theme.padding ?? EdgeInsets.zero).resolve(TextDirection.ltr);
-    final centre = Offset(pad.left + (box.size.width - pad.horizontal) * fraction, box.size.height / 2);
-    final over = _enabled && (event.localPosition - centre).distance <= _RenderScrubberTrack.thumbRadius * 2;
-    if (over == _overThumb) return;
-    _overThumb = over;
-    _syncHalo();
-  }
 
   bool get _enabled => widget.onChanged != null;
 
@@ -110,10 +78,7 @@ class _ScrubberBarState extends State<ScrubberBar> with SingleTickerProviderStat
   }
 
   void _change(double dx, SliderThemeData theme) {
-    if (!_active) {
-      _active = true;
-      _syncHalo();
-    }
+    _active = true;
     _last = _valueAt(dx, theme);
     widget.onChanged?.call(_last);
   }
@@ -121,7 +86,6 @@ class _ScrubberBarState extends State<ScrubberBar> with SingleTickerProviderStat
   void _end() {
     if (!_active) return;
     _active = false;
-    _syncHalo();
     widget.onChangeEnd?.call(_last);
   }
 
@@ -141,16 +105,7 @@ class _ScrubberBarState extends State<ScrubberBar> with SingleTickerProviderStat
     final up = (value + max * ScrubberBar.actionFraction).clamp(0.0, max);
     final down = (value - max * ScrubberBar.actionFraction).clamp(0.0, max);
 
-    return MouseRegion(
-      opaque: false,
-      cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
-      onHover: (event) => _onHover(event, theme, value / max),
-      onExit: (_) {
-        if (!_overThumb) return;
-        _overThumb = false;
-        _syncHalo();
-      },
-      child: FocusRingShape(
+    return FocusRingShape(
       shape: const StadiumBorder(),
       child: Focus(
         canRequestFocus: enabled,
@@ -175,21 +130,16 @@ class _ScrubberBarState extends State<ScrubberBar> with SingleTickerProviderStat
             onHorizontalDragCancel: enabled ? _end : null,
             child: Padding(
               padding: theme.padding ?? EdgeInsets.zero,
-              child: AnimatedBuilder(
-                animation: _haloCurve,
-                builder: (context, _) => _ScrubberTrack(
-                  theme: theme,
-                  enabled: enabled,
-                  fraction: value / max,
-                  secondaryFraction: (widget.secondaryTrackValue / max).clamp(0.0, 1.0),
-                  halo: _haloCurve.value,
-                ),
+              child: _ScrubberTrack(
+                theme: theme,
+                enabled: enabled,
+                fraction: value / max,
+                secondaryFraction: (widget.secondaryTrackValue / max).clamp(0.0, 1.0),
               ),
             ),
           ),
         ),
       ),
-    ),
     );
   }
 }
@@ -201,17 +151,15 @@ class _ScrubberTrack extends LeafRenderObjectWidget {
     required this.enabled,
     required this.fraction,
     required this.secondaryFraction,
-    required this.halo,
   });
 
   final SliderThemeData theme;
   final bool enabled;
   final double fraction;
   final double secondaryFraction;
-  final double halo;
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderScrubberTrack(theme, enabled, fraction, secondaryFraction, halo);
+  RenderObject createRenderObject(BuildContext context) => _RenderScrubberTrack(theme, enabled, fraction, secondaryFraction);
 
   @override
   void updateRenderObject(BuildContext context, _RenderScrubberTrack renderObject) {
@@ -219,18 +167,14 @@ class _ScrubberTrack extends LeafRenderObjectWidget {
       ..theme = theme
       ..enabled = enabled
       ..fraction = fraction
-      ..secondaryFraction = secondaryFraction
-      ..halo = halo;
+      ..secondaryFraction = secondaryFraction;
   }
 }
 
 class _RenderScrubberTrack extends RenderBox {
-  _RenderScrubberTrack(this._theme, this._enabled, this._fraction, this._secondaryFraction, this._halo);
+  _RenderScrubberTrack(this._theme, this._enabled, this._fraction, this._secondaryFraction);
 
-  static const double thumbRadius = 6;
-
-  /// How far the halo grows, as a multiple of the thumb.
-  static const double haloScale = 1.75;
+  static const double _thumbRadius = 6;
 
   /// The height with nothing to take it from: what the `Slider` it replaces measured, so the control
   /// bar keeps its height.
@@ -255,13 +199,6 @@ class _RenderScrubberTrack extends RenderBox {
   set fraction(double value) {
     if (value == _fraction) return;
     _fraction = value;
-    markNeedsPaint();
-  }
-
-  double _halo;
-  set halo(double value) {
-    if (value == _halo) return;
-    _halo = value;
     markNeedsPaint();
   }
 
@@ -301,11 +238,7 @@ class _RenderScrubberTrack extends RenderBox {
     );
     // No thumb while disabled: there is no position to mark.
     if (_enabled) {
-      // The halo, under the thumb: from nothing to a little wider than it.
-      if (_halo > 0) {
-        context.canvas.drawCircle(thumbCenter, thumbRadius * haloScale * _halo, Paint()..color = _theme.thumbColor!.withValues(alpha: 0.5));
-      }
-      context.canvas.drawCircle(thumbCenter, thumbRadius, Paint()..color = _theme.thumbColor!);
+      context.canvas.drawCircle(thumbCenter, _thumbRadius, Paint()..color = _theme.thumbColor!);
     }
   }
 }
