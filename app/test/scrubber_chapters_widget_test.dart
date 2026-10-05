@@ -444,6 +444,48 @@ void main() {
     });
   });
 
+  group('the thumb', () {
+    List<double> circleRadii(WidgetTester tester) {
+      final canvas = TestRecordingCanvas();
+      tester.renderObject(find.byKey(playerScrubberKey)).paint(TestRecordingPaintingContext(canvas), Offset.zero);
+      return [
+        for (final call in canvas.invocations)
+          if (call.invocation.memberName == #drawCircle) call.invocation.positionalArguments[1] as double,
+      ];
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    testBar("a click cursor anywhere; a halo in the thumb's section; the thumb swells under the pointer", (tester) async {
+      await pumpWatching(tester);
+      await emit(tester, position: const Duration(minutes: 5));
+      final b = bar(tester);
+      final pointer = await mouse(tester);
+
+      await pointer.moveTo(b.at(0.85));
+      await settle(tester);
+      expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click, reason: 'a click anywhere on the bar');
+      expect(circleRadii(tester), [6.0], reason: 'another chapter: no halo');
+
+      await pointer.moveTo(b.at(0.6));
+      await settle(tester);
+      final inSection = circleRadii(tester);
+      expect(inSection, hasLength(2), reason: "the thumb's own chapter: a halo");
+      expect(inSection.last, 6.0, reason: 'the thumb has not swollen, the pointer is not on it');
+
+      await pointer.moveTo(b.at(0.5));
+      await settle(tester);
+      expect(circleRadii(tester).last, greaterThan(6.0), reason: 'on the thumb: it swells');
+
+      await pointer.moveTo(b.at(0.85));
+      await settle(tester);
+      expect(circleRadii(tester), [6.0], reason: 'and both go when the pointer leaves the section');
+    });
+  });
+
   group('the segments', () {
     testBar('one per chapter, with the gap at each boundary and nowhere else', (tester) async {
       await pumpWatching(tester);
