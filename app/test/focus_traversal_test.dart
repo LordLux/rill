@@ -42,9 +42,9 @@ String focused() {
     } else if (widget is Tooltip && widget.message != null) {
       name = widget.message!;
       found = true;
-    } else if (widget is RawTooltip && (widget.semanticsTooltip ?? '').isNotEmpty) {
+    } else if (widget is Semantics && (widget.properties.tooltip ?? '').isNotEmpty) {
       // The player controls' own tooltip, which has no Material `Tooltip` around it (F51).
-      name = widget.semanticsTooltip!;
+      name = widget.properties.tooltip!;
       found = true;
     } else if (widget.key is ValueKey<String>) {
       name = (widget.key! as ValueKey<String>).value;

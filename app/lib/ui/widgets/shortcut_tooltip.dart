@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart' show tooltipBubbleDecoration, tooltipBubbleForeground, tooltipBubbleShade, tooltipBubbleTextStyle;
@@ -112,15 +114,19 @@ class ShortcutTooltip extends StatelessWidget {
   }
 }
 
-/// A tooltip whose bubble has **no semantics**: the Material one puts a node for it in the
-/// overlay, and shown from under the player's control bar (opacity, slide, ignore-pointer)
-/// that node reached the Windows accessibility bridge without a parent — a burst of
-/// `Failed to update ui::AXTree … will not be in the tree` for as long as it was up
-/// (`architecture.md` F51). Every control already carries its own label, so a screen
-/// reader loses nothing; the bubble is for the pointer.
+/// A tooltip drawn **in the tree, not in an overlay** — the player's controls use it.
 ///
-/// Drawn like the Material desktop tooltip, above its target.
-class _SilentTooltip extends StatelessWidget {
+/// Flutter 3.44 attaches an `OverlayPortal`'s overlay child to its anchor's *semantics*
+/// (`traversalParentIdentifier`), so a tooltip is a semantics subtree that must stay attached to
+/// a control while that control's own subtree is being faded, clipped, re-laid-out or remounted —
+/// all of which the player's bar and the watch page do. When it does not, the Windows
+/// accessibility bridge is handed a node without a parent and rejects that update and every one
+/// after it: `Failed to update ui::AXTree … will not be in the tree` (`architecture.md` F51;
+/// reproduced as a bare, childless full-window node that lived five seconds while a user
+/// clicked around the watch page). With no overlay there is nothing to orphan. The bubble sits
+/// above the control, inside the player, with no semantics of its own; the control already has
+/// its label, so a screen reader loses nothing.
+class _SilentTooltip extends StatefulWidget {
   const _SilentTooltip({
     required this.label,
     required this.hoverDelay,
@@ -128,43 +134,104 @@ class _SilentTooltip extends StatelessWidget {
     required this.child,
   });
 
-  /// What assistive technology is told, on the anchor — the part of a tooltip that is not the
-  /// bubble. Null: nothing.
+  /// What assistive technology is told, on the anchor. Null: nothing.
   final String? label;
   final Duration hoverDelay;
   final InlineSpan message;
   final Widget child;
 
   @override
+  State<_SilentTooltip> createState() => _SilentTooltipState();
+}
+
+class _SilentTooltipState extends State<_SilentTooltip> {
+  Timer? _timer;
+  bool _shown = false;
+
+  /// -1 left-aligned to the control, 0 centred, 1 right-aligned: chosen when the bubble is shown,
+  /// from where the control is in the window, so a control at the edge keeps its bubble on screen.
+  double _align = 0;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _enter() {
+    _timer?.cancel();
+    if (_shown) return;
+    _timer = Timer(widget.hoverDelay, () {
+      if (!mounted) return;
+      final box = context.findRenderObject();
+      var align = 0.0;
+      if (box is RenderBox && box.attached) {
+        final centre = box.localToGlobal(box.size.center(Offset.zero)).dx;
+        final width = MediaQuery.sizeOf(context).width;
+        // Half the bubble, estimated from its text: only deciding which side has room.
+        final half = (widget.message.toPlainText().length * 7.0 + 28) / 2;
+        if (centre + half > width - 8) {
+          align = 1;
+        } else if (centre - half < 8) {
+          align = -1;
+        }
+      }
+      setState(() {
+        _align = align;
+        _shown = true;
+      });
+    });
+  }
+
+  void _hide() {
+    _timer?.cancel();
+    if (_shown && mounted) setState(() => _shown = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Not wrapped in `ExcludeSemantics`: that would drop the *control* under the tooltip from
-    // the semantics tree, not just the bubble.
-    return RawTooltip(
-      semanticsTooltip: label,
-      hoverDelay: hoverDelay,
-      positionDelegate: (c) => positionDependentBox(
-        size: c.overlaySize,
-        childSize: c.tooltipSize,
-        target: c.target,
-        verticalOffset: c.targetSize.height / 2 + 4,
-        preferBelow: false,
-      ),
-      tooltipBuilder: (context, animation) => ExcludeSemantics(
-        child: FadeTransition(
-          opacity: animation,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 24),
-            child: DecoratedBox(
-              decoration: tooltipBubbleDecoration,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Text.rich(message, style: tooltipBubbleTextStyle),
+    // Not `ExcludeSemantics` around the whole: that would drop the *control* from the tree.
+    final anchor = Semantics(tooltip: widget.label, child: widget.child);
+    return MouseRegion(
+      onEnter: (_) => _enter(),
+      onExit: (_) => _hide(),
+      // A press ends it, as a Material tooltip's does.
+      child: Listener(
+        onPointerDown: (_) => _hide(),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            anchor,
+            if (_shown)
+              Positioned(
+                top: 0,
+                left: -400,
+                right: -400,
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: Align(
+                      alignment: Alignment(_align, 0),
+                      child: FractionalTranslation(
+                        // Above the control, with a little air.
+                        translation: const Offset(0, -1.15),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 24),
+                          child: DecoratedBox(
+                            decoration: tooltipBubbleDecoration,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              child: Text.rich(widget.message, style: tooltipBubbleTextStyle, softWrap: false),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+          ],
         ),
       ),
-      child: child,
     );
   }
 }
