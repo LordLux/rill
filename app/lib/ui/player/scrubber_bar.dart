@@ -230,7 +230,7 @@ class _RenderScrubberTrack extends RenderBox {
   static const double thumbRadius = 6;
 
   /// How far the halo grows, as a multiple of the thumb.
-  static const double haloScale = 1.25;
+  static const double haloScale = 1.75;
 
   /// The height with nothing to take it from: what the `Slider` it replaces measured, so the control
   /// bar keeps its height.
@@ -303,7 +303,7 @@ class _RenderScrubberTrack extends RenderBox {
     if (_enabled) {
       // The halo, under the thumb: from nothing to a little wider than it.
       if (_halo > 0) {
-        context.canvas.drawCircle(thumbCenter, thumbRadius * haloScale * _halo, Paint()..color = _theme.thumbColor!.withValues(alpha: 0.35));
+        context.canvas.drawCircle(thumbCenter, thumbRadius * haloScale * _halo, Paint()..color = _theme.thumbColor!.withValues(alpha: 0.5));
       }
       context.canvas.drawCircle(thumbCenter, thumbRadius, Paint()..color = _theme.thumbColor!);
     }
