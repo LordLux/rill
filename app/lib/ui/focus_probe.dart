@@ -14,6 +14,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
@@ -89,6 +90,113 @@ Future<void> _probe(ProviderContainer container, String mode) async {
     if (size.length == 2 && size[0] != null && size[1] != null) {
       appWindow.size = Size(size[0]!, size[1]!);
       await _wait(2000);
+    }
+
+    if (mode == 'scrollchange') {
+      // The watch page scrolled down into its comments, focus somewhere inside the page, and the
+      // video changes: new comments, new related, the old nodes going away under a focused one.
+      final binding = GestureBinding.instance;
+      const device = 31;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(600, 500), kind: PointerDeviceKind.mouse, device: device));
+      final videos = ['dQw4w9WgXcQ', '9bZkp7q19f0', 'kJQP7kiw5Fk', '3JZ_D3ELwOQ'];
+      var current = 0;
+      openWatchIn(container, placeholderVideoItem(videos[current]));
+      await _wait(10000);
+      for (var cycle = 0; cycle < 8; cycle++) {
+        for (var s = 0; s < 3; s++) {
+          binding.handlePointerEvent(PointerScrollEvent(position: const Offset(600, 500), scrollDelta: const Offset(0, 400), kind: PointerDeviceKind.mouse, device: device));
+          await _wait(500);
+        }
+        final tabs = 8 + cycle * 7;
+        for (var i = 0; i < tabs; i++) {
+          FocusManager.instance.primaryFocus?.nextFocus();
+          await _wait(40);
+        }
+        current = (current + 1) % videos.length;
+        _say('SCROLLCHANGE $cycle: focus=${FocusManager.instance.primaryFocus?.debugLabel ?? FocusManager.instance.primaryFocus.runtimeType}; opening ${videos[current]}');
+        openWatchIn(container, placeholderVideoItem(videos[current]));
+        await _wait(7000);
+      }
+      _say('SCROLLCHANGE done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'monkey') {
+      // A screen reader's hands: pick a random tappable node from the semantics tree and press it,
+      // scroll, Tab, change video — and log each step, so that if an AXTree error appears the
+      // steps just before it are in the same log. Only labels on a short allow-list are pressed:
+      // nothing that changes the account (like, subscribe, vote, delete) and nothing that leaves the app.
+      final random = math.Random(int.tryParse(Platform.environment['RILL_MONKEY_SEED'] ?? '') ?? 7);
+      final steps = int.tryParse(Platform.environment['RILL_MONKEY_STEPS'] ?? '') ?? 150;
+      final safe = RegExp(
+        r'^(Show \d+ repl|Hide \d+ repl|Top$|Newest$|Show more|Show less|Mute|Unmute|Pause|Play$|Theatre mode|Fullscreen|Exit fullscreen|Miniplayer|Home|Subscriptions|Back$|Toggle menu|Share$|Close|Save to playlist|More actions|Captions|Settings|Quality|Next video|Previous video|Remove from queue|Video,|Music Video,|Playlist,|Mix|Short,|Live,|Station,)',
+      );
+      final binding = GestureBinding.instance;
+      const device = 21;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(400, 400), kind: PointerDeviceKind.mouse, device: device));
+      final videos = ['dQw4w9WgXcQ', '9bZkp7q19f0', 'kJQP7kiw5Fk', '3JZ_D3ELwOQ'];
+      openWatchIn(container, placeholderVideoItem(videos[0]));
+      for (final v in videos.skip(1)) {
+        container.read(queueProvider.notifier).addToQueue(placeholderVideoItem(v));
+      }
+      await _wait(10000);
+
+      List<(int, String)> tappable() {
+        final owner = RendererBinding.instance.renderViews.first.owner?.semanticsOwner;
+        final out = <(int, String)>[];
+        void walk(SemanticsNode node) {
+          final data = node.getSemanticsData();
+          if (data.hasAction(SemanticsAction.tap) && safe.hasMatch(data.label)) out.add((node.id, data.label));
+          node.visitChildren((c) {
+            walk(c);
+            return true;
+          });
+        }
+
+        final root = owner?.rootSemanticsNode;
+        if (root != null) walk(root);
+        return out;
+      }
+
+      var n = 0;
+      for (; n < steps; n++) {
+        final roll = random.nextInt(100);
+        if (roll < 55) {
+          final nodes = tappable();
+          if (nodes.isEmpty) {
+            _say('MONKEY $n: nothing to press');
+          } else {
+            final pick = nodes[random.nextInt(nodes.length)];
+            _say('MONKEY $n: tap #${pick.$1} "${pick.$2.replaceAll('\n', ' / ')}"');
+            RendererBinding.instance.renderViews.first.owner!.semanticsOwner!.performAction(pick.$1, SemanticsAction.tap);
+          }
+        } else if (roll < 75) {
+          final dy = (random.nextBool() ? 1 : -1) * (100.0 + random.nextInt(500));
+          final at = Offset(300.0 + random.nextInt(900), 200.0 + random.nextInt(500));
+          _say('MONKEY $n: scroll $dy at $at');
+          binding.handlePointerEvent(PointerScrollEvent(position: at, scrollDelta: Offset(0, dy), kind: PointerDeviceKind.mouse, device: device));
+        } else if (roll < 90) {
+          final k = 1 + random.nextInt(6);
+          _say('MONKEY $n: tab x$k');
+          for (var i = 0; i < k; i++) {
+            FocusManager.instance.primaryFocus?.nextFocus();
+            await _wait(60);
+          }
+        } else if (roll < 96) {
+          final v = videos[random.nextInt(videos.length)];
+          _say('MONKEY $n: open video $v');
+          openWatchIn(container, placeholderVideoItem(v));
+        } else {
+          _say('MONKEY $n: Escape');
+          HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.escape, logicalKey: LogicalKeyboardKey.escape, timeStamp: Duration.zero));
+          HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: PhysicalKeyboardKey.escape, logicalKey: LogicalKeyboardKey.escape, timeStamp: Duration.zero));
+        }
+        await _wait(700 + random.nextInt(900));
+      }
+      _say('MONKEY done after $n steps');
+      await stderr.flush();
+      return;
     }
 
     if (mode == 'keystate') {
