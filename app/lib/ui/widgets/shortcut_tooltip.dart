@@ -54,6 +54,7 @@ class ShortcutTooltip extends StatelessWidget {
     this.silent = false,
     this.announce = true,
     this.side = TooltipSide.above,
+    this.delay,
     required this.child,
   });
 
@@ -63,6 +64,10 @@ class ShortcutTooltip extends StatelessWidget {
   /// Whether a [silent] tooltip also names its anchor for assistive technology. Off for a
   /// control that already says the same thing itself (the volume bar: "Volume 100%").
   final bool announce;
+
+  /// How long the pointer rests before a [silent] bubble shows, where the default for the kind of
+  /// tooltip is not right.
+  final Duration? delay;
 
   /// Where a [silent] bubble opens.
   final TooltipSide side;
@@ -74,7 +79,7 @@ class ShortcutTooltip extends StatelessWidget {
   final Widget child;
 
   Widget _tip({required Duration wait, required InlineSpan message, bool plain = false}) {
-    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: wait, message: message, side: side, child: child);
+    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: delay ?? wait, message: message, side: side, child: child);
     if (plain) {
       return Tooltip(
         message: label,
@@ -222,12 +227,13 @@ class _SilentTooltipState extends State<_SilentTooltip> {
   }
 
   Widget _bubble() => ConstrainedBox(
-    constraints: const BoxConstraints(minHeight: 24),
+    // Wraps past this, for a long label (a video's title); the short ones never reach it.
+    constraints: const BoxConstraints(minHeight: 24, maxWidth: 360),
     child: DecoratedBox(
       decoration: tooltipBubbleDecoration,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Text.rich(widget.message, style: tooltipBubbleTextStyle, softWrap: false),
+        child: Text.rich(widget.message, style: tooltipBubbleTextStyle),
       ),
     ),
   );

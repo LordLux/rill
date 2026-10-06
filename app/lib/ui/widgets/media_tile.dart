@@ -851,10 +851,8 @@ class _MediaTileState extends State<MediaTile> {
                   width: double.infinity,
                   child: Padding(
                     padding: const EdgeInsets.only(right: 28.0, top: 4.0),
-                    child: Text(
-                      widget.spec.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    child: _TitleTip(
+                      title: widget.spec.title,
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w400,
@@ -980,10 +978,8 @@ class _MediaTileState extends State<MediaTile> {
                       width: double.infinity,
                       child: Padding(
                         padding: const EdgeInsets.only(right: 28.0, top: 0.0),
-                        child: Text(
-                          widget.spec.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        child: _TitleTip(
+                          title: widget.spec.title,
                           style: TextStyle(
                             fontSize: widget.spec.isShort ? 16 : 14,
                             fontWeight: widget.spec.isShort
@@ -1403,6 +1399,36 @@ class _TileMoreButtonState extends ConsumerState<_TileMoreButton> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// A tile's title, at most two lines. When it is cut, hovering shows all of it in a tooltip drawn in
+/// the tree (no overlay: `architecture.md` F51); when it fits there is no tooltip at all.
+class _TitleTip extends StatelessWidget {
+  const _TitleTip({required this.title, required this.style});
+
+  final String title;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: style);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: title, style: DefaultTextStyle.of(context).style.merge(style)),
+          maxLines: 2,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final cut = painter.didExceedMaxLines;
+        painter.dispose();
+        // Announced by the tile's own narration, which already says the whole title.
+        return cut
+            ? ShortcutTooltip(label: title, silent: true, announce: false, delay: const Duration(milliseconds: 500), child: text)
+            : text;
+      },
     );
   }
 }
