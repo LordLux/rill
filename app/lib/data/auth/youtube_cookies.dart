@@ -50,6 +50,60 @@ const Set<String> kSessionCookies = {
   '__Secure-3PAPISID',
 };
 
+/// The cookies a sign-out deletes: every one that signs somebody in.
+///
+/// **Measured, not guessed** (Task 33, `architecture.md` F53): the names a
+/// signed-in jar holds that a signed-out one does not, minus Google's
+/// trusted-device mark. `LOGIN_INFO` is the one name here that the dumps did
+/// not show; it is in [kSessionCookies], and everything the reader looks for
+/// has to be deleted (`youtube_cookies_test.dart` holds that).
+///
+/// Not here, and so kept by a sign-out: `SMSV`, which is the "Don't ask again
+/// on this device" mark; `ACCOUNT_CHOOSER`, so the next sign-in offers the
+/// addresses used here before (it still asks for the password); and the
+/// cookies an anonymous visitor gets anyway.
+const Set<String> kSignOutCookieNames = {
+  // The session, on `.youtube.com`, `.google.com` and `.google.<country>`.
+  'SID',
+  'HSID',
+  'SSID',
+  'APISID',
+  'SAPISID',
+  '__Secure-1PSID',
+  '__Secure-3PSID',
+  '__Secure-1PAPISID',
+  '__Secure-3PAPISID',
+  'LOGIN_INFO',
+  // Its rotation and consistency companions.
+  'SIDCC',
+  '__Secure-1PSIDCC',
+  '__Secure-3PSIDCC',
+  '__Secure-1PSIDTS',
+  '__Secure-3PSIDTS',
+  '__Secure-1PSIDRTS',
+  '__Secure-3PSIDRTS',
+  // Google's login, on `accounts.google.com`.
+  'LSID',
+  '__Host-1PLSID',
+  '__Host-3PLSID',
+  '__Host-GAPSTS',
+};
+
+/// `youtube.com`, `google.com` or `google.<country>`, and any host under one.
+///
+/// The country domain is the viewer's (`.google.it` in the measurement), so it
+/// is matched by shape; listing one country would leave every other viewer's
+/// session cookies behind.
+final RegExp _accountDomain =
+    RegExp(r'(^|\.)(youtube\.com|google\.[a-z]{2,3}(\.[a-z]{2})?)$');
+
+/// Whether a sign-out deletes the cookie [name] set on [domain].
+///
+/// By name **and** domain: a name from [kSignOutCookieNames] on somebody else's
+/// site is not ours to delete.
+bool isSignOutCookie(String name, String domain) =>
+    kSignOutCookieNames.contains(name) && _accountDomain.hasMatch(domain.toLowerCase());
+
 /// Whether [names] contains everything an authenticated call needs.
 bool hasSessionCookies(Iterable<String> names) {
   final present = names.toSet();
