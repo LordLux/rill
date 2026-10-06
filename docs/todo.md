@@ -1100,3 +1100,29 @@ instead of saying the connection is the problem.
   pattern match.
 - **Check the other paths** (`feed.*`, `search.query`, `video.comments`) surface the same
   code rather than only playback.
+
+### 85. The sign-in page is not reachable with a screen reader or by Tab from Flutter
+
+Reported 2026-10-06 while testing with Narrator on: on the login page the embedded WebView2 is
+not focusable from the Flutter side.
+
+- **What works:** once the page has focus (click the email field), Tab moves through the page's
+  own controls exactly as in a browser.
+- **What does not:** Tab from Flutter's controls never enters the page, and Tab inside the page
+  never leaves it (it cycles the page's items). Narrator does not see the page's content.
+- **Cause (not yet confirmed on a build):** `third_party/flutter_inappwebview_windows` hosts
+  WebView2 in *composition* mode (`ICoreWebView2CompositionController`): the page is a texture
+  in Flutter's surface, so the page's UIA tree is not part of the window's, and Flutter's focus
+  traversal has no way to hand focus across (`MoveFocus`) or take it back.
+- **Chosen fix: sign-in in its own native window.** Host WebView2 in a top-level window
+  (windowed `ICoreWebView2Controller`), opened by the login page, which waits for the cookie
+  result and closes it. A real window is accessible to Narrator and takes keyboard focus on its
+  own, so neither direction of Tab needs bridging. Re-verify Task 33's cookie capture, the
+  device-trust cookie on sign-out and the account picker, which share this code path.
+- **Rejected:** bridging WebView2's UIA tree into Flutter's (answering `WM_GETOBJECT` ourselves —
+  fragile); a child HWND inside the Flutter window (unclear that Narrator descends into it, and
+  Tab handoff is still manual).
+- **A smaller step if wanted first:** keyboard handoff only — `MoveFocus` into the page on Tab
+  from the last Flutter control, and back out on Shift+Tab / at the page's ends. Does nothing for
+  Narrator reading the page.
+- Until then: sign in without Narrator, or seed the session with `YT_COOKIE`.
