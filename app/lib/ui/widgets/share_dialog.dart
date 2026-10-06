@@ -193,170 +193,170 @@ class _ShareDialogState extends State<ShareDialog> {
       label: 'Share',
       explicitChildNodes: true,
       child: Dialog(
-      backgroundColor: scheme.surfaceContainerHigh,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SizedBox(
-        width: 460,
-        child: Padding(
-          // The gutters live on each section rather than on the whole column:
-          // the close button has to sit closer to the edge than the content
-          // does, and a single outer padding cannot give it that.
-          padding: const EdgeInsets.only(top: 12, bottom: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 24, right: 12),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 36),
-                    Expanded(
-                      child: Text(
-                        'Share',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close, size: 20),
-                      tooltip: 'Close',
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 4),
-              // Not wired yet, so not narrated at all: nothing to do with it and a
-              // sentence that promises it.
-              ExcludeSemantics(
-                child: Column(
-                  children: [
-                    FilledButton.icon(
-                      onPressed: null,
-                      icon: const Icon(Icons.share, size: 18),
-                      label: const Text('Share via Windows…'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Share this video using the OS share sheet.',
-                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: ExcludeSemantics(
-                  child: Text(
-                    // Not "Share" a second time: the title already said it, and
-                    // the label's job here is to separate the row that works from
-                    // the button above it that does not yet.
-                    'Send to',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SizedBox(
-                  height: 70,
-                  child: SilkyListView.builder(
-                    shrinkWrap: true,
-                    itemCount: targets.length,
-                    scrollDirection: Axis.horizontal,
-                    itemBuilder: (context, index) => Padding(
-                      padding: EdgeInsets.only(right: index == targets.length - 1 ? 0 : 6),
-                      child: targets[index],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Container(
-                  height: 44,
-                  padding: const EdgeInsets.only(left: 16, right: 6),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(22),
-                  ),
+        backgroundColor: scheme.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: SizedBox(
+          width: 460,
+          child: Padding(
+            // The gutters live on each section rather than on the whole column:
+            // the close button has to sit closer to the edge than the content
+            // does, and a single outer padding cannot give it that.
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 24, right: 12),
                   child: Row(
                     children: [
+                      const SizedBox(width: 36),
                       Expanded(
-                        // The address is for the eyes; the button beside it says what it does.
-                        child: ExcludeSemantics(
-                          child: Text(
-                            _link,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                          ),
+                        child: Text(
+                          'Share',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.onSurface),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      // The one white thing in the dialog, same as the mock and
-                      // the same role the pills go to when they are on.
-                      Semantics(
-                        label: 'Copy link',
-                        child: FilledButton(
-                          onPressed: () => _copy(_link, 'Link copied'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: scheme.inverseSurface,
-                            foregroundColor: scheme.onInverseSurface,
-                            minimumSize: const Size(0, 32),
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                          ),
-                          child: ExcludeSemantics(
-                            child: Transform.translate(offset: const Offset(0, -1), child: const Text('Copy')),
-                          ),
-                        ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close, size: 20),
+                        tooltip: 'Close',
                       ),
                     ],
                   ),
                 ),
-              ),
-              // Nothing to start at on a video that has not started, and nothing
-              // to offer when the thing being shared is not the thing playing.
-              if (widget.position > Duration.zero) ...[
-                const SizedBox(height: 10),
-                InkWell(
-                  borderRadius: BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
-                  onTap: () => setState(() => _startAt = !_startAt),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                const SizedBox(height: 4),
+                // Not wired yet, so not narrated at all: nothing to do with it and a
+                // sentence that promises it.
+                ExcludeSemantics(
+                  child: Column(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.share, size: 18),
+                        label: const Text('Share via Windows…'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 40),
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Share this video using the OS share sheet.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: ExcludeSemantics(
+                    child: Text(
+                      // Not "Share" a second time: the title already said it, and
+                      // the label's job here is to separate the row that works from
+                      // the button above it that does not yet.
+                      'Send to',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: SizedBox(
+                    height: 70,
+                    child: SilkyListView.builder(
+                      shrinkWrap: true,
+                      itemCount: targets.length,
+                      scrollDirection: Axis.horizontal,
+                      itemBuilder: (context, index) => Padding(
+                        padding: EdgeInsets.only(right: index == targets.length - 1 ? 0 : 6),
+                        child: targets[index],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Container(
+                    height: 44,
+                    padding: const EdgeInsets.only(left: 16, right: 6),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(22),
+                    ),
                     child: Row(
                       children: [
-                        Checkbox(
-                          value: _startAt,
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          onChanged: (next) => setState(() => _startAt = next ?? false),
+                        Expanded(
+                          // The address is for the eyes; the button beside it says what it does.
+                          child: ExcludeSemantics(
+                            child: Text(
+                              _link,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        Text('Start at', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatDuration(widget.position),
-                          style: TextStyle(fontSize: 13, color: scheme.primary),
+                        // The one white thing in the dialog, same as the mock and
+                        // the same role the pills go to when they are on.
+                        Semantics(
+                          label: 'Copy link',
+                          child: FilledButton(
+                            onPressed: () => _copy(_link, 'Link copied'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: scheme.inverseSurface,
+                              foregroundColor: scheme.onInverseSurface,
+                              minimumSize: const Size(0, 32),
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                            ),
+                            child: ExcludeSemantics(
+                              child: Transform.translate(offset: const Offset(0, -1), child: const Text('Copy')),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
+                // Nothing to start at on a video that has not started, and nothing
+                // to offer when the thing being shared is not the thing playing.
+                if (widget.position > Duration.zero) ...[
+                  const SizedBox(height: 10),
+                  InkWell(
+                    borderRadius: BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                    onTap: () => setState(() => _startAt = !_startAt),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            value: _startAt,
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            onChanged: (next) => setState(() => _startAt = next ?? false),
+                          ),
+                          const SizedBox(width: 8),
+                          Text('Start at', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatDuration(widget.position),
+                            style: TextStyle(fontSize: 13, color: scheme.primary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
-      ),
-      ),
+        ),
     );
   }
 }
@@ -419,30 +419,30 @@ class _ShareTargetState extends State<_ShareTarget> {
               child: Semantics(
                 label: widget.label,
                 child: InkWell(
-                customBorder: const CircleBorder(), // the focus ring is a circle too
-                onHover: (hovered) => setState(() => _isHovered = hovered),
-                onTap: widget.onTap,
-                child: ExcludeSemantics(
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: Center(
-                      child: widget.icon != null
-                          ? Icon(widget.icon, size: 22, color: iconColor)
-                          : widget.iconBuilder != null
-                          ? widget.iconBuilder!(iconColor, _isHovered)
-                          : Text(
-                              widget.label,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                color: iconColor,
+                  customBorder: const CircleBorder(), // the focus ring is a circle too
+                  onHover: (hovered) => setState(() => _isHovered = hovered),
+                  onTap: widget.onTap,
+                  child: ExcludeSemantics(
+                    child: SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Center(
+                        child: widget.icon != null
+                            ? Icon(widget.icon, size: 22, color: iconColor)
+                            : widget.iconBuilder != null
+                            ? widget.iconBuilder!(iconColor, _isHovered)
+                            : Text(
+                                widget.label,
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: iconColor,
+                                ),
                               ),
-                            ),
+                      ),
                     ),
                   ),
                 ),
-              ),
               ),
             ),
           ),

@@ -965,11 +965,11 @@ class _QueueItemTileState extends State<_QueueItemTile> {
   String _rowLabel() {
     final tone = durationToneFor(widget.item);
     final clock = formatVideoDuration(widget.item);
-    final length = switch (tone) {
-      DurationBadgeTone.station => 'Station',
-      DurationBadgeTone.live => 'Live',
-      _ => clock == null ? null : '${spokenClock(clock) ?? clock} long',
-    };
+    final length = spokenLength(
+      isLive: tone == DurationBadgeTone.live,
+      isStation: tone == DurationBadgeTone.station,
+      clock: clock,
+    );
     return [
       widget.item.title,
       widget.item.channelName,

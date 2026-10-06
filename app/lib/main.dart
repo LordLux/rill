@@ -20,6 +20,8 @@ import 'ui/audio_mode_controller.dart';
 import 'ui/focus_probe.dart';
 import 'ui/focus_ring.dart';
 import 'ui/hide_queue_controller.dart';
+import 'ui/key_diag.dart';
+import 'ui/keyboard_resync.dart';
 
 import 'ui/auth_controller.dart';
 import 'ui/auth_probe.dart';
@@ -40,6 +42,7 @@ import 'ui/ytdlp_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   KeyboardNavigation.install();
+  KeyboardResync.install();
   // First, so nothing below can print a cookie or an error the log misses.
   // `YT_COOKIE` is the development path's cookie (the sidecar reads it too).
   installErrorLogging();
@@ -150,6 +153,7 @@ Future<void> main() async {
   runCaptionsProbe(container);
   runSemanticsProbe(container);
   runSemanticsDump();
+  runKeyDiag();
   runFocusProbe(container);
 }
 

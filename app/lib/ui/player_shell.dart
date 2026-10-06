@@ -132,6 +132,10 @@ class RouteTracker extends NavigatorObserver {
   bool _isTransient(Route<dynamic> route) =>
       route is PopupRoute || (route is PageRoute && route.fullscreenDialog);
 
+  /// A tooltip's overlay entry is a semantics node grafted under its anchor; a page swap that removes the
+  /// anchor while it is up can leave that node without a parent (`architecture.md` F51). Close them first.
+  void _closeTooltips() => Tooltip.dismissAllToolTips();
+
   void _report(Route<dynamic>? route) {
     final name = route?.settings.name;
     WidgetsBinding.instance.addPostFrameCallback((_) => onPageRoute(name));
@@ -143,6 +147,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _closeTooltips();
     if (_isReportablePage(route)) {
       _report(route);
     } else if (_isTransient(route)) {
@@ -152,6 +157,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _closeTooltips();
     if (_isReportablePage(route)) {
       _report(previousRoute);
     } else if (_isTransient(route)) {
@@ -170,6 +176,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _closeTooltips();
     if (newRoute != null && _isReportablePage(newRoute)) _report(newRoute);
   }
 }

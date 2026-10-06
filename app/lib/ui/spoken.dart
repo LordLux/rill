@@ -30,3 +30,19 @@ String? spokenClock(String clock) {
   final seconds = v.length == 3 ? v[0] * 3600 + v[1] * 60 + v[2] : v[0] * 60 + v[1];
   return spokenDuration(Duration(seconds: seconds));
 }
+
+/// "1 video" / "24 videos" — a playlist's or mix's size, shown and spoken alike.
+String videoCountLabel(int count) => _unit(count, 'video');
+
+/// How long a video is, or what stands in for it, as a screen reader says it: "Live",
+/// "Station", or "`<spoken clock> long`"; null when there is nothing to say. [clock] is the
+/// display text (`12:50`).
+String? spokenLength({required bool isLive, required bool isStation, String? clock}) {
+  if (isStation) return 'Station';
+  if (isLive) return 'Live';
+  return spokenClockLength(clock);
+}
+
+/// "12 minutes and 50 seconds long" for the display clock `12:50`; null for no clock. For a
+/// tile, whose kind ("Live", "Station") is announced first and so is not repeated as a length.
+String? spokenClockLength(String? clock) => clock == null ? null : '${spokenClock(clock) ?? clock} long';

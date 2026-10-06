@@ -195,6 +195,44 @@ void main() {
       finish();
     });
 
+    for (final how in ['Shift+N', 'a new video']) {
+      testWidgets('after $how the keyboard still works: no stale focus, no exception', (tester) async {
+        await openWatch(tester, alsoQueue: ['vid-2']);
+        // Keyboard on a control of the player, as a user who has been Tabbing.
+        for (var i = 0; i < 60 && focused() != 'player-mute'; i++) {
+          await tabThrough(tester, 1);
+        }
+        expect(focused(), 'player-mute');
+
+        if (how == 'Shift+N') {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        } else {
+          openWatchIn(container, video('vid-3'));
+        }
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+        expect(tester.takeException(), isNull, reason: 'nothing threw while the video changed');
+
+        final primary = FocusManager.instance.primaryFocus;
+        // The focused node, if there is one, belongs to a widget that is still on screen.
+        expect(primary == null || primary.context == null || primary.context!.mounted, isTrue, reason: 'focus is not on an unmounted widget: $primary');
+
+        // And the keys still do things: Tab moves focus, and a shortcut reaches its handler.
+        await tabThrough(tester, 1);
+        expect(tester.takeException(), isNull, reason: 'Tab after the change did not throw');
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: 'a shortcut after the change did not throw');
+        expect(container.read(playerViewProvider).theatre, isTrue, reason: '"t" toggled theatre mode');
+        finish();
+      });
+    }
+
     testWidgets('every tap target on the watch page has a label', (tester) async {
       final semantics = tester.ensureSemantics();
       await openWatch(tester, alsoQueue: ['vid-2']);

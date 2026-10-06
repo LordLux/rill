@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsAction;
@@ -373,6 +375,24 @@ void main() {
       await tester.pumpWidget(const SizedBox());
 
       expect(source.cancelled, isEmpty);
+    });
+
+    testWidgets('the replies button is named "Show N replies", and the comment does not carry that name', (tester) async {
+      final handle = tester.ensureSemantics();
+      final source = FakeCommentsSource();
+      await tester.pumpWidget(section(source));
+      source.issued.single.completer.complete(
+        CommentsResult(items: [comment('t1', replyCount: 2, repliesContinuation: 'rep-t1')]),
+      );
+      await tester.pump();
+
+      // The button has the name; before, it was nameless and the name sat on the comment.
+      final button = tester.getSemantics(find.bySemanticsLabel('Show 2 replies'));
+      expect(button.getSemanticsData().flagsCollection.isButton, isNot(Tristate.isFalse));
+      final commentNode = tester.getSemantics(find.bySemanticsLabel(RegExp('^(?!Show 2 replies).*', dotAll: true)).first);
+      expect(commentNode.label, isNot(contains('Show 2 replies')));
+      expect(find.bySemanticsLabel(RegExp('Show 2 replies')), findsOneWidget, reason: 'said once');
+      handle.dispose();
     });
 
     testWidgets('a thread that goes away while its replies load releases the sidecar', (tester) async {
