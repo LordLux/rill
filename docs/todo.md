@@ -1080,3 +1080,83 @@ What `docs/tasks/32` found and deliberately left, each one small:
   next Tab does not land on it. Horizontal layout is correct and tested.
 - **The comment box's Escape** does not cancel (Cancel does); the filters dialog
   and the player's submenus close on Escape through their own paths.
+
+### 84. Say "can't reach YouTube" when the connection itself fails
+
+Measured 2026-10-05: with no network, yt-dlp's tier of the playback ladder reports
+`Unable to download API page: … Failed to resolve 'www.youtube.com' ([Errno 11001]
+getaddrinfo failed)`, and the UI shows that text (or "This video would not open")
+instead of saying the connection is the problem.
+
+- **A new RPC error code** for a failure *below HTTP*: DNS (`getaddrinfo`, `ENOTFOUND`),
+  `ECONNREFUSED`, `fetch failed`, and yt-dlp's `Failed to resolve`. Raised only when nothing
+  got through — not for HTTP 4xx/5xx, timeouts or TLS errors, which can be a proxy, a flaky
+  link or a real outage and need their own wording.
+- **Wording:** "Can't reach YouTube. Check your internet connection." — true for no network,
+  filtered DNS, a VPN or a firewall alike. Not "You're offline", which can be wrong.
+  `retry: user`, and keep *Try again* (a single DNS blip is common).
+- **In the playback ladder** it sits next to the throttle check in `resolve.ts`, so a video is
+  not blamed for the connection; tier 2 (yt-dlp) reports through a string and needs a small
+  pattern match.
+- **Check the other paths** (`feed.*`, `search.query`, `video.comments`) surface the same
+  code rather than only playback.
+
+### 85. The sign-in page is not reachable with a screen reader or by Tab from Flutter
+
+Reported 2026-10-06 while testing with Narrator on: on the login page the embedded WebView2 is
+not focusable from the Flutter side.
+
+- **What works:** once the page has focus (click the email field), Tab moves through the page's
+  own controls exactly as in a browser.
+- **What does not:** Tab from Flutter's controls never enters the page, and Tab inside the page
+  never leaves it (it cycles the page's items). Narrator does not see the page's content.
+- **Cause (not yet confirmed on a build):** `third_party/flutter_inappwebview_windows` hosts
+  WebView2 in *composition* mode (`ICoreWebView2CompositionController`): the page is a texture
+  in Flutter's surface, so the page's UIA tree is not part of the window's, and Flutter's focus
+  traversal has no way to hand focus across (`MoveFocus`) or take it back.
+- **Chosen fix: sign-in in its own native window.** Host WebView2 in a top-level window
+  (windowed `ICoreWebView2Controller`), opened by the login page, which waits for the cookie
+  result and closes it. A real window is accessible to Narrator and takes keyboard focus on its
+  own, so neither direction of Tab needs bridging. Re-verify Task 33's cookie capture, the
+  device-trust cookie on sign-out and the account picker, which share this code path.
+- **Rejected:** bridging WebView2's UIA tree into Flutter's (answering `WM_GETOBJECT` ourselves —
+  fragile); a child HWND inside the Flutter window (unclear that Narrator descends into it, and
+  Tab handoff is still manual).
+- **A smaller step if wanted first:** keyboard handoff only — `MoveFocus` into the page on Tab
+  from the last Flutter control, and back out on Shift+Tab / at the page's ends. Does nothing for
+  Narrator reading the page.
+- Until then: sign in without Narrator, or seed the session with `YT_COOKIE`.
+
+### 86. Report an accessibility error when it happens
+
+An `AXTree` error silences Narrator for the rest of the session (see CLAUDE.md "Accessibility"),
+and today it is only visible to someone reading the log. Wanted: it is noticed, and a report with
+enough in it to find the node can be kept or sent — for the developer testing, and for users.
+
+- **Where it can be seen.** The error is the engine's own stderr line
+  (`accessibility_bridge.cc(114)`), so only the release launcher
+  (`windows/runner/log_capture.cpp`, which already pipes, redacts and timestamps every line) can
+  see it; Dart cannot. The launcher can count the lines and tell the app (a file or a named pipe).
+- **Report contents (no cookie, no account data):** time, app version, the first error line, how
+  many followed, the OS and Flutter versions, whether a screen reader was running, and — if
+  `RILL_SEMANTICS_DUMP` is on — the node id's lines from `rill-semantics-changes.txt`. The log
+  already redacts cookies; keep that chokepoint.
+- **Local first:** append to `%LOCALAPPDATA%\rill\a11y-reports\` (one file per run, newest 10),
+  and show a row in the Problems list ("Accessibility errors: N this session — Copy report").
+  Sending anything off the machine is a separate, opt-in step; nothing is sent by default.
+- **Do not** try to recover the tree automatically (re-sending semantics) without measuring it:
+  the bridge rejects every later update, and a rebuild may or may not clear that.
+
+### 87. Remove the default-on semantics dump (due 2026-11-28)
+
+`RILL_SEMANTICS_DUMP` was made **on by default in a dev build** (no `RILL_VERSION`) on 2026-10-06 to
+collect node logs for the intermittent `AXTree` error. It forces semantics on (a cost the app
+otherwise only pays when a screen reader asks), writes a ring of tree dumps once a second to
+`%TEMP%` and keeps a 4 MB node-change log.
+
+- **On or after 2026-11-28:** delete `_dumpWanted`'s dev-build default in `ui/semantics_probe.dart`
+  (back to `== '1'` only), and the sentences about the default in `docs/configuration.md` and
+  CLAUDE.md "Accessibility".
+- **Before removing:** if the error was seen in that time, check that it is explained
+  (`axtree-error-diagnosis` memory, `architecture.md` F51); if not, extend the date.
+- Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.

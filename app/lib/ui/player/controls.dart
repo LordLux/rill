@@ -44,6 +44,7 @@ import '../video_info.dart';
 import '../focus_ring.dart' show KeyboardNavigation;
 import '../focus_surface.dart';
 import '../widgets/shortcut_tooltip.dart';
+import 'scrubber_bar.dart';
 import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
 import 'settings_menu.dart';
@@ -372,277 +373,279 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     // Ordered: the progress bar and controls first, then whatever the slates hold (in
     // fullscreen, the queue's toggle and the queue). Reading order alone put a queue sliding
     // in at the top of the screen before the controls at the bottom.
-    return FocusSurface(
-      ordered: true,
-      child: Focus(
-        focusNode: _focusProbe,
-        // No semantics node: this `Focus` only watches focus, and the node it would
-        // add above the whole player brings the Slider/OverlayPortal fault back
-        // (`architecture.md` F51) — measured, ~1 450 AXTree errors a run.
-        includeSemantics: false,
-        onFocusChange: _onFocusInsideChanged,
-        child: Listener(
-      onPointerSignal: _onPointerSignal,
-      child: MouseRegion(
-        // The pointer disappears with the controls, as it does in every video
-        // player. `onHover` fires on movement only, which is exactly the wake
-        // condition the task asks for.
-        cursor: _visible ? MouseCursor.defer : SystemMouseCursors.none,
-        onHover: (event) {
-          if (event.delta != Offset.zero) _wake();
-        },
-        onExit: (_) => _wake(),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // The quality-switch cover (architecture §2.7): a reopened media
-            // plays one real frame from position zero before the seek back
-            // lands, and that flash is what reads as broken. Held until the
-            // position returns, above the video and below the bar.
-            if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)) && !ref.watch(audioModeProvider)) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
-            // The click surface, beneath the bar so the bar's own buttons win
-            // the hit test and its background absorbs rather than falls through.
-            // Kept in audio-only too. It was gated off to let the music
-            // layout's buttons be clicked, which did not work — the opaque
-            // `MouseRegion` above it was the real blocker — and the gate cost
-            // tap-to-pause and double-click-to-fullscreen for nothing. The
-            // layout now sits above this instead.
-            Semantics(
-              button: true,
-              label: 'Play or pause',
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _onTap,
-                child: const SizedBox.expand(),
-              ),
-            ),
-            if (widget.child != null) // Before the bar: what the slates hold is a problem the viewer has to act on (Try
-            // again, Notify me, Sign in) and comes first. In fullscreen the queue's toggle and
-            // the queue carry their own larger numbers and still follow the controls.
-            FocusTraversalOrder(order: const NumericFocusOrder(0.5), child: widget.child!),
-            // Above the click surface so it paints over the cover, but
-            // pointer-transparent — a spinner that swallowed the click to
-            // play/pause would take the control away exactly when the player is
-            // least responsive.
-            //
-            // **Keyed, and it does not work without the key.** The cover
-            // toggling breaks the child list's forward scan and the menu breaks
-            // the backward one, so this lands in the middle range Flutter
-            // rematches by key alone — unkeyed, its `State` was destroyed and
-            // its grace timer cancelled at the exact moment a switch started.
-            IgnorePointer(
-              key: const ValueKey('player-busy'),
-              child: _BusySpinner(engine: widget.engine, onBusyChanged: _onBusyChanged),
-            ),
-            // **Mounted unconditionally now that it fades.** The `if` used to
-            // be here, and an `if` cannot animate an exit: the panel was gone
-            // from the tree on the same frame it was told to close, with nothing
-            // left to fade. `SettingsMenuFade` owns the mount instead and holds
-            // it for the length of the fade. While closed it is a zero-width
-            // box — two render objects and no hit target.
-            Positioned(
-              right: _isVertical ? 64 : 7,
-              // `top` as well as `bottom`, so the menu is bounded by the
-              // player box rather than by a guess: a 22-rung ladder in a 16:9
-              // box on a 900 px window would otherwise run off the top and be
-              // silently clipped by the `Stack`. The panel's own 400 cap is
-              // the *other* limit; whichever is smaller wins, which is what
-              // keeps a tall menu out of a short player.
-              top: 8,
-              bottom: _isVertical ? 56 : 58,
-              child: SettingsMenuFade(
-                visible: ref.watch(playerMenuProvider.select((menu) => menu.open)),
-                child: PlayerSettingsMenu(
-                  key: playerSettingsMenuKey,
-                  onPicked: (variant) {
-                    ref.read(playerMenuProvider.notifier).close();
-                    _restartHideTimer();
-                    unawaited(ref.read(playbackProvider.notifier).switchQuality(variant));
-                  },
-                ),
-              ),
-            ),
-            // The fullscreen header: what is playing, since fullscreen hides the
-            // page that would otherwise say. Fades with the bar rather than on
-            // its own timer — one visibility, so they cannot disagree.
-            if (ref.watch(playerViewProvider.select((view) => view.fullscreen)) && !ref.watch(audioModeProvider))
-              Positioned(
-                key: const ValueKey('player-header'),
-                left: 0,
-                right: 0,
-                top: 0,
-                child: AnimatedOpacity(
-                  opacity: _visible ? 1 : 0,
-                  duration: _fadeDuration(_visible),
-                  curve: Curves.easeIn,
-                  child: AnimatedSlide(
-                    offset: Offset.zero.translate(0, _visible ? 0 : -0.15),
-                    duration: _fadeDuration(_visible),
-                    curve: _visible ? Curves.decelerate : Curves.easeInExpo,
-                    child: IgnorePointer(child: _FullscreenHeader(tokens: tokens)),
+    return TooltipBounds(
+      child: FocusSurface(
+        ordered: true,
+        child: Focus(
+          focusNode: _focusProbe,
+          // No semantics node: this `Focus` only watches focus, and the node it would
+          // add above the whole player brings the Slider/OverlayPortal fault back
+          // (`architecture.md` F51) — measured, ~1 450 AXTree errors a run.
+          includeSemantics: false,
+          onFocusChange: _onFocusInsideChanged,
+          child: Listener(
+            onPointerSignal: _onPointerSignal,
+            child: MouseRegion(
+              // The pointer disappears with the controls, as it does in every video
+              // player. `onHover` fires on movement only, which is exactly the wake
+              // condition the task asks for.
+              cursor: _visible ? MouseCursor.defer : SystemMouseCursors.none,
+              onHover: (event) {
+                if (event.delta != Offset.zero) _wake();
+              },
+              onExit: (_) => _wake(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // The quality-switch cover (architecture §2.7): a reopened media
+                  // plays one real frame from position zero before the seek back
+                  // lands, and that flash is what reads as broken. Held until the
+                  // position returns, above the video and below the bar.
+                  if (ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)) && !ref.watch(audioModeProvider)) ColoredBox(key: playerSwitchCoverKey, color: tokens.scrim),
+                  // The click surface, beneath the bar so the bar's own buttons win
+                  // the hit test and its background absorbs rather than falls through.
+                  // Kept in audio-only too. It was gated off to let the music
+                  // layout's buttons be clicked, which did not work — the opaque
+                  // `MouseRegion` above it was the real blocker — and the gate cost
+                  // tap-to-pause and double-click-to-fullscreen for nothing. The
+                  // layout now sits above this instead.
+                  Semantics(
+                    button: true,
+                    label: 'Play or pause',
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _onTap,
+                      child: const SizedBox.expand(),
+                    ),
                   ),
-                ),
-              ),
-
-            // Vertical video player controls
-            if (_isVertical)
-              Positioned(
-                right: 6,
-                bottom: 52,
-                child: AnimatedOpacity(
-                  alwaysIncludeSemantics: true,
-                  opacity: _visible ? 1 : 0,
-                  duration: _fadeDuration(_visible),
-                  curve: Curves.easeIn,
-                  child: AnimatedSlide(
-                    offset: Offset.zero.translate(_visible ? 0 : 0.15, 0),
-                    duration: _fadeDuration(_visible),
-                    curve: _visible ? Curves.decelerate : Curves.easeInExpo,
-                    child: IgnorePointer(
-                      ignoring: !_visible,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: tokens.scrim.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(52),
-                          border: Border.all(color: tokens.onScrim.withValues(alpha: 0x1F / 0xFF)),
+                  if (widget.child != null) // Before the bar: what the slates hold is a problem the viewer has to act on (Try
+                    // again, Notify me, Sign in) and comes first. In fullscreen the queue's toggle and
+                    // the queue carry their own larger numbers and still follow the controls.
+                    FocusTraversalOrder(order: const NumericFocusOrder(0.5), child: widget.child!),
+                  // Above the click surface so it paints over the cover, but
+                  // pointer-transparent — a spinner that swallowed the click to
+                  // play/pause would take the control away exactly when the player is
+                  // least responsive.
+                  //
+                  // **Keyed, and it does not work without the key.** The cover
+                  // toggling breaks the child list's forward scan and the menu breaks
+                  // the backward one, so this lands in the middle range Flutter
+                  // rematches by key alone — unkeyed, its `State` was destroyed and
+                  // its grace timer cancelled at the exact moment a switch started.
+                  IgnorePointer(
+                    key: const ValueKey('player-busy'),
+                    child: _BusySpinner(engine: widget.engine, onBusyChanged: _onBusyChanged),
+                  ),
+                  // **Mounted unconditionally now that it fades.** The `if` used to
+                  // be here, and an `if` cannot animate an exit: the panel was gone
+                  // from the tree on the same frame it was told to close, with nothing
+                  // left to fade. `SettingsMenuFade` owns the mount instead and holds
+                  // it for the length of the fade. While closed it is a zero-width
+                  // box — two render objects and no hit target.
+                  Positioned(
+                    right: _isVertical ? 64 : 7,
+                    // `top` as well as `bottom`, so the menu is bounded by the
+                    // player box rather than by a guess: a 22-rung ladder in a 16:9
+                    // box on a 900 px window would otherwise run off the top and be
+                    // silently clipped by the `Stack`. The panel's own 400 cap is
+                    // the *other* limit; whichever is smaller wins, which is what
+                    // keeps a tall menu out of a short player.
+                    top: 8,
+                    bottom: _isVertical ? 56 : 58,
+                    child: SettingsMenuFade(
+                      visible: ref.watch(playerMenuProvider.select((menu) => menu.open)),
+                      child: PlayerSettingsMenu(
+                        key: playerSettingsMenuKey,
+                        onPicked: (variant) {
+                          ref.read(playerMenuProvider.notifier).close();
+                          _restartHideTimer();
+                          unawaited(ref.read(playbackProvider.notifier).switchQuality(variant));
+                        },
+                      ),
+                    ),
+                  ),
+                  // The fullscreen header: what is playing, since fullscreen hides the
+                  // page that would otherwise say. Fades with the bar rather than on
+                  // its own timer — one visibility, so they cannot disagree.
+                  if (ref.watch(playerViewProvider.select((view) => view.fullscreen)) && !ref.watch(audioModeProvider))
+                    Positioned(
+                      key: const ValueKey('player-header'),
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      child: AnimatedOpacity(
+                        opacity: _visible ? 1 : 0,
+                        duration: _fadeDuration(_visible),
+                        curve: Curves.easeIn,
+                        child: AnimatedSlide(
+                          offset: Offset.zero.translate(0, _visible ? 0 : -0.15),
+                          duration: _fadeDuration(_visible),
+                          curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                          child: IgnorePointer(child: _FullscreenHeader(tokens: tokens)),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _buildHoverable(
-                                _VerticalVolume(
-                                  key: playerVerticalVolumeKey,
-                                  engine: widget.engine,
-                                  onChanged: _wake,
-                                ),
+                      ),
+                    ),
+
+                  // Vertical video player controls
+                  if (_isVertical)
+                    Positioned(
+                      right: 6,
+                      bottom: 52,
+                      child: AnimatedOpacity(
+                        alwaysIncludeSemantics: true,
+                        opacity: _visible ? 1 : 0,
+                        duration: _fadeDuration(_visible),
+                        curve: Curves.easeIn,
+                        child: AnimatedSlide(
+                          offset: Offset.zero.translate(_visible ? 0 : 0.15, 0),
+                          duration: _fadeDuration(_visible),
+                          curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                          child: IgnorePointer(
+                            ignoring: !_visible,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: tokens.scrim.withValues(alpha: 0.65),
+                                borderRadius: BorderRadius.circular(52),
+                                border: Border.all(color: tokens.onScrim.withValues(alpha: 0x1F / 0xFF)),
                               ),
-                              const SizedBox(height: 2),
-                              if (ref.watch(captionsProvider.select((c) => c.hasTracks))) ...[
-                                KeyedSubtree(
-                                  key: captionsButtonAnchorKey,
-                                  child: _buildHoverable(
-                                    _MenuButton(
-                                      key: playerCaptionsKey,
-                                      icon: ref.watch(captionsProvider.select((c) => c.isOn)) ? Icons.closed_caption : Icons.closed_caption_outlined,
-                                      label: 'Captions',
-                                      action: PlayerAction.captions,
-                                      busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
-                                      open: ref.watch(
-                                        playerMenuProvider.select(
-                                          (menu) => menu.open && menu.page == SettingsPage.captions,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildHoverable(
+                                      _VerticalVolume(
+                                        key: playerVerticalVolumeKey,
+                                        engine: widget.engine,
+                                        onChanged: _wake,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    if (ref.watch(captionsProvider.select((c) => c.hasTracks))) ...[
+                                      KeyedSubtree(
+                                        key: captionsButtonAnchorKey,
+                                        child: _buildHoverable(
+                                          _MenuButton(
+                                            key: playerCaptionsKey,
+                                            icon: ref.watch(captionsProvider.select((c) => c.isOn)) ? Icons.closed_caption : Icons.closed_caption_outlined,
+                                            label: 'Captions',
+                                            action: PlayerAction.captions,
+                                            busy: ref.watch(captionsProvider.select((c) => c.isLoadingTrack)),
+                                            open: ref.watch(
+                                              playerMenuProvider.select(
+                                                (menu) => menu.open && menu.page == SettingsPage.captions,
+                                              ),
+                                            ),
+                                            onPressed: _toggleCaptions,
+                                          ),
                                         ),
                                       ),
-                                      onPressed: _toggleCaptions,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                              ],
-                              KeyedSubtree(
-                                key: qualityButtonAnchorKey,
-                                child: _buildHoverable(
-                                  _MenuButton(
-                                    key: playerQualityButtonKey,
-                                    icon: Icons.hd_outlined,
-                                    label: 'Quality',
-                                    busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
-                                    open: ref.watch(
-                                      playerMenuProvider.select(
-                                        (menu) => menu.open && menu.page == SettingsPage.quality,
+                                      const SizedBox(height: 2),
+                                    ],
+                                    KeyedSubtree(
+                                      key: qualityButtonAnchorKey,
+                                      child: _buildHoverable(
+                                        _MenuButton(
+                                          key: playerQualityButtonKey,
+                                          icon: Icons.hd_outlined,
+                                          label: 'Quality',
+                                          busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
+                                          open: ref.watch(
+                                            playerMenuProvider.select(
+                                              (menu) => menu.open && menu.page == SettingsPage.quality,
+                                            ),
+                                          ),
+                                          onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty)) ? null : _toggleQuality,
+                                        ),
                                       ),
                                     ),
-                                    onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty)) ? null : _toggleQuality,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              KeyedSubtree(
-                                key: settingsMenuAnchorKey,
-                                child: _buildHoverable(
-                                  _MenuButton(
-                                    key: playerSettingsButtonKey,
-                                    icon: Icons.settings,
-                                    label: 'Settings',
-                                    open: ref.watch(
-                                      playerMenuProvider.select(
-                                        (menu) => menu.open && _isGearPage(menu.page),
+                                    const SizedBox(height: 2),
+                                    KeyedSubtree(
+                                      key: settingsMenuAnchorKey,
+                                      child: _buildHoverable(
+                                        _MenuButton(
+                                          key: playerSettingsButtonKey,
+                                          icon: Icons.settings,
+                                          label: 'Settings',
+                                          open: ref.watch(
+                                            playerMenuProvider.select(
+                                              (menu) => menu.open && _isGearPage(menu.page),
+                                            ),
+                                          ),
+                                          onPressed: _toggleMenu,
+                                        ),
                                       ),
                                     ),
-                                    onPressed: _toggleMenu,
-                                  ),
+                                  ],
                                 ),
                               ),
-                            ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    // `alwaysIncludeSemantics` here and on the vertical column: the Sliders
+                    // in here must never have their semantics skipped while hidden
+                    // (architecture.md F51).
+                    child: AnimatedOpacity(
+                      key: playerControlsBarKey,
+                      alwaysIncludeSemantics: true,
+                      opacity: _visible ? 1 : 0,
+                      duration: _fadeDuration(_visible),
+                      curve: Curves.easeIn,
+                      child: AnimatedSlide(
+                        offset: Offset.zero.translate(0, _visible ? 0 : 0.15),
+                        duration: _fadeDuration(_visible),
+                        curve: _visible ? Curves.decelerate : Curves.easeInExpo,
+                        // **Focusable while hidden, and focusing it shows it**
+                        // (`_onFocusInsideChanged`). It was `ExcludeFocus` while hidden, but
+                        // Tab runs in the same key event that wakes the bar, so it found the
+                        // controls still excluded and skipped them: every walk of the watch
+                        // page started at the queue instead of the player.
+                        child: IgnorePointer(
+                          ignoring: !_visible,
+                          child: GestureDetector(
+                            // Absorbs. A click on the bar's background is not a click on
+                            // the video, and must not pause it.
+                            behavior: HitTestBehavior.opaque,
+                            // Not a semantic tap target: its tap node *merges* its descendants,
+                            // which is where a control's tooltip overlay was grafted (F51).
+                            excludeFromSemantics: true,
+                            onTap: () {},
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                  colors: [
+                                    tokens.scrim.withValues(alpha: .75),
+                                    tokens.scrim.withValues(alpha: .5),
+                                    tokens.scrim.withValues(alpha: 0),
+                                  ],
+                                ),
+                              ),
+                              child: FocusTraversalOrder(
+                                order: const NumericFocusOrder(1),
+                                child: Material(
+                                  type: MaterialType.transparency,
+                                  child: _isVertical ? _buildVerticalBar(context) : (ref.watch(audioModeProvider) ? _buildAudioBar(context) : _buildBar(context)),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              // `alwaysIncludeSemantics` here and on the vertical column: the Sliders
-              // in here must never have their semantics skipped while hidden
-              // (architecture.md F51).
-              child: AnimatedOpacity(
-                key: playerControlsBarKey,
-                alwaysIncludeSemantics: true,
-                opacity: _visible ? 1 : 0,
-                duration: _fadeDuration(_visible),
-                curve: Curves.easeIn,
-                child: AnimatedSlide(
-                  offset: Offset.zero.translate(0, _visible ? 0 : 0.15),
-                  duration: _fadeDuration(_visible),
-                  curve: _visible ? Curves.decelerate : Curves.easeInExpo,
-                  // **Focusable while hidden, and focusing it shows it**
-                  // (`_onFocusInsideChanged`). It was `ExcludeFocus` while hidden, but
-                  // Tab runs in the same key event that wakes the bar, so it found the
-                  // controls still excluded and skipped them: every walk of the watch
-                  // page started at the queue instead of the player.
-                  child: IgnorePointer(
-                    ignoring: !_visible,
-                    child: GestureDetector(
-                      // Absorbs. A click on the bar's background is not a click on
-                      // the video, and must not pause it.
-                      behavior: HitTestBehavior.opaque,
-                      // Not a semantic tap target: its tap node *merges* its descendants,
-                      // which is where a control's tooltip overlay was grafted (F51).
-                      excludeFromSemantics: true,
-                      onTap: () {},
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              tokens.scrim.withValues(alpha: .75),
-                              tokens.scrim.withValues(alpha: .5),
-                              tokens.scrim.withValues(alpha: 0),
-                            ],
-                          ),
-                        ),
-                        child: FocusTraversalOrder(
-                          order: const NumericFocusOrder(1),
-                          child: Material(
-                          type: MaterialType.transparency,
-                          child: _isVertical ? _buildVerticalBar(context) : (ref.watch(audioModeProvider) ? _buildAudioBar(context) : _buildBar(context)),
-                        ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
-      ),
-      ),
       ),
     );
   }
@@ -1387,13 +1390,19 @@ class _ScrubberState extends ConsumerState<_Scrubber> with SingleTickerProviderS
                           disabledActiveTrackColor: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
                           padding: pad / 1.5,
                         ),
-                        child: Slider(
+                        child: ScrubberBar(
+                          // The thumb's halo lights while the pointer is in the section it is in.
+                          highlightSpan: timeline == null
+                              ? (0.0, 1.0)
+                              : (() {
+                                  final span = timeline.segments[timeline.segmentAt(Duration(milliseconds: value.round()))];
+                                  return (span.start, span.end);
+                                })(),
                           value: value,
                           max: max,
                           secondaryTrackValue: bufferedMs.clamp(value, max),
                           // The position as a duration, not "8%": the value is milliseconds.
-                          semanticFormatterCallback: (v) =>
-                              '${spokenDuration(Duration(milliseconds: v.round()))} of ${spokenDuration(Duration(milliseconds: max.round()))}',
+                          semanticFormatterCallback: (v) => '${spokenDuration(Duration(milliseconds: v.round()))} of ${spokenDuration(Duration(milliseconds: max.round()))}',
                           onChanged: widget.enabled ? handleDrag : null,
                           onChangeEnd: widget.enabled ? handleDragEnd : null,
                         ),
@@ -1590,57 +1599,58 @@ class _VolumeState extends ConsumerState<_Volume> {
           // Only for the keyboard: focus a click left behind opens nothing.
           onFocusChange: (has) => has ? (KeyboardNavigation.active ? _enter() : null) : _exit(),
           child: MouseRegion(
-          // One region over the button *and* the slider, so travelling from one
-          // to the other never leaves it.
-          onEnter: (_) => _enter(),
-          onExit: (_) => _exit(),
-          child: Stack(
-            fit: StackFit.loose,
-            children: [
-              _ControlIcon(
-                iconKey: playerMuteKey,
-                icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
-                label: volume == 0 ? 'Unmute' : 'Mute',
-                action: PlayerAction.mute,
-                onPressed: () {
-                  widget.onChanged();
-                  unawaited(ref.read(playbackProvider.notifier).toggleMute());
-                },
-              ),
-              ClipRect(
-                child: Padding(
+            // One region over the button *and* the slider, so travelling from one
+            // to the other never leaves it.
+            onEnter: (_) => _enter(),
+            onExit: (_) => _exit(),
+            child: Stack(
+              fit: StackFit.loose,
+              children: [
+                _ControlIcon(
+                  iconKey: playerMuteKey,
+                  icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
+                  label: volume == 0 ? 'Unmute' : 'Mute',
+                  action: PlayerAction.mute,
+                  onPressed: () {
+                    widget.onChanged();
+                    unawaited(ref.read(playbackProvider.notifier).toggleMute());
+                  },
+                ),
+                Padding(
                   padding: const EdgeInsets.only(left: 42),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 140),
-                    key: playerVolumeSliderKey,
-                    width: open ? 120 : 0,
-                    height: 40,
-                    child: ShortcutTooltip(
-                      silent: true,
-                      announce: false, // the bar says "Volume 100%" itself
-                      label: 'Volume: ${volume.round()}%',
-                      // Not mounted while collapsed, so Tab cannot land on it. Not a
-                      // Material `Slider`: that one's value-indicator `OverlayPortal`
-                      // double-parents its semantics node here (§F51).
-                      child: AnimatedCrossFade(
+                  // Outside the `ClipRect`: inside it the bubble was cut to the slider's 120x40.
+                  child: ShortcutTooltip(
+                    silent: true,
+                    announce: false, // the bar says "Volume 100%" itself
+                    label: 'Volume: ${volume.round()}%',
+                    child: ClipRect(
+                      child: AnimatedContainer(
                         duration: const Duration(milliseconds: 140),
-                        crossFadeState: open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                        firstChild: const SizedBox.shrink(), 
-                        secondChild: VolumeBar(
-                          value: volume,
-                          onChanged: (next) {
-                            widget.onChanged();
-                            unawaited(ref.read(playbackProvider.notifier).setVolume(next));
-                          },
+                        key: playerVolumeSliderKey,
+                        width: open ? 120 : 0,
+                        height: 40,
+                        // Not mounted while collapsed, so Tab cannot land on it. Not a
+                        // Material `Slider`: that one's value-indicator `OverlayPortal`
+                        // double-parents its semantics node here (§F51).
+                        child: AnimatedCrossFade(
+                          duration: const Duration(milliseconds: 140),
+                          crossFadeState: open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                          firstChild: const SizedBox.shrink(),
+                          secondChild: VolumeBar(
+                            value: volume,
+                            onChanged: (next) {
+                              widget.onChanged();
+                              unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                            },
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         );
       },
     );
@@ -1697,55 +1707,58 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
           includeSemantics: false,
           onFocusChange: (has) => has ? (KeyboardNavigation.active ? _enter() : null) : _exit(),
           child: MouseRegion(
-          onEnter: (_) => _enter(),
-          onExit: (_) => _exit(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ClipRect(
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 140),
-                  curve: Curves.easeOut,
-                  child: SizedBox(
-                    key: playerVerticalVolumeSliderKey,
-                    height: _open ? 100 : 0,
-                    width: 36,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 9),
-                      child: RotatedBox(
-                        quarterTurns: 3,
-                        child: ShortcutTooltip(
-                          silent: true,
-                          announce: false,
-                          label: 'Volume: ${volume.round()}%',
-                          child: !_open
-                              ? const SizedBox.shrink()
-                              : VolumeBar(
-                                  value: volume,
-                                  onChanged: (next) {
-                                    widget.onChanged();
-                                    unawaited(ref.read(playbackProvider.notifier).setVolume(next));
-                                  },
-                                ),
+            onEnter: (_) => _enter(),
+            onExit: (_) => _exit(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // The tooltip is outside the `ClipRect` (inside, it is cut to the slider) and the
+                // `RotatedBox` (it would be drawn sideways), and opens to the left of the slider.
+                ShortcutTooltip(
+                  silent: true,
+                  announce: false,
+                  side: TooltipSide.left,
+                  label: 'Volume: ${volume.round()}%',
+                  child: ClipRect(
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 140),
+                      curve: Curves.easeOut,
+                      child: SizedBox(
+                        key: playerVerticalVolumeSliderKey,
+                        height: _open ? 100 : 0,
+                        width: 36,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 9),
+                          child: RotatedBox(
+                            quarterTurns: 3,
+                            child: !_open
+                                ? const SizedBox.shrink()
+                                : VolumeBar(
+                                    value: volume,
+                                    onChanged: (next) {
+                                      widget.onChanged();
+                                      unawaited(ref.read(playbackProvider.notifier).setVolume(next));
+                                    },
+                                  ),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              _ControlIcon(
-                iconKey: playerMuteKey,
-                icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
-                label: volume == 0 ? 'Unmute' : 'Mute',
-                action: PlayerAction.mute,
-                onPressed: () {
-                  widget.onChanged();
-                  unawaited(ref.read(playbackProvider.notifier).toggleMute());
-                },
-              ),
-            ],
+                _ControlIcon(
+                  iconKey: playerMuteKey,
+                  icon: volume == 0 ? Icons.volume_off : (volume < 50 ? Icons.volume_down : Icons.volume_up),
+                  label: volume == 0 ? 'Unmute' : 'Mute',
+                  action: PlayerAction.mute,
+                  onPressed: () {
+                    widget.onChanged();
+                    unawaited(ref.read(playbackProvider.notifier).toggleMute());
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
         );
       },
     );

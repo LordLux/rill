@@ -17,7 +17,9 @@ import '../focus_ring.dart' show KeyboardNavigation;
 import '../focus_surface.dart';
 import '../open_video.dart' show copyToClipboard;
 import '../playback_controller.dart';
+import 'channel_badge.dart';
 import 'comment_composer.dart';
+import 'shortcut_tooltip.dart';
 
 class CommentsSection extends ConsumerStatefulWidget {
   final String videoId;
@@ -1148,11 +1150,14 @@ class CommentTile extends ConsumerWidget {
                             color: scheme.onSurface,
                           ),
                         ),
-                        if (comment.isVerified)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 4.0),
-                            child: Icon(Icons.check_circle, size: 12, color: scheme.onSurfaceVariant),
-                          ),
+                        // The same badge, and tooltip, as everywhere else a channel is named.
+                        ChannelBadge(
+                          channelId: comment.authorChannelId,
+                          isArtistChannel: false,
+                          isVerified: comment.isVerified,
+                          size: 13,
+                          paddingLeft: 4,
+                        ),
                         if (comment.publishedText != null) ...[
                           const SizedBox(width: 8),
                           NoTabSelectionArea(
@@ -1213,8 +1218,9 @@ class CommentTile extends ConsumerWidget {
                 ),
                 if (comment.creatorHearted) ...[
                   const SizedBox(width: 4),
-                  Tooltip(
-                    message: 'Creator liked this comment', // TODO get creator name from channel info
+                  ShortcutTooltip(
+                    label: 'Creator liked this comment', // TODO get creator name from channel info
+                    silent: true,
                     child: Padding(
                       padding: EdgeInsets.all(8),
                       child: Icon(Icons.favorite, size: 14, color: Theme.of(context).tokens.liveBadge),
@@ -1537,23 +1543,25 @@ class _VoteButton extends StatelessWidget {
     // left at full colour next to a greyed thumb (Task 31 §4).
     final color = onPressed == null ? scheme.onSurface.withValues(alpha: 0.38) : (active ? scheme.primary : null);
     final noLabel = label == null || label!.isEmpty;
-    return IconButton(
+    return ShortcutTooltip(
+      label: tooltip,
+      silent: true,
+      child: IconButton(
       mouseCursor: onPressed == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
       icon: noLabel
-          ? Icon(icon, size: 14, color: color)
+          ? Icon(icon, size: 14, color: color, semanticLabel: tooltip)
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 14, color: color),
+                Icon(icon, size: 14, color: color, semanticLabel: tooltip),
                 const SizedBox(width: 4),
                 Text(label!, style: TextStyle(fontSize: 12, color: color)),
               ],
             ),
-      tooltip: tooltip,
       visualDensity: VisualDensity.compact,
       padding: noLabel ? EdgeInsets.symmetric(horizontal: 6, vertical: 2) : EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       constraints: const BoxConstraints(minHeight: 35),
       onPressed: onPressed,
-    );
+    ));
   }
 }

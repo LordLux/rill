@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../verified_channels_controller.dart';
+import 'shortcut_tooltip.dart';
 
 class ChannelBadge extends ConsumerWidget {
   const ChannelBadge({
@@ -51,8 +52,12 @@ class ChannelBadge extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final asset = isArtistChannel ? 'assets/icons/verified_artist.svg' : 'assets/icons/verified.svg';
     
-    final icon = Tooltip(
-      message: isArtistChannel ? 'Verified artist channel' : 'Verified channel',
+    // In the tree, not an overlay: this is on every tile, and an overlay tooltip's semantics node
+    // is what an AXTree error was traced to when a tile went away under it (`architecture.md` F51).
+    final icon = ShortcutTooltip(
+      label: isArtistChannel ? 'Verified artist channel' : 'Verified channel',
+      silent: true,
+      delay: const Duration(milliseconds: 300),
       child: SvgPicture.asset(
         asset,
         width: size,

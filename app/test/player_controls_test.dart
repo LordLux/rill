@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/ui/player/scrubber_bar.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/captions_controller.dart';
@@ -150,11 +151,11 @@ Future<void> pumpWatching(WidgetTester tester, {List<String> queue = const ['aaa
   await settleReal(tester);
 }
 
-/// The scrubber's `Slider`, which is what actually carries the position — the
+/// The scrubber's `ScrubberBar`, which is what actually carries the position — the
 /// key is on the wrapper.
 final Finder scrubber = find.descendant(
   of: find.byKey(playerScrubberKey),
-  matching: find.byType(Slider),
+  matching: find.byType(ScrubberBar),
 );
 
 double barOpacity(WidgetTester tester) =>
@@ -676,6 +677,26 @@ void main() {
     // "F" badge is a `WidgetSpan`), so the rendered text is "Exit fullscreen"
     // plus trailing spacing rather than an exact match.
     expect(find.textContaining('Exit fullscreen'), findsOneWidget);
+    // The fullscreen button is at the right edge: its bubble is pushed in, not hung over it.
+    expect(tester.getTopRight(find.textContaining('Exit fullscreen')).dx, lessThanOrEqualTo(tester.view.physicalSize.width));
+    // The fullscreen button is at the right edge: its bubble is pushed in, not hung over it.
+    expect(tester.getTopRight(find.textContaining('Exit fullscreen')).dx, lessThanOrEqualTo(tester.view.physicalSize.width));
+
+    disposeContainer();
+  });
+
+  testWidgets('a tooltip with a key badge by the left edge stays inside the window', (tester) async {
+    // The bubble is measured in layout, badge included, not guessed from its text.
+    await pumpWatching(tester);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(playerPlayPauseKey)));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Pause'), findsWidgets);
+    expect(tester.getTopLeft(find.textContaining('Pause').last).dx, greaterThanOrEqualTo(0));
 
     disposeContainer();
   });
@@ -1253,7 +1274,7 @@ void main() {
     expect(find.textContaining('3:00'), findsOneWidget,
         reason: 'and the clock is still showing where the user is');
 
-    final slider = tester.widget<Slider>(scrubber);
+    final slider = tester.widget<ScrubberBar>(scrubber);
     expect(slider.value, const Duration(minutes: 3).inMilliseconds.toDouble(),
         reason: 'so is the scrubber');
     // **The far-right bug, pinned.** Holding the position without the duration

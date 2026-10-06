@@ -12,6 +12,7 @@ import '../focus_surface.dart';
 import '../queue_controller.dart';
 import '../spoken.dart';
 import 'channel_badge.dart';
+import 'shortcut_tooltip.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
@@ -577,15 +578,22 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           ),
                           secondChild: const SizedBox.shrink(),
                         ),
-                        AnimatedRotation(
-                          turns: _expanded ? 0 : 0.5,
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                          child: IconButton(
-                            tooltip: _expanded ? 'Collapse queue' : 'Expand queue',
-                            icon: Icon(Icons.keyboard_arrow_up),
-                            color: scheme.onSurfaceVariant,
-                            onPressed: _clearing ? null : () => _onCollapse(),
+                        // The tooltip is outside the rotation (it would be turned upside down) and opens to
+                        // the left: above the button is outside the panel, which clips it.
+                        ShortcutTooltip(
+                          label: _expanded ? 'Collapse queue' : 'Expand queue',
+                          silent: true,
+                          side: TooltipSide.left,
+                          child: AnimatedRotation(
+                            turns: _expanded ? 0 : 0.5,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOutCubic,
+                            child: IconButton(
+                              // The icon names the button: `IconButton(tooltip:)` used to.
+                              icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
+                              color: scheme.onSurfaceVariant,
+                              onPressed: _clearing ? null : () => _onCollapse(),
+                            ),
                           ),
                         ),
                       ],
@@ -1068,17 +1076,17 @@ class _QueueItemTileState extends State<_QueueItemTile> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 50),
-                  crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                  firstChild: Tooltip(
-                    message: 'Remove',
-                    excludeFromSemantics: true,
-                    waitDuration: const Duration(milliseconds: 300),
-                    preferBelow: false,
-                    showDuration: const Duration(milliseconds: 800),
-                    exitDuration: const Duration(milliseconds: 0),
-                    child: Semantics(
+                // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
+                // box, and a bubble to the left of the X is outside it.
+                ShortcutTooltip(
+                  label: 'Remove',
+                  silent: true,
+                  announce: false,
+                  side: TooltipSide.left,
+                  child: AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 50),
+                    crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                    firstChild: Semantics(
                       container: true,
                       label: 'Remove from queue',
                       child: IconButton(
@@ -1087,8 +1095,8 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                         onPressed: widget.onRemove,
                       ),
                     ),
+                    secondChild: const SizedBox.shrink(),
                   ),
-                  secondChild: const SizedBox.shrink(),
                 ),
                 if (!inert)
                   // Focusable, with Up/Down to reorder: the keyboard's way of doing
