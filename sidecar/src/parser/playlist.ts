@@ -22,7 +22,8 @@ const log = logger('playlist');
  */
 function refusalFrom(raw: Json, playlistId: string): string | null {
   for (const alert of asArray(get(raw, 'alerts'))) {
-    const renderer = get(alert, 'alertRenderer');
+    // "Unavailable videos are hidden" comes as `alertWithButtonRenderer`.
+    const renderer = get(alert, 'alertRenderer') ?? get(alert, 'alertWithButtonRenderer');
     const message = text(get(renderer, 'text'));
     if (!message) continue;
     if (str(get(renderer, 'type')) === 'ERROR') return message;
@@ -76,6 +77,7 @@ export async function getPlaylist(
     log.debug(`playlist.get dropped ${feed.items.length - items.length} non-video items`);
   }
 
-  // A continuation page has no header, so both are null there.
+  // Measured 2026-10-06: a continuation page repeats `metadata` and `sidebar`,
+  // so the header is there too — but nothing promises it, hence nullable.
   return { ...parsePlaylistHeader(raw), items, continuation: feed.continuation };
 }

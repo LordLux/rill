@@ -61,6 +61,15 @@ class FakeMixService implements MixService {
       pendingPlaylist = null;
       return pending.future;
     }
+    if (continuation != null && failures > 0) {
+      failures--;
+      throw StateError('network down');
+    }
+    if (continuation != null && emptyPages > 0) {
+      emptyPages--;
+      _pagesServed++;
+      return PlaylistPage(items: const [], continuation: 'token_$_pagesServed');
+    }
 
     _pagesServed++;
     final bool isLast = _pagesServed >= totalPages;
@@ -79,6 +88,12 @@ class FakeMixService implements MixService {
   /// null to stand in for a response that does not say.
   String? title = 'Playlist from the sidecar';
   int? videoCount;
+
+  /// How many continuation requests fail before they start working.
+  int failures = 0;
+
+  /// How many continuation requests answer with no videos and a next token.
+  int emptyPages = 0;
 
   /// The page a held continuation request will answer with.
   PlaylistPage lastPage(int count) =>
@@ -201,6 +216,77 @@ void main() {
       
       expect(service.extendCalls, 1, reason: 'mixes must use extend');
       expect(service.getPlaylistCalls, 0, reason: 'mixes must not use getPlaylist');
+    });
+  });
+
+  group('When paging goes wrong', () {
+    test('a page that is put back while its request is out is not appended twice', () async {
+      // Playlist A, with its second page held on the wire.
+      final service = FakeMixService(totalPages: 2);
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+      final heldA = Completer<PlaylistPage>();
+      service.pendingPlaylist = heldA;
+      await queue.startPlaylist('PLaaa');
+      expect(stateOf(c).items, hasLength(25));
+
+      // Start B over it (one page, so it asks for nothing more), then undo: A
+      // is back, and asks for its second page again. That request is held too.
+      await queue.startPlaylist('PLbbb');
+      final asked = service.getPlaylistCalls;
+      final heldAgain = Completer<PlaylistPage>();
+      service.pendingPlaylist = heldAgain;
+      queue.undoStartMix();
+      expect(stateOf(c).mix!.playlistId, 'PLaaa');
+      expect(service.getPlaylistCalls, asked + 1, reason: 'the restored queue pages on a request of its own');
+
+      // The first request for that page answers. It is nobody's now.
+      heldA.complete(PlaylistPage(items: videos(25, from: 500), continuation: null));
+      await Future<void>.delayed(Duration.zero);
+      expect(stateOf(c).items.map((v) => v.id), isNot(contains('v500')), reason: 'the abandoned answer is dropped');
+      expect(stateOf(c).mix!.exhausted, isFalse, reason: 'and it does not end the list either');
+
+      // The live one answers, and the page is there once.
+      heldAgain.complete(PlaylistPage(items: videos(25, from: 500), continuation: null));
+      await Future<void>.delayed(Duration.zero);
+      final ids = stateOf(c).items.map((v) => v.id).toList();
+      expect(ids, hasLength(50));
+      expect(ids.toSet(), hasLength(50), reason: 'no video twice');
+    });
+
+    test('a page with nothing playable on it does not stop the loader', () async {
+      final service = FakeMixService(totalPages: 3)..emptyPages = 1;
+      final c = containerWith(service);
+
+      await controllerOf(c).startPlaylist('PL123');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(stateOf(c).mix!.exhausted, isTrue, reason: 'it carried on past the empty page to the end');
+      expect(stateOf(c).items, hasLength(50));
+      expect(stateOf(c).currentIndex, 0);
+    });
+
+    test('a failed page keeps the queue, says so, and is retried on the next queue change', () async {
+      final service = FakeMixService(totalPages: 2)..failures = 1;
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      await queue.startPlaylist('PL123');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(stateOf(c).items, hasLength(25), reason: 'what loaded is kept');
+      expect(stateOf(c).mix!.exhausted, isFalse, reason: 'a failure is not the end');
+      expect(queue.mixError, contains('network down'));
+      final asked = service.getPlaylistCalls;
+
+      // Autoplay moving on is a queue change, and that is the retry.
+      queue.advance();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.getPlaylistCalls, asked + 1);
+      expect(queue.mixError, isNull);
+      expect(stateOf(c).items, hasLength(50));
+      expect(stateOf(c).mix!.exhausted, isTrue);
     });
   });
 
