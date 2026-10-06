@@ -119,6 +119,23 @@ void main() {
     await clickRemoveOn(tester, row);
   }
 
+  testWidgets('hovering the X names it, to its left and inside the row', (tester) async {
+    await pumpPanel(tester, ['a', 'b']);
+    final row = rowFor('b');
+    await mouse.moveTo(tester.getCenter(row));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final remove = find.descendant(of: row, matching: find.byWidgetPredicate((w) => w is ShortcutTooltip && w.label == 'Remove'));
+    await mouse.moveTo(tester.getCenter(remove));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final bubble = find.text('Remove');
+    expect(bubble, findsOneWidget);
+    expect(tester.getTopRight(bubble).dx, lessThanOrEqualTo(tester.getTopLeft(remove).dx), reason: 'to the left of the X');
+  });
+
   testWidgets('the row slides out before the queue changes', (tester) async {
     await pumpPanel(tester, ['a', 'b', 'c', 'd']);
 

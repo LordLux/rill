@@ -1076,15 +1076,17 @@ class _QueueItemTileState extends State<_QueueItemTile> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 50),
-                  crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                  firstChild: ShortcutTooltip(
-                    label: 'Remove',
-                    silent: true,
-                    announce: false,
-                    side: TooltipSide.left, // above the row is outside the list, which clips it
-                    child: Semantics(
+                // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
+                // box, and a bubble to the left of the X is outside it.
+                ShortcutTooltip(
+                  label: 'Remove',
+                  silent: true,
+                  announce: false,
+                  side: TooltipSide.left,
+                  child: AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 50),
+                    crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                    firstChild: Semantics(
                       container: true,
                       label: 'Remove from queue',
                       child: IconButton(
@@ -1093,8 +1095,8 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                         onPressed: widget.onRemove,
                       ),
                     ),
+                    secondChild: const SizedBox.shrink(),
                   ),
-                  secondChild: const SizedBox.shrink(),
                 ),
                 if (!inert)
                   // Focusable, with Up/Down to reorder: the keyboard's way of doing
