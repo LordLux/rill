@@ -31,12 +31,18 @@ VideoItem video(String id) => VideoItem(
 /// A list source whose top-ups never answer, so a header test sees the queue
 /// exactly as it was set rather than mid-fetch or after a failed one.
 class _SilentMixService implements MixService {
+  _SilentMixService({this.failPages = false});
+
+  /// Fail every page request instead of leaving it unanswered.
+  final bool failPages;
+
   @override
   Future<MixStart> start(String playlistId, {String? videoId, String? params}) => Completer<MixStart>().future;
   @override
   Future<MixExtension> extend(String playlistId, String afterVideoId) => Completer<MixExtension>().future;
   @override
-  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) => Completer<PlaylistPage>().future;
+  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) =>
+      failPages ? Future.error(StateError('network down')) : Completer<PlaylistPage>().future;
 }
 
 /// The queue's ids in order — the assertion that matters in every test here.
@@ -355,9 +361,14 @@ void main() {
   // The header builds its collapsed and its expanded subtitle at once and
   // crossfades them, so both are in the tree and both can be read here.
   group('a playlist\'s header', () {
-    Future<void> pumpPlaylist(WidgetTester tester, {required int at, required MixQueue mix}) async {
+    Future<void> pumpPlaylist(
+      WidgetTester tester, {
+      required int at,
+      required MixQueue mix,
+      bool failPages = false,
+    }) async {
       container = ProviderContainer(
-        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
+        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService(failPages: failPages))],
       );
       addTearDown(container.dispose);
       container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
@@ -410,6 +421,21 @@ void main() {
       expect(find.text(' · End of playlist'), findsOneWidget);
       expect(crossFadeOver(' · End of playlist'), findsNothing);
       expect(find.text(' · Last video'), findsNothing);
+    });
+
+    testWidgets('a page that failed to load is said after the position, open or closed', (tester) async {
+      await pumpPlaylist(
+        tester,
+        at: 0,
+        failPages: true,
+        mix: const MixQueue(playlistId: 'PL123', title: 'My Playlist', isPlaylist: true, continuation: 'more', totalCount: 135),
+      );
+
+      expect(find.text('1 / 135'), findsOneWidget);
+      // One widget, outside any crossfade: the same line in both states.
+      expect(find.text(' · Paused. Couldn\'t load more'), findsOneWidget);
+      expect(crossFadeOver(' · Paused. Couldn\'t load more'), findsNothing);
+      expect(find.text(' · Next: Video 2'), findsNothing);
     });
 
     testWidgets('while pages are still to come, the position is against the whole playlist', (tester) async {
