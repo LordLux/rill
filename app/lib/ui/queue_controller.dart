@@ -590,6 +590,22 @@ class QueueController extends Notifier<QueueState> {
   /// and a queue with everything in it twice.
   bool _extending = false;
 
+  /// Which request [_extending] is about.
+  ///
+  /// Replacing the queue has to be able to start a new top-up at once, so it
+  /// clears [_extending] — and the request that was out is still out. Without
+  /// this its answer was matched by playlist id alone: start a playlist, start
+  /// another, press Undo, and the restored queue asked for its next page again
+  /// while the first request for that same page was still coming. Both
+  /// appended it. A request whose ticket is no longer current is dropped whole.
+  int _extendTicket = 0;
+
+  /// Forget the top-up that is out, if any. Its answer will be ignored.
+  void _abandonExtension() {
+    _extendTicket++;
+    _extending = false;
+  }
+
   /// Autoplay reached the end of the mix while a top-up was on the wire.
   ///
   /// Without this the radio could stop for good: the last video ended,
@@ -759,7 +775,7 @@ class QueueController extends Notifier<QueueState> {
     final previous = state.isEmpty ? null : state;
     _replaced = null;
     _mixError = null;
-    _extending = false;
+    _abandonExtension();
     _advanceWhenExtended = false;
     state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
 
@@ -797,7 +813,7 @@ class QueueController extends Notifier<QueueState> {
     final previous = state.isEmpty ? null : state;
     _replaced = null;
     _mixError = null;
-    _extending = false;
+    _abandonExtension();
     _advanceWhenExtended = false;
     state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
 
@@ -846,7 +862,7 @@ class QueueController extends Notifier<QueueState> {
     if (previous == null) return;
     _replaced = null;
     _mixError = null;
-    _extending = false;
+    _abandonExtension();
     // `version` must move or the playback controller will not reopen the video
     // the user was on: it listens for a playhead change, and restoring a
     // snapshot is one. Entries are carried forward, so the panel reads the
@@ -880,12 +896,12 @@ class QueueController extends Notifier<QueueState> {
     }
 
     _extending = true;
-    unawaited(_extend(mix));
+    unawaited(_extend(mix, ++_extendTicket));
   }
 
   /// One top-up: a mix re-anchors on its last video (F24), a playlist asks for
   /// its next page. The two never share a request.
-  Future<void> _extend(MixQueue source) async {
+  Future<void> _extend(MixQueue source, int ticket) async {
     final playlistId = source.playlistId;
     final service = ref.read(mixServiceProvider);
     var landed = false;
@@ -910,8 +926,9 @@ class QueueController extends Notifier<QueueState> {
       }
       // The list may have been replaced or cleared while this was in flight.
       // Appending to a queue that is no longer this one is the one genuinely
-      // wrong outcome available here.
-      if (state.mix?.playlistId != playlistId) return;
+      // wrong outcome available here. The ticket covers the case the id cannot:
+      // the same list, put back, with a newer request already out for it.
+      if (ticket != _extendTicket || state.mix?.playlistId != playlistId) return;
       _mixError = null;
       if (items.isNotEmpty) state = state.extendedWith(items);
       if (exhausted) {
@@ -919,16 +936,27 @@ class QueueController extends Notifier<QueueState> {
       } else if (continuation != null) {
         state = state.playlistContinuesAt(continuation);
       }
-      landed = items.isNotEmpty && !exhausted;
+      // A playlist page can hold nothing playable and still point at a next
+      // one; the loader goes on as long as the token moved. A mix that returns
+      // nothing has nothing to re-anchor on, so it stops as before.
+      final emptyButContinues = source.isPlaylist && continuation != source.continuation;
+      landed = !exhausted && (items.isNotEmpty || emptyButContinues);
       playable = source.isPlaylist ? items.isNotEmpty : landed;
     } on Object catch (e) {
       // Not fatal (§4): the queue plays what it has. Not marked exhausted
       // either, so the next advance retries — a natural backoff of one attempt
       // per playhead move rather than a timer nobody would remember to cancel.
-      if (state.mix?.playlistId == playlistId) _mixError = '$e';
+      if (ticket == _extendTicket && state.mix?.playlistId == playlistId) {
+        _mixError = '$e';
+        // The error is not part of the state, so nothing would redraw the
+        // panel to show it. A new state object with the same contents does.
+        state = state._with(state.entries, state.currentIndex);
+      }
     } finally {
-      _extending = false;
+      // An abandoned request must not clear the flag of the one that replaced it.
+      if (ticket == _extendTicket) _extending = false;
     }
+    if (ticket != _extendTicket) return;
 
     // Playback stalled at the end waiting for exactly this. `advance` goes
     // through `_set`, so it also re-checks the threshold. A failure or an

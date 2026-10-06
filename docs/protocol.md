@@ -207,9 +207,13 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 **`playlist.get` is a paginated list, not a sliding window.** Unlike a mix, a
 playlist has a fixed end. It is read from `/browse VL<id>`, 100 entries to a
 page; `continuation` is the next page's token and is `null` on the last one,
-which is the only way a playlist ends. Unavailable (private or deleted) entries
-arrive with an id and a placeholder title (`[Deleted video]`) and are skipped by
-the parser, so they never reach the client. An `ERROR` alert in the response
+which is the only way a playlist ends. **Unavailable (private or deleted)
+entries are left out by YouTube itself** — measured 2026-10-06 on a public
+playlist read anonymously: 135 claimed, 133 lockups across both pages, none of
+them a placeholder, and an `INFO` alert "Unavailable videos are hidden". The
+parser also drops a tile titled `[Deleted video]` / `[Private video]` or marked
+`isPlayable: false`, as a backstop for a view that does list them (the owner's,
+not yet captured); the title half of that is English-only. An `ERROR` alert in the response
 ("The playlist does not exist.") is answered as `UPSTREAM_ERROR` with that text.
 
 ```ts
@@ -222,8 +226,8 @@ interface PlaylistResult {
 ```
 
 `title` and `videoCount` come from the page's header. **`videoCount` can be
-larger than the items the pages add up to**, because it counts the entries the
-parser skips — measured 2026-10-06: a playlist reporting 135 paged out as
+larger than the items the pages add up to**, because it counts the unavailable
+entries too — measured 2026-10-06: a playlist reporting 135 paged out as
 100 + 33. The client shows it as the list's length only while pages are still to
 come, and its own count once the last one has landed. Treat both as possibly
 `null` on any page; the client falls back to what the tile showed.
