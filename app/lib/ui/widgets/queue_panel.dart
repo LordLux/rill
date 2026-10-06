@@ -578,13 +578,16 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           ),
                           secondChild: const SizedBox.shrink(),
                         ),
-                        AnimatedRotation(
-                          turns: _expanded ? 0 : 0.5,
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                          child: ShortcutTooltip(
-                            label: _expanded ? 'Collapse queue' : 'Expand queue',
-                            silent: true,
+                        // The tooltip is outside the rotation (it would be turned upside down) and opens to
+                        // the left: above the button is outside the panel, which clips it.
+                        ShortcutTooltip(
+                          label: _expanded ? 'Collapse queue' : 'Expand queue',
+                          silent: true,
+                          side: TooltipSide.left,
+                          child: AnimatedRotation(
+                            turns: _expanded ? 0 : 0.5,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOutCubic,
                             child: IconButton(
                               // The icon names the button: `IconButton(tooltip:)` used to.
                               icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
@@ -1080,6 +1083,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                     label: 'Remove',
                     silent: true,
                     announce: false,
+                    side: TooltipSide.left, // above the row is outside the list, which clips it
                     child: Semantics(
                       container: true,
                       label: 'Remove from queue',
