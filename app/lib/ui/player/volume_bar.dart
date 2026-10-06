@@ -12,7 +12,7 @@ import '../focus_surface.dart' show ArrowKeyClaim;
 /// own semantics node when it is mounted (`architecture.md` F51), which the
 /// Windows accessibility bridge answers by rejecting that update and every one
 /// after it. This has no overlay, so there is nothing to double-parent. The
-/// scrubber stays a `Slider`: it is built with the bar and has never done it.
+/// progress bar followed for the same reason (`ScrubberBar`).
 ///
 /// Keyboard: arrows and Home/End, and the arrows are claimed (`ArrowKeyClaim`) so
 /// the player's own seek shortcut does not also fire. Screen readers get a slider

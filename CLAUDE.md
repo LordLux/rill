@@ -8,6 +8,8 @@ Read `docs/architecture.md` and `docs/protocol.md` before writing code. They are
 decisions-only; rejected alternatives are fenced in an appendix. **Do not revive
 a rejected alternative** — if one looks necessary, say so and stop.
 
+**Accessibility is part of every UI change, not a later pass** — see "Accessibility" below.
+
 Flutter UI decisions live in `architecture.md` §2.6–§2.8 — hover previews,
 player controls, and the watch page's sharp edges (mount points, overlays,
 tooltips, queue identity, aspect ratio). Code comments there are deliberately
@@ -768,7 +770,8 @@ the answer.
   `Focus(canRequestFocus: false, skipTraversal: true, includeSemantics: false)`.
   **The semantics probe alone proves little: run it with the focus probe**
   (`RILL_SEMANTICS_PROBE=1 RILL_FOCUS_PROBE=watch`), because the volume `Slider`
-  failed whenever it opened (now `VolumeBar`, not a `Slider`) and an animated
+  failed whenever it opened (now `VolumeBar`, not a `Slider`; the scrubber went the same way,
+  `ScrubberBar`, 2026-10-05) and an animated
   `Scrollable.ensureVisible` through the comments failed every frame (now a jump),
   and neither runs without Tab presses. `architecture.md` F51.
 - **Keyboard navigation is a state: on at Tab, off at any click, off at Escape.**
@@ -803,6 +806,56 @@ the answer.
   full-bleed row says `FocusRingShape(inflate: -1)` — do not draw a ring per widget. Walk the real app with
   `RILL_FOCUS_PROBE=feed|watch` before calling a keyboard change done.
   `architecture.md` F52.
+
+## Accessibility
+
+Windows Narrator reads Flutter's semantics tree through its accessibility bridge, and **one
+rejected update freezes it for the rest of the session** — Narrator stops announcing anything
+while the app looks fine, and the log fills with `Failed to update ui::AXTree` (measured, and
+reported by a user, 2026-10-05). `flutter test` cannot see it. Design every widget so a person with
+a screen reader or only a keyboard can use it, and check it the way `architecture.md` F51/F52 say.
+
+- **Never put an overlay under anything that mounts, unmounts, scrolls or fades.** Material
+  `Tooltip`, `IconButton(tooltip:)`, `Slider`, `PopupMenuButton`/`MenuAnchor` and anything built
+  on `OverlayPortal` host a semantics node *grafted under their anchor*; when the anchor goes
+  away in a frame (a tile scrolled out, a page swapped, the control bar re-added) the node is
+  left with no parent and the bridge rejects it. Every cause found so far was this. Use
+  `ShortcutTooltip(silent: true, …)` (`widgets/shortcut_tooltip.dart`), which draws the bubble
+  *in the tree*. Its sharp edges, all learned the hard way: put it **outside** any `ClipRect`,
+  `AnimatedCrossFade`, `AnimatedSize` (they clip the bubble, which hangs outside its anchor) and
+  outside `RotatedBox`/`AnimatedRotation` (the bubble is turned with it); `side: TooltipSide.left`
+  where above would leave the panel (a thumbnail corner, a header); wrap a surface that clips in
+  `TooltipBounds`; `delay:` for anything the pointer crosses often; `announce: false` where the
+  control already names itself. It does **not** name its control: with `IconButton(tooltip:)` gone,
+  give the icon `semanticLabel:` (the guideline test `every tap target … has a label` fails
+  otherwise). Overlay tooltips still exist in the top bar, title bar, account menu, the watch page's
+  "Audio-only stream unavailable" warning and the audio-mode "Show/Hide queue" — convert one if it
+  shows up in a node log, and add no new ones.
+- **Every control has one name, said once.** Merging rules that bite: a non-`container`
+  `Semantics` merges *up* into the nearest node; `container: true` makes its own; a `Focus`
+  outside a container `Semantics` puts `isFocused` on the parent's node (Narrator then reads the
+  whole row); `ReorderableListView` wraps each row in an unlabelled focusable group;
+  `Image` adds "image" unless `excludeFromSemantics: true`. Spoken text goes through `ui/spoken.dart`
+  (`1:05:09` is "1 hour, 5 minutes and 9 seconds", never digits). A tile's children are narrated by
+  the tile (`media_tile.dart` `_narration`/`_quiet`).
+- **Keep semantics stable across a frame.** No `Opacity(0)`/`ExcludeSemantics` above something with
+  an overlay, no `GlobalKey` subtree moved between parents while semantics are on (the fullscreen
+  switch went through `PlayerLayerGate` for this), no animated `Scrollable.ensureVisible` through
+  a tree being rebuilt (jump). A `Focus` that only observes is `includeSemantics: false`.
+- **Keyboard**: the `FocusSurface`/`KeyboardTap`/`FocusRingShape` rules in the Task 32 note above
+  — a hover-only control is `ExcludeFocus`, a new surface declares its Tab order, Escape closes and
+  returns focus.
+- **To check**: `rill check` (it includes the labelled-tap-target and traversal tests), then a real
+  run with `$env:RILL_SEMANTICS_DUMP='1'; $env:RILL_KEY_DIAG='1'; rill open` and Narrator on. The
+  error names only a node id: find it in `%TEMP%\rill-semantics-changes.txt` (every node added or
+  removed, frame by frame). An **empty full-window child of the root (`#1`), added in the same
+  frame that something else was removed, whose child is a tooltip's text** is an orphaned overlay
+  — find the widget that owns that text. `RILL_FOCUS_PROBE=monkey|controlhover|tilebuttons|…`
+  (`docs/configuration.md`) drives the real app; clean probes do not prove a fix, because the
+  fault is intermittent and needs a long session of clicking.
+- **Known gap**: the sign-in page's embedded WebView2 is not reachable by Narrator or by Tab from
+  Flutter (`todo.md` 85). Debug builds need a hot *restart*, not a reload, after a widget gains
+  state or a mixin.
 
 ## Current state
 
