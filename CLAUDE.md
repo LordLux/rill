@@ -775,6 +775,15 @@ the answer.
   Flutter calls the *mouse* "keyboard-like" (`FocusHighlightMode.traditional`), so
   anything keyed to it draws and scrolls on clicks. Key it to
   `KeyboardNavigation.active` instead (`ui/focus_ring.dart`). `architecture.md` F52.
+- **A modifier whose release went to another window stays "held" in Flutter, and then no
+  shortcut or Tab fires — measured 2026-10-03.** Alt+Tab (also Win+Ctrl+Arrow, Win+Tab)
+  gives the keyboard to another window between the modifier going down and coming up, so
+  the key-up is never delivered here. Every `RILL_KEY_DIAG` line after it read
+  `down=[Alt Left+…]`; the report was "the keyboard dies after a video change", which was
+  only when the user happened to Alt+Tab. `ui/keyboard_resync.dart` asks the platform what is
+  really down when the window regains the keyboard and releases the rest — Flutter's own
+  `syncKeyboardState` only ever *adds* keys. Anything new that matches key presses "without
+  modifiers" depends on this.
 - **A new surface gets its own `FocusSurface`, and the keyboard cannot reach
   anything above the `Navigator` — Task 32.** Tab order is declared in
   `ui/focus_surface.dart`, not inherited from the tree: title bar, rail, search,

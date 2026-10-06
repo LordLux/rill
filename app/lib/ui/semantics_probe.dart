@@ -19,6 +19,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -38,22 +39,77 @@ void runSemanticsProbe(ProviderContainer container) {
 }
 
 /// `RILL_SEMANTICS_DUMP=1`: turns semantics on and writes the whole semantics tree, with its
-/// node ids, to `%TEMP%\rill-semantics-ring-<0..15>.txt` once a second, oldest overwritten.
+/// node ids, to `%TEMP%\rill-semantics-ring-<n>.txt` once a second, oldest overwritten. It keeps
+/// the last 300 seconds (`RILL_SEMANTICS_DUMP_KEEP=<seconds>` to change it; about 10 KB a file).
 ///
 /// The accessibility bridge's errors name a node id and nothing else; the id is only
 /// meaningful against a tree from the same run. Reproduce the error, then read the files
-/// written around the moment it appeared (their timestamps say which).
+/// written around the moment it appeared (their timestamps say which). Nothing is logged per
+/// dump: a line a second would fill the 10 MB log and push the error's start out of it.
 void runSemanticsDump() {
   if (Platform.environment['RILL_SEMANTICS_DUMP'] != '1') return;
   SemanticsBinding.instance.ensureSemantics();
+  final keep = int.tryParse(Platform.environment['RILL_SEMANTICS_DUMP_KEEP'] ?? '') ?? 300;
+  _watchNodeChanges();
   var n = 0;
   Timer.periodic(const Duration(seconds: 1), (_) {
     try {
-      _dumpTree('ring-${n++ % 90}');
+      _dumpTree('ring-${n++ % keep}', quiet: true);
     } on Object catch (error) {
       stderr.writeln('semantics dump failed: $error');
     }
   });
+}
+
+/// Every semantics node that appears or disappears, frame by frame, to
+/// `%TEMP%\rill-semantics-changes.txt` (the last ~4 MB). The once-a-second tree dumps cannot
+/// see a node that lives for a few frames — a tooltip, a menu — and an `AXTree` error can name
+/// exactly such a node; this names it, with its label, its parent and the time.
+void _watchNodeChanges() {
+  final path = '${Directory.systemTemp.path}\\rill-semantics-changes.txt';
+  final file = File(path);
+  file.writeAsStringSync('');
+  var known = <int, String>{};
+  var written = 0;
+  void frame(Duration _) {
+    WidgetsBinding.instance.addPostFrameCallback(frame);
+    final root = RendererBinding.instance.renderViews.first.owner?.semanticsOwner?.rootSemanticsNode;
+    if (root == null) return;
+    final now = <int, String>{};
+    void walk(SemanticsNode node, SemanticsNode? parent) {
+      final data = node.getSemanticsData();
+      final label = data.label.replaceAll('\n', ' / ');
+      final tip = data.tooltip.isEmpty ? '' : ' tooltip="${data.tooltip}"';
+      final r = node.rect;
+      now[node.id] = '"$label"$tip ${r.width.round()}x${r.height.round()} parent=#${parent?.id}';
+      node.visitChildren((c) {
+        walk(c, node);
+        return true;
+      });
+    }
+
+    walk(root, null);
+    final stamp = DateTime.now().toIso8601String().substring(11, 23);
+    final lines = StringBuffer();
+    for (final e in now.entries) {
+      if (!known.containsKey(e.key)) lines.writeln('$stamp + #${e.key} ${e.value}');
+    }
+    for (final e in known.entries) {
+      if (!now.containsKey(e.key)) lines.writeln('$stamp - #${e.key} ${e.value}');
+    }
+    known = now;
+    if (lines.isEmpty) return;
+    final text = lines.toString();
+    written += text.length;
+    // Start over rather than grow without end: the error is in the last few minutes.
+    if (written > 4000000) {
+      file.writeAsStringSync('');
+      written = text.length;
+    }
+    file.writeAsStringSync(text, mode: FileMode.append);
+  }
+
+  WidgetsBinding.instance.addPostFrameCallback(frame);
 }
 
 void _say(String line) => stderr.writeln('probe: $line');
@@ -127,7 +183,7 @@ Offset? _find(bool Function(Widget widget) matches) {
 
 /// The semantics tree as the engine is sent it, ids included, to a file — a
 /// dump of a few thousand lines does not belong in the log.
-void _dumpTree(String label) {
+void _dumpTree(String label, {bool quiet = false}) {
   final root = RendererBinding.instance.renderViews.first.owner?.semanticsOwner?.rootSemanticsNode;
   final path = '${Directory.systemTemp.path}\\rill-semantics-$label.txt';
   final out = StringBuffer();
@@ -137,7 +193,7 @@ void _dumpTree(String label) {
     out.writeln('${'  ' * depth}#${node.id} rect=${r.left.round()},${r.top.round()} ${r.width.round()}x${r.height.round()} '
         'label="${data.label.replaceAll('\n', ' / ')}" value="${data.value}" tooltip="${data.tooltip}" '
         'hidden=${node.isInvisible} merged=${node.isMergedIntoParent} '
-        'actions=${data.actions}');
+        'actions=${data.actions}${data.flagsCollection.isFocused == Tristate.isTrue ? ' FOCUSED' : ''}');
     node.visitChildren((child) {
       walk(child, depth + 1);
       return true;
@@ -150,7 +206,7 @@ void _dumpTree(String label) {
     walk(root, 0);
   }
   File(path).writeAsStringSync(out.toString());
-  _say('tree dumped to $path');
+  if (!quiet) _say('tree dumped to $path');
 }
 
 Future<void> _probe(ProviderContainer container) async {

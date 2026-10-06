@@ -14,6 +14,8 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/gestures.dart';
@@ -26,6 +28,7 @@ import 'player/controls.dart';
 import 'player/view_mode.dart';
 import '../domain/youtube_link.dart';
 import 'player_shell.dart';
+import 'queue_controller.dart';
 void runFocusProbe(ProviderContainer container) {
   final mode = Platform.environment['RILL_FOCUS_PROBE'];
   if (mode == null || mode.isEmpty) return;
@@ -87,6 +90,293 @@ Future<void> _probe(ProviderContainer container, String mode) async {
     if (size.length == 2 && size[0] != null && size[1] != null) {
       appWindow.size = Size(size[0]!, size[1]!);
       await _wait(2000);
+    }
+
+    if (mode == 'tilebuttons') {
+      // A tile's hover buttons (Watch later, Add to queue) and their tooltips: hover the tile, move
+      // onto a button until its tooltip is up, then leave — onto the next tile, and so on.
+      final binding = GestureBinding.instance;
+      const device = 51;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(600, 500), kind: PointerDeviceKind.mouse, device: device));
+      List<Offset> centers(bool Function(Widget) test) {
+        final found = <Offset>[];
+        void visit(Element element) {
+          if (test(element.widget)) {
+            final box = element.renderObject;
+            if (box is RenderBox && box.attached) found.add(box.localToGlobal(box.size.center(Offset.zero)));
+            return;
+          }
+          element.visitChildren(visit);
+        }
+
+        WidgetsBinding.instance.rootElement?.visitChildren(visit);
+        return found;
+      }
+
+      await _wait(9000);
+      var n = 0;
+      for (var round = 0; round < 12; round++) {
+        final buttons = centers((w) => w is IconButton && (w.tooltip == 'Watch later' || w.tooltip == 'Add to queue'));
+        final visible = buttons.where((b) => b.dx > 0 && b.dy > 60 && b.dy < 900 && b.dx < 1700).toList();
+        if (visible.isEmpty) {
+          _say('TILEBUTTONS $round: no buttons on screen');
+          binding.handlePointerEvent(PointerScrollEvent(position: const Offset(800, 500), scrollDelta: const Offset(0, 300), kind: PointerDeviceKind.mouse, device: device));
+          await _wait(1000);
+          continue;
+        }
+        final target = visible[round % visible.length];
+        // Onto the tile first, so its buttons fade in; then onto the button.
+        binding.handlePointerEvent(PointerHoverEvent(position: target + const Offset(-60, 60), kind: PointerDeviceKind.mouse, device: device));
+        await _wait(500);
+        binding.handlePointerEvent(PointerHoverEvent(position: target, kind: PointerDeviceKind.mouse, device: device));
+        await _wait(1400);
+        _say('TILEBUTTONS ${n++}: tooltip up at $target');
+        // Away, to empty space and to the next tile.
+        binding.handlePointerEvent(PointerHoverEvent(position: const Offset(640, 40), kind: PointerDeviceKind.mouse, device: device));
+        await _wait(700);
+      }
+      _say('TILEBUTTONS done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'accountmenu') {
+      // Hover the account button (its tooltip), open its menu, leave it open a while, close it by
+      // clicking outside and by clicking the button again; ten times.
+      final binding = GestureBinding.instance;
+      const device = 41;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(600, 500), kind: PointerDeviceKind.mouse, device: device));
+      Offset? centerOf(bool Function(Widget) test) {
+        Offset? found;
+        void visit(Element element) {
+          if (found != null) return;
+          if (test(element.widget)) {
+            final box = element.renderObject;
+            if (box is RenderBox && box.attached) found = box.localToGlobal(box.size.center(Offset.zero));
+            return;
+          }
+          element.visitChildren(visit);
+        }
+
+        WidgetsBinding.instance.rootElement?.visitChildren(visit);
+        return found;
+      }
+
+      void click(Offset at) {
+        binding.handlePointerEvent(PointerHoverEvent(position: at, kind: PointerDeviceKind.mouse, device: device));
+        binding.handlePointerEvent(PointerDownEvent(position: at, kind: PointerDeviceKind.mouse, device: device, buttons: kPrimaryButton));
+        binding.handlePointerEvent(PointerUpEvent(position: at, kind: PointerDeviceKind.mouse, device: device));
+      }
+
+      await _wait(8000);
+      for (var cycle = 0; cycle < 10; cycle++) {
+        final at = centerOf((w) => w.runtimeType.toString() == 'AccountButton');
+        if (at == null) {
+          _say('ACCOUNT $cycle: no button');
+          break;
+        }
+        binding.handlePointerEvent(PointerHoverEvent(position: at, kind: PointerDeviceKind.mouse, device: device));
+        await _wait(1500); // tooltip up
+        _say('ACCOUNT $cycle: open at $at');
+        click(at);
+        await _wait(2500 + (cycle % 3) * 2500);
+        if (cycle.isEven) {
+          _say('ACCOUNT $cycle: click outside');
+          click(const Offset(600, 500));
+        } else {
+          _say('ACCOUNT $cycle: click the button again');
+          click(at);
+        }
+        await _wait(2000);
+      }
+      _say('ACCOUNT done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'scrollchange') {
+      // The watch page scrolled down into its comments, focus somewhere inside the page, and the
+      // video changes: new comments, new related, the old nodes going away under a focused one.
+      final binding = GestureBinding.instance;
+      const device = 31;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(600, 500), kind: PointerDeviceKind.mouse, device: device));
+      final videos = ['dQw4w9WgXcQ', '9bZkp7q19f0', 'kJQP7kiw5Fk', '3JZ_D3ELwOQ'];
+      var current = 0;
+      openWatchIn(container, placeholderVideoItem(videos[current]));
+      await _wait(10000);
+      for (var cycle = 0; cycle < 8; cycle++) {
+        for (var s = 0; s < 3; s++) {
+          binding.handlePointerEvent(PointerScrollEvent(position: const Offset(600, 500), scrollDelta: const Offset(0, 400), kind: PointerDeviceKind.mouse, device: device));
+          await _wait(500);
+        }
+        final tabs = 8 + cycle * 7;
+        for (var i = 0; i < tabs; i++) {
+          FocusManager.instance.primaryFocus?.nextFocus();
+          await _wait(40);
+        }
+        current = (current + 1) % videos.length;
+        _say('SCROLLCHANGE $cycle: focus=${FocusManager.instance.primaryFocus?.debugLabel ?? FocusManager.instance.primaryFocus.runtimeType}; opening ${videos[current]}');
+        openWatchIn(container, placeholderVideoItem(videos[current]));
+        await _wait(7000);
+      }
+      _say('SCROLLCHANGE done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'monkey') {
+      // A screen reader's hands: pick a random tappable node from the semantics tree and press it,
+      // scroll, Tab, change video — and log each step, so that if an AXTree error appears the
+      // steps just before it are in the same log. Only labels on a short allow-list are pressed:
+      // nothing that changes the account (like, subscribe, vote, delete) and nothing that leaves the app.
+      final random = math.Random(int.tryParse(Platform.environment['RILL_MONKEY_SEED'] ?? '') ?? 7);
+      final steps = int.tryParse(Platform.environment['RILL_MONKEY_STEPS'] ?? '') ?? 150;
+      final safe = RegExp(
+        r'^(Show \d+ repl|Hide \d+ repl|Top$|Newest$|Show more|Show less|Mute|Unmute|Pause|Play$|Theatre mode|Fullscreen|Exit fullscreen|Miniplayer|Home|Subscriptions|Back$|Toggle menu|Share$|Close|Save to playlist|More actions|Captions|Settings|Quality|Next video|Previous video|Remove from queue|Video,|Music Video,|Playlist,|Mix|Short,|Live,|Station,)',
+      );
+      final binding = GestureBinding.instance;
+      const device = 21;
+      binding.handlePointerEvent(const PointerAddedEvent(position: Offset(400, 400), kind: PointerDeviceKind.mouse, device: device));
+      final videos = ['dQw4w9WgXcQ', '9bZkp7q19f0', 'kJQP7kiw5Fk', '3JZ_D3ELwOQ'];
+      openWatchIn(container, placeholderVideoItem(videos[0]));
+      for (final v in videos.skip(1)) {
+        container.read(queueProvider.notifier).addToQueue(placeholderVideoItem(v));
+      }
+      await _wait(10000);
+
+      List<(int, String)> tappable() {
+        final owner = RendererBinding.instance.renderViews.first.owner?.semanticsOwner;
+        final out = <(int, String)>[];
+        void walk(SemanticsNode node) {
+          final data = node.getSemanticsData();
+          if (data.hasAction(SemanticsAction.tap) && safe.hasMatch(data.label)) out.add((node.id, data.label));
+          node.visitChildren((c) {
+            walk(c);
+            return true;
+          });
+        }
+
+        final root = owner?.rootSemanticsNode;
+        if (root != null) walk(root);
+        return out;
+      }
+
+      var n = 0;
+      for (; n < steps; n++) {
+        final roll = random.nextInt(100);
+        if (roll < 55) {
+          final nodes = tappable();
+          if (nodes.isEmpty) {
+            _say('MONKEY $n: nothing to press');
+          } else {
+            final pick = nodes[random.nextInt(nodes.length)];
+            _say('MONKEY $n: tap #${pick.$1} "${pick.$2.replaceAll('\n', ' / ')}"');
+            RendererBinding.instance.renderViews.first.owner!.semanticsOwner!.performAction(pick.$1, SemanticsAction.tap);
+          }
+        } else if (roll < 75) {
+          final dy = (random.nextBool() ? 1 : -1) * (100.0 + random.nextInt(500));
+          final at = Offset(300.0 + random.nextInt(900), 200.0 + random.nextInt(500));
+          _say('MONKEY $n: scroll $dy at $at');
+          binding.handlePointerEvent(PointerScrollEvent(position: at, scrollDelta: Offset(0, dy), kind: PointerDeviceKind.mouse, device: device));
+        } else if (roll < 90) {
+          final k = 1 + random.nextInt(6);
+          _say('MONKEY $n: tab x$k');
+          for (var i = 0; i < k; i++) {
+            FocusManager.instance.primaryFocus?.nextFocus();
+            await _wait(60);
+          }
+        } else if (roll < 96) {
+          final v = videos[random.nextInt(videos.length)];
+          _say('MONKEY $n: open video $v');
+          openWatchIn(container, placeholderVideoItem(v));
+        } else {
+          _say('MONKEY $n: Escape');
+          HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.escape, logicalKey: LogicalKeyboardKey.escape, timeStamp: Duration.zero));
+          HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: PhysicalKeyboardKey.escape, logicalKey: LogicalKeyboardKey.escape, timeStamp: Duration.zero));
+        }
+        await _wait(700 + random.nextInt(900));
+      }
+      _say('MONKEY done after $n steps');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'keystate') {
+      // The Alt+Tab case: Alt goes down in this window and its release goes elsewhere. Does
+      // the platform answer "what is down", and does coming back clear the stale Alt?
+      HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.altLeft, logicalKey: LogicalKeyboardKey.altLeft, timeStamp: Duration.zero));
+      _say('KEYSTATE alt held in Flutter: ${HardwareKeyboard.instance.isAltPressed}');
+      try {
+        final state = await SystemChannels.keyboard.invokeMapMethod<int, int>('getKeyboardState');
+        _say('KEYSTATE platform answers: ${state == null ? 'null' : '${state.length} keys down'}');
+      } on Object catch (error) {
+        _say('KEYSTATE platform query failed: $error');
+      }
+      WidgetsBinding.instance.handleViewFocusChanged(const ViewFocusEvent(viewId: 0, state: ViewFocusState.focused, direction: ViewFocusDirection.undefined));
+      await _wait(500);
+      _say('KEYSTATE after the window got the keyboard back: alt held = ${HardwareKeyboard.instance.isAltPressed}');
+      _say('done');
+      await stderr.flush();
+      return;
+    }
+
+    if (mode == 'videochange') {
+      // Keyboard on a player control, then the video changes (next in the queue, a new video):
+      // do shortcuts and Tab still work, and is focus still on something that exists?
+      openWatchIn(container, placeholderVideoItem('dQw4w9WgXcQ'));
+      container.read(queueProvider.notifier).addToQueue(placeholderVideoItem('9bZkp7q19f0'));
+      container.read(queueProvider.notifier).addToQueue(placeholderVideoItem('kJQP7kiw5Fk'));
+      await _wait(12000);
+
+      void key(LogicalKeyboardKey logical, PhysicalKeyboardKey physical, {bool shift = false}) {
+        if (shift) {
+          HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: PhysicalKeyboardKey.shiftLeft, logicalKey: LogicalKeyboardKey.shiftLeft, timeStamp: Duration.zero));
+        }
+        HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero));
+        HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero));
+        if (shift) {
+          HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: PhysicalKeyboardKey.shiftLeft, logicalKey: LogicalKeyboardKey.shiftLeft, timeStamp: Duration.zero));
+        }
+      }
+
+      String focusState() {
+        final f = FocusManager.instance.primaryFocus;
+        final c = f?.context;
+        return 'focus=${f?.debugLabel ?? f.runtimeType} ctx=${c == null ? 'none' : (c.mounted ? 'mounted' : 'UNMOUNTED')} mode=${FocusManager.instance.highlightMode.name}';
+      }
+
+      Future<void> check(String when) async {
+        final before = container.read(playerViewProvider).theatre;
+        key(LogicalKeyboardKey.keyT, PhysicalKeyboardKey.keyT);
+        await _wait(300);
+        final after = container.read(playerViewProvider).theatre;
+        _say('SHORTCUT $when: "t" ${before != after ? 'WORKED' : 'DID NOTHING'}; ${focusState()}');
+        if (after != before) container.read(playerViewProvider.notifier).toggleTheatre();
+        key(LogicalKeyboardKey.tab, PhysicalKeyboardKey.tab);
+        await _wait(300);
+        _say('TAB $when: ${focusState()}');
+      }
+
+      // Walk Tab onto the player's controls first.
+      for (var i = 0; i < 16; i++) {
+        key(LogicalKeyboardKey.tab, PhysicalKeyboardKey.tab);
+        await _wait(150);
+      }
+      _say('KEYBOARD on a control: ${focusState()}');
+      await check('before');
+
+      for (final how in ['Shift+N', 'Shift+N', 'a new video']) {
+        if (how == 'Shift+N') {
+          key(LogicalKeyboardKey.keyN, PhysicalKeyboardKey.keyN, shift: true);
+        } else {
+          openWatchIn(container, placeholderVideoItem('3JZ_D3ELwOQ'));
+        }
+        await _wait(9000);
+        await check('after $how');
+      }
+      _say('done');
+      await stderr.flush();
+      return;
     }
 
     if (mode == 'controlhover') {
