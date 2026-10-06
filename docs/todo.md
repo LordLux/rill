@@ -1146,3 +1146,17 @@ enough in it to find the node can be kept or sent — for the developer testing,
   Sending anything off the machine is a separate, opt-in step; nothing is sent by default.
 - **Do not** try to recover the tree automatically (re-sending semantics) without measuring it:
   the bridge rejects every later update, and a rebuild may or may not clear that.
+
+### 87. Remove the default-on semantics dump (due 2026-11-28)
+
+`RILL_SEMANTICS_DUMP` was made **on by default in a dev build** (no `RILL_VERSION`) on 2026-10-06 to
+collect node logs for the intermittent `AXTree` error. It forces semantics on (a cost the app
+otherwise only pays when a screen reader asks), writes a ring of tree dumps once a second to
+`%TEMP%` and keeps a 4 MB node-change log.
+
+- **On or after 2026-11-28:** delete `_dumpWanted`'s dev-build default in `ui/semantics_probe.dart`
+  (back to `== '1'` only), and the sentences about the default in `docs/configuration.md` and
+  CLAUDE.md "Accessibility".
+- **Before removing:** if the error was seen in that time, check that it is explained
+  (`axtree-error-diagnosis` memory, `architecture.md` F51); if not, extend the date.
+- Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.

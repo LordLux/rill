@@ -846,7 +846,8 @@ a screen reader or only a keyboard can use it, and check it the way `architectur
   — a hover-only control is `ExcludeFocus`, a new surface declares its Tab order, Escape closes and
   returns focus.
 - **To check**: `rill check` (it includes the labelled-tap-target and traversal tests), then a real
-  run with `$env:RILL_SEMANTICS_DUMP='1'; $env:RILL_KEY_DIAG='1'; rill open` and Narrator on. The
+  run with `$env:RILL_KEY_DIAG='1'; rill open` and Narrator on (the semantics dump is on by default in a
+  dev build until 2026-11-28, `todo.md` 87; `RILL_SEMANTICS_DUMP=0` turns it off). The
   error names only a node id: find it in `%TEMP%\rill-semantics-changes.txt` (every node added or
   removed, frame by frame). An **empty full-window child of the root (`#1`), added in the same
   frame that something else was removed, whose child is a tooltip's text** is an orphaned overlay
