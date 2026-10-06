@@ -17,6 +17,7 @@ import '../focus_ring.dart' show KeyboardNavigation;
 import '../focus_surface.dart';
 import '../open_video.dart' show copyToClipboard;
 import '../playback_controller.dart';
+import 'channel_badge.dart';
 import 'comment_composer.dart';
 import 'shortcut_tooltip.dart';
 
@@ -1149,11 +1150,14 @@ class CommentTile extends ConsumerWidget {
                             color: scheme.onSurface,
                           ),
                         ),
-                        if (comment.isVerified)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 4.0),
-                            child: Icon(Icons.check_circle, size: 12, color: scheme.onSurfaceVariant),
-                          ),
+                        // The same badge, and tooltip, as everywhere else a channel is named.
+                        ChannelBadge(
+                          channelId: comment.authorChannelId,
+                          isArtistChannel: false,
+                          isVerified: comment.isVerified,
+                          size: 13,
+                          paddingLeft: 4,
+                        ),
                         if (comment.publishedText != null) ...[
                           const SizedBox(width: 8),
                           NoTabSelectionArea(
