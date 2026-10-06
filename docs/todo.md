@@ -1126,3 +1126,23 @@ not focusable from the Flutter side.
   from the last Flutter control, and back out on Shift+Tab / at the page's ends. Does nothing for
   Narrator reading the page.
 - Until then: sign in without Narrator, or seed the session with `YT_COOKIE`.
+
+### 86. Report an accessibility error when it happens
+
+An `AXTree` error silences Narrator for the rest of the session (see CLAUDE.md "Accessibility"),
+and today it is only visible to someone reading the log. Wanted: it is noticed, and a report with
+enough in it to find the node can be kept or sent — for the developer testing, and for users.
+
+- **Where it can be seen.** The error is the engine's own stderr line
+  (`accessibility_bridge.cc(114)`), so only the release launcher
+  (`windows/runner/log_capture.cpp`, which already pipes, redacts and timestamps every line) can
+  see it; Dart cannot. The launcher can count the lines and tell the app (a file or a named pipe).
+- **Report contents (no cookie, no account data):** time, app version, the first error line, how
+  many followed, the OS and Flutter versions, whether a screen reader was running, and — if
+  `RILL_SEMANTICS_DUMP` is on — the node id's lines from `rill-semantics-changes.txt`. The log
+  already redacts cookies; keep that chokepoint.
+- **Local first:** append to `%LOCALAPPDATA%\rill\a11y-reports\` (one file per run, newest 10),
+  and show a row in the Problems list ("Accessibility errors: N this session — Copy report").
+  Sending anything off the machine is a separate, opt-in step; nothing is sent by default.
+- **Do not** try to recover the tree automatically (re-sending semantics) without measuring it:
+  the bridge rejects every later update, and a rebuild may or may not clear that.
