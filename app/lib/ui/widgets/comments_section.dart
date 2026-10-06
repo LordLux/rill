@@ -1214,8 +1214,9 @@ class CommentTile extends ConsumerWidget {
                 ),
                 if (comment.creatorHearted) ...[
                   const SizedBox(width: 4),
-                  Tooltip(
-                    message: 'Creator liked this comment', // TODO get creator name from channel info
+                  ShortcutTooltip(
+                    label: 'Creator liked this comment', // TODO get creator name from channel info
+                    silent: true,
                     child: Padding(
                       padding: EdgeInsets.all(8),
                       child: Icon(Icons.favorite, size: 14, color: Theme.of(context).tokens.liveBadge),
