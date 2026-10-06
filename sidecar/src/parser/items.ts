@@ -87,6 +87,12 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   // shape we do not model. Either way there is no title to ship.
   if (!title) return null;
 
+  // This depends on hl=en. If a language-independent signal (like isPlayable
+  // or a missing duration) is found in lockupViewModel, use it instead.
+  if (title === '[Deleted video]' || title === '[Private video]') {
+    return null;
+  }
+
   const thumbnailUrl = bestImageUrl(node['contentImage']);
   const badges = scanBadges(node['contentImage']);
   const rows = metadataRowTexts(get(metadata, 'metadata', 'contentMetadataViewModel'));
@@ -94,7 +100,10 @@ export function mapLockup(node: JsonObject): FeedItem | null {
 
   if (/PLAYLIST|PODCAST|ALBUM/i.test(contentType)) {
     const subtitle = flatRows[0] ?? null;
-    const videoCount = flatRows.map(countFromText).find((n) => n !== null) ?? null;
+    // The count is the thumbnail's badge ("134 videos"), and nowhere else. The
+    // metadata rows hold the owner and the first two videos' titles, so the
+    // first number in them is whatever those happen to contain — protocol.md §3.3.
+    const videoCount = badges.labels.map(countFromText).find((n) => n !== null) ?? null;
 
     if (isMixId(id) || badges.labels.some((label) => /^mix$/i.test(label))) {
       return {
@@ -194,6 +203,10 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
 
   const title = text(node['title']) ?? text(node['headline']);
   if (!title) return null;
+
+  if (node['isPlayable'] === false || title === '[Deleted video]' || title === '[Private video]') {
+    return null;
+  }
 
   const byline = node['longBylineText'] ?? node['ownerText'] ?? node['shortBylineText'];
   const badges = scanBadges(node);

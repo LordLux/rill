@@ -20,6 +20,9 @@ import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDur
 const Duration _rowSlide = Duration(milliseconds: 200);
 const Duration _rowExit = Duration(milliseconds: 340);
 
+/// How many rows of one batch play the staggered entrance.
+const int _staggeredArrivals = 12;
+
 /// Where the slide ends and the collapse begins, as a fraction of [_rowExit].
 const double _rowSlidePhase = 200 / 340;
 
@@ -167,6 +170,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       final ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
       _itemCtrls[entry] = ctrl;
       if (opening && i == 0) continue;
+      // A playlist page is a hundred rows. Only the first screenful of a batch
+      // can be seen arriving; the rest are simply there, rather than each
+      // holding a timer for up to five seconds to slide in off screen.
+      if (arrival >= _staggeredArrivals) continue;
 
       // The entrance is the dismissal backwards: 1 → 0 slides in from the right.
       ctrl.value = 1.0;
@@ -500,7 +507,11 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                                   // rather than stopping — so the panel naming
                                   // it is not decoration (Task 26 §3).
                                   if (queue.isMix) ...[
-                                    Icon(Icons.podcasts, size: 15, color: scheme.onSurfaceVariant),
+                                    Icon(
+                                      queue.mix!.isPlaylist ? Icons.playlist_play : Icons.podcasts,
+                                      size: queue.mix!.isPlaylist ? 18 : 15,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
                                     const SizedBox(width: 6),
                                   ],
                                   Expanded(
@@ -524,17 +535,46 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                                   // subtitle to both slots meant the text swapped
                                   // instantly and the crossfade faded between two
                                   // copies of the same thing.
+                                  Text line(String text) => Text(
+                                    text,
+                                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  );
+
+                                  // A playlist keeps its position where it is and
+                                  // changes only what follows it.
+                                  if (queue.mix?.isPlaylist ?? false) {
+                                    Widget tail(bool expanded) {
+                                      final text = _playlistTail(queue, controller, expanded);
+                                      return text == null ? const SizedBox(width: double.infinity) : line(' · $text');
+                                    }
+
+                                    final same = _playlistTail(queue, controller, false) == _playlistTail(queue, controller, true);
+                                    return Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        line(_position(queue)),
+                                        Expanded(
+                                          // One widget when both states say the same thing,
+                                          // so there is nothing to animate and nothing said twice.
+                                          child: same
+                                              ? tail(_expanded)
+                                              : AnimatedCrossFade(
+                                                  duration: const Duration(milliseconds: 200),
+                                                  alignment: Alignment.topLeft,
+                                                  crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                  firstChild: tail(false),
+                                                  secondChild: tail(true),
+                                                ),
+                                        ),
+                                      ],
+                                    );
+                                  }
+
                                   Widget subtitleFor(bool expanded) {
                                     final (text, icon) = _headerSubtitle(queue, controller, expanded);
-                                    return _mixSubtitle(
-                                      icon,
-                                      Text(
-                                        text,
-                                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    );
+                                    return _mixSubtitle(icon, line(text));
                                   }
 
                                   return AnimatedCrossFade(
@@ -825,7 +865,7 @@ class _ParticlePainter extends CustomPainter {
 /// not assemble, so which mix it is, is the only thing that identifies it.
 String _headerTitle(QueueState queue, VideoItem? nextItem) {
   final mix = queue.mix;
-  if (mix != null) return mix.title ?? 'Mix';
+  if (mix != null) return mix.title ?? (mix.isPlaylist ? 'Playlist' : 'Mix');
   return nextItem != null ? 'Next: ${nextItem.title}' : 'Queue';
 }
 
@@ -837,18 +877,53 @@ String _headerTitle(QueueState queue, VideoItem? nextItem) {
 /// the denominator climb would reasonably read it as the list changing under
 /// them rather than as the thing working. What a mix shows instead is what is
 /// coming next, and — per §4 — whether it has stopped.
+///
+/// A playlist does not come through here: it always shows its position, with
+/// [_playlistTail] after it.
+///
+/// **"End of" is said when the last video has finished, not when the list is
+/// known to be finite.** Until the last of them ends, the line says what is
+/// next, and then that this is the last one.
 (String, Widget?) _headerSubtitle(QueueState queue, QueueController controller, bool expanded) {
-  final position = queue.currentIndex != null ? '${queue.currentIndex! + 1} / ${queue.items.length}' : '${queue.items.length} items';
-
   final mix = queue.mix;
 
-  if (expanded) return ('Mixes are playlists YouTube makes for you', null);
-  if (mix == null) return (position, null);
+  if (expanded) {
+    if (mix != null) return ('Mixes are playlists YouTube makes for you', null);
+    return (_position(queue), null);
+  }
+
+  if (mix == null) return (_position(queue), null);
   if (controller.mixError != null) return ('Paused. Couldn\'t load more', null);
-  if (mix.exhausted) return ('End of mix', null);
+  if (queue.playedOut) return ('End of mix', null);
 
   final nextItem = queue.next;
-  return (nextItem?.title != null ? 'Next: ${nextItem?.title}' : 'Mix', null);
+  if (nextItem != null) return ('Next: ${nextItem.title}', null);
+  // Nothing after this one. Only "last" once nothing more can arrive — before
+  // that a top-up is still out, and the list simply names itself.
+  if (mix.exhausted) return ('Last video', null);
+  return ('Mix', null);
+}
+
+/// `3 / 135`. A playlist's total is YouTube's count while pages are still to
+/// come (`displayLength`), which is why it can be shown for one and not for a mix.
+String _position(QueueState queue) {
+  final total = queue.displayLength;
+  return queue.currentIndex != null ? '${queue.currentIndex! + 1} / $total' : '$total items';
+}
+
+/// What follows a playlist's position, or null for nothing.
+///
+/// The error and the end are said in both states, because the open list shows
+/// neither. What is next, and that this is the last one, the open list already
+/// shows — so those are the collapsed panel's alone.
+String? _playlistTail(QueueState queue, QueueController controller, bool expanded) {
+  if (controller.mixError != null) return 'Paused. Couldn\'t load more';
+  if (queue.playedOut) return 'End of playlist';
+  if (expanded) return null;
+
+  final nextItem = queue.next;
+  if (nextItem != null) return 'Next: ${nextItem.title}';
+  return (queue.mix?.exhausted ?? false) ? 'Last video' : null;
 }
 
 class _QueueItemTile extends StatefulWidget {

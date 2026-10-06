@@ -6,7 +6,7 @@
       "id": "list_001",
       "title": "Sanitised Title 1",
       "thumbnailUrl": "https://fake.url/img1.jpg",
-      "videoCount": 8,
+      "videoCount": 134,
       "channelName": "Sanitised Channel 1"
     },
     {
@@ -91,7 +91,7 @@
       "id": "list_005",
       "title": "Sanitised Title 5",
       "thumbnailUrl": "https://fake.url/img5.jpg",
-      "videoCount": 4,
+      "videoCount": 57,
       "channelName": "Sanitised Channel 5"
     },
     {

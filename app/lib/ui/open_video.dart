@@ -118,6 +118,66 @@ Future<void> startMixFromTile(
   }));
 }
 
+/// Start a playlist from a tile: [startMixFromTile]'s tap, rollback and undo,
+/// over `playlist.get` instead of `mix.start`.
+///
+/// [title] and [videoCount] are what the tile showed, so the panel can name
+/// the playlist and size it even where the response does not.
+Future<void> startPlaylistFromTile(
+  BuildContext context,
+  WidgetRef ref,
+  String playlistId, {
+  String? title,
+  int? videoCount,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final container = ProviderScope.containerOf(context, listen: false);
+  final queue = container.read(queueProvider.notifier);
+  final resumeAt = container.read(playbackProvider).item == null
+      ? null
+      : container.read(playbackProvider.notifier).currentPosition;
+
+  showWatchPage(ref);
+
+  try {
+    await queue.startPlaylist(playlistId, title: title, videoCount: videoCount);
+  } on Object catch (e) {
+    if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+    if (container.read(queueProvider).isEmpty) toMiniPlayerIn(container);
+    final message = switch (e) {
+      RpcException(code: 'AUTH_REQUIRED') => 'Sign in to play playlists',
+      RpcException(:final message) => message,
+      _ => 'Could not start this playlist — $e',
+    };
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+    return;
+  }
+
+  if (!queue.canUndoStartMix) return;
+  final snackBar = messenger.showSnackBar(
+    SnackBar(
+      duration: const Duration(seconds: 5),
+      persist: false,
+      content: Text(title == null ? 'Queue replaced by the playlist' : 'Queue replaced by $title'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          queue.undoStartMix();
+          if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+        },
+      ),
+    ),
+  );
+
+  final watch = container.listen(queueProvider, (_, _) {
+    if (!queue.canUndoStartMix) snackBar.close();
+  });
+  unawaited(snackBar.closed.then((reason) {
+    watch.close();
+    if (reason != SnackBarClosedReason.action) queue.discardStartMixUndo();
+  }));
+}
+
 /// What tapping a tile should do, or null when nothing can happen.
 ///
 /// **One handler for every surface**, for the reason `openFromTile` already
@@ -137,6 +197,15 @@ VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) 
           videoId: item.seedVideoId,
           params: item.startParams,
           title: item.title,
+        ));
+  }
+  if (item is PlaylistItem) {
+    return () => unawaited(startPlaylistFromTile(
+          context,
+          ref,
+          item.id,
+          title: item.title,
+          videoCount: item.videoCount,
         ));
   }
   return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);

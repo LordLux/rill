@@ -305,6 +305,8 @@ describe('RPC Transport', () => {
     // that reaches YouTube as a request about a video nobody asked for. `no`,
     // not `auto`: the same bytes fail the same way forever.
     const malformed: Array<[string, string, unknown]> = [
+      ['playlist.get with no playlistId', 'playlist.get', {}],
+      ['playlist.get with a blank playlistId', 'playlist.get', { playlistId: '   ' }],
       ['video.info with no videoId', 'video.info', {}],
       ['video.info with a blank videoId', 'video.info', { videoId: '   ' }],
       ['video.storyboard with no videoId', 'video.storyboard', {}],

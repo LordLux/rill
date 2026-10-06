@@ -428,7 +428,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     );
 
     try {
-      // The mix this watch belongs to, if any. It does not change resolution —
+      // The mix or playlist this watch belongs to, if any. It does not change resolution —
       // the sidecar keeps it off the ladder for exactly that reason — it is
       // recorded on the playback session so `playback.report` can put `list=`
       // on the watchtime ping. Without it a mix watch trains the recommender
@@ -634,7 +634,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     // Autoplay, or stop. `advance` answers false at the end of the queue — and
     // at the end of a mix with a top-up still out, the queue remembers and
     // advances itself when it lands (`QueueController._advanceWhenExtended`).
-    ref.read(queueProvider.notifier).advance();
+    final queue = ref.read(queueProvider.notifier);
+    if (!queue.advance()) queue.playedOut();
   }
 
   /// Final report and `playback.close` for whatever session is open.
