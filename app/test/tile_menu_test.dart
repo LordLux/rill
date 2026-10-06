@@ -5,6 +5,7 @@
 /// looked like a control, and no test asked whether it did anything. These do.
 library;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -141,6 +142,7 @@ void recordClipboard() {
 }
 
 void main() {
+  titleTooltipTests();
   group('the button', () {
     testWidgets('a tile with no menu draws the 3-dot button disabled, and it opens nothing', (tester) async {
       await tester.pumpWidget(harness(const MediaTile(spec: spec)));
@@ -397,5 +399,43 @@ void main() {
         expect(find.text('My Mix'), findsOneWidget, reason: "the dialog loaded this video's playlists");
       });
     });
+  });
+}
+
+/// A title the tile has to cut shows in full on hover; one that fits has no tooltip.
+void titleTooltipTests() {
+  const long = 'An extremely long video title that goes on and on, far past what two lines of a 320 px tile can hold, '
+      'so that it has to be cut with an ellipsis and the rest can only be read in a tooltip';
+
+  Future<void> hoverTitle(WidgetTester tester, String title) async {
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.text(title).first));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+  }
+
+  testWidgets('a cut title shows in full on hover', (tester) async {
+    await tester.pumpWidget(harness(MediaTile(spec: TileSpec(
+      title: long,
+      thumbnailUrl: spec.thumbnailUrl,
+      isStackedCards: false,
+      durationText: '4:20',
+      durationTone: DurationBadgeTone.normal,
+      badges: const [],
+      canWatchLater: true,
+      canAddToQueue: true,
+      primaryLine: 'Channel',
+    ))));
+    await hoverTitle(tester, long);
+    // The title itself, and the bubble that repeats it.
+    expect(find.text(long), findsNWidgets(2));
+  });
+
+  testWidgets('a title that fits has no tooltip', (tester) async {
+    await tester.pumpWidget(harness(const MediaTile(spec: spec)));
+    await hoverTitle(tester, 'A video');
+    expect(find.text('A video'), findsOneWidget);
   });
 }
