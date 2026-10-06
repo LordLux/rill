@@ -37,7 +37,15 @@ function row(id: string, title = `Video ${id}`, extra: Record<string, unknown> =
 function page(rows: unknown[], options: { token?: string; title?: string; count?: string; alert?: [string, string] } = {}) {
   return {
     ...(options.alert
-      ? { alerts: [{ alertRenderer: { type: options.alert[0], text: { runs: [{ text: options.alert[1] }] } } }] }
+      ? {
+          alerts: [
+            // The two shapes seen: an ERROR as `alertRenderer` with runs, the
+            // "hidden" notice as `alertWithButtonRenderer` with simpleText.
+            options.alert[0] === 'ERROR'
+              ? { alertRenderer: { type: options.alert[0], text: { runs: [{ text: options.alert[1] }] } } }
+              : { alertWithButtonRenderer: { type: options.alert[0], text: { simpleText: options.alert[1] } } },
+          ],
+        }
       : {}),
     ...(options.title ? { metadata: { playlistMetadataRenderer: { title: options.title } } } : {}),
     ...(options.count

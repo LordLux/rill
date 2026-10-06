@@ -87,8 +87,11 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   // shape we do not model. Either way there is no title to ship.
   if (!title) return null;
 
-  // This depends on hl=en. If a language-independent signal (like isPlayable
-  // or a missing duration) is found in lockupViewModel, use it instead.
+  // A backstop, and an English-only one. Measured 2026-10-06: a public playlist
+  // read anonymously never contains its unavailable entries — YouTube leaves
+  // them out and says so in an alert — so this has nothing to catch there. It
+  // is for a view that does list them (the owner's), which has not been
+  // captured; when one is, key this on whatever that tile carries instead.
   if (title === '[Deleted video]' || title === '[Private video]') {
     return null;
   }
