@@ -38,6 +38,17 @@ void runSemanticsProbe(ProviderContainer container) {
   WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_probe(container)));
 }
 
+/// Whether the dump runs: `RILL_SEMANTICS_DUMP=1` asks for it, `=0` refuses it, and with neither it is
+/// **on in a dev build** (no `RILL_VERSION` baked in) — the `AXTree` hunt of October 2026 needs the
+/// node log from every session the developer runs, and a released build, which has a version, never
+/// forces semantics on or writes files unasked. Remove the default on 2026-11-28 (`todo.md` 87).
+bool _dumpWanted() {
+  final asked = Platform.environment['RILL_SEMANTICS_DUMP'];
+  if (asked == '1') return true;
+  if (asked == '0') return false;
+  return const String.fromEnvironment('RILL_VERSION').isEmpty;
+}
+
 /// `RILL_SEMANTICS_DUMP=1`: turns semantics on and writes the whole semantics tree, with its
 /// node ids, to `%TEMP%\rill-semantics-ring-<n>.txt` once a second, oldest overwritten. It keeps
 /// the last 300 seconds (`RILL_SEMANTICS_DUMP_KEEP=<seconds>` to change it; about 10 KB a file).
@@ -47,7 +58,7 @@ void runSemanticsProbe(ProviderContainer container) {
 /// written around the moment it appeared (their timestamps say which). Nothing is logged per
 /// dump: a line a second would fill the 10 MB log and push the error's start out of it.
 void runSemanticsDump() {
-  if (Platform.environment['RILL_SEMANTICS_DUMP'] != '1') return;
+  if (!_dumpWanted()) return;
   SemanticsBinding.instance.ensureSemantics();
   final keep = int.tryParse(Platform.environment['RILL_SEMANTICS_DUMP_KEEP'] ?? '') ?? 300;
   _watchNodeChanges();

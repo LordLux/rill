@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/ui/player/scrubber_bar.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/domain/video_detail.dart';
@@ -102,9 +103,9 @@ Future<void> pumpWatching(WidgetTester tester, {List<String> queue = const ['cha
   await settleReal(tester);
 }
 
-/// The scrubber's `Slider`. Its box is the scrubber's box — the `Stack` around
+/// The scrubber's `ScrubberBar`. Its box is the scrubber's box — the `Stack` around
 /// it has no other sized child — and its track is inset by the 8 px padding.
-final Finder scrubber = find.descendant(of: find.byKey(playerScrubberKey), matching: find.byType(Slider));
+final Finder scrubber = find.descendant(of: find.byKey(playerScrubberKey), matching: find.byType(ScrubberBar));
 
 const double trackInset = 8;
 
@@ -163,11 +164,7 @@ List<({Rect rect, Color color})> painted(WidgetTester tester) {
     for (final call in canvas.invocations)
       if (call.invocation.memberName == #drawRect)
         (
-          // The slider's own 8 px padding is carried by the `Slider`'s
-          // `CompositedTransformTarget` as a layer offset, which a recording
-          // context has no layer to apply — so every rect comes back that far
-          // left of where it is on screen.
-          rect: (call.invocation.positionalArguments[0] as Rect).shift(const Offset(trackInset, 0)),
+          rect: (call.invocation.positionalArguments[0] as Rect),
           color: (call.invocation.positionalArguments[1] as Paint).color,
         ),
   ];
@@ -444,6 +441,48 @@ void main() {
         expect(formatClock(engine.seeks.single), hovered,
             reason: 'the tooltip names the position the click lands on, at $fraction of the track');
       }
+    });
+  });
+
+  group('the thumb', () {
+    List<double> circleRadii(WidgetTester tester) {
+      final canvas = TestRecordingCanvas();
+      tester.renderObject(find.byKey(playerScrubberKey)).paint(TestRecordingPaintingContext(canvas), Offset.zero);
+      return [
+        for (final call in canvas.invocations)
+          if (call.invocation.memberName == #drawCircle) call.invocation.positionalArguments[1] as double,
+      ];
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    testBar("a click cursor anywhere; a halo in the thumb's section; the thumb swells under the pointer", (tester) async {
+      await pumpWatching(tester);
+      await emit(tester, position: const Duration(minutes: 5));
+      final b = bar(tester);
+      final pointer = await mouse(tester);
+
+      await pointer.moveTo(b.at(0.85));
+      await settle(tester);
+      expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click, reason: 'a click anywhere on the bar');
+      expect(circleRadii(tester), [6.0], reason: 'another chapter: no halo');
+
+      await pointer.moveTo(b.at(0.6));
+      await settle(tester);
+      final inSection = circleRadii(tester);
+      expect(inSection, hasLength(2), reason: "the thumb's own chapter: a halo");
+      expect(inSection.last, 6.0, reason: 'the thumb has not swollen, the pointer is not on it');
+
+      await pointer.moveTo(b.at(0.5));
+      await settle(tester);
+      expect(circleRadii(tester).last, greaterThan(6.0), reason: 'on the thumb: it swells');
+
+      await pointer.moveTo(b.at(0.85));
+      await settle(tester);
+      expect(circleRadii(tester), [6.0], reason: 'and both go when the pointer leaves the section');
     });
   });
 

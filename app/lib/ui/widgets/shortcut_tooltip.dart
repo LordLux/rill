@@ -15,6 +15,37 @@ import '../player/shortcuts.dart' show PlayerAction, playerActionKeyLabel;
 /// Passing an [action] with no entry in [playerActionKeyLabel] (or omitting
 /// it) falls back to a plain text-only tooltip rather than a badge with
 /// nothing in it.
+/// Marks the region an in-tree tooltip must stay inside — the player, which clips what hangs over
+/// its edge. Without one the window is the limit.
+class TooltipBounds extends StatelessWidget {
+  const TooltipBounds({super.key, required this.child});
+
+  final Widget child;
+
+  static Rect? _of(BuildContext context) {
+    final scope = context.getInheritedWidgetOfExactType<_BoundsScope>();
+    final box = scope?.boundsContext.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  @override
+  Widget build(BuildContext context) => _BoundsScope(boundsContext: context, child: child);
+}
+
+class _BoundsScope extends InheritedWidget {
+  const _BoundsScope({required this.boundsContext, required super.child});
+
+  final BuildContext boundsContext;
+
+  @override
+  bool updateShouldNotify(_BoundsScope old) => false;
+}
+
+/// Which side of its control an in-tree tooltip opens on. [left] for a control inside something that
+/// clips (a thumbnail's corner), where a bubble above it would be cut off.
+enum TooltipSide { above, left }
+
 class ShortcutTooltip extends StatelessWidget {
   const ShortcutTooltip({
     super.key,
@@ -22,6 +53,8 @@ class ShortcutTooltip extends StatelessWidget {
     this.action,
     this.silent = false,
     this.announce = true,
+    this.side = TooltipSide.above,
+    this.delay,
     required this.child,
   });
 
@@ -32,6 +65,13 @@ class ShortcutTooltip extends StatelessWidget {
   /// control that already says the same thing itself (the volume bar: "Volume 100%").
   final bool announce;
 
+  /// How long the pointer rests before a [silent] bubble shows, where the default for the kind of
+  /// tooltip is not right.
+  final Duration? delay;
+
+  /// Where a [silent] bubble opens.
+  final TooltipSide side;
+
   /// Draws the bubble with no semantics of its own ([_SilentTooltip]). For the player's
   /// control bar, where the Material tooltip's overlay node reaches the accessibility
   /// bridge orphaned (F51).
@@ -39,7 +79,7 @@ class ShortcutTooltip extends StatelessWidget {
   final Widget child;
 
   Widget _tip({required Duration wait, required InlineSpan message, bool plain = false}) {
-    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: wait, message: message, child: child);
+    if (silent) return _SilentTooltip(label: announce ? label : null, hoverDelay: delay ?? wait, message: message, side: side, child: child);
     if (plain) {
       return Tooltip(
         message: label,
@@ -131,8 +171,11 @@ class _SilentTooltip extends StatefulWidget {
     required this.label,
     required this.hoverDelay,
     required this.message,
+    required this.side,
     required this.child,
   });
+
+  final TooltipSide side;
 
   /// What assistive technology is told, on the anchor. Null: nothing.
   final String? label;
@@ -148,9 +191,9 @@ class _SilentTooltipState extends State<_SilentTooltip> {
   Timer? _timer;
   bool _shown = false;
 
-  /// -1 left-aligned to the control, 0 centred, 1 right-aligned: chosen when the bubble is shown,
-  /// from where the control is in the window, so a control at the edge keeps its bubble on screen.
-  double _align = 0;
+  /// Where the control is in the player (or window), taken when the bubble is shown; the bubble is
+  /// measured and placed against it in layout, so a control at an edge keeps its bubble inside.
+  _Span _span = const _Span(-_reach, _reach, 0);
 
   @override
   void dispose() {
@@ -164,20 +207,15 @@ class _SilentTooltipState extends State<_SilentTooltip> {
     _timer = Timer(widget.hoverDelay, () {
       if (!mounted) return;
       final box = context.findRenderObject();
-      var align = 0.0;
+      var span = const _Span(-_reach, _reach, 0);
       if (box is RenderBox && box.attached) {
-        final centre = box.localToGlobal(box.size.center(Offset.zero)).dx;
-        final width = MediaQuery.sizeOf(context).width;
-        // Half the bubble, estimated from its text: only deciding which side has room.
-        final half = (widget.message.toPlainText().length * 7.0 + 28) / 2;
-        if (centre + half > width - 8) {
-          align = 1;
-        } else if (centre - half < 8) {
-          align = -1;
-        }
+        final left = box.localToGlobal(Offset.zero).dx;
+        final bounds = TooltipBounds._of(context) ?? (Offset.zero & MediaQuery.sizeOf(context));
+        // The room on each side of the control, in its own coordinates.
+        span = _Span(bounds.left - left, bounds.right - left, box.size.width);
       }
       setState(() {
-        _align = align;
+        _span = span;
         _shown = true;
       });
     });
@@ -187,6 +225,18 @@ class _SilentTooltipState extends State<_SilentTooltip> {
     _timer?.cancel();
     if (_shown && mounted) setState(() => _shown = false);
   }
+
+  Widget _bubble() => ConstrainedBox(
+    // Wraps past this, for a long label (a video's title); the short ones never reach it.
+    constraints: const BoxConstraints(minHeight: 24, maxWidth: 360),
+    child: DecoratedBox(
+      decoration: tooltipBubbleDecoration,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text.rich(widget.message, style: tooltipBubbleTextStyle),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -203,37 +253,76 @@ class _SilentTooltipState extends State<_SilentTooltip> {
           children: [
             anchor,
             if (_shown)
-              Positioned(
-                top: 0,
-                left: -400,
-                right: -400,
-                child: IgnorePointer(
-                  child: ExcludeSemantics(
-                    child: Align(
-                      alignment: Alignment(_align, 0),
-                      child: FractionalTranslation(
-                        // Above the control, with a little air.
-                        translation: const Offset(0, -1.15),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 24),
-                          child: DecoratedBox(
-                            decoration: tooltipBubbleDecoration,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              child: Text.rich(widget.message, style: tooltipBubbleTextStyle, softWrap: false),
-                            ),
-                          ),
-                        ),
+              if (widget.side == TooltipSide.left)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: -400,
+                  width: 400,
+                  child: IgnorePointer(
+                    child: ExcludeSemantics(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(padding: const EdgeInsets.only(right: 4), child: _bubble()),
                       ),
                     ),
                   ),
+                )
+              else
+                // Zero tall, `_reach` wide each way: the delegate puts the bubble above it and
+                // inside the bounds, whatever its width (a key badge makes that unguessable).
+                Positioned(
+                  top: 0,
+                  height: 0,
+                  left: -_reach,
+                  right: -_reach,
+                  child: IgnorePointer(
+                    child: ExcludeSemantics(child: CustomSingleChildLayout(delegate: _AboveInside(_span), child: _bubble())),
+                  ),
                 ),
-              ),
           ],
         ),
       ),
     );
   }
+}
+
+/// How far an in-tree tooltip's layout box reaches either side of its control.
+const double _reach = 2000;
+
+/// The room around a control: its bounds' left and right edges, and its own width, all measured from
+/// the control's left edge.
+class _Span {
+  const _Span(this.left, this.right, this.width);
+
+  final double left;
+  final double right;
+  final double width;
+}
+
+/// Puts a bubble above its control, centred on it, then pushes it back inside the bounds. Measured
+/// in layout, so it needs no guess at the bubble's width.
+class _AboveInside extends SingleChildLayoutDelegate {
+  const _AboveInside(this.span);
+
+  final _Span span;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) => const BoxConstraints(maxWidth: 2 * _reach, maxHeight: 200);
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    const margin = 8.0;
+    final centred = _reach + span.width / 2 - childSize.width / 2;
+    final lo = _reach + span.left + margin;
+    final hi = _reach + span.right - margin - childSize.width;
+    // A bubble wider than the room favours the left edge.
+    final x = hi < lo ? lo : centred.clamp(lo, hi);
+    return Offset(x, -childSize.height - 6);
+  }
+
+  @override
+  bool shouldRelayout(_AboveInside old) => old.span != span;
 }
 
 /// The small rounded-corner box a keybinding sits in.

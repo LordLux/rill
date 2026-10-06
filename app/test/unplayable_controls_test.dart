@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/ui/player/scrubber_bar.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/playback_controller.dart';
@@ -134,7 +135,7 @@ void main() {
     await settleReal(tester);
   }
 
-  final scrubber = find.descendant(of: find.byKey(playerScrubberKey), matching: find.byType(Slider));
+  final scrubber = find.descendant(of: find.byKey(playerScrubberKey), matching: find.byType(ScrubberBar));
 
   group('the slate clears the control bar', () {
     for (final size in const [Size(1400, 1000), Size(900, 700)]) {
@@ -165,7 +166,7 @@ void main() {
       testPlayer('$what: the scrubber and the play button are disabled', (tester) async {
         await open(tester, id, then: ['aaa']);
 
-        expect(tester.widget<Slider>(scrubber).onChanged, isNull, reason: 'no dragging or tapping the bar');
+        expect(tester.widget<ScrubberBar>(scrubber).onChanged, isNull, reason: 'no dragging or tapping the bar');
         expect(tester.widget<IconButton>(find.byKey(playerPlayPauseKey)).onPressed, isNull);
         // Skipping past it is exactly when next is wanted.
         expect(tester.widget<IconButton>(find.byKey(playerNextKey)).onPressed, isNotNull);
@@ -212,7 +213,7 @@ void main() {
     testPlayer('keeps every one of them', (tester) async {
       await open(tester, 'aaa');
       // Playing: the play button is the pause icon and is live.
-      expect(tester.widget<Slider>(scrubber).onChanged, isNotNull);
+      expect(tester.widget<ScrubberBar>(scrubber).onChanged, isNotNull);
       expect(tester.widget<IconButton>(find.byKey(playerPlayPauseKey)).onPressed, isNotNull);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.space);

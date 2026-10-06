@@ -12,20 +12,79 @@ import '../focus_surface.dart' show ArrowKeyClaim;
 /// own semantics node when it is mounted (`architecture.md` F51), which the
 /// Windows accessibility bridge answers by rejecting that update and every one
 /// after it. This has no overlay, so there is nothing to double-parent. The
-/// scrubber stays a `Slider`: it is built with the bar and has never done it.
+/// progress bar followed for the same reason (`ScrubberBar`).
 ///
 /// Keyboard: arrows and Home/End, and the arrows are claimed (`ArrowKeyClaim`) so
 /// the player's own seek shortcut does not also fire. Screen readers get a slider
 /// with increase/decrease actions.
-class VolumeBar extends StatelessWidget {
+class VolumeBar extends StatefulWidget {
   const VolumeBar({super.key, required this.value, required this.onChanged});
 
   final double value;
   final ValueChanged<double> onChanged;
 
-  static const double _step = 5;
+  @override
+  State<VolumeBar> createState() => _VolumeBarState();
+}
 
-  void _set(double next) => onChanged(next.clamp(0.0, 100.0));
+class _VolumeBarState extends State<VolumeBar> with TickerProviderStateMixin {
+  static const double _step = 5;
+  static const double _thumbRadius = 6;
+  static const double _inset = 10;
+
+  double get value => widget.value;
+
+  /// 0 to 1: the halo, while the pointer is anywhere on the bar; and the thumb swelling, while it is
+  /// on the thumb or holding it. The click cursor is the thumb's alone.
+  late final AnimationController _halo = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
+  late final AnimationController _grow = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
+  late final Animation<double> _haloCurve = CurvedAnimation(parent: _halo, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
+  late final Animation<double> _growCurve = CurvedAnimation(parent: _grow, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
+
+  bool _overBar = false;
+  bool _overThumb = false;
+  bool _pressed = false;
+
+  @override
+  void dispose() {
+    _halo.dispose();
+    _grow.dispose();
+    super.dispose();
+  }
+
+  void _sync() {
+    (_overBar || _pressed ? _halo.forward() : _halo.reverse());
+    (_overThumb || _pressed ? _grow.forward() : _grow.reverse());
+  }
+
+  void _onHover(PointerEvent event, double width) {
+    final track = width - 2 * _inset;
+    final centre = Offset(_inset + track * (value / 100).clamp(0.0, 1.0), 20);
+    final over = (event.localPosition - centre).distance <= _thumbRadius * 2;
+    if (_overBar && over == _overThumb) return;
+    setState(() {
+      _overBar = true;
+      _overThumb = over;
+    });
+    _sync();
+  }
+
+  void _onExit() {
+    if (!_overBar && !_overThumb) return;
+    setState(() {
+      _overBar = false;
+      _overThumb = false;
+    });
+    _sync();
+  }
+
+  void _press(bool down) {
+    if (_pressed == down) return;
+    _pressed = down;
+    _sync();
+  }
+
+  void _set(double next) => widget.onChanged(next.clamp(0.0, 100.0));
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
@@ -65,28 +124,41 @@ class VolumeBar extends StatelessWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 // The track runs between the thumb's end stops, so 0 and 100 are reachable.
-                const inset = 10.0;
+                const inset = _inset;
                 final track = constraints.maxWidth - 2 * inset;
                 // Mounted while it animates open, so the track can be zero-width or less.
                 double fromDx(double dx) => track <= 0
                     ? value
                     : ((dx - inset) / track * 100).clamp(0.0, 100.0);
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (d) => _set(fromDx(d.localPosition.dx)),
-                  onHorizontalDragUpdate: (d) =>
-                      _set(fromDx(d.localPosition.dx)),
-                  child: SizedBox(
-                    height: 40,
-                    width: constraints.maxWidth,
-                    child: CustomPaint(
-                      painter: _VolumePainter(
-                        fraction: value / 100,
-                        active: scheme.primary,
-                        inactive: Theme.of(
-                          context,
-                        ).tokens.onScrim.withValues(alpha: 0.25),
-                        inset: inset,
+                return MouseRegion(
+                  opaque: false,
+                  cursor: _overThumb || _pressed ? SystemMouseCursors.click : MouseCursor.defer,
+                  onHover: (event) => _onHover(event, constraints.maxWidth),
+                  onExit: (_) => _onExit(),
+                  child: Listener(
+                    onPointerDown: (_) => _press(true),
+                    onPointerUp: (_) => _press(false),
+                    onPointerCancel: (_) => _press(false),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: (d) => _set(fromDx(d.localPosition.dx)),
+                      onHorizontalDragUpdate: (d) => _set(fromDx(d.localPosition.dx)),
+                      child: SizedBox(
+                        height: 40,
+                        width: constraints.maxWidth,
+                        child: AnimatedBuilder(
+                          animation: Listenable.merge([_haloCurve, _growCurve]),
+                          builder: (context, _) => CustomPaint(
+                            painter: _VolumePainter(
+                              fraction: value / 100,
+                              active: scheme.primary,
+                              inactive: Theme.of(context).tokens.onScrim.withValues(alpha: 0.25),
+                              inset: inset,
+                              halo: _haloCurve.value,
+                              grow: _growCurve.value,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -106,12 +178,16 @@ class _VolumePainter extends CustomPainter {
     required this.active,
     required this.inactive,
     required this.inset,
+    required this.halo,
+    required this.grow,
   });
 
   final double fraction;
   final Color active;
   final Color inactive;
   final double inset;
+  final double halo;
+  final double grow;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -124,7 +200,9 @@ class _VolumePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(Offset(left, y), Offset(right, y), track..color = inactive);
     canvas.drawLine(Offset(left, y), Offset(x, y), track..color = active);
-    canvas.drawCircle(Offset(x, y), 6, Paint()..color = active);
+    // The halo, under the thumb, then the thumb a little bigger while it is hovered or held.
+    if (halo > 0) canvas.drawCircle(Offset(x, y), 6 * 1.75 * halo, Paint()..color = active.withValues(alpha: 0.5));
+    canvas.drawCircle(Offset(x, y), 6 * (1 + 0.3 * grow), Paint()..color = active);
   }
 
   @override
@@ -132,5 +210,7 @@ class _VolumePainter extends CustomPainter {
       fraction != old.fraction ||
       active != old.active ||
       inactive != old.inactive ||
-      inset != old.inset;
+      inset != old.inset ||
+      halo != old.halo ||
+      grow != old.grow;
 }
