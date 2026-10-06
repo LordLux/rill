@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 
 import '../data/connectivity.dart';
+import '../data/auth/cookie_jar_dump.dart';
 import '../data/auth/credential_store.dart';
 import '../data/auth/web_session_cookies.dart';
 import '../data/log_capture.dart';
@@ -227,6 +228,7 @@ class AuthController extends Notifier<AuthState> {
       // page is a round trip per surface for no new information.
       if (status == AuthStatus.authenticated) {
         ref.read(authRefreshProvider.notifier).bump();
+        await dumpCookieJar('after sign-in');
       }
       return status;
     } on Object catch (error) {
@@ -252,11 +254,16 @@ class AuthController extends Notifier<AuthState> {
 
     await _attempt('credential store', () => _store.clear());
     await _attempt('sidecar session', () => RpcClient.instance.call('auth.signOut', {}));
-    // The jar last, and never skipped: leaving it means the next sign-in shows
-    // no account picker and silently reuses this account, which looks like the
-    // login flow ignoring the user rather than like a sign-out that did not
-    // finish.
+    // The jar last, and never skipped: a login cookie left in it means the next
+    // sign-in shows no account picker and silently reuses this account, which
+    // looks like the login flow ignoring the user rather than like a sign-out
+    // that did not finish. That used to be met by emptying the jar, which also
+    // threw away Google's trusted-device mark and brought 2-step verification
+    // back on every sign-in. Now only the cookies that sign somebody in are
+    // deleted (`kSignOutCookieNames`), and the step checks none is left, wiping
+    // the jar if one is — so the reason above still holds. `architecture.md` F53.
     await _attempt('WebView2 cookie jar', () => _jar.clear());
+    await dumpCookieJar('after sign-out');
 
     state = const AuthState(status: AuthStatus.anonymous);
     // The fourth thing §5 lists — "any cached feed". Every loaded surface

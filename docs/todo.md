@@ -95,31 +95,6 @@ working, `mix.start` runs on the browse session, which is anonymous when signed
 out, and that string is only the message `startMixFromTile` would show if the
 call ever answered `AUTH_REQUIRED`.
 
-### 57. Signing out makes Google ask for 2-step verification every time
-
-Reported by the user 2026-10-01: after a sign-out, the next sign-in asks for
-2-step verification again even when "Don't ask again on this device" was ticked
-minutes earlier. The cause is by design. `AuthController.signOut` clears the
-**whole** WebView2 cookie jar (`auth_controller.dart`: "leaving it means the next
-sign-in shows no account picker and silently reuses this account"), and Google
-keeps its trusted-device mark in that jar too, so every sign-in after a sign-out
-looks like a new device.
-
-**The option:** on sign-out, delete only the session cookies (the ones
-`hasSessionCookies` and `cookieHeader` read) and keep the rest. Google would still
-ask for the account and password, because the session is gone, but could skip
-2-step verification for an account that ticked the box.
-- **Measure first** which cookie names actually survive a sign-out on
-  google.com and youtube.com, and which one carries the device trust. Do not guess
-  the names.
-- **The cost to weigh:** on a shared computer, the next person signing into *that
-  same* Google account here skips the second step. They still need the password.
-  That is how a normal browser behaves after "Don't ask again".
-
-**Done when:** a sign-out followed by a sign-in to the same account does not ask
-for the second step, and no session cookie survives the sign-out; or the user
-decides to keep the full wipe, and this says why.
-
 ### 39. Comments: four gaps left after replies, delete and the comment box
 
 Found 2026-09-18 while fixing reply lists (`protocol.md` §3.3, "A reply list is

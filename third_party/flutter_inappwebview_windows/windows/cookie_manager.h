@@ -32,6 +32,8 @@ namespace flutter_inappwebview_plugin
     void deleteCookie(WebViewEnvironment* webViewEnvironment, const std::string& url, const std::string& name, const std::string& path, const std::optional<std::string>& domain, std::function<void(const bool&)> completionHandler) const;
     void deleteCookies(WebViewEnvironment* webViewEnvironment, const std::string& url, const std::string& path, const std::optional<std::string>& domain, std::function<void(const bool&)> completionHandler) const;
     void deleteAllCookies(WebViewEnvironment* webViewEnvironment, std::function<void(const bool&)> completionHandler) const;
+    // rill patch (Task 33): every cookie in the jar, all domains, without values.
+    void getAllCookieNames(WebViewEnvironment* webViewEnvironment, std::function<void(const flutter::EncodableValue&)> completionHandler) const;
   };
 }
 
