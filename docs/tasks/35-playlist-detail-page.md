@@ -45,7 +45,10 @@ playlist's first page; capture more as needed, declared in
    - the visibility ("Private", "Unlisted"), which youtube.com shows in that
      same row for the viewer's own playlists;
    - the description;
-   - the "last updated" text, if it is there at all.
+   - the "last updated" text, if it is there at all;
+   - a colour for the header's tint, if the response carries one. The artist
+     panel's does (`ThemedColor`, `artist_panel_card.dart`); look for the same
+     here before assuming it has to be computed from the cover.
 2. **Which of those survive** for: a public playlist, an unlisted one, a private
    one of the viewer's own, `WL` and `LL`. Signed in and anonymous where both
    make sense. Record what is absent, not only what is present.
@@ -78,8 +81,11 @@ playlist's first page; capture more as needed, declared in
   }
   ```
 
-  That is a proposal; §1 decides the real fields. Every field is a value or
-  `null`, never omitted. `PlaylistResult.title` and `.videoCount` exist already
+  That is a proposal; §1 decides the real fields. **If §1 finds a
+  language-independent visibility signal, ship that instead of the label:**
+  `visibility: 'public' | 'unlisted' | 'private' | null`, with the client
+  writing the word. `visibilityText` is only for the case where the label is
+  all there is. Every field is a value or `null`, never omitted. `PlaylistResult.title` and `.videoCount` exist already
   and the queue reads them: keep them, or move them into the header and update
   the queue, but do not ship the same fact twice.
 - **Restate the shape in all five places** (`CLAUDE.md` on
@@ -100,7 +106,15 @@ playlist's first page; capture more as needed, declared in
   the nullable fields uses the sentinel (invariant 10).
 - **Layout:** header panel left, list right; header on top below a width you
   choose and name as a constant. The header's tinted background on youtube.com
-  comes from the cover; a plain surface colour is acceptable for this task.
+  comes from the cover.
+- **The tint must not pop in.** Use a colour from the response if §1 found one
+  (as the artist panel does: no decode, no first frame in the wrong colour).
+  The app has no palette extraction today (`theme/tokens.dart` says so). If the
+  colour has to be computed from the cover, do it off the UI isolate, cache it
+  by playlist id, draw the header on the plain surface colour first and animate
+  to the tint when it arrives. Text and buttons must stay readable on both, in
+  light and dark themes. A new dependency for this is a decision to report, not
+  to take silently.
 - **Header content:** cover, title, owner (avatar, "by <name>", opening nothing
   yet unless a channel page exists), `Playlist · <visibility> · N videos · views`,
   description, and the action row.
@@ -126,7 +140,10 @@ playlist's first page; capture more as needed, declared in
   retry at the foot of the list** and does not lose what is loaded.
 - This is **separate from the queue's paging.** The queue loads every page in
   the background because it has to play them (`QueueController._maybeExtend`).
-  The two may fetch the same pages; do not couple them to avoid that.
+  The two may fetch the same pages; do not couple them to avoid that. This is
+  duplicated work, not a race: each controller holds its own list and its own
+  continuation, the requests are read-only, and neither reads the other's
+  result. No de-duplication in the client or the sidecar.
 
 ### 3.3 Playing from the page
 
@@ -147,7 +164,9 @@ playlist's first page; capture more as needed, declared in
 - **Queue panel header:** right-click opens a menu with *Open playlist page* and
   *Copy link*. Only for a playlist, not a mix or a hand-built queue.
   - The menu must also open from the keyboard (the context-menu key and
-    Shift+F10 on the focused header); a mouse-only menu is not done.
+    Shift+F10 on the focused header); a mouse-only menu is not done. The
+    header is already a Tab stop (its `InkWell` collapses the panel), so this
+    adds a key handler, not a new focus node.
   - Read the Accessibility section before choosing the widget: an overlay menu
     anchored under something that unmounts is the AXTree fault. The header does
     not unmount while the panel is shown, but check with the semantics probe.
