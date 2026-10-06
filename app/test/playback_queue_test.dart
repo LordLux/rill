@@ -28,6 +28,12 @@ VideoItem video(String id) => VideoItem(
     );
 
 late FakeEngine engine;
+
+class FakeMixService implements MixService {
+  @override Future<MixStart> start(String id, {String? videoId, String? params}) async => MixStart(playlistId: id, items: [video('aaa')]);
+  @override Future<MixExtension> extend(String id, String after) async => const MixExtension(items: [], exhausted: true);
+  @override Future<PlaylistPage> getPlaylist(String id, {String? continuation}) async => PlaylistPage(items: [video('aaa')]);
+}
 late ProviderContainer container;
 
 /// Start a fresh sidecar and container.
@@ -48,7 +54,10 @@ Future<void> boot({String mode = ''}) async {
 
   engine = FakeEngine();
   container = ProviderContainer(
-    overrides: [playbackEngineProvider.overrideWithValue(engine)],
+    overrides: [
+      playbackEngineProvider.overrideWithValue(engine),
+      mixServiceProvider.overrideWithValue(FakeMixService()),
+    ],
   );
   // Construct the controller: its queue listener is registered in `build`, so
   // nothing plays until something has read it.
@@ -239,5 +248,17 @@ void main() {
 
     expect(engine.opened, hasLength(2), reason: 'an index shift is not a new video');
     expect(container.read(queueProvider).current?.id, 'bbb');
+  });
+
+  test('playback.open carries the playlistId for playlists', () async {
+    final queue = container.read(queueProvider.notifier);
+    // The list itself comes from `FakeMixService`; the open goes to the fake
+    // sidecar, which records what it was sent. `list=` on the watchtime ping
+    // (F25) comes from this id and nothing else.
+    await queue.startPlaylist('PL123');
+    await settle();
+
+    final opens = (await log()).opens.cast<Map<String, dynamic>>();
+    expect(opens.where((o) => o['videoId'] == 'aaa' && o['playlistId'] == 'PL123'), hasLength(1));
   });
 }
