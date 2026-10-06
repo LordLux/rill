@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 85.** A new item takes it, and the same edit bumps this line.
+**Next number: 89.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1056,7 +1056,7 @@ What `docs/tasks/32` found and deliberately left, each one small:
 - **The comment box's Escape** does not cancel (Cancel does); the filters dialog
   and the player's submenus close on Escape through their own paths.
 
-### 84. Say "can't reach YouTube" when the connection itself fails
+### 88. Say "can't reach YouTube" when the connection itself fails
 
 Measured 2026-10-05: with no network, yt-dlp's tier of the playback ladder reports
 `Unable to download API page: … Failed to resolve 'www.youtube.com' ([Errno 11001]
