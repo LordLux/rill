@@ -47,6 +47,7 @@ const videoDetailKeys = <String>{
   'isArtistChannel',
   'badges',
   'music',
+  'chapters',
   'isMembersOnly',
   'premiereAtMs',
   'related',

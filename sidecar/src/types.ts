@@ -246,6 +246,19 @@ export interface FeedResult {
 }
 
 // ---------------------------------------------------------------------------
+// Playlist
+// ---------------------------------------------------------------------------
+
+export interface PlaylistResult {
+  /** The playlist's name. First page only; null on a continuation. */
+  title: string | null;
+  /** Every entry, unavailable ones included. First page only. */
+  videoCount: number | null;
+  items: VideoItem[];
+  continuation: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
 

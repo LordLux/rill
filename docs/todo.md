@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 89.** A new item takes it, and the same edit bumps this line.
+**Next number: 90.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -314,33 +314,14 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
 
-### 58. Playlists do not play: clicking one does nothing
-
-Reported 2026-10-01. A `PlaylistItem` tile (feed, search) opens nothing. Mixes
-play because they have their own path (`mix.start` / `mix.extend`,
-`startMixFromTile` in `open_video.dart`, `architecture.md` F24); playlists have
-none. `playlist.get` is in `protocol.md` §3.3 marked **not implemented**, and
-Guard 2 (`sidecar/test/contract-docs.test.ts`) keeps that marking honest, so the
-handler and the removal of the marking land in the same change.
-
-- **Sidecar:** `playlist.get {playlistId, continuation?}` → items and
-  continuation. Unlike a mix (F24), a playlist is finite and pages with real
-  continuations. Measure the response first (`/browse` with `VL<id>`, or `/next`
-  with `playlistId`); a community reference is a hypothesis (`CLAUDE.md`).
-- **Queue:** start from the first item (or the tapped one) and load further pages
-  as the queue nears its end, the way a mix extends.
-- **Reporting:** pass the `playlistId` to `/player` so `playback.report` carries
-  `list=` (F25), as mixes do.
-- **Unavailable or private entries** are skipped, never a dead end.
-
-**Done when:** a playlist plays from its tile, the queue holds it in order and
-keeps loading past the first page, and a watch inside it is reported with `list=`.
-
 ### 59. Playlist detail page
 
 The page youtube.com opens with "View full playlist": cover, title, owner, video
 count, visibility, description, share, play all, shuffle, and every video.
-**Depends on item 58's `playlist.get`**; measure which header fields come back
+`playlist.get` exists (Task 34, `architecture.md` F54) and already returns the
+header's `title` and `videoCount` (`parser/playlist.ts`, `parsePlaylistHeader`);
+the cover, owner, visibility and description are in the same
+`pageHeaderRenderer` and are not read yet. Measure which header fields come back
 for a public, an unlisted, a private and the viewer's own playlist. The viewer's
 own playlists add editing (title, visibility, removing a video):
 `action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
@@ -1135,3 +1116,22 @@ otherwise only pays when a screen reader asks), writes a ring of tree dumps once
 - **Before removing:** if the error was seen in that time, check that it is explained
   (`axtree-error-diagnosis` memory, `architecture.md` F51); if not, extend the date.
 - Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.
+
+### 89. Distinct playlist tile
+
+A playlist tile looks like a mix tile (stacked cards) and says far less than
+youtube.com's: only the title, the owner's name and the count.
+
+- **Look:** a video-count bar instead of the mix's stacked cards, so the two are
+  told apart at a glance.
+- **Content the response already has** (search `lockupViewModel`, measured
+  2026-10-06): the owner's channel id (row 0's `browseEndpoint`), the type label
+  ("Playlist" / "Album" / "Podcast"), and the first two videos as
+  `"<title> · <duration>"` rows, each with its own `watchEndpoint`. youtube.com
+  also shows "Updated 4 days ago"; that row was absent from the captured search
+  fixtures, so find where it appears before promising it.
+- **Contract:** new `PlaylistItem` fields go in all five places
+  (`contract-docs.test.ts`), the Dart model and the corpus sanitiser.
+
+**Done when:** a playlist tile cannot be mistaken for a mix, and shows what
+YouTube's does where the response carries it.
