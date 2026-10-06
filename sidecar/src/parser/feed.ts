@@ -74,6 +74,8 @@ function continuationToken(node: JsonObject): string | null {
     ['endpoint', 'continuationCommand', 'token'],
     ['button', 'buttonRenderer', 'command', 'continuationCommand', 'token'],
     ['continuationCommand', 'token'],
+    // A playlist page's `continuationItemViewModel` (F54).
+    ['continuationCommand', 'innertubeCommand', 'continuationCommand', 'token'],
     ['token'],
   ];
 

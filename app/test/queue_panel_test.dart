@@ -6,6 +6,8 @@
 /// exactly the videos whose X was pressed.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +27,17 @@ VideoItem video(String id) => VideoItem(
       canWatchLater: true,
       canAddToQueue: true,
     );
+
+/// A list source whose top-ups never answer, so a header test sees the queue
+/// exactly as it was set rather than mid-fetch or after a failed one.
+class _SilentMixService implements MixService {
+  @override
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) => Completer<MixStart>().future;
+  @override
+  Future<MixExtension> extend(String playlistId, String afterVideoId) => Completer<MixExtension>().future;
+  @override
+  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) => Completer<PlaylistPage>().future;
+}
 
 /// The queue's ids in order — the assertion that matters in every test here.
 List<String> idsIn(ProviderContainer container) =>
@@ -313,5 +326,101 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(idsIn(container), ['a', 'b', 'd']);
+  });
+  testWidgets('Playlist source shows playlist title', (tester) async {
+    container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    // Provide a queue state that is a playlist
+    container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+      items: [video('1'), video('2')],
+      currentIndex: 0,
+      mix: const MixQueue(playlistId: 'PL123', title: 'My Playlist', isPlaylist: true),
+    ));
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(
+        home: Scaffold(body: EmbeddedQueuePanel(maxHeight: 360)),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('My Playlist'), findsOneWidget);
+    expect(find.text('Mixes are playlists YouTube makes for you'), findsNothing);
+    expect(find.byIcon(Icons.playlist_play), findsOneWidget);
+    expect(find.byIcon(Icons.podcasts), findsNothing, reason: 'that one is the mix\'s');
+  });
+
+  // The header builds its collapsed and its expanded subtitle at once and
+  // crossfades them, so both are in the tree and both can be read here.
+  group('a playlist\'s header', () {
+    Future<void> pumpPlaylist(WidgetTester tester, {required int at, required MixQueue mix}) async {
+      container = ProviderContainer(
+        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
+      );
+      addTearDown(container.dispose);
+      container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+        items: [video('1'), video('2'), video('3')],
+        currentIndex: at,
+        mix: mix,
+      ));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: Scaffold(body: EmbeddedQueuePanel(maxHeight: 360))),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    const whole = MixQueue(playlistId: 'PL123', title: 'My Playlist', isPlaylist: true, exhausted: true, totalCount: 5);
+
+    testWidgets('knowing where it ends is not the end', (tester) async {
+      await pumpPlaylist(tester, at: 0, mix: whole);
+
+      expect(find.text(' · Next: Video 2'), findsOneWidget);
+      expect(find.text(' · End of playlist'), findsNothing);
+      expect(find.text('1 / 3'), findsOneWidget, reason: 'all of it is loaded, so the real length');
+    });
+
+    Finder crossFadeOver(String text) =>
+        find.ancestor(of: find.text(text), matching: find.byType(AnimatedCrossFade));
+
+    testWidgets('the position stays put: only what follows it changes with the panel', (tester) async {
+      await pumpPlaylist(tester, at: 0, mix: whole);
+
+      // Once, and outside any crossfade: collapsing cannot fade it against itself.
+      expect(find.text('1 / 3'), findsOneWidget);
+      expect(crossFadeOver('1 / 3'), findsNothing);
+      // What is next belongs to the collapsed state, so it is the half that fades.
+      expect(crossFadeOver(' · Next: Video 2'), findsOneWidget);
+    });
+
+    testWidgets('the last video says so, and the end is said when it finishes', (tester) async {
+      await pumpPlaylist(tester, at: 2, mix: whole);
+
+      expect(find.text('3 / 3'), findsOneWidget);
+      expect(find.text(' · Last video'), findsOneWidget);
+      expect(find.text(' · End of playlist'), findsNothing);
+
+      container.read(queueProvider.notifier).playedOut();
+      await tester.pumpAndSettle();
+
+      // Said in both states, so it is one widget with nothing to animate.
+      expect(find.text('3 / 3'), findsOneWidget, reason: 'the position is still there at the end');
+      expect(find.text(' · End of playlist'), findsOneWidget);
+      expect(crossFadeOver(' · End of playlist'), findsNothing);
+      expect(find.text(' · Last video'), findsNothing);
+    });
+
+    testWidgets('while pages are still to come, the position is against the whole playlist', (tester) async {
+      await pumpPlaylist(
+        tester,
+        at: 0,
+        mix: const MixQueue(playlistId: 'PL123', title: 'My Playlist', isPlaylist: true, continuation: 'more', totalCount: 135),
+      );
+
+      expect(find.text('1 / 135'), findsOneWidget);
+      expect(find.text('1 / 3'), findsNothing);
+    });
   });
 }

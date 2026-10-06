@@ -198,22 +198,43 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?, chips?, commentCount, createParams}` — `createParams` is the comment box's submit token, null when the viewer cannot comment |
-| `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
+| `playlist.get` | `{playlistId, continuation?}` | `PlaylistResult` — `{title, videoCount, items[], continuation}` |
 | `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
 | `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
 | `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?, artist?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
-**`playlist.get` is specified and does not exist.** There is no handler for it
-in `rpc/server.ts` — calling it answers `Unknown method`. The row stays because
-the shape is still the intended one, but it is marked so the table cannot be
-read as a list of things that work. Found while implementing Task 26, which hit
-the same thing with `mix.start`.
+**`playlist.get` is a paginated list, not a sliding window.** Unlike a mix, a
+playlist has a fixed end. It is read from `/browse VL<id>`, 100 entries to a
+page; `continuation` is the next page's token and is `null` on the last one,
+which is the only way a playlist ends. Unavailable (private or deleted) entries
+arrive with an id and a placeholder title (`[Deleted video]`) and are skipped by
+the parser, so they never reach the client. An `ERROR` alert in the response
+("The playlist does not exist.") is answered as `UPSTREAM_ERROR` with that text.
 
-**`feed.watchLater` and `feed.history` are specified and do not exist,** the same
-way `playlist.get` above is. Watch Later and history are reachable today only as
-writes (`action.addToWatchLater` / `action.removeFromPlaylist`); the feed
-surfaces are intended but not built.
+```ts
+interface PlaylistResult {
+  title: string | null;        // the playlist's name
+  videoCount: number | null;   // every entry, unavailable ones included
+  items: VideoItem[];
+  continuation: string | null;
+}
+```
+
+`title` and `videoCount` come from the page's header. **`videoCount` can be
+larger than the items the pages add up to**, because it counts the entries the
+parser skips — measured 2026-10-06: a playlist reporting 135 paged out as
+100 + 33. The client shows it as the list's length only while pages are still to
+come, and its own count once the last one has landed. Treat both as possibly
+`null` on any page; the client falls back to what the tile showed.
+
+**A playlist tile's `videoCount` is its thumbnail badge** (`"134 videos"`), on
+both generations. The metadata rows of a `lockupViewModel` hold the owner's name
+and the first two videos' titles, and until 2026-10-06 the parser took the first
+number it found in them: `8Click` shipped as 8 videos, and `[1 HOUR] · 1:00:02`
+as 110002. A tile with no badge has `videoCount: null`.
+
+**`feed.watchLater` and `feed.history` are specified and do not exist.** Watch Later and history are reachable today only as writes (`action.addToWatchLater` / `action.removeFromPlaylist`); the feed surfaces are intended but not built.
 
 #### Comments — Task 27
 
