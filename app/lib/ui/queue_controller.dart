@@ -876,27 +876,48 @@ class QueueController extends Notifier<QueueState> {
   /// and nothing waits for it. A failure leaves the queue exactly as playable
   /// as it was.
   ///
-  /// **A playlist does not wait for the threshold: it loads all of itself, a
-  /// page after a page, from the moment it starts.** It is finite and the user
-  /// was shown its length, so a panel that stops at row 100 of 883 until
-  /// playback reaches row 95 reads as a broken list. One request at a time,
-  /// each started by the last one landing (`_extend`'s tail), so the first
-  /// video's `playback.open` never queues behind more than one page. A mix
-  /// keeps the threshold — it has no end to load up to.
-  void _maybeExtend() {
+  /// **A playlist keeps [playlistLookahead] videos loaded past the playhead**,
+  /// a page after a page, from the moment it starts — not the mix's five. It
+  /// is finite and the user was shown its length, so a panel that stops at row
+  /// 100 until playback reaches row 95 reads as a broken list. But not all of
+  /// it either: a Watch Later of 5,000 is fifty requests on every play. One
+  /// request at a time, each started by the last one landing (`_extend`'s
+  /// tail), so the first video's `playback.open` never queues behind more than
+  /// one page. Scrolling the panel to the end of what is loaded asks for more
+  /// ([loadMoreOfPlaylist]).
+  void _maybeExtend({bool pastLookahead = false}) {
     final mix = state.mix;
     if (mix == null || mix.exhausted || _extending) return;
     if (state.entries.isEmpty) return;
+    final remaining = state.remainingAfterCurrent;
+    if (remaining == null) return;
     if (mix.isPlaylist) {
       // A playlist's end is its null continuation, whatever else is set.
       if (mix.continuation == null) return;
+      if (!pastLookahead && remaining >= playlistLookahead) return;
     } else {
-      final remaining = state.remainingAfterCurrent;
-      if (remaining == null || remaining > extendThreshold) return;
+      if (remaining > extendThreshold) return;
     }
 
     _extending = true;
     unawaited(_extend(mix, ++_extendTicket));
+  }
+
+  /// How many videos a playlist keeps loaded after the one playing.
+  ///
+  /// Two pages. Enough that the panel shows a long run of what is coming and
+  /// that skipping cannot outrun it; small enough that a playlist of thousands
+  /// costs three requests to start instead of dozens.
+  static const int playlistLookahead = 200;
+
+  /// The panel was scrolled to the end of what is loaded: fetch one more page
+  /// of the playlist, whatever the playhead's margin is.
+  ///
+  /// One page per call and nothing while a request is out, so a scroll that
+  /// fires this on every frame is one request. A no-op for a mix, a hand-built
+  /// queue, and a playlist that has all its pages.
+  void loadMoreOfPlaylist() {
+    if (state.mix?.isPlaylist ?? false) _maybeExtend(pastLookahead: true);
   }
 
   /// One top-up: a mix re-anchors on its last video (F24), a playlist asks for
