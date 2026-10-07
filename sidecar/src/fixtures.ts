@@ -92,8 +92,20 @@ export const CAPTURE_FILES: readonly CaptureFile[] = [
  *     video precisely so that setting the state touches nobody else. Rebuilding
  *     this one means liking and un-liking four strangers' comments. Declared as
  *     what it is rather than filed under a tool that would not produce it.
+ * 
+ *   `playlist-*.json`
+ *     Captured ad-hoc because capturing them requires the viewer to own
+ *     the playlist in various privacy states, which `capture.ts` cannot guarantee.
  */
-export const CARRIED: readonly string[] = ['viewer-state', 'comments-viewer-state.json'];
+export const CARRIED: readonly string[] = [
+  'viewer-state',
+  'comments-viewer-state.json',
+  'playlist-private-owned.json',
+  'playlist-public-anon.json',
+  'playlist-public-owned.json',
+  'playlist-unlisted-owned.json',
+  'playlist-wl.json',
+];
 
 const CAPTURE_NAMES: ReadonlySet<string> = new Set(CAPTURE_FILES.map((file) => file.name));
 const CARRIED_NAMES: ReadonlySet<string> = new Set(CARRIED);

@@ -436,6 +436,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                                   spec: spec,
                                   size: MediaTileSize.large,
                                   onTap: tapHandlerFor(context, ref, feedItem),
+                                  onThumbnailTap: thumbnailTapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
                                   menu: menuForTile(context, ref, feedItem, spec),
@@ -443,6 +444,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                               : MediaTile(
                                   spec: spec,
                                   onTap: tapHandlerFor(context, ref, feedItem),
+                                  onThumbnailTap: thumbnailTapHandlerFor(context, ref, feedItem),
                                   onAddToQueue: () => queueFromTile(ref, feedItem),
                                   onWatchLater: () => addToWatchLater(context, feedItem),
                                   menu: menuForTile(context, ref, feedItem, spec),
@@ -611,6 +613,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                         child: MediaTile(
                           spec: spec,
                           onTap: tapHandlerFor(context, ref, item),
+                          onThumbnailTap: thumbnailTapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                           menu: menuForTile(context, ref, item, spec),
@@ -695,6 +698,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
                         child: MediaTile.shorts(
                           spec: spec,
                           onTap: tapHandlerFor(context, ref, item),
+                          onThumbnailTap: thumbnailTapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                           menu: menuForTile(context, ref, item, spec),

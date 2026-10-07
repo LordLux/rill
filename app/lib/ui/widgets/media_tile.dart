@@ -240,6 +240,10 @@ class MediaTile extends StatefulWidget {
   /// to nothing.
   final VoidCallback? onTap;
 
+  /// Specifically opens the thumbnail. If provided, tapping the thumbnail executes
+  /// this instead of `onTap`.
+  final VoidCallback? onThumbnailTap;
+
   /// The two hover actions. Both sit inside `IconButton`s, which win the gesture
   /// arena against the tile behind them — so pressing one does not also navigate
   /// (task §6). That is asserted in `media_tile_tap_test.dart` as behaviour,
@@ -262,6 +266,7 @@ class MediaTile extends StatefulWidget {
     super.key,
     required this.spec,
     this.onTap,
+    this.onThumbnailTap,
     this.onWatchLater,
     this.onAddToQueue,
     this.menu = const [],
@@ -272,6 +277,7 @@ class MediaTile extends StatefulWidget {
     super.key,
     required this.spec,
     this.onTap,
+    this.onThumbnailTap,
     this.onWatchLater,
     this.onAddToQueue,
     this.menu = const [],
@@ -282,6 +288,7 @@ class MediaTile extends StatefulWidget {
     super.key,
     required this.spec,
     this.onTap,
+    this.onThumbnailTap,
     this.onWatchLater,
     this.onAddToQueue,
     this.menu = const [],

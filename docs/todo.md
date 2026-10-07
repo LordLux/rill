@@ -321,9 +321,13 @@ count, visibility, description, share, play all, shuffle, and every video.
 `playlist.get` exists (Task 34, `architecture.md` F54) and already returns the
 header's `title` and `videoCount` (`parser/playlist.ts`, `parsePlaylistHeader`);
 the cover, owner, visibility and description are in the same
-`pageHeaderRenderer` and are not read yet. Measure which header fields come back
-for a public, an unlisted, a private and the viewer's own playlist. The viewer's
-own playlists add editing (title, visibility, removing a video):
+`pageHeaderRenderer` and are not read yet. The header fields `thumbnailUrl`,
+`ownerName`, `ownerChannelId`, `ownerAvatarUrl`, `viewCountText`, `description`,
+`visibility` (public, unlisted, private), `backgroundColor` (extracted as `ThemedColor`),
+and `isOwnedByViewer` have been successfully mapped (measured 2026-10-06).
+Unavailable entries are omitted by YouTube anonymously and require specific
+parameters not yet sent, so they do not have a robust signal besides not arriving.
+The viewer's own playlists add editing (title, visibility, removing a video):
 `action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
 anything else is measured first. Share reuses `share_dialog.dart`.
 

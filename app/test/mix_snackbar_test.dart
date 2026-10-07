@@ -32,7 +32,7 @@ VideoItem _video(String id) => VideoItem(
     );
 
 class _Mixes implements MixService {
-  @override Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) async => throw UnimplementedError();
+  @override Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async => throw UnimplementedError();
 
   /// What the last `start` was asked for — the seed and params a tile sends.
   static ({String playlistId, String? videoId, String? params})? lastStart;

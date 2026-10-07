@@ -196,7 +196,7 @@ export function exactCountFromText(value: unknown): number | null {
 
 /** Classifies a metadata string as a view count. "22K views", "1.2M watching". */
 export function isViewCountText(value: string): boolean {
-  return /\b(view|views|watching|waiting)\b/i.test(value);
+  return /\b(view|views|watching|waiting)\b/i.test(value) || /^\d+(?:\.\d+)?[KMB]?$/i.test(value);
 }
 
 /** Classifies a metadata string as a publish date. "1 hour ago", "Streamed 2 days ago". */

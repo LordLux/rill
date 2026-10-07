@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 
 import '../data/rpc/client.dart';
+import '../domain/artist_panel.dart';
 import '../domain/feed_item.dart';
 
 /// The list a queue is playing, when it is playing one: a mix (Task 26 §3) or
@@ -379,11 +380,11 @@ class QueueState {
   /// The playhead moves by construction, so `version` increments and playback
   /// opens `items.first`. Entries are minted fresh because none of them
   /// survived — this is the one mutation where that is correct.
-  QueueState startedMix(List<VideoItem> items, MixQueue mix) {
+  QueueState startedMix(List<VideoItem> items, MixQueue mix, {int startIndex = 0}) {
     if (items.isEmpty) return this;
     return QueueState._(
       [for (final item in items) QueueEntry(item)],
-      currentIndex: 0,
+      currentIndex: startIndex,
       version: version + 1,
       mix: mix,
     );
@@ -474,10 +475,36 @@ class MixStart {
   final List<VideoItem> items;
 }
 
+@immutable
+class PlaylistHeader {
+  const PlaylistHeader({
+    required this.thumbnailUrl,
+    required this.ownerName,
+    required this.ownerChannelId,
+    required this.ownerAvatarUrl,
+    required this.viewCountText,
+    required this.description,
+    required this.visibility,
+    required this.backgroundColor,
+    required this.isOwnedByViewer,
+  });
+
+  final String? thumbnailUrl;
+  final String? ownerName;
+  final String? ownerChannelId;
+  final String? ownerAvatarUrl;
+  final String? viewCountText;
+  final String? description;
+  final String? visibility;
+  final ThemedColor? backgroundColor;
+  final bool isOwnedByViewer;
+}
+
 /// What `playlist.get` answers: one page of a playlist.
 @immutable
-class PlaylistPage {
-  const PlaylistPage({this.title, this.videoCount, required this.items, this.continuation});
+class PlaylistResult {
+  const PlaylistResult({this.header, this.title, this.videoCount, required this.items, this.continuation});
+  final PlaylistHeader? header;
   final String? title;
   final int? videoCount;
   final List<VideoItem> items;
@@ -504,7 +531,7 @@ class MixExtension {
 abstract class MixService {
   Future<MixStart> start(String playlistId, {String? videoId, String? params});
   Future<MixExtension> extend(String playlistId, String afterVideoId);
-  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation});
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation});
 }
 
 class RpcMixService implements MixService {
@@ -525,12 +552,28 @@ class RpcMixService implements MixService {
   }
 
   @override
-  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) async {
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async {
     final response = await RpcClient.instance.call('playlist.get', {
       'playlistId': playlistId,
       'continuation': ?continuation,
     }) as Map<String, dynamic>;
-    return PlaylistPage(
+    final header = response['header'] as Map<String, dynamic>?;
+    return PlaylistResult(
+      header: header == null
+          ? null
+          : PlaylistHeader(
+              thumbnailUrl: header['thumbnailUrl'] as String?,
+              ownerName: header['ownerName'] as String?,
+              ownerChannelId: header['ownerChannelId'] as String?,
+              ownerAvatarUrl: header['ownerAvatarUrl'] as String?,
+              viewCountText: header['viewCountText'] as String?,
+              description: header['description'] as String?,
+              visibility: header['visibility'] as String?,
+              backgroundColor: header['backgroundColor'] == null
+                  ? null
+                  : ThemedColor.fromJson(header['backgroundColor'] as Map<String, dynamic>),
+              isOwnedByViewer: header['isOwnedByViewer'] as bool? ?? false,
+            ),
       title: response['title'] as String?,
       videoCount: (response['videoCount'] as num?)?.toInt(),
       items: _videosFrom(response['items']),
@@ -803,11 +846,14 @@ class QueueController extends Notifier<QueueState> {
     ));
   }
 
-  /// Replace the queue with a playlist, from its first playable video.
-  ///
-  /// The same tap guard, rollback and undo as [startMix]. [title] and
-  /// [videoCount] are the tile's, used where `playlist.get` does not say.
-  Future<void> startPlaylist(String playlistId, {String? title, int? videoCount}) async {
+  Future<void> startPlaylist(
+    String playlistId, {
+    String? title,
+    int? videoCount,
+    List<VideoItem>? loadedItems,
+    String? continuation,
+    int startIndex = 0,
+  }) async {
     if (isStartingMix) return;
 
     final previous = state.isEmpty ? null : state;
@@ -817,29 +863,43 @@ class QueueController extends Notifier<QueueState> {
     _advanceWhenExtended = false;
     state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
 
-    final PlaylistPage result;
-    try {
-      result = await ref.read(mixServiceProvider).getPlaylist(playlistId);
-    } catch (_) {
-      _rollBack(previous);
-      rethrow;
-    }
+    List<VideoItem> items;
+    String? finalContinuation;
+    String? finalTitle = title;
+    int? finalVideoCount = videoCount;
 
-    if (result.items.isEmpty) {
-      _rollBack(previous);
-      throw StateError('playlist.get returned no items for $playlistId');
+    if (loadedItems != null) {
+      items = loadedItems;
+      finalContinuation = continuation;
+    } else {
+      final PlaylistResult result;
+      try {
+        result = await ref.read(mixServiceProvider).getPlaylist(playlistId);
+      } catch (_) {
+        _rollBack(previous);
+        rethrow;
+      }
+      if (result.items.isEmpty) {
+        _rollBack(previous);
+        throw StateError('playlist.get returned no items for $playlistId');
+      }
+      items = result.items;
+      finalContinuation = result.continuation;
+      finalTitle = result.title ?? title;
+      finalVideoCount = result.videoCount ?? videoCount;
     }
 
     _replaced = previous;
     _set(state.startedMix(
-      result.items,
+      items,
+      startIndex: startIndex,
       MixQueue(
         playlistId: playlistId,
-        title: result.title ?? title,
+        title: finalTitle,
         isPlaylist: true,
-        continuation: result.continuation,
-        exhausted: result.continuation == null,
-        totalCount: result.videoCount ?? videoCount,
+        continuation: finalContinuation,
+        exhausted: finalContinuation == null,
+        totalCount: finalVideoCount,
       ),
     ));
   }
