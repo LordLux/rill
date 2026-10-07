@@ -35,7 +35,7 @@ class FakeMixService implements MixService {
   int _issued = 0;
 
   /// When set, the next continuation request waits on it instead of answering.
-  Completer<PlaylistPage>? pendingPlaylist;
+  Completer<PlaylistResult>? pendingPlaylist;
 
   FakeMixService({this.totalPages = 3});
 
@@ -52,7 +52,7 @@ class FakeMixService implements MixService {
   }
 
   @override
-  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) async {
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async {
     getPlaylistCalls++;
     lastContinuation = continuation;
 
@@ -68,7 +68,7 @@ class FakeMixService implements MixService {
     if (continuation != null && emptyPages > 0) {
       emptyPages--;
       _pagesServed++;
-      return PlaylistPage(items: const [], continuation: 'token_$_pagesServed');
+      return PlaylistResult(items: const [], continuation: 'token_$_pagesServed');
     }
 
     _pagesServed++;
@@ -76,7 +76,7 @@ class FakeMixService implements MixService {
     final items = videos(25, from: _issued);
     _issued += 25;
 
-    return PlaylistPage(
+    return PlaylistResult(
       title: title,
       videoCount: videoCount,
       items: items,
@@ -96,8 +96,8 @@ class FakeMixService implements MixService {
   int emptyPages = 0;
 
   /// The page a held continuation request will answer with.
-  PlaylistPage lastPage(int count) =>
-      PlaylistPage(items: videos(count, from: _issued), continuation: null);
+  PlaylistResult lastPage(int count) =>
+      PlaylistResult(items: videos(count, from: _issued), continuation: null);
 }
 
 ProviderContainer containerWith(MixService service) =>
@@ -110,7 +110,7 @@ void main() {
   group('Starting a playlist', () {
     test('startPlaylist replaces the queue and marks it as a playlist', () async {
       // The second page is held, so this is the queue as the first one left it.
-      final service = FakeMixService()..pendingPlaylist = Completer<PlaylistPage>();
+      final service = FakeMixService()..pendingPlaylist = Completer<PlaylistResult>();
       final c = containerWith(service);
       final queue = controllerOf(c);
 
@@ -147,7 +147,7 @@ void main() {
 
   group('Playlist continuation', () {
     test('the next page is asked for at once, with the first page\'s token', () async {
-      final service = FakeMixService()..pendingPlaylist = Completer<PlaylistPage>();
+      final service = FakeMixService()..pendingPlaylist = Completer<PlaylistResult>();
       final c = containerWith(service);
 
       await controllerOf(c).startPlaylist('VL123');
@@ -229,7 +229,7 @@ void main() {
     });
 
     test('one page at a time: a mutation while one is out does not ask again', () async {
-      final service = FakeMixService()..pendingPlaylist = Completer<PlaylistPage>();
+      final service = FakeMixService()..pendingPlaylist = Completer<PlaylistResult>();
       final c = containerWith(service);
       final queue = controllerOf(c);
 
@@ -282,7 +282,7 @@ void main() {
       final service = FakeMixService(totalPages: 2);
       final c = containerWith(service);
       final queue = controllerOf(c);
-      final heldA = Completer<PlaylistPage>();
+      final heldA = Completer<PlaylistResult>();
       service.pendingPlaylist = heldA;
       await queue.startPlaylist('PLaaa');
       expect(stateOf(c).items, hasLength(25));
@@ -291,20 +291,20 @@ void main() {
       // is back, and asks for its second page again. That request is held too.
       await queue.startPlaylist('PLbbb');
       final asked = service.getPlaylistCalls;
-      final heldAgain = Completer<PlaylistPage>();
+      final heldAgain = Completer<PlaylistResult>();
       service.pendingPlaylist = heldAgain;
       queue.undoStartMix();
       expect(stateOf(c).mix!.playlistId, 'PLaaa');
       expect(service.getPlaylistCalls, asked + 1, reason: 'the restored queue pages on a request of its own');
 
       // The first request for that page answers. It is nobody's now.
-      heldA.complete(PlaylistPage(items: videos(25, from: 500), continuation: null));
+      heldA.complete(PlaylistResult(items: videos(25, from: 500), continuation: null));
       await Future<void>.delayed(Duration.zero);
       expect(stateOf(c).items.map((v) => v.id), isNot(contains('v500')), reason: 'the abandoned answer is dropped');
       expect(stateOf(c).mix!.exhausted, isFalse, reason: 'and it does not end the list either');
 
       // The live one answers, and the page is there once.
-      heldAgain.complete(PlaylistPage(items: videos(25, from: 500), continuation: null));
+      heldAgain.complete(PlaylistResult(items: videos(25, from: 500), continuation: null));
       await Future<void>.delayed(Duration.zero);
       final ids = stateOf(c).items.map((v) => v.id).toList();
       expect(ids, hasLength(50));
@@ -370,7 +370,7 @@ void main() {
       final c = containerWith(service);
       final queue = controllerOf(c);
 
-      final held = Completer<PlaylistPage>();
+      final held = Completer<PlaylistResult>();
       service.pendingPlaylist = held;
       await queue.startPlaylist('PL123');
       expect(stateOf(c).items, hasLength(25));
@@ -433,7 +433,7 @@ void main() {
       final c = containerWith(service);
       final queue = controllerOf(c);
       // Hold the next page, then run to the end of the first one.
-      final held = Completer<PlaylistPage>();
+      final held = Completer<PlaylistResult>();
       service.pendingPlaylist = held;
       await queue.startPlaylist('PL123');
       for (var i = 0; i < 24; i++) { queue.advance(); }
@@ -455,7 +455,7 @@ void main() {
       final service = FakeMixService(totalPages: 3);
       final c = containerWith(service);
       final queue = controllerOf(c);
-      final held = Completer<PlaylistPage>();
+      final held = Completer<PlaylistResult>();
       service.pendingPlaylist = held;
       await queue.startPlaylist('PL123');
       for (var i = 0; i < 24; i++) { queue.advance(); }

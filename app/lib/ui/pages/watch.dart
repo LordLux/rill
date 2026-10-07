@@ -506,6 +506,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
       return MediaTile.wide(
         spec: spec,
         onTap: tapHandlerFor(context, ref, related),
+        onThumbnailTap: thumbnailTapHandlerFor(context, ref, related),
         onAddToQueue: () => queueFromTile(ref, related),
         onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
         menu: menuForTile(context, ref, related, spec),
@@ -514,6 +515,7 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     return MediaTile(
       spec: spec,
       onTap: tapHandlerFor(context, ref, related),
+        onThumbnailTap: thumbnailTapHandlerFor(context, ref, related),
       onAddToQueue: () => queueFromTile(ref, related),
       onWatchLater: () => _addToWatchLater(watchTargetFor(related)?.id),
       menu: menuForTile(context, ref, related, spec),

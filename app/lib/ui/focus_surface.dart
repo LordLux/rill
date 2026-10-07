@@ -37,6 +37,12 @@ abstract final class WatchFocusOrder {
   static const NumericFocusOrder related = NumericFocusOrder(5);
 }
 
+/// The playlist page's Tab order.
+abstract final class PlaylistFocusOrder {
+  static const NumericFocusOrder header = NumericFocusOrder(1);
+  static const NumericFocusOrder list = NumericFocusOrder(2);
+}
+
 /// Marks a subtree whose focused widgets use the arrow keys themselves — a
 /// reorder handle, a slider — so the player's global shortcuts (seek, volume) stand
 /// down while one of them has focus. `PlayerShortcuts` runs before the focus

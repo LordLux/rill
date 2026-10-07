@@ -32,7 +32,7 @@ late FakeEngine engine;
 class FakeMixService implements MixService {
   @override Future<MixStart> start(String id, {String? videoId, String? params}) async => MixStart(playlistId: id, items: [video('aaa')]);
   @override Future<MixExtension> extend(String id, String after) async => const MixExtension(items: [], exhausted: true);
-  @override Future<PlaylistPage> getPlaylist(String id, {String? continuation}) async => PlaylistPage(items: [video('aaa')]);
+  @override Future<PlaylistResult> getPlaylist(String id, {String? continuation}) async => PlaylistResult(items: [video('aaa')]);
 }
 late ProviderContainer container;
 

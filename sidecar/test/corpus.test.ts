@@ -112,7 +112,8 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   artist: /^Sanitised Artist \d+$/,
   album: /^Sanitised Album \d+$/,
   coverUrl: /^https:\/\/fake\.url\/cover\d+\.jpg$/,
-  channelName: /^Sanitised Channel \d+$/,
+  // A playlistVideoRenderer row can carry no byline at all (measured on private playlist)
+  channelName: /^(Sanitised Channel \d+|)$/,
   name: /^Sanitised Channel \d+$/,
   subtitle: /^Sanitised Subtitle \d+$/,
   // Free text from an arbitrary uploader, same reasoning as `title`.
@@ -135,6 +136,10 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // MixItem's start target (2026-09-14) — the exporter replaces both.
   seedVideoId: /^vid_\d{3,}$/,
   startParams: /^START_PARAMS$/,
+  ownerName: /^Sanitised Channel \d+$/,
+  ownerChannelId: /^chan_\d{3,}$/,
+  ownerAvatarUrl: /^https:\/\/fake\.url\/avatar\d+\.jpg$/,
+  visibility: /^(public|unlisted|private)$/,
 
   // "All" survives verbatim: the app keys its unfiltered state off that label,
   // and an empty token is the contract's "no filter" rather than session data.
@@ -242,6 +247,7 @@ export function auditShapes(docs: Doc[]): string[] {
  */
 function isContractVocabulary(value: string, field: string | null): boolean {
   if (field === 'kind' || field === 'scope') return true;
+  if (field === 'privacy' || field === 'visibility') return true;
   if (field === 'label' && value === 'All') return true;
   if (field === 'token' && value === '') return true;
   return false;

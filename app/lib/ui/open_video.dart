@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'pages/playlist.dart';
 
 import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
@@ -200,6 +201,19 @@ VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) 
         ));
   }
   if (item is PlaylistItem) {
+    return () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => PlaylistPage(playlistId: item.id),
+          ),
+        );
+  }
+  return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);
+}
+
+/// What tapping the thumbnail specifically should do.
+/// Returns null if the thumbnail should just use the tile's main [tapHandlerFor].
+VoidCallback? thumbnailTapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) {
+  if (item is PlaylistItem) {
     return () => unawaited(startPlaylistFromTile(
           context,
           ref,
@@ -208,7 +222,7 @@ VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) 
           videoCount: item.videoCount,
         ));
   }
-  return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);
+  return null;
 }
 
 /// Add to the queue from a tile, for the kinds that can be queued.
