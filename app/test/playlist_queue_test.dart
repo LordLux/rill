@@ -171,6 +171,63 @@ void main() {
       expect(stateOf(c).mix!.exhausted, isTrue);
     });
 
+    test('a long playlist loads two hundred ahead of the playhead and stops', () async {
+      final service = FakeMixService(totalPages: 40); // 1,000 videos, 25 a page
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      await queue.startPlaylist('VL123');
+      await Future<void>.delayed(Duration.zero);
+
+      // 225: the first count at which 200 or more follow the one playing.
+      expect(stateOf(c).items, hasLength(225));
+      expect(service.getPlaylistCalls, 9);
+      expect(stateOf(c).mix!.exhausted, isFalse);
+
+      // The margin follows the playhead: one more page once it is eaten into.
+      for (var i = 0; i < 25; i++) { queue.advance(); }
+      await Future<void>.delayed(Duration.zero);
+      expect(stateOf(c).items, hasLength(250));
+      expect(stateOf(c).remainingAfterCurrent, greaterThanOrEqualTo(QueueController.playlistLookahead));
+    });
+
+    test('scrolling to the end of what is loaded fetches one more page, and only one', () async {
+      final service = FakeMixService(totalPages: 40);
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+      await queue.startPlaylist('VL123');
+      await Future<void>.delayed(Duration.zero);
+      final calls = service.getPlaylistCalls;
+
+      // A scroll reports on every frame; that is still one request.
+      queue.loadMoreOfPlaylist();
+      queue.loadMoreOfPlaylist();
+      queue.loadMoreOfPlaylist();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.getPlaylistCalls, calls + 1);
+      expect(stateOf(c).items, hasLength(250));
+      expect(stateOf(c).currentIndex, 0);
+    });
+
+    test('scrolling asks for nothing from a mix or a finished playlist', () async {
+      final service = FakeMixService(totalPages: 2);
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+      await queue.startPlaylist('VL123');
+      await Future<void>.delayed(Duration.zero);
+      expect(stateOf(c).mix!.exhausted, isTrue);
+      queue.loadMoreOfPlaylist();
+      await Future<void>.delayed(Duration.zero);
+      expect(service.getPlaylistCalls, 2);
+
+      await queue.startMix('RD123');
+      queue.loadMoreOfPlaylist();
+      await Future<void>.delayed(Duration.zero);
+      expect(service.extendCalls, 0, reason: 'a mix keeps its own threshold');
+      expect(service.getPlaylistCalls, 2);
+    });
+
     test('one page at a time: a mutation while one is out does not ask again', () async {
       final service = FakeMixService()..pendingPlaylist = Completer<PlaylistPage>();
       final c = containerWith(service);

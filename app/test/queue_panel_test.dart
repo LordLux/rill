@@ -423,6 +423,22 @@ void main() {
       expect(find.text(' · Last video'), findsNothing);
     });
 
+    testWidgets('rows are numbered, and the playing one shows its arrow instead', (tester) async {
+      await pumpPlaylist(tester, at: 1, mix: whole);
+
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('2'), findsNothing, reason: 'the playing row has the arrow in its place');
+      expect(find.text('3'), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    });
+
+    testWidgets('a hand-built queue has no numbers', (tester) async {
+      await pumpPanel(tester, ['aaa', 'bbb', 'ccc']);
+
+      expect(find.text('2'), findsNothing);
+      expect(find.text('3'), findsNothing);
+    });
+
     testWidgets('a page that failed to load is said after the position, open or closed', (tester) async {
       await pumpPlaylist(
         tester,

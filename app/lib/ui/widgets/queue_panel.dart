@@ -20,6 +20,10 @@ import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDur
 const Duration _rowSlide = Duration(milliseconds: 200);
 const Duration _rowExit = Duration(milliseconds: 340);
 
+/// How close to the end of the loaded rows a scroll has to get before the next
+/// page of a playlist is asked for: about five rows.
+const double _loadMoreWithin = 360;
+
 /// How many rows of one batch play the staggered entrance.
 const int _staggeredArrivals = 12;
 
@@ -657,7 +661,17 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                 child: SilkyScroll(
                   controller: _listScroll,
                   builder: (context, scrollController, physics, _) {
-                    return ReorderableListView.builder(
+                    // A playlist loads only so far ahead of the playhead; reaching the
+                    // end of what is here asks for the next page.
+                    return NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        final metrics = notification.metrics;
+                        if (metrics.axis == Axis.vertical && metrics.extentAfter < _loadMoreWithin) {
+                          controller.loadMoreOfPlaylist();
+                        }
+                        return false;
+                      },
+                      child: ReorderableListView.builder(
                       scrollController: scrollController,
                       shrinkWrap: true,
                       buildDefaultDragHandles: false,
@@ -675,6 +689,9 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           index: index,
                           itemCount: queue.entries.length,
                           isCurrent: index == queue.currentIndex,
+                          // A playlist has an order worth showing; a mix and a
+                          // hand-built queue do not.
+                          numberDigits: (queue.mix?.isPlaylist ?? false) ? '${queue.displayLength}'.length : null,
                           scheme: scheme,
                           controller: controller,
                           dismissAnimation: _itemCtrls[entry],
@@ -683,6 +700,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           onRemove: () => _requestRemove(entry, controller),
                         ));
                       },
+                    ),
                     );
                   },
                 ),
@@ -933,6 +951,7 @@ class _QueueItemTile extends StatefulWidget {
     required this.index,
     required this.itemCount,
     required this.isCurrent,
+    this.numberDigits,
     required this.scheme,
     required this.controller,
     required this.onRemove,
@@ -945,6 +964,10 @@ class _QueueItemTile extends StatefulWidget {
   final int index;
   final int itemCount;
   final bool isCurrent;
+
+  /// Non-null for a playlist: the row shows its position, in a column wide
+  /// enough for this many digits. The playing row shows its arrow there.
+  final int? numberDigits;
   final ColorScheme scheme;
   final QueueController controller;
   final VoidCallback onRemove;
@@ -1054,6 +1077,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
       clock: clock,
     );
     return [
+      if (widget.numberDigits != null) 'number ${widget.index + 1}',
       widget.item.title,
       widget.item.channelName,
       if (widget.isCurrent) 'now playing',
@@ -1089,7 +1113,26 @@ class _QueueItemTileState extends State<_QueueItemTile> {
             mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
             leading: ExcludeSemantics(
-              child: SizedBox(
+              child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+              if (widget.numberDigits case final digits?)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: SizedBox(
+                    width: 7.0 * digits,
+                    child: widget.isCurrent
+                        ? Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12)
+                        : Text(
+                            '${widget.index + 1}',
+                            textAlign: TextAlign.right,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: TextStyle(fontSize: 11, color: widget.scheme.onSurfaceVariant),
+                          ),
+                  ),
+                ),
+              SizedBox(
               width: 82,
               height: 60,
               child: ClipRRect(
@@ -1110,6 +1153,8 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                   ],
                 ),
               ),
+            ),
+            ],
             ),
             ),
             // The row's one name lives on its title, which is what the tile's own tap node
@@ -1205,8 +1250,8 @@ class _QueueItemTileState extends State<_QueueItemTile> {
             ),
             onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
           ),
-          // Current indicator
-          if (widget.isCurrent)
+          // Current indicator. A numbered row draws it in the number's place instead.
+          if (widget.isCurrent && widget.numberDigits == null)
             Positioned(
               left: -0.5,
               top: 0,
