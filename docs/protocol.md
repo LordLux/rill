@@ -217,7 +217,20 @@ not yet captured); the title half of that is English-only. An `ERROR` alert in t
 ("The playlist does not exist.") is answered as `UPSTREAM_ERROR` with that text.
 
 ```ts
+interface PlaylistHeader {
+  thumbnailUrl: string | null;
+  ownerName: string | null;
+  ownerChannelId: string | null;
+  ownerAvatarUrl: string | null;
+  viewCountText: string | null;
+  description: string | null;
+  visibility: 'public' | 'unlisted' | 'private' | null;
+  backgroundColor: ThemedColor | null;
+  isOwnedByViewer: boolean;
+}
+
 interface PlaylistResult {
+  header: PlaylistHeader | null; // null on continuation pages
   title: string | null;        // the playlist's name
   videoCount: number | null;   // every entry, unavailable ones included
   items: VideoItem[];

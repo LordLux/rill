@@ -41,8 +41,8 @@ class _SilentMixService implements MixService {
   @override
   Future<MixExtension> extend(String playlistId, String afterVideoId) => Completer<MixExtension>().future;
   @override
-  Future<PlaylistPage> getPlaylist(String playlistId, {String? continuation}) =>
-      failPages ? Future.error(StateError('network down')) : Completer<PlaylistPage>().future;
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) =>
+      failPages ? Future.error(StateError('network down')) : Completer<PlaylistResult>().future;
 }
 
 /// The queue's ids in order — the assertion that matters in every test here.
@@ -356,6 +356,33 @@ void main() {
     expect(find.text('Mixes are playlists YouTube makes for you'), findsNothing);
     expect(find.byIcon(Icons.playlist_play), findsOneWidget);
     expect(find.byIcon(Icons.podcasts), findsNothing, reason: 'that one is the mix\'s');
+
+    // For a playlist, the menu has children so right-clicking it will open a menu.
+    // MenuAnchor itself is present. We can just check that it has children by looking at its children list, or simulating a right click.
+    final anchor = tester.widget<MenuAnchor>(find.byType(MenuAnchor));
+    expect(anchor.menuChildren.isNotEmpty, true, reason: 'menu is present for playlists');
+  });
+
+  testWidgets('Mix source shows mix text and hides menu', (tester) async {
+    container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+      items: [video('1'), video('2')],
+      currentIndex: 0,
+      mix: const MixQueue(playlistId: 'RD123', title: 'My Mix', isPlaylist: false),
+    ));
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(
+        home: Scaffold(body: EmbeddedQueuePanel(maxHeight: 360)),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final anchor = tester.widget<MenuAnchor>(find.byType(MenuAnchor));
+    expect(anchor.menuChildren.isEmpty, true, reason: 'menu is hidden for mixes');
   });
 
   // The header builds its collapsed and its expanded subtitle at once and

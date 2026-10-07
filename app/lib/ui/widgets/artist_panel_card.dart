@@ -708,6 +708,7 @@ class _Shelf extends ConsumerWidget {
                         child: MediaTile(
                           spec: spec,
                           onTap: tapHandlerFor(context, ref, item),
+                          onThumbnailTap: thumbnailTapHandlerFor(context, ref, item),
                           onAddToQueue: () => queueFromTile(ref, item),
                           onWatchLater: () => addToWatchLater(context, item),
                           menu: menuForTile(context, ref, item, spec),
