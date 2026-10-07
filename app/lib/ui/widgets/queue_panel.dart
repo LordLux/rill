@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey;
+import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey, Clipboard, ClipboardData;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,6 +14,7 @@ import '../spoken.dart';
 import 'channel_badge.dart';
 import 'shortcut_tooltip.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
+import '../player_shell.dart';
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
 /// collapse that closes the gap the sweep never has to (architecture §2.8).
@@ -30,6 +31,10 @@ const int _staggeredArrivals = 12;
 /// Where the slide ends and the collapse begins, as a fraction of [_rowExit].
 const double _rowSlidePhase = 200 / 340;
 
+class _ContextMenuIntent extends Intent {
+  const _ContextMenuIntent();
+}
+
 class EmbeddedQueuePanel extends ConsumerStatefulWidget {
   const EmbeddedQueuePanel({super.key, this.maxHeight = 400.0, this.borderRadius, this.onCollapse});
 
@@ -42,6 +47,7 @@ class EmbeddedQueuePanel extends ConsumerStatefulWidget {
 }
 
 class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with TickerProviderStateMixin {
+  final MenuController _headerMenuCtrl = MenuController();
   bool _expanded = true;
 
   /// True while the clear-sweep animation is running. Disables taps and
@@ -490,12 +496,59 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
               order: const NumericFocusOrder(0),
               child: Material(
               color: Colors.transparent,
-              child: Ink(
-                key: _headerKey,
-                color: scheme.surfaceContainerHighest,
-                child: InkWell(
-                  onTap: _clearing ? null : () => _onCollapse(),
-                  borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
+              child: MenuAnchor(
+                controller: _headerMenuCtrl,
+                style: MenuStyle(
+                  backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
+                  shape: const WidgetStatePropertyAll(
+                    RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                  ),
+                  mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+                ),
+                menuChildren: [
+                  if (queue.isMix && queue.mix!.isPlaylist) ...[
+                    MenuItemButton(
+                      leadingIcon: const Icon(Icons.playlist_play),
+                      onPressed: () => ref.read(currentRouteProvider.notifier).state = '/playlist/${queue.mix!.playlistId}',
+                      child: const Text('Go to Playlist'),
+                    ),
+                    MenuItemButton(
+                      leadingIcon: const Icon(Icons.link),
+                      onPressed: () async {
+                        final url = 'https://www.youtube.com/playlist?list=${queue.mix!.playlistId}';
+                        await Clipboard.setData(ClipboardData(text: url));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Link copied to clipboard'),
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(seconds: 2),
+                          ));
+                        }
+                      },
+                      child: const Text('Copy link'),
+                    ),
+                  ],
+                ],
+                builder: (context, menuController, child) {
+                  return Shortcuts(
+                    shortcuts: {
+                      SingleActivator(LogicalKeyboardKey.f10, shift: true): const _ContextMenuIntent(),
+                    },
+                    child: Actions(
+                      actions: {
+                        _ContextMenuIntent: CallbackAction<_ContextMenuIntent>(
+                          onInvoke: (_) => menuController.isOpen ? menuController.close() : menuController.open(),
+                        ),
+                      },
+                    child: Ink(
+                      key: _headerKey,
+                      color: scheme.surfaceContainerHighest,
+                      child: GestureDetector(
+                        excludeFromSemantics: true,
+                        onSecondaryTapUp: (details) => menuController.isOpen ? menuController.close() : menuController.open(position: details.localPosition),
+                        child: InkWell(
+                          onTap: _clearing ? null : () => _onCollapse(),
+                          borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
                   child: Padding(
                     padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
                     child: Row(
@@ -644,6 +697,11 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                     ),
                   ),
                 ),
+                ),
+                ),
+                ),
+                );
+                },
               ),
             ),
             ),

@@ -32,11 +32,11 @@ describe('music attribution', () => {
     const tracks = parseMusicTracks(fixture('mix'));
 
     expect(tracks).toHaveLength(1);
-    expect(tracks[0]!.title).toBe('Instant Crush (feat. Julian Casablancas)');
+    expect(tracks[0]!.title).toBe('what if?');
     // The card's primary artist, deliberately narrower than the credits
     // dialog's "Daft Punk, Julian Casablancas" — see `parser/music.ts`.
-    expect(tracks[0]!.artist).toBe('Daft Punk');
-    expect(tracks[0]!.album).toBe('Random Access Memories');
+    expect(tracks[0]!.artist).toBe('Yoko Takahashi');
+    expect(tracks[0]!.album).toBe('鷺巣詩郎 what if? 高橋洋子ver. 通常版');
   });
 
   test.skipIf(!hasFixture('mix'))('sizes the cover, and does not double-size it', () => {
@@ -61,7 +61,7 @@ describe('music attribution', () => {
     // two being separate would leave is a parser nothing calls.
     const detail = parseVideoDetail(fixture('mix'));
     expect(detail.music).toHaveLength(1);
-    expect(detail.music[0]!.title).toBe('Instant Crush (feat. Julian Casablancas)');
+    expect(detail.music[0]!.title).toBe('what if?');
   });
 
   test('a card with no title is dropped rather than shipped blank', () => {
