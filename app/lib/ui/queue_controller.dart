@@ -869,6 +869,10 @@ class QueueController extends Notifier<QueueState> {
     int? finalVideoCount = videoCount;
 
     if (loadedItems != null) {
+      if (loadedItems.isEmpty) {
+        _rollBack(previous);
+        return;
+      }
       items = loadedItems;
       finalContinuation = continuation;
     } else {

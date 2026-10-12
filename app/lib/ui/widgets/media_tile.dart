@@ -262,6 +262,11 @@ class MediaTile extends StatefulWidget {
   /// to open from somewhere, and a callback has no position to give it.
   final List<TileMenuItem> menu;
 
+  /// The widest a large wide tile's thumbnail gets. Null is the search page's
+  /// 400 (250 for a Short); a list of rows wants a smaller one, and the row
+  /// then takes its height from whichever of the thumbnail and the text is taller.
+  final double? thumbnailWidth;
+
   const MediaTile({
     super.key,
     required this.spec,
@@ -271,7 +276,8 @@ class MediaTile extends StatefulWidget {
     this.onAddToQueue,
     this.menu = const [],
   }) : layout = MediaTileLayout.standard,
-       size = MediaTileSize.standard;
+       size = MediaTileSize.standard,
+       thumbnailWidth = null;
 
   const MediaTile.wide({
     super.key,
@@ -282,6 +288,7 @@ class MediaTile extends StatefulWidget {
     this.onAddToQueue,
     this.menu = const [],
     this.size = MediaTileSize.standard,
+    this.thumbnailWidth,
   }) : layout = MediaTileLayout.wide;
 
   const MediaTile.shorts({
@@ -293,7 +300,8 @@ class MediaTile extends StatefulWidget {
     this.onAddToQueue,
     this.menu = const [],
   }) : layout = MediaTileLayout.shorts,
-       size = MediaTileSize.standard;
+       size = MediaTileSize.standard,
+       thumbnailWidth = null;
 
   @override
   State<MediaTile> createState() => _MediaTileState();
@@ -553,6 +561,16 @@ class _MediaTileState extends State<MediaTile> {
   /// A piece of the tile that [_narration] already says: kept on screen, out of the tree.
   Widget _quiet(Widget child) => ExcludeSemantics(child: child);
 
+  Widget _interactiveThumbnail({required void Function(PointerEvent) onEnter, required void Function(PointerEvent) onExit, required Widget child}) {
+    final region = MouseRegion(onEnter: onEnter, onExit: onExit, child: child);
+    if (widget.onThumbnailTap == null) return region;
+    return GestureDetector(
+      excludeFromSemantics: true,
+      onTap: widget.onThumbnailTap,
+      child: region,
+    );
+  }
+
   String _getBadgeText(bool isStation, bool isLive, bool isMix) {
     if (isStation) return 'STATION';
     if (isLive) return 'LIVE';
@@ -699,7 +717,7 @@ class _MediaTileState extends State<MediaTile> {
                   children: [
                     // MouseRegion for preview that covers the background
                     Positioned.fill(
-                      child: MouseRegion(
+                      child: _interactiveThumbnail(
                         onEnter: (_) => _onEnterPreview(),
                         onExit: (_) => _onExitPreview(),
                         child: Stack(
@@ -1193,10 +1211,11 @@ class _MediaTileState extends State<MediaTile> {
     Widget Function({bool showAvatar}) bottomArea,
   ) {
     // The watch page sidebar uses standard wide tiles and needs them to stay wide
-    // even in narrow spaces. The fallback is only for large tiles (search results).
+    // even in narrow spaces. The fallback is only for large tiles (search results),
+    // and not for one given its own thumbnail width, which fits a narrow row as it is.
     final bool isEffectiveWide =
         widget.layout == MediaTileLayout.wide &&
-        (widget.size == MediaTileSize.standard || constraints.maxWidth >= 483);
+        (widget.size == MediaTileSize.standard || widget.thumbnailWidth != null || constraints.maxWidth >= 483);
 
     final Widget layout = switch (widget.layout) {
       MediaTileLayout.wide when isEffectiveWide => Row(
@@ -1208,7 +1227,7 @@ class _MediaTileState extends State<MediaTile> {
                   fit: FlexFit.loose,
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxWidth: widget.spec.isShort ? 250 : 400,
+                      maxWidth: widget.thumbnailWidth ?? (widget.spec.isShort ? 250 : 400),
                     ),
                     child: topArea(isShort: widget.spec.isShort),
                   ),

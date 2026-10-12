@@ -116,9 +116,7 @@ class _ArtistPanelCardState extends ConsumerState<ArtistPanelCard> {
   void _nudgeShelf(int direction) {
     if (!_shelfScroll.hasClients) return;
     final position = _shelfScroll.position;
-    final target = (position.pixels + direction * position.viewportDimension * 0.8)
-        .clamp(0.0, position.maxScrollExtent)
-        .toDouble();
+    final target = (position.pixels + direction * position.viewportDimension * 0.8).clamp(0.0, position.maxScrollExtent).toDouble();
     _shelfScroll.animateTo(
       target,
       duration: const Duration(milliseconds: 320),
@@ -228,9 +226,7 @@ class ArtistPanelTint {
     // Legible on a tint nobody here chose, which is exactly the scrim /
     // onScrim problem (`tokens.dart`): fixed, and not allowed to follow the
     // accent.
-    final onSurface = ThemeData.estimateBrightnessForColor(surface) == Brightness.dark
-        ? theme.tokens.onScrim
-        : theme.tokens.onPaleTint;
+    final onSurface = ThemeData.estimateBrightnessForColor(surface) == Brightness.dark ? theme.tokens.onScrim : theme.tokens.onPaleTint;
 
     return ArtistPanelTint(
       surface: surface,
@@ -354,7 +350,7 @@ class _ArtworkBleed extends StatelessWidget {
                       // ignore: rill_lints/no_color_literals
                       colors: [Color(0xFF000000), Color(0x00000000)],
                       // Solid clear until 20%, then ramps to 100% blurred at the edge
-                      stops: [0.2, 1.0], 
+                      stops: [0.2, 1.0],
                     ).createShader(bounds),
                     child: rawImage,
                   ),
@@ -510,9 +506,7 @@ class _Header extends StatelessWidget {
               backgroundColor: tint.onSurface.withValues(alpha: 0.10),
               backgroundImage: artist.avatarUrl.isEmpty ? null : NetworkImage(artist.avatarUrl),
               onBackgroundImageError: artist.avatarUrl.isEmpty ? null : (error, stackTrace) {},
-              child: artist.avatarUrl.isEmpty
-                  ? Icon(Icons.person, size: 44, color: tint.onSurfaceMuted)
-                  : null,
+              child: artist.avatarUrl.isEmpty ? Icon(Icons.person, size: 44, color: tint.onSurfaceMuted) : null,
             ),
             const SizedBox(width: 20),
             if (isWide) ...[
@@ -590,6 +584,7 @@ class _TintedAction extends StatelessWidget {
       shape: const StadiumBorder(),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       minimumSize: const Size(0, kArtistActionHeight),
+      enabledMouseCursor: SystemMouseCursors.click,
       // Material pads a button's *layout* box out to a 48 px touch target,
       // which is why these sat noticeably chunkier than the reference despite
       // asking for 36. Dropping the pad is a pointer-only concession and the
@@ -683,8 +678,7 @@ class _Shelf extends ConsumerWidget {
         // thumbnails on a wide window nor a single tile on a narrow one.
         final double itemWidth = (constraints.maxWidth / 3.2).clamp(180.0, 320.0);
         final double thumbnailHeight = itemWidth / ScreenValues.normalAspectRatio;
-        final double itemHeight =
-            thumbnailHeight + _metadataHeight + (hasBadges ? _badgeRowHeight : 0);
+        final double itemHeight = thumbnailHeight + _metadataHeight + (hasBadges ? _badgeRowHeight : 0);
 
         return SizedBox(
           height: itemHeight + _shelfInset * 2,
@@ -700,7 +694,7 @@ class _Shelf extends ConsumerWidget {
                     final item = items[index];
                     final spec = specs[index];
                     if (spec == null) return const SizedBox.shrink();
-        
+
                     return Padding(
                       padding: EdgeInsets.only(right: index == items.length - 1 ? 0 : 16),
                       child: SizedBox(
@@ -729,6 +723,27 @@ class _Shelf extends ConsumerWidget {
                   child: _ShelfChevron(tint: tint, onPressed: () => onNudge(1)),
                 ),
               ),
+              // Left chevron is conditional: it only appears when the shelf has been scrolled right
+              Positioned(
+                left: 6,
+                top: _shelfInset,
+                height: thumbnailHeight,
+                child: Center(
+                  child: AnimatedBuilder(
+                    animation: controller,
+                    builder: (context, _) {
+                      final showChevron = controller.hasClients && controller.position.pixels > 0;
+                      return AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 260),
+                        reverseDuration: const Duration(milliseconds: 260),
+                        child: showChevron
+                            ? _ShelfChevron(tint: tint, onPressed: () => onNudge(-1), backwards: true)
+                            : const SizedBox.shrink(),
+                      );
+                    },
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -737,24 +752,59 @@ class _Shelf extends ConsumerWidget {
   }
 }
 
-class _ShelfChevron extends StatelessWidget {
-  const _ShelfChevron({required this.tint, required this.onPressed});
+class _ShelfChevron extends StatefulWidget {
+  const _ShelfChevron({required this.tint, required this.onPressed, this.backwards = false});
 
   final ArtistPanelTint tint;
   final VoidCallback onPressed;
+  final bool backwards;
+
+  @override
+  State<_ShelfChevron> createState() => _ShelfChevronState();
+}
+
+class _ShelfChevronState extends State<_ShelfChevron> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: tint.surface.withValues(alpha: 0.92),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onPressed,
-        child: SizedBox(
-          width: 36,
-          height: 36,
-          child: Icon(Icons.chevron_right, size: 22, color: tint.onSurface),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        width: 36,
+        height: 36,
+        decoration: ShapeDecoration(
+          color: widget.tint.surface.withValues(alpha: 0.92),
+          shape: CircleBorder(
+            side: BorderSide(
+              color: _isHovered ? widget.tint.onSurface.withValues(alpha: 0.45) : Colors.transparent,
+              width: 1.2,
+            ),
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onPressed,
+            mouseCursor: SystemMouseCursors.click,
+            hoverColor: widget.tint.onSurface.withValues(alpha: 0.1),
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Icon(
+                widget.backwards ? Icons.chevron_left : Icons.chevron_right,
+                size: 22,
+                color: widget.tint.onSurface,
+                semanticLabel: widget.backwards ? 'Earlier videos' : 'More videos',
+              ),
+            ),
+          ),
         ),
       ),
     );
