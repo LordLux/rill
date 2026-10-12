@@ -548,8 +548,9 @@ class _MediaTileState extends State<MediaTile> {
     // Views and age ("1M views • 3y ago"): after who made it, before the badges and the length.
     final secondary = spec.secondaryLine;
     return [
-      ?kind,
-      spec.title,
+      // A tile whose thumbnail does something else (a playlist: it plays) says
+      // what the tile itself does, since "Play …" is the thumbnail's name.
+      if (widget.onThumbnailTap != null) 'Open playlist ${spec.title}' else ...[?kind, spec.title],
       spec.primaryLine,
       ?secondary,
       if (spec.isMembersOnly) 'Members only',
@@ -564,10 +565,18 @@ class _MediaTileState extends State<MediaTile> {
   Widget _interactiveThumbnail({required void Function(PointerEvent) onEnter, required void Function(PointerEvent) onExit, required Widget child}) {
     final region = MouseRegion(onEnter: onEnter, onExit: onExit, child: child);
     if (widget.onThumbnailTap == null) return region;
-    return GestureDetector(
-      excludeFromSemantics: true,
-      onTap: widget.onThumbnailTap,
-      child: region,
+    // A second target with its own action, so its own name and its own Tab stop:
+    // left to the mouse, the keyboard could open a playlist's page but not play it.
+    // `container`, or its name merges up into the tile's and the two read as one
+    // button called "Open playlist …, Play …".
+    return Semantics(
+      container: true,
+      child: KeyboardTap(
+        label: 'Play ${widget.spec.title}',
+        borderRadius: 12,
+        onTap: widget.onThumbnailTap,
+        child: region,
+      ),
     );
   }
 

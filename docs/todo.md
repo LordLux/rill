@@ -332,8 +332,14 @@ Share through `share_dialog.dart`. A playlist tile's title opens it, and so does
   channel pages exist (item 61).
 - **Unavailable entries** are omitted by YouTube anonymously and need parameters
   not yet sent, so they have no signal besides not arriving.
-- **Not read with Narrator, and not walked with `RILL_FOCUS_PROBE`.** The header's
-  Tab order and its selectable text are asserted by test only.
+- **"The playlist does not exist." still offers *Try again*.** Task 35 wanted no
+  retry there and one for a network failure, but both arrive as `UPSTREAM_ERROR`
+  (`retry: auto`), so the page cannot tell them apart. Telling them apart is a
+  new error code for "YouTube answered, and the answer is no", which is a change
+  to the contract (`protocol.md` §4), not to this page.
+- **Not read with Narrator, and not walked with `RILL_FOCUS_PROBE`.** The page's
+  Tab order, its tap targets' names and its selectable text are asserted by test
+  only (`focus_traversal_test.dart`, `playlist_page_flow_test.dart`).
 
 **Done when:** the four disabled buttons work or are gone, and the owner's
 controls change a real playlist.

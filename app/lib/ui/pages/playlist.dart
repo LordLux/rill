@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
+import '../auth_controller.dart';
 import '../playlist_controller.dart';
 import '../queue_controller.dart';
 import '../widgets/media_tile.dart';
@@ -77,8 +78,11 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
       // out with the title bar when the page changes.
       tint: _PlaylistTint.of(context, playlistState.value?.header).wash,
       body: playlistState.when(
+        // A re-read after a sign-in or sign-out keeps the page it has until the
+        // new one lands, instead of dropping back to the skeleton.
+        skipLoadingOnReload: true,
         data: (state) => _PlaylistContent(state: state, scrollController: _scrollController),
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const _PlaylistSkeleton(),
         error: (e, st) => Center(child: Text(e.toString())),
       ),
     );
@@ -162,7 +166,16 @@ class _PlaylistContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final header = state.header;
-    if (header == null && state.items.isEmpty && state.loading) return const Center(child: CircularProgressIndicator());
+    if (header == null && state.items.isEmpty) {
+      if (state.loading) return const _PlaylistSkeleton();
+      // The first page never arrived: there is no header to draw the page around.
+      if (state.error case final error?) {
+        return _PlaylistUnavailable(
+          message: error,
+          onRetry: () => ref.read(playlistProvider(state.playlistId).notifier).retry(),
+        );
+      }
+    }
 
     Widget headerFor({required bool beside}) => FocusTraversalOrder(
       order: PlaylistFocusOrder.header,
@@ -464,7 +477,9 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
                   foregroundColor: tint.onInverse,
                   textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
-                onPressed: () => unawaited(startPlaylistFromTile(context, ref, playlistId)),
+                onPressed: () => unawaited(
+                  startPlaylistFromTile(context, ref, playlistId, title: title, videoCount: videoCount),
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -475,7 +490,8 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
             round(Icons.shuffle, 'Shuffle', unavailable: 'Shuffle is not available yet'),
           ],
         ),
-        if (header?.isOwnedByViewer == true) ...[
+        // Masked the moment there is no account, not when the re-read lands.
+        if (header?.isOwnedByViewer == true && ref.watch(authIdentityProvider.select((identity) => identity.$1))) ...[
           const SizedBox(height: 8),
           Row(
             children: [
@@ -489,6 +505,173 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
     );
   }
 
+}
+
+/// The page before its first response: the header card and a column of rows,
+/// where the real ones will be.
+///
+/// One controller and one [FadeTransition] over the lot, as `FeedSkeleton` does
+/// it and for the same reason: nothing below it rebuilds to pulse.
+class _PlaylistSkeleton extends StatefulWidget {
+  const _PlaylistSkeleton();
+
+  @override
+  State<_PlaylistSkeleton> createState() => _PlaylistSkeletonState();
+}
+
+class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  late final Animation<double> _pulse = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeInOut,
+  ).drive(Tween<double>(begin: 0.45, end: 1.0));
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final block = scheme.surfaceContainerHighest;
+
+    Widget bar(double width, double height) => Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(4)),
+    );
+
+    Widget card({required bool beside}) => Padding(
+      padding: beside ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Container(
+        decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(15)),
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          mainAxisSize: beside ? MainAxisSize.max : MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 316),
+              child: AspectRatio(
+                aspectRatio: ScreenValues.normalAspectRatio,
+                child: Container(
+                  decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            bar(220, 24),
+            const SizedBox(height: 12),
+            bar(120, 13),
+            const SizedBox(height: 8),
+            bar(180, 12),
+            const SizedBox(height: 18),
+            bar(160, 46),
+          ],
+        ),
+      ),
+    );
+
+    Widget row() => SizedBox(
+      height: _PlaylistSliverList._rowMinHeight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            const SizedBox(width: 48),
+            Container(
+              width: _PlaylistSliverList._thumbnailHeight * ScreenValues.normalAspectRatio,
+              height: _PlaylistSliverList._thumbnailHeight,
+              decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(12)),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [bar(260, 16), const SizedBox(height: 10), bar(140, 12), const SizedBox(height: 14), bar(90, 12)],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // As many rows as fit, cut off at the bottom: the list that replaces them scrolls.
+    Widget rows() => ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.topCenter,
+        maxHeight: double.infinity,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [for (var i = 0; i < 12; i++) row()]),
+      ),
+    );
+
+    // Said once; the blocks are pictures of nothing.
+    return Semantics(
+      label: 'Loading playlist',
+      child: ExcludeSemantics(
+        child: FadeTransition(
+          opacity: _pulse,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth > _PlaylistPageState._narrowBreakpoint) {
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1280),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(width: 360, child: card(beside: true)),
+                        Expanded(child: rows()),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [card(beside: false), Expanded(child: rows())],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The page when its first request failed: what was said, and a way to ask again.
+class _PlaylistUnavailable extends StatelessWidget {
+  const _PlaylistUnavailable({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, color: scheme.error, size: 48),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurface)),
+            const SizedBox(height: 12),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PlaylistList extends ConsumerWidget {
@@ -568,20 +751,20 @@ class _PlaylistSliverList extends ConsumerWidget {
                         onAddToQueue: () => queueFromTile(ref, item),
                         onWatchLater: () => addToWatchLater(context, item),
                         menu: menuForTile(context, ref, item, spec),
-                        onTap: () {
-                          unawaited(
-                            ref
-                                .read(queueProvider.notifier)
-                                .startPlaylist(
-                                  state.playlistId,
-                                  title: state.title,
-                                  videoCount: state.videoCount,
-                                  loadedItems: state.items,
-                                  continuation: state.continuation,
-                                  startIndex: index,
-                                ),
-                          );
-                        },
+                        // The tile's own path, from this row: the watch page opens, a
+                        // replaced queue can be undone, and a failure is said.
+                        onTap: () => unawaited(
+                          startPlaylistFromTile(
+                            context,
+                            ref,
+                            state.playlistId,
+                            title: state.title,
+                            videoCount: state.videoCount,
+                            loadedItems: state.items,
+                            continuation: state.continuation,
+                            startIndex: index,
+                          ),
+                        ),
                       ),
                     ),
                   ],

@@ -21,6 +21,8 @@ import 'package:rill/ui/open_video.dart' show TileMenuItem;
 import 'package:rill/ui/pages/feed.dart';
 import 'package:rill/ui/page_wrapper.dart';
 import 'package:rill/ui/pages/login_page.dart';
+import 'package:rill/ui/pages/playlist.dart';
+import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/search_suggest_controller.dart';
 import 'package:rill/ui/widgets/media_tile.dart';
 import 'package:rill/ui/widgets/account_button.dart';
@@ -159,6 +161,46 @@ final FeedState _feedState = FeedState(
   },
 );
 
+/// `playlist.get` answering one short page, for the playlist page's own walk.
+class _OnePagePlaylist implements MixService {
+  @override
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async => PlaylistResult(
+        header: const PlaylistHeader(
+          thumbnailUrl: null,
+          ownerName: 'Owner',
+          ownerChannelId: null,
+          ownerAvatarUrl: null,
+          viewCountText: null,
+          description: null,
+          visibility: 'public',
+          backgroundColor: null,
+          isOwnedByViewer: false,
+        ),
+        title: 'My Playlist',
+        videoCount: 3,
+        items: [
+          for (var i = 0; i < 3; i++)
+            VideoItem(
+              kind: 'video',
+              id: 'vid_$i',
+              title: 'Video $i',
+              channelName: 'Channel $i',
+              thumbnailUrl: '',
+              durationSeconds: 60,
+              isLive: false,
+              canWatchLater: true,
+              canAddToQueue: true,
+            ),
+        ],
+      );
+
+  @override
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) async => throw UnimplementedError();
+
+  @override
+  Future<MixExtension> extend(String playlistId, String afterVideoId) async => throw UnimplementedError();
+}
+
 /// A suggestions controller with the dropdown already open and nothing on the
 /// wire: typing must not reach the sidecar.
 class _OpenSuggestions extends SearchSuggestController {
@@ -295,6 +337,49 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pump();
       expect(opened, 1, reason: 'a tile reachable by Tab has to be openable from the keyboard too');
+    });
+  });
+
+  // Task 35 §3.5: a new surface declares its order (`PlaylistFocusOrder`), the
+  // header's actions before the list.
+  group('the playlist page', () {
+    Future<void> pumpPage(WidgetTester tester) async {
+      bigWindow(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mixServiceProvider.overrideWithValue(_OnePagePlaylist())],
+          child: MaterialApp(theme: buildRillTheme(kDefaultAccent), home: const PlaylistPage(playlistId: 'PL123')),
+        ),
+      );
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    testWidgets('Tab goes shell, then the header\'s live buttons, then row by row', (tester) async {
+      await pumpPage(tester);
+
+      expect(
+        await tabThrough(tester, 15),
+        [
+          'Toggle menu',
+          'home', 'subscriptions', 'playlists', 'history',
+          'field', 'Search',
+          'Log in',
+          // Save and Shuffle are stubs: disabled, so not stops.
+          'Play all', 'Share',
+          'Video 0', 'Video 0/tile-more',
+          'Video 1', 'Video 1/tile-more',
+          'Video 2',
+        ],
+      );
+    });
+
+    testWidgets('every tap target on it has a label', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpPage(tester);
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      semantics.dispose();
     });
   });
 
