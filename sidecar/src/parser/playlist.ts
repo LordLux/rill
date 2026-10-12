@@ -155,7 +155,11 @@ export async function getPlaylist(
     log.debug(`playlist.get dropped ${feed.items.length - items.length} non-video items`);
   }
 
-  // Measured 2026-10-06: a continuation page repeats `metadata` and `sidebar`,
-  // so the header is there too — but nothing promises it, hence nullable.
-  return { ...parsePlaylistHeader(raw), items, continuation: feed.continuation };
+  // The header is the first page's (`protocol.md` §3.3). A continuation page
+  // repeats `metadata` and `sidebar` (measured 2026-10-06), which is enough to
+  // build one from, but nothing promises the rest of it there: shipped, a
+  // header missing its tint or its cover would replace the whole one the
+  // client is showing. The title and the count are still passed on.
+  const parsed = parsePlaylistHeader(raw);
+  return { ...parsed, header: continuation ? null : parsed.header, items, continuation: feed.continuation };
 }
