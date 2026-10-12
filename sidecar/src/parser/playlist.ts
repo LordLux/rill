@@ -17,17 +17,28 @@ import { asArray, get, str, type Json, isObject } from './tree.ts';
 const log = logger('playlist');
 
 /**
- * An `ERROR` alert is the whole answer ("The playlist does not exist."); any
- * other type rides along with a list that is still good, so it is only logged.
+ * The header's tint: the opaque colour YouTube derived from the artwork, which
+ * its own page fades to the background behind a blurred copy of that artwork.
+ *
+ * On the cinematic container's `config`, in both header generations: the view
+ * model every `PL…` playlist ships, and the classic renderer Watch Later still
+ * does. Measured 2026-10-07 across all six playlist fixtures.
  */
-function themedColor(value: Json): { light: number; dark: number } | null {
-  if (!isObject(value)) return null;
-  const light = value['lightTheme'];
-  const dark = value['darkTheme'];
+function headerTint(raw: Json): { light: number; dark: number } | null {
+  const config =
+    get(raw, 'header', 'pageHeaderRenderer', 'content', 'pageHeaderViewModel', 'background', 'cinematicContainerViewModel', 'config') ??
+    get(raw, 'header', 'playlistHeaderRenderer', 'cinematicContainer', 'cinematicContainerRenderer', 'config');
+  if (!isObject(config)) return null;
+  const light = config['lightThemeBackgroundColor'];
+  const dark = config['darkThemeBackgroundColor'];
   if (typeof light !== 'number' || typeof dark !== 'number') return null;
   return { light, dark };
 }
 
+/**
+ * An `ERROR` alert is the whole answer ("The playlist does not exist."); any
+ * other type rides along with a list that is still good, so it is only logged.
+ */
 function refusalFrom(raw: Json, playlistId: string): string | null {
   for (const alert of asArray(get(raw, 'alerts'))) {
     // "Unavailable videos are hidden" comes as `alertWithButtonRenderer`.
@@ -105,9 +116,7 @@ export function parsePlaylistHeader(raw: Json): { title: string | null; videoCou
     else visibility = unlisted ? 'unlisted' : 'public';
   }
 
-  // Background color
-  const colorData = get(raw, 'header', 'pageHeaderRenderer', 'content', 'pageHeaderViewModel', 'style', 'pageHeaderStyle', 'imageColorInfo', 'palette');
-  const backgroundColor = themedColor(colorData);
+  const backgroundColor = headerTint(raw);
 
   const header: PlaylistHeader = {
     thumbnailUrl,
