@@ -7,7 +7,7 @@ import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
 import 'queue_controller.dart';
 
-const Object? _sentinel = Object();
+const Object _sentinel = Object();
 
 @immutable
 class PlaylistState {

@@ -16,6 +16,15 @@ Future<void> showShareDialog(BuildContext context, VideoItem item, {Duration pos
   );
 }
 
+/// The same dialog for a whole playlist: its page's address, and nothing to
+/// start at.
+Future<void> showPlaylistShareDialog(BuildContext context, {required String playlistId, required String title}) {
+  return showDialog<void>(
+    context: context,
+    builder: (_) => ShareDialog.playlist(playlistId: playlistId, title: title),
+  );
+}
+
 const Set<String> _launchableSchemes = {'http', 'https', 'mailto'};
 
 void _openInBrowser(String url) {
@@ -29,9 +38,31 @@ void _openInBrowser(String url) {
 /// Drawn **disabled**: we need `IDataTransferManagerInterop::ShowShareUIForWindow(HWND)`
 /// WinRT interop through the runner.
 class ShareDialog extends StatefulWidget {
-  const ShareDialog({super.key, required this.item, required this.position});
+  /// The short form for a video, because it is the one that survives being
+  /// pasted into a chat client that eats query strings — and `?t=` is the only
+  /// parameter anything here appends.
+  ShareDialog({super.key, required VideoItem item, required this.position})
+    : title = item.title,
+      link = 'https://youtu.be/${item.id}',
+      embedSrc = 'https://www.youtube.com/embed/${item.id}',
+      subject = 'video';
 
-  final VideoItem item;
+  const ShareDialog.playlist({super.key, required String playlistId, required this.title})
+    : link = 'https://www.youtube.com/playlist?list=$playlistId',
+      embedSrc = 'https://www.youtube.com/embed/videoseries?list=$playlistId',
+      subject = 'playlist',
+      position = Duration.zero;
+
+  final String title;
+
+  /// The address that is shared, before any "Start at".
+  final String link;
+
+  /// The `src` of the embed code's frame.
+  final String embedSrc;
+
+  /// "video" or "playlist", for the one sentence that names it.
+  final String subject;
 
   /// Where the video was when the dialog opened. `Duration.zero` when this is
   /// not the video that is playing, which is what hides "Start at".
@@ -44,20 +75,40 @@ class ShareDialog extends StatefulWidget {
 class _ShareDialogState extends State<ShareDialog> {
   bool _startAt = false;
 
-  /// The short form, because it is the one that survives being pasted into a
-  /// chat client that eats query strings — and `?t=` is the only parameter
-  /// anything here appends.
-  String get _link {
-    final base = 'https://youtu.be/${widget.item.id}';
-    if (!_startAt) return base;
-    return '$base?t=${widget.position.inSeconds}';
+  /// The Copy button is showing its check.
+  bool _copied = false;
+  Timer? _copiedReset;
+
+  /// How long the check stays, and how long it takes to come and go.
+  static const Duration _copiedFor = Duration(milliseconds: 1800);
+  static const Duration _copiedMotion = Duration(milliseconds: 240);
+
+  @override
+  void dispose() {
+    _copiedReset?.cancel();
+    super.dispose();
   }
+
+  // "Start at" is only ever offered for a video, whose addresses carry no query.
+  String get _link => _startAt ? '${widget.link}?t=${widget.position.inSeconds}' : widget.link;
 
   String get _embed {
     final start = _startAt ? '?start=${widget.position.inSeconds}' : '';
     return '<iframe width="560" height="315" '
-        'src="https://www.youtube.com/embed/${widget.item.id}$start" '
-        'title="${htmlEscape.convert(widget.item.title)}" frameborder="0" allowfullscreen></iframe>';
+        'src="${widget.embedSrc}$start" '
+        'title="${htmlEscape.convert(widget.title)}" frameborder="0" allowfullscreen></iframe>';
+  }
+
+  /// The check shows at the press, not when the clipboard answers: the write is
+  /// a platform round trip, and a button that reacts a beat late reads as a
+  /// missed click.
+  void _copyLink() {
+    _copiedReset?.cancel();
+    setState(() => _copied = true);
+    _copiedReset = Timer(_copiedFor, () {
+      if (mounted) setState(() => _copied = false);
+    });
+    unawaited(_copy(_link, 'Link copied'));
   }
 
   Future<void> _copy(String value, String said) async {
@@ -80,7 +131,7 @@ class _ShareDialogState extends State<ShareDialog> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final title = widget.item.title;
+    final title = widget.title;
 
     // Six targets at 56 + 12 of gutter fit the 460 the dialog is wide, so there
     // is no scroll and therefore no chevron. Mock 4 has one because YouTube's
@@ -243,7 +294,7 @@ class _ShareDialogState extends State<ShareDialog> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Share this video using the OS share sheet.',
+                        'Share this ${widget.subject} using the OS share sheet.',
                         style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                       ),
                     ],
@@ -283,7 +334,7 @@ class _ShareDialogState extends State<ShareDialog> {
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: Container(
                     height: 44,
-                    padding: const EdgeInsets.only(left: 16, right: 6),
+                    padding: const EdgeInsets.only(left: 16, right: 4.5),
                     decoration: BoxDecoration(
                       color: scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(22),
@@ -293,11 +344,18 @@ class _ShareDialogState extends State<ShareDialog> {
                         Expanded(
                           // The address is for the eyes; the button beside it says what it does.
                           child: ExcludeSemantics(
-                            child: Text(
-                              _link,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                            child: Tooltip(
+                              message: _link,
+                              margin: const EdgeInsets.only(left: 64),
+                              preferBelow: true,
+                              verticalOffset: 30,
+                              waitDuration: const Duration(milliseconds: 500),
+                              child: Text(
+                                _link,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                              ),
                             ),
                           ),
                         ),
@@ -306,16 +364,42 @@ class _ShareDialogState extends State<ShareDialog> {
                         // the same role the pills go to when they are on.
                         Semantics(
                           label: 'Copy link',
-                          child: FilledButton(
-                            onPressed: () => _copy(_link, 'Link copied'),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: scheme.inverseSurface,
-                              foregroundColor: scheme.onInverseSurface,
-                              minimumSize: const Size(0, 32),
-                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                            ),
-                            child: ExcludeSemantics(
-                              child: Transform.translate(offset: const Offset(0, -1), child: const Text('Copy')),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.5),
+                            child: FilledButton(
+                              onPressed: _copyLink,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: scheme.inverseSurface,
+                                foregroundColor: scheme.onInverseSurface,
+                                minimumSize: const Size(0, 32),
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                              ),
+                              child: ExcludeSemantics(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Transform.translate(offset: const Offset(0, -1), child: const Text('Copy')),
+                                    // The check makes its own room as it pops in: the button
+                                    // is against the right edge, so the word moves left. Not
+                                    // clipped; at no width its scale is 0 and nothing is drawn.
+                                    AnimatedAlign(
+                                      duration: _copiedMotion,
+                                      curve: Curves.easeOutCubic,
+                                      alignment: Alignment.centerLeft,
+                                      widthFactor: _copied ? 1 : 0,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(left: 6),
+                                        child: AnimatedScale(
+                                          duration: _copiedMotion,
+                                          curve: _copied ? Curves.easeOutBack : Curves.easeInOutCubicEmphasized,
+                                          scale: _copied ? 1 : 0,
+                                          child: const Icon(Icons.check_rounded, size: 18),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -351,6 +435,8 @@ class _ShareDialogState extends State<ShareDialog> {
                       ),
                     ),
                   ),
+                ] else ...[
+                  const SizedBox(height: 16),
                 ],
               ],
             ),

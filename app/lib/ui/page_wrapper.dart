@@ -41,6 +41,50 @@ Future<bool> readDrawerOpen() async {
   return prefs.getBool(drawerPrefsKey) ?? true;
 }
 
+/// The colour the title bar and the rail are on *this frame*, for every page at
+/// once, and the one each page's own ground fades down from ([pageGroundFor]).
+/// Null until the first page has painted.
+///
+/// Each page builds its own title bar and rail, and routes swap with no
+/// transition, so a colour owned by a page cuts in and out with it. Every page
+/// paints this one value instead, and only the page on top moves it: a page
+/// that opens, or that a Back uncovers, carries on from wherever the last one
+/// left the colour, mid-fade included.
+///
+/// A plain notifier rather than provider state, and the fade is not a target
+/// each page animates towards on its own. Both were tried (2026-10-09) and cut
+/// on a Back: a covered page's tickers are muted and Riverpod pauses its
+/// subscriptions, so it comes back holding a stale colour and no fade, and
+/// shows it the moment the outgoing page is removed.
+class PageChrome extends ValueNotifier<Color?> {
+  PageChrome() : super(null);
+
+  /// The page whose fade is moving [value]. Taking it over stops the last one.
+  Object? driver;
+}
+
+/// A page's own ground under a chrome of [tint]: that colour at the top, gone by
+/// three quarters of the way down. Plain [ground] when the two are the same,
+/// which is every page that brings no colour of its own.
+@visibleForTesting
+BoxDecoration pageGroundFor(Color tint, Color ground) {
+  if (tint == ground) return BoxDecoration(color: ground);
+  return BoxDecoration(
+    gradient: LinearGradient(
+      begin: const Alignment(-3 / 20, -1.0),
+      end: const Alignment(1 / 20, 1.0),
+      colors: [tint, ground],
+      stops: const [0.0, 0.75],
+    ),
+  );
+}
+
+final pageChromeProvider = Provider<PageChrome>((ref) {
+  final chrome = PageChrome();
+  ref.onDispose(chrome.dispose);
+  return chrome;
+});
+
 class PageWrapper extends ConsumerStatefulWidget {
   final Widget body;
   final Widget title;
@@ -51,13 +95,58 @@ class PageWrapper extends ConsumerStatefulWidget {
   /// before that would pick the first thing that *is* there (the Like button).
   final bool landingReady;
 
-  const PageWrapper({super.key, required this.body, required this.title, this.actions, this.landingReady = true});
+  /// A colour of the page's own (a playlist's tint): the title bar and the rail
+  /// are painted on it, and the page's ground fades down from it. Null is the
+  /// theme's, on a plain ground.
+  final Color? tint;
+
+  const PageWrapper({
+    super.key,
+    required this.body,
+    required this.title,
+    this.actions,
+    this.landingReady = true,
+    this.tint,
+  });
 
   @override
   ConsumerState<PageWrapper> createState() => _PageWrapperState();
 }
 
-class _PageWrapperState extends ConsumerState<PageWrapper> {
+class _PageWrapperState extends ConsumerState<PageWrapper> with SingleTickerProviderStateMixin {
+  /// How long the title bar and the rail take to change colour between pages.
+  static const Duration _chromeFadeDuration = Duration(milliseconds: 300);
+
+  late final PageChrome _chrome = ref.read(pageChromeProvider);
+  late final AnimationController _chromeFade = AnimationController(vsync: this, duration: _chromeFadeDuration)
+    ..addListener(_paintChrome);
+  ColorTween? _chromeTween;
+
+  void _paintChrome() {
+    final tween = _chromeTween;
+    if (tween == null) return;
+    // Another page is on top now and has carried on from where this one was.
+    if (!identical(_chrome.driver, this)) {
+      _chromeFade.stop();
+      return;
+    }
+    _chrome.value = tween.evaluate(_chromeFade);
+  }
+
+  /// Take the chrome over and fade it to [want] from whatever it is showing.
+  void _fadeChromeTo(Color want) {
+    if (identical(_chrome.driver, this) && _chromeTween?.end == want) return;
+    final from = _chrome.value ?? want;
+    _chrome.driver = this;
+    _chromeTween = ColorTween(begin: from, end: want);
+    if (from == want) {
+      _chromeFade.value = 1;
+      _chrome.value = want;
+    } else {
+      _chromeFade.forward(from: 0);
+    }
+  }
+
   /// A zero-size marker at the very front of the page content (order 0, ahead of
   /// every numbered surface). Not a Tab stop; it exists so "the first thing Tab
   /// would reach in the content" can be asked of the real traversal policy instead
@@ -109,9 +198,13 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
 
   @override
   void dispose() {
+    _chromeFade.dispose();
     _landing.dispose();
     super.dispose();
   }
+
+  /// Whether this page is the one showing. True with no route at all (a test).
+  bool get _isOnTop => ModalRoute.of(context)?.isCurrent ?? true;
 
   void _toggleDrawer() => ref.read(drawerStateProvider.notifier).toggle();
 
@@ -171,11 +264,27 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
     final currentRoute = ref.watch(currentRouteProvider);
     final showBack = currentRoute != null && currentRoute != homeRouteName;
 
+    // Only the page on top moves the chrome (`PageChrome`), and it takes it
+    // over after the frame: its first frame is still the colour it covers.
+    final ground = Theme.of(context).scaffoldBackgroundColor;
+    final wantChrome = widget.tint ?? ground;
+    if (_isOnTop && !(identical(_chrome.driver, this) && _chromeTween?.end == wantChrome)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isOnTop) _fadeChromeTo(wantChrome);
+      });
+    }
+
     // Tab order is by `ShellFocusOrder`, not by where `appBar` and `body` happen
     // to sit in the tree: title bar, rail, search, top-bar actions, page.
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
+      // The one surface the title bar and the rail both sit on: neither paints
+      // a ground of its own, so a change of colour fades in under both.
+      child: ValueListenableBuilder<Color?>(
+      valueListenable: _chrome,
+      builder: (context, color, child) => ColoredBox(color: color ?? wantChrome, child: child),
       child: Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: TopBar(
         toggleDrawer: _toggleDrawer,
         showBackButton: showBack,
@@ -196,7 +305,7 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
             // Change 72 to 0 if you want it completely hidden when closed!
             width: isDrawerOpen ? ScreenValues.openRailWidth : ScreenValues.closedRailWidth,
             child: Material(
-              color: Theme.of(context).scaffoldBackgroundColor,
+              type: MaterialType.transparency,
               child: SilkyListView(
                 children: [
                   _DrawerItem(
@@ -267,7 +376,15 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
                   Expanded(
                     child: ClipRRect(
                       borderRadius: BorderRadiusGeometry.only(topLeft: Radius.circular(10)),
-                      child: widget.body,
+                      // The page's own ground, from the same value as the chrome so
+                      // the two fade together and meet with no seam. A page paints
+                      // none of its own: one that did would pop in over this.
+                      child: ValueListenableBuilder<Color?>(
+                        valueListenable: _chrome,
+                        builder: (context, color, child) =>
+                            DecoratedBox(decoration: pageGroundFor(color ?? wantChrome, ground), child: child),
+                        child: widget.body,
+                      ),
                     ),
                   ),
                 ],
@@ -276,6 +393,7 @@ class _PageWrapperState extends ConsumerState<PageWrapper> {
           ),
         ],
       ),
+    ),
     ),
     );
   }

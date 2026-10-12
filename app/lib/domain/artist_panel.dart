@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'feed_item.dart';
@@ -65,3 +67,8 @@ abstract class ArtistPanel with _$ArtistPanel {
 
   factory ArtistPanel.fromJson(Map<String, Object?> json) => _$ArtistPanelFromJson(json);
 }
+
+extension ThemedColorExtension on ThemedColor {
+  Color resolve(Brightness brightness) => Color(brightness == Brightness.dark ? dark : light);
+}
+
