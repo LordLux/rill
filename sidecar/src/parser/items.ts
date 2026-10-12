@@ -26,12 +26,14 @@ import {
   durationToSeconds,
   isPublishedText,
   isViewCountText,
+  lockupViewCountText,
   metadataRowTexts,
   scanBadges,
   scanOwnerBadges,
   scanTileActions,
   text,
   tileId,
+  videoInfoTexts,
 } from './text.ts';
 import { isRendererKey, normaliseRendererName } from './vocabulary.ts';
 
@@ -181,7 +183,7 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     durationSeconds: badges.isLive ? null : badges.durationSeconds,
     isLive: badges.isLive || detailRows.some((row) => /watching now/i.test(row)),
     isStation: badges.isStation,
-    viewCountText: detailRows.find(isViewCountText) ?? null,
+    viewCountText: lockupViewCountText(get(metadata, 'metadata', 'contentMetadataViewModel')),
     publishedText: detailRows.find(isPublishedText) ?? null,
     descriptionSnippet: null,
     badges: badges.labels,
@@ -221,7 +223,11 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     badges.durationSeconds ??
     (typeof node['lengthSeconds'] === 'string' ? Number(node['lengthSeconds']) : null);
 
-  const viewCountText = text(node['viewCountText']) ?? text(node['shortViewCountText']);
+  // An owned playlist's rows and Watch Later's carry neither field: both facts
+  // are in `videoInfo`, and without it those tiles had no second line at all.
+  const info = videoInfoTexts(node['videoInfo']);
+  const viewCountText =
+    text(node['viewCountText']) ?? text(node['shortViewCountText']) ?? info.viewCountText;
 
   // Classic tiles signal live three ways: a LIVE badge, a LIVE-styled time
   // overlay (both caught by scanBadges), or a "watching now" view count.
@@ -240,7 +246,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     isLive,
     isStation: badges.isStation,
     viewCountText,
-    publishedText: text(node['publishedTimeText']),
+    publishedText: text(node['publishedTimeText']) ?? info.publishedText,
     descriptionSnippet:
       text(get(asArray(node['detailedMetadataSnippets'])[0], 'snippetText')) ??
       text(node['descriptionSnippet']) ??

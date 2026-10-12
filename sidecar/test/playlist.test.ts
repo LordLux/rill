@@ -183,6 +183,90 @@ describe('playlist.get', () => {
       expect(parseFeed(raw, 'playlist').continuation).toBeTruthy();
     }
   });
+
+  // The tint was read from a path no response has, so every header was grey
+  // with an all-green suite: nothing asserted that a captured page has one.
+  for (const name of ['playlist', 'playlist-public-anon', 'playlist-wl']) {
+    test.if(hasFixture(name))(`the captured ${name} header has its tint, opaque`, () => {
+      const tint = parsePlaylistHeader(fixture(name)).header?.backgroundColor;
+      expect(tint).toBeTruthy();
+      for (const argb of [tint!.light, tint!.dark]) {
+        expect(argb >>> 24).toBe(0xff);
+      }
+    });
+  }
+
+  // A playlist row ships "622K" beside a play icon and keeps the unit in its
+  // accessibility label, so its tiles read "56M • 4y ago" until it is put back.
+  for (const name of ['playlist', 'playlist-public-anon', 'playlist-wl', 'playlist-public-owned', 'playlist-private-owned']) {
+    test.if(hasFixture(name))(`every captured ${name} row's view count says what it counts`, () => {
+      const videos = parseFeed(fixture(name), 'playlist').items.filter((item) => item.kind === 'video');
+      const counted = videos.filter((video) => video.viewCountText !== null);
+      expect(counted.length).toBeGreaterThan(0);
+      for (const video of counted) {
+        expect(video.viewCountText).toMatch(/^\S+ views?$/);
+      }
+    });
+  }
+
+  test('a bare count takes its unit from the accessibility label, singular included', () => {
+    const lockup = (id: string, parts: unknown[]) => ({
+      lockupViewModel: {
+        contentId: id,
+        contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        metadata: {
+          lockupMetadataViewModel: {
+            title: { content: `Video ${id}` },
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [{ metadataParts: [{ text: { content: 'Owner' } }] }, { metadataParts: parts }],
+              },
+            },
+          },
+        },
+      },
+    });
+    const part = (content: string, accessibilityLabel?: string) => ({ text: { content }, accessibilityLabel });
+    const views = (parts: unknown[]) => {
+      const [item] = parseFeed(lockup('a', parts) as Json, 'playlist').items;
+      return item?.kind === 'video' ? item.viewCountText : undefined;
+    };
+
+    expect(views([part('622K', '622 thousand views'), part('5y ago', '5 years ago')])).toBe('622K views');
+    // Too small for a magnitude: only the label says this number is a count.
+    expect(views([part('532', '532 views'), part('5y ago', '5 years ago')])).toBe('532 views');
+    expect(views([part('1', '1 view')])).toBe('1 view');
+    // Already worded, as on every other surface: left alone, not doubled.
+    expect(views([part('22K views', '22 thousand views')])).toBe('22K views');
+    expect(views([part('5y ago', '5 years ago')])).toBeNull();
+  });
+
+  // The classic row an owned playlist and Watch Later ship: one `videoInfo`
+  // line, no label. Unread, those tiles had no view count and no date.
+  test('a classic row reads its count and date from videoInfo', async () => {
+    const info = (...texts: string[]) => ({ videoInfo: { runs: texts.map((text) => ({ text })) } });
+    const { session } = sessionOf([
+      page([
+        row('a', 'A', info('84K', ' • ', '3d ago')),
+        row('b', 'B', info('1', ' • ', '2y ago')),
+        row('c', 'C', info('532', ' • ', '1mo ago')),
+        row('d', 'D'),
+      ]),
+    ]);
+    const { items } = await getPlaylist(session, { playlistId: 'PLabc', continuation: null });
+    expect(items.map((item) => [item.viewCountText, item.publishedText])).toEqual([
+      ['84K views', '3d ago'],
+      ['1 view', '2y ago'],
+      ['532 views', '1mo ago'],
+      [null, null],
+    ]);
+  });
+
+  test('a header with no cinematic container has no tint, and is still a header', () => {
+    const { header } = parsePlaylistHeader({ metadata: { playlistMetadataRenderer: { title: 'Plain' } } });
+    expect(header).not.toBeNull();
+    expect(header!.backgroundColor).toBeNull();
+  });
 });
 
 describe('a playlist tile counts its videos from the thumbnail badge', () => {
