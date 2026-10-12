@@ -243,6 +243,15 @@ while the `"Members only"` label is localised. It ships as
 watch** — YouTube puts members-only videos in a subscriber's feed either way,
 and the resolve path is anonymous besides.
 
+**A playlist row's view count ships without its unit — measured 2026-10-07
+(`architecture.md` F57).** `viewCountText` is a display string, and a playlist is
+the one surface where YouTube's own string is just `"622K"`: the unit is in the
+lockup part's `accessibilityLabel`, and a classic `playlistVideoRenderer` row (the
+viewer's own playlists, Watch Later) has neither field, only `videoInfo.runs`.
+`lockupViewCountText` and `videoInfoTexts` (`parser/text.ts`) put the unit back so
+the field reads the same on every surface. A new mapper goes through them, not
+through `isViewCountText`, which no longer accepts a bare number.
+
 **A 24/7 station is live, and separately flagged — added 2026-09-11 (F22).**
 YouTube ships a `"STATION"` label instead of `"LIVE"` for continuous
 radio/music content. It is not tied to one client: first measured from
@@ -806,6 +815,16 @@ the answer.
   full-bleed row says `FocusRingShape(inflate: -1)` — do not draw a ring per widget. Walk the real app with
   `RILL_FOCUS_PROBE=feed|watch` before calling a keyboard change done.
   `architecture.md` F52.
+- **A covered page is frozen: its tickers are muted and its `ref.watch` is paused —
+  measured 2026-10-09.** A route under an opaque one keeps its state but runs no
+  animation and hears no provider change. So anything meant to carry on *across*
+  pages cannot be a value each page animates towards on its own: the page comes
+  back stale and shows it the instant the outgoing page is removed, which with no
+  route transition reads as a cut a moment after a Back. The title bar's colour was
+  the case; it is now one value above the pages that only the page on top moves
+  (`PageChrome`, `ui/page_wrapper.dart`; `architecture.md` §2.8). **A test for
+  this passes for the wrong reason unless whatever sets the state arrives after
+  the route transition** — before that the page underneath is still live.
 
 ## Accessibility
 
@@ -829,8 +848,12 @@ a screen reader or only a keyboard can use it, and check it the way `architectur
   control already names itself. It does **not** name its control: with `IconButton(tooltip:)` gone,
   give the icon `semanticLabel:` (the guideline test `every tap target … has a label` fails
   otherwise). Overlay tooltips still exist in the top bar, title bar, account menu, the watch page's
-  "Audio-only stream unavailable" warning and the audio-mode "Show/Hide queue" — convert one if it
-  shows up in a node log, and add no new ones.
+  "Audio-only stream unavailable" warning, its view-count and date read-outs (a `ShortcutTooltip`
+  without `silent`) and the audio-mode "Show/Hide queue" — convert one if it
+  shows up in a node log, and add no new ones. **A `MenuAnchor` that can scroll out from under its
+  menu needs our own close-on-scroll listener**: its built-in one does not fire under `silky_scroll`,
+  and a menu left open while its anchor leaves is the same orphan (the queue header's, 2026-10-07;
+  `architecture.md` §2.8).
 - **Every control has one name, said once.** Merging rules that bite: a non-`container`
   `Semantics` merges *up* into the nearest node; `container: true` makes its own; a `Focus`
   outside a container `Semantics` puts `isFocused` on the parent's node (Narrator then reads the
