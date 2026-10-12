@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 90.** A new item takes it, and the same edit bumps this line.
+**Next number: 92.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -316,24 +316,27 @@ app.
 
 ### 59. Playlist detail page
 
-The page youtube.com opens with "View full playlist": cover, title, owner, video
-count, visibility, description, share, play all, shuffle, and every video.
-`playlist.get` exists (Task 34, `architecture.md` F54) and already returns the
-header's `title` and `videoCount` (`parser/playlist.ts`, `parsePlaylistHeader`);
-the cover, owner, visibility and description are in the same
-`pageHeaderRenderer` and are not read yet. The header fields `thumbnailUrl`,
-`ownerName`, `ownerChannelId`, `ownerAvatarUrl`, `viewCountText`, `description`,
-`visibility` (public, unlisted, private), `backgroundColor` (extracted as `ThemedColor`),
-and `isOwnedByViewer` have been successfully mapped (measured 2026-10-06).
-Unavailable entries are omitted by YouTube anonymously and require specific
-parameters not yet sent, so they do not have a robust signal besides not arriving.
-The viewer's own playlists add editing (title, visibility, removing a video):
-`action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
-anything else is measured first. Share reuses `share_dialog.dart`.
+The page is built (Task 35, `ui/pages/playlist.dart`): a header card with the
+artwork, title, owner, counts, visibility and description over the playlist's
+own tint (`architecture.md` F55, F56), the whole list with paging, Play all, and
+Share through `share_dialog.dart`. A playlist tile's title opens it, and so does
+"Go to Playlist" in the queue header's menu. What is left:
 
-**Done when:** every playlist tile has a way to open the page, the page shows the
-header and the whole list with paging, and the owner-only controls appear only on
-the viewer's own playlists.
+- **Save, Shuffle, and the owner's Add videos and Edit** are drawn disabled, each
+  saying it is not available yet. Shuffle is a queue order; the other three need
+  their requests measured first.
+- **Editing the viewer's own playlist** (title, visibility, removing a video):
+  `action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
+  anything else is measured first.
+- **The owner is text, not a link.** `ownerChannelId` is carried and unused until
+  channel pages exist (item 61).
+- **Unavailable entries** are omitted by YouTube anonymously and need parameters
+  not yet sent, so they have no signal besides not arriving.
+- **Not read with Narrator, and not walked with `RILL_FOCUS_PROBE`.** The header's
+  Tab order and its selectable text are asserted by test only.
+
+**Done when:** the four disabled buttons work or are gone, and the owner's
+controls change a real playlist.
 
 ### 60. History screen
 
@@ -411,6 +414,11 @@ its corner radius. Likely the controls' backdrop or gradient is clipped
 differently from the video (or not at all), or the two clips anti-alias
 differently. Everything inside the rounded player should sit under one clip
 (`player_shell.dart`, `controls.dart`).
+
+**As of 2026-10-12** the watch page's player clip (`watch.dart`,
+`_PlayerSurface`) uses `Clip.antiAliasWithSaveLayer`, which draws everything
+first and clips once (`architecture.md` §2.8). Still to check: 150 % scaling,
+and whether the miniplayer and the fullscreen layer need the same.
 
 **Done when:** nothing shows outside the radius with the controls open or closed,
 at 100 % and 150 % display scaling.
@@ -939,6 +947,20 @@ bell its count and a panel. Signed-in only.
 
 ---
 
+### 90. Routes pile up between the watch page and a playlist's page
+
+"Go to Playlist" in the queue header pushes the playlist's page over the watch
+page, and playing a row from there pushes a new watch page over that
+(`showWatchPageIn` pushes whenever the current route is not `watch`). Each round
+trip adds two routes, all kept mounted, and Back walks every one of them. A
+search from the watch page has the same shape. Only the watch page on top claims
+the player (`isTopWatchPage`, `watch.dart`), so nothing breaks: it is memory and
+a long way back.
+
+**Done when:** opening a video from a page that was itself opened from the watch
+page returns to the watch page already there instead of stacking a second one,
+or the stack is shown to be harmless and this item is deleted.
+
 ## Triggered — read when one of these fires
 
 ### 18. Evaluate freezed 4.0.1
@@ -990,6 +1012,36 @@ wrong path.
 
 ## Far future — ideas, not commitments
 
+### 91. A backdrop material for the app's surfaces
+
+Wanted later, not designed: the app's surface taking a material instead of a
+flat colour. Two different things have been called this, and they are built
+differently:
+
+- **A translucent title bar the page scrolls under**, blurred. In-app only: the
+  page's body laid out behind the bar and a blur in the bar itself. It touches
+  the caption layer, which is clipped below the bar on the assumption that the
+  bar is opaque (`_BelowTopBarClipper`, `player_shell.dart`), and whether a blur
+  samples the video texture has to be measured, not assumed.
+- **A window material from the OS** (Mica, Acrylic). Mica is Windows 11 only, and
+  the development machine is Windows 10, where Acrylic is the nearest thing. It
+  needs the Flutter view itself to be transparent, so every opaque ground in the
+  app becomes a decision.
+
+Either could follow **what is playing**. A colour from the video has to come
+from something already decoded off the UI isolate (the thumbnail, a storyboard
+frame, `nowPlayingBackdropProvider`), never from polling the player (CLAUDE.md
+invariant 9).
+
+**Where it plugs in.** Every page paints its title bar, rail and ground from one
+shared value, `PageChrome` (`ui/page_wrapper.dart`, `architecture.md` §2.8),
+which is a colour today. A material would widen that value rather than add a
+second mechanism, and it does not need the title bar moved above the
+`Navigator`, which was rejected for the keyboard's sake.
+
+**Done when:** one of the two is chosen and specified as a task, or the idea is
+dropped and this item deleted.
+
 ### 80. SponsorBlock
 
 Skip sponsor segments using the community SponsorBlock database. A third-party
@@ -1038,6 +1090,16 @@ What `docs/tasks/32` found and deliberately left, each one small:
 - **The vertical-video volume slider** mounts above its speaker button, so a Tab
   onto the speaker opens a slider that sits *before* it in reading order and the
   next Tab does not land on it. Horizontal layout is correct and tested.
+- **The queue header's right-click menu** (Task 34) closes on scroll now
+  (`architecture.md` §2.8). Whether focus moves into it and returns, and how
+  Narrator reads it, were not checked.
+- **The watch page's view count and date** show their exact values in an overlay
+  `Tooltip` (a `ShortcutTooltip` without `silent`), inside a page that scrolls.
+  Seen in a node log on 2026-10-07, added and removed cleanly; `silent: true` is
+  the conversion.
+- **The artist shelf's left chevron** is a Tab stop that exists only while the
+  shelf is scrolled. The tiles are reachable without it, so it may want
+  `ExcludeFocus`.
 - **The comment box's Escape** does not cancel (Cancel does); the filters dialog
   and the player's submenus close on Escape through their own paths.
 
