@@ -1,5 +1,8 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey, Clipboard, ClipboardData;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,7 +17,7 @@ import '../spoken.dart';
 import 'channel_badge.dart';
 import 'shortcut_tooltip.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
-import '../player_shell.dart';
+import '../pages/playlist.dart' show openPlaylistPage;
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
 /// collapse that closes the gap the sweep never has to (architecture §2.8).
@@ -30,6 +33,57 @@ const int _staggeredArrivals = 12;
 
 /// Where the slide ends and the collapse begins, as a fraction of [_rowExit].
 const double _rowSlidePhase = 200 / 340;
+
+/// The header menu's rows, and through them the menu: never narrower than this.
+///
+/// On the rows because `MenuStyle.minimumSize` does not do it: the panel is laid
+/// out at the width of its widest row inside the box that minimum sizes, so a
+/// menu holding only "Copy link" stayed as narrow as those two words.
+final ButtonStyle _headerMenuItemStyle = MenuItemButton.styleFrom(minimumSize: const Size(200, 48));
+
+/// The number column's width per digit, at the row number's 11 px.
+const double _digitWidth = 7;
+
+/// Over how many rows the number column widens ahead of a longer number.
+const double _digitRampRows = 10;
+
+/// A row's height before the list has laid one out to measure.
+const double _nominalRowExtent = 80;
+
+/// How many digits wide a playlist's number column is, when [bottomRow] is the
+/// number of the row at the list's bottom edge — fractional, so 90.5 is row 90
+/// half scrolled in.
+///
+/// A function of position alone, so it is the same scrolling either way: the
+/// column takes the ten rows before a longer number to widen for it, and is
+/// full width as that number comes into view. Never wider than [maxDigits],
+/// which is what the playlist's last row needs.
+@visibleForTesting
+double numberColumnDigits(double bottomRow, int maxDigits) {
+  final row = math.max(bottomRow, 1.0);
+  var digits = 1;
+  var longer = 10.0; // the first number with one more digit
+  while (row >= longer) {
+    digits++;
+    longer *= 10;
+  }
+  final ramp = ((row - (longer - _digitRampRows)) / _digitRampRows).clamp(0.0, 1.0);
+  return math.min(digits + ramp, maxDigits.toDouble());
+}
+
+/// The address of what the queue is playing through, or null for a queue put
+/// together by hand, which has none.
+///
+/// A playlist is its own page. A mix has no page: YouTube addresses one as a
+/// video *in* it, `watch?v=…&list=RD…`, so the link is the video the queue is on.
+@visibleForTesting
+String? queueLinkFor(QueueState queue) {
+  final mix = queue.mix;
+  if (mix == null) return null;
+  final playing = queue.current?.id;
+  if (mix.isPlaylist || playing == null) return 'https://www.youtube.com/playlist?list=${mix.playlistId}';
+  return 'https://www.youtube.com/watch?v=$playing&list=${mix.playlistId}';
+}
 
 class _ContextMenuIntent extends Intent {
   const _ContextMenuIntent();
@@ -48,6 +102,13 @@ class EmbeddedQueuePanel extends ConsumerStatefulWidget {
 
 class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with TickerProviderStateMixin {
   final MenuController _headerMenuCtrl = MenuController();
+
+  /// The enclosing page's scroll position, watched to close the header menu.
+  ScrollPosition? _pageScroll;
+
+  /// The press now in progress closed the header menu, so it is not also a
+  /// click on the header: dismissing a menu should not collapse the queue.
+  bool _pressClosedMenu = false;
   bool _expanded = true;
 
   /// True while the clear-sweep animation is running. Disables taps and
@@ -94,6 +155,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
   final ScrollController _baseScroll = ScrollController();
   late final SilkyScrollController _listScroll = SilkyScrollController(clientController: _baseScroll);
 
+  /// How many digits wide a playlist's number column is right now, for every
+  /// row at once. Follows the scroll position ([numberColumnDigits]).
+  final ValueNotifier<double> _numberDigits = ValueNotifier<double>(1);
+
   /// Key on the list's ConstrainedBox to measure visible bounds.
   final GlobalKey _listBoxKey = GlobalKey();
 
@@ -114,6 +179,46 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       duration: const Duration(milliseconds: 400),
     );
     _syncEntries(ref.read(queueProvider).entries);
+    _syncNumberDigits();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The page the panel sits in: scrolling it moves the header out from under its menu.
+    final pageScroll = Scrollable.maybeOf(context)?.position;
+    if (_pageScroll != pageScroll) {
+      _pageScroll?.removeListener(_closeHeaderMenu);
+      _pageScroll = pageScroll;
+      _pageScroll?.addListener(_closeHeaderMenu);
+    }
+  }
+
+  void _closeHeaderMenu() {
+    if (_headerMenuCtrl.isOpen) _headerMenuCtrl.close();
+  }
+
+  /// Size the number column for the rows in view. [metrics] is the list's
+  /// scroll position; without one it is read from the controller, and before
+  /// the list has laid out it is worked out from the panel's height.
+  void _syncNumberDigits([ScrollMetrics? metrics]) {
+    if (!mounted) return;
+    final queue = ref.read(queueProvider);
+    final count = queue.entries.length;
+    if (count == 0 || !(queue.mix?.isPlaylist ?? false)) return;
+
+    final at = metrics ?? (_baseScroll.hasClients ? _baseScroll.position : null);
+    var rowExtent = _nominalRowExtent;
+    var bottom = math.max(0.0, widget.maxHeight - 66.0);
+    if (at != null && at.hasContentDimensions && at.hasViewportDimension) {
+      rowExtent = at.extentTotal / count;
+      bottom = at.extentBefore + at.extentInside;
+    }
+    if (rowExtent <= 0) return;
+
+    // The row whose top edge is at the bottom of the list: the next to appear.
+    final bottomRow = math.min(bottom / rowExtent, count.toDouble()) + 1;
+    _numberDigits.value = numberColumnDigits(bottomRow, '${queue.displayLength}'.length);
   }
 
   @override
@@ -137,6 +242,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       c.dispose();
     }
     _removing.clear();
+    try {
+      _pageScroll?.removeListener(_closeHeaderMenu);
+    } catch (_) {}
+    _numberDigits.dispose();
     _baseScroll.dispose();
     _listScroll.dispose();
     super.dispose();
@@ -401,10 +510,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     await _shrinkCtrl.forward();
     if (!mounted) return;
   }
-  
+
   void _onCollapse() {
     if (_clearing) return;
-    
+
     if (widget.onCollapse != null) {
       widget.onCollapse!();
     } else {
@@ -478,23 +587,28 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       return const SizedBox.shrink();
     }
 
+    // Rows arriving, the panel resizing and the queue becoming a playlist all
+    // change what is in view without a scroll.
+    final numbered = queue.mix?.isPlaylist ?? false;
+    if (numbered) WidgetsBinding.instance.addPostFrameCallback((_) => _syncNumberDigits());
+
     final nextItem = queue.next;
 
     Widget panel = Material(
       key: _panelKey,
-        color: scheme.surfaceContainer,
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
-          borderRadius: widget.borderRadius ?? BorderRadius.circular(12),
-          side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(0),
-              child: Material(
+      color: scheme.surfaceContainer,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: widget.borderRadius ?? BorderRadius.circular(12),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(0),
+            child: Material(
               color: Colors.transparent,
               child: MenuAnchor(
                 controller: _headerMenuCtrl,
@@ -506,28 +620,32 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                   mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
                 ),
                 menuChildren: [
-                  if (queue.isMix && queue.mix!.isPlaylist) ...[
+                  if (queue.mix?.isPlaylist ?? false)
                     MenuItemButton(
+                      style: _headerMenuItemStyle,
                       leadingIcon: const Icon(Icons.playlist_play),
-                      onPressed: () => ref.read(currentRouteProvider.notifier).state = '/playlist/${queue.mix!.playlistId}',
+                      onPressed: () => openPlaylistPage(queue.mix!.playlistId),
                       child: const Text('Go to Playlist'),
                     ),
+                  // A mix too: it has a link, only no page to go to.
+                  if (queueLinkFor(queue) case final url?)
                     MenuItemButton(
+                      style: _headerMenuItemStyle,
                       leadingIcon: const Icon(Icons.link),
                       onPressed: () async {
-                        final url = 'https://www.youtube.com/playlist?list=${queue.mix!.playlistId}';
                         await Clipboard.setData(ClipboardData(text: url));
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                            content: Text('Link copied to clipboard'),
-                            behavior: SnackBarBehavior.floating,
-                            duration: Duration(seconds: 2),
-                          ));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Link copied to clipboard'),
+                              behavior: SnackBarBehavior.floating,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
                         }
                       },
                       child: const Text('Copy link'),
                     ),
-                  ],
                 ],
                 builder: (context, menuController, child) {
                   return Shortcuts(
@@ -537,199 +655,218 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                     child: Actions(
                       actions: {
                         _ContextMenuIntent: CallbackAction<_ContextMenuIntent>(
-                          onInvoke: (_) => menuController.isOpen ? menuController.close() : menuController.open(),
+                          // Nothing to offer on a queue put together by hand, so no empty menu.
+                          onInvoke: (_) => menuController.isOpen
+                              ? menuController.close()
+                              : (queueLinkFor(queue) == null ? null : menuController.open()),
                         ),
                       },
-                    child: Ink(
-                      key: _headerKey,
-                      color: scheme.surfaceContainerHighest,
-                      child: GestureDetector(
-                        excludeFromSemantics: true,
-                        onSecondaryTapUp: (details) => menuController.isOpen ? menuController.close() : menuController.open(position: details.localPosition),
-                        child: InkWell(
-                          onTap: _clearing ? null : () => _onCollapse(),
-                          borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
-                  child: Padding(
-                    padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  // A mix says so, and says which one. The queue
-                                  // behaves differently at its end — it extends
-                                  // rather than stopping — so the panel naming
-                                  // it is not decoration (Task 26 §3).
-                                  if (queue.isMix) ...[
-                                    Icon(
-                                      queue.mix!.isPlaylist ? Icons.playlist_play : Icons.podcasts,
-                                      size: queue.mix!.isPlaylist ? 18 : 15,
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                                    const SizedBox(width: 6),
-                                  ],
-                                  Expanded(
-                                    child: Text(
-                                      _headerTitle(queue, nextItem),
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: scheme.onSurface,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Builder(
-                                builder: (context) {
-                                  // Both states built every time. Passing the *current*
-                                  // subtitle to both slots meant the text swapped
-                                  // instantly and the crossfade faded between two
-                                  // copies of the same thing.
-                                  Text line(String text) => Text(
-                                    text,
-                                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  );
-
-                                  // A playlist keeps its position where it is and
-                                  // changes only what follows it.
-                                  if (queue.mix?.isPlaylist ?? false) {
-                                    Widget tail(bool expanded) {
-                                      final text = _playlistTail(queue, controller, expanded);
-                                      return text == null ? const SizedBox(width: double.infinity) : line(' · $text');
-                                    }
-
-                                    final same = _playlistTail(queue, controller, false) == _playlistTail(queue, controller, true);
-                                    return Row(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        line(_position(queue)),
-                                        Expanded(
-                                          // One widget when both states say the same thing,
-                                          // so there is nothing to animate and nothing said twice.
-                                          child: same
-                                              ? tail(_expanded)
-                                              : AnimatedCrossFade(
-                                                  duration: const Duration(milliseconds: 200),
-                                                  alignment: Alignment.topLeft,
-                                                  crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                                                  firstChild: tail(false),
-                                                  secondChild: tail(true),
-                                                ),
-                                        ),
-                                      ],
-                                    );
-                                  }
-
-                                  Widget subtitleFor(bool expanded) {
-                                    final (text, icon) = _headerSubtitle(queue, controller, expanded);
-                                    return _mixSubtitle(icon, line(text));
-                                  }
-
-                                  return AnimatedCrossFade(
-                                    duration: const Duration(milliseconds: 200),
-                                    crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                                    // subtitle slides upwards when appearing
-                                    firstChild: subtitleFor(false),
-                                    secondChild: subtitleFor(true),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                        AnimatedCrossFade(
-                          duration: const Duration(milliseconds: 200),
-                          crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                          firstChild: Row(
-                            children: [
-                              TextButton(
-                                onPressed: _clearing ? null : () => _animateClear(controller),
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  foregroundColor: scheme.onSurface,
-                                ),
+                      child: Ink(
+                        key: _headerKey,
+                        color: scheme.surfaceContainerHighest,
+                        // The header is the menu's own anchor, so a press on it is not
+                        // the "outside" press that closes the menu everywhere else.
+                        child: Listener(
+                          onPointerDown: (event) {
+                            _pressClosedMenu = event.buttons == kPrimaryButton && menuController.isOpen;
+                            if (_pressClosedMenu) menuController.close();
+                          },
+                          child: GestureDetector(
+                            excludeFromSemantics: true,
+                            // Open or not: an open menu moves to the new place, as it does
+                            // for a right-click anywhere else.
+                            onSecondaryTapUp: (details) => queueLinkFor(queue) == null
+                                ? null
+                                : menuController.open(position: details.localPosition),
+                            child: InkWell(
+                              onTap: _clearing
+                                  ? null
+                                  : () {if (!_pressClosedMenu) _onCollapse();},
+                              borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
+                              child: Padding(
+                                padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
                                 child: Row(
                                   children: [
-                                    RotationTransition(
-                                      turns: _iconSpinCtrl.drive(
-                                        Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              // A mix says so, and says which one. The queue
+                                              // behaves differently at its end — it extends
+                                              // rather than stopping — so the panel naming
+                                              // it is not decoration (Task 26 §3).
+                                              if (queue.isMix) ...[
+                                                Icon(
+                                                  queue.mix!.isPlaylist ? Icons.playlist_play : Icons.podcasts,
+                                                  size: queue.mix!.isPlaylist ? 18 : 15,
+                                                  color: scheme.onSurfaceVariant,
+                                                ),
+                                                const SizedBox(width: 6),
+                                              ],
+                                              Expanded(
+                                                child: Text(
+                                                  _headerTitle(queue, nextItem),
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: scheme.onSurface,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Builder(
+                                            builder: (context) {
+                                              // Both states built every time. Passing the *current*
+                                              // subtitle to both slots meant the text swapped
+                                              // instantly and the crossfade faded between two
+                                              // copies of the same thing.
+                                              Text line(String text) => Text(
+                                                text,
+                                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              );
+
+                                              // A playlist keeps its position where it is and
+                                              // changes only what follows it.
+                                              if (queue.mix?.isPlaylist ?? false) {
+                                                Widget tail(bool expanded) {
+                                                  final text = _playlistTail(queue, controller, expanded);
+                                                  return text == null ? const SizedBox(width: double.infinity) : line(' · $text');
+                                                }
+
+                                                final same = _playlistTail(queue, controller, false) == _playlistTail(queue, controller, true);
+                                                return Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    line(_position(queue)),
+                                                    Expanded(
+                                                      // One widget when both states say the same thing,
+                                                      // so there is nothing to animate and nothing said twice.
+                                                      child: same
+                                                          ? tail(_expanded)
+                                                          : AnimatedCrossFade(
+                                                              duration: const Duration(milliseconds: 200),
+                                                              alignment: Alignment.topLeft,
+                                                              crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                              firstChild: tail(false),
+                                                              secondChild: tail(true),
+                                                            ),
+                                                    ),
+                                                  ],
+                                                );
+                                              }
+
+                                              Widget subtitleFor(bool expanded) {
+                                                final (text, icon) = _headerSubtitle(queue, controller, expanded);
+                                                return _mixSubtitle(icon, line(text));
+                                              }
+
+                                              return AnimatedCrossFade(
+                                                duration: const Duration(milliseconds: 200),
+                                                crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                // subtitle slides upwards when appearing
+                                                firstChild: subtitleFor(false),
+                                                secondChild: subtitleFor(true),
+                                              );
+                                            },
+                                          ),
+                                        ],
                                       ),
-                                      child: const Icon(Icons.clear_all_sharp, size: 18),
                                     ),
-                                    const SizedBox(width: 4),
-                                    const Text('Clear'),
+                                    AnimatedCrossFade(
+                                      duration: const Duration(milliseconds: 200),
+                                      crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                                      firstChild: Row(
+                                        children: [
+                                          TextButton(
+                                            onPressed: _clearing ? null : () => _animateClear(controller),
+                                            style: TextButton.styleFrom(
+                                              visualDensity: VisualDensity.compact,
+                                              foregroundColor: scheme.onSurface,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                RotationTransition(
+                                                  turns: _iconSpinCtrl.drive(
+                                                    Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
+                                                  ),
+                                                  child: const Icon(Icons.clear_all_sharp, size: 18),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                const Text('Clear'),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 2),
+                                        ],
+                                      ),
+                                      secondChild: const SizedBox.shrink(),
+                                    ),
+                                    // The tooltip is outside the rotation (it would be turned upside down) and opens to
+                                    // the left: above the button is outside the panel, which clips it.
+                                    ShortcutTooltip(
+                                      label: _expanded ? 'Collapse queue' : 'Expand queue',
+                                      silent: true,
+                                      side: TooltipSide.left,
+                                      child: AnimatedRotation(
+                                        turns: _expanded ? 0 : 0.5,
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutCubic,
+                                        child: IconButton(
+                                          // The icon names the button: `IconButton(tooltip:)` used to.
+                                          icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
+                                          color: scheme.onSurfaceVariant,
+                                          onPressed: _clearing ? null : () => _onCollapse(),
+                                        ),
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 2),
-                            ],
-                          ),
-                          secondChild: const SizedBox.shrink(),
-                        ),
-                        // The tooltip is outside the rotation (it would be turned upside down) and opens to
-                        // the left: above the button is outside the panel, which clips it.
-                        ShortcutTooltip(
-                          label: _expanded ? 'Collapse queue' : 'Expand queue',
-                          silent: true,
-                          side: TooltipSide.left,
-                          child: AnimatedRotation(
-                            turns: _expanded ? 0 : 0.5,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOutCubic,
-                            child: IconButton(
-                              // The icon names the button: `IconButton(tooltip:)` used to.
-                              icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
-                              color: scheme.onSurfaceVariant,
-                              onPressed: _clearing ? null : () => _onCollapse(),
                             ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-                ),
-                ),
-                ),
-                );
+                  );
                 },
               ),
             ),
-            ),
-            // Queue List
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 300),
-              sizeCurve: Curves.easeOutCubic,
-              firstCurve: Curves.easeOut,
-              secondCurve: Curves.easeOut,
-              crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-              secondChild: const SizedBox(width: double.infinity, height: 0),
-              firstChild: ConstrainedBox(
-                key: _listBoxKey,
-                constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
-                child: SilkyScroll(
-                  controller: _listScroll,
-                  builder: (context, scrollController, physics, _) {
-                    // A playlist loads only so far ahead of the playhead; reaching the
-                    // end of what is here asks for the next page.
-                    return NotificationListener<ScrollNotification>(
-                      onNotification: (notification) {
-                        final metrics = notification.metrics;
-                        if (metrics.axis == Axis.vertical && metrics.extentAfter < _loadMoreWithin) {
-                          controller.loadMoreOfPlaylist();
-                        }
-                        return false;
-                      },
-                      child: ReorderableListView.builder(
+          ),
+          // Queue List
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 300),
+            sizeCurve: Curves.easeOutCubic,
+            firstCurve: Curves.easeOut,
+            secondCurve: Curves.easeOut,
+            crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+            secondChild: const SizedBox(width: double.infinity, height: 0),
+            firstChild: ConstrainedBox(
+              key: _listBoxKey,
+              constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
+              child: SilkyScroll(
+                controller: _listScroll,
+                builder: (context, scrollController, physics, _) {
+                  // A playlist loads only so far ahead of the playhead; reaching the
+                  // end of what is here asks for the next page.
+                  return NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      final metrics = notification.metrics;
+                      if (metrics.axis == Axis.vertical && metrics.extentAfter < _loadMoreWithin) {
+                        controller.loadMoreOfPlaylist();
+                      }
+                      if (notification.depth == 0) _syncNumberDigits(metrics);
+                      if (notification is ScrollUpdateNotification) _closeHeaderMenu();
+                      return false;
+                    },
+                    child: ReorderableListView.builder(
                       scrollController: scrollController,
                       shrinkWrap: true,
                       buildDefaultDragHandles: false,
@@ -742,31 +879,32 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           key: ValueKey(_itemKeys.putIfAbsent(entry, GlobalKey.new)),
                           order: NumericFocusOrder(1.0 + index),
                           child: _QueueItemTile(
-                          key: _itemKeys.putIfAbsent(entry, GlobalKey.new),
-                          entry: entry,
-                          index: index,
-                          itemCount: queue.entries.length,
-                          isCurrent: index == queue.currentIndex,
-                          // A playlist has an order worth showing; a mix and a
-                          // hand-built queue do not.
-                          numberDigits: (queue.mix?.isPlaylist ?? false) ? '${queue.displayLength}'.length : null,
-                          scheme: scheme,
-                          controller: controller,
-                          dismissAnimation: _itemCtrls[entry],
-                          removeAnimation: _removing[entry],
-                          clearing: _clearing,
-                          onRemove: () => _requestRemove(entry, controller),
-                        ));
+                            key: _itemKeys.putIfAbsent(entry, GlobalKey.new),
+                            entry: entry,
+                            index: index,
+                            itemCount: queue.entries.length,
+                            isCurrent: index == queue.currentIndex,
+                            // A playlist has an order worth showing; a mix and a
+                            // hand-built queue do not.
+                            numberDigits: numbered ? _numberDigits : null,
+                            scheme: scheme,
+                            controller: controller,
+                            dismissAnimation: _itemCtrls[entry],
+                            removeAnimation: _removing[entry],
+                            clearing: _clearing,
+                            onRemove: () => _requestRemove(entry, controller),
+                          ),
+                        );
                       },
                     ),
-                    );
-                  },
-                ),
+                  );
+                },
               ),
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
 
     panel = Padding(
       padding: const EdgeInsets.only(bottom: 20),
@@ -1023,9 +1161,10 @@ class _QueueItemTile extends StatefulWidget {
   final int itemCount;
   final bool isCurrent;
 
-  /// Non-null for a playlist: the row shows its position, in a column wide
-  /// enough for this many digits. The playing row shows its arrow there.
-  final int? numberDigits;
+  /// Non-null for a playlist: the row shows its position, in a column this
+  /// many digits wide — a fraction while the list scrolls towards longer
+  /// numbers. The playing row shows its arrow there.
+  final ValueListenable<double>? numberDigits;
   final ColorScheme scheme;
   final QueueController controller;
   final VoidCallback onRemove;
@@ -1146,179 +1285,190 @@ class _QueueItemTileState extends State<_QueueItemTile> {
   @override
   Widget build(BuildContext context) {
     final inert = widget.clearing || widget.removing;
+    final bool isPlaylist = widget.numberDigits != null;
 
     // The row fills the panel edge to edge, so the ring sits inside it.
     Widget tile = FocusRingShape(
       inflate: -1,
       child: MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        includeSemantics: false,
-        onFocusChange: (has) {
-          if (_focusWithin != has) setState(() => _focusWithin = has);
-        },
-        child: Stack(
-        children: [
-          // The row is one thing to listen to — "title, channel, duration" — with its Remove
-          // and Reorder as separate nodes of their own (`container: true`); left to merge, the
-          // row read as "group", and the handle read the whole row followed by its hint.
-          ListTile(
-            selected: widget.isCurrent,
-            selectedTileColor: widget.scheme.surfaceContainerHigh,
-            mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
-            leading: ExcludeSemantics(
-              child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-              if (widget.numberDigits case final digits?)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: SizedBox(
-                    width: 7.0 * digits,
-                    child: widget.isCurrent
-                        ? Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12)
-                        : Text(
-                            '${widget.index + 1}',
-                            textAlign: TextAlign.right,
-                            maxLines: 1,
-                            softWrap: false,
-                            style: TextStyle(fontSize: 11, color: widget.scheme.onSurfaceVariant),
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          includeSemantics: false,
+          onFocusChange: (has) {
+            if (_focusWithin != has) setState(() => _focusWithin = has);
+          },
+          child: Stack(
+            children: [
+              // The row is one thing to listen to — "title, channel, duration" — with its Remove
+              // and Reorder as separate nodes of their own (`container: true`); left to merge, the
+              // row read as "group", and the handle read the whole row followed by its hint.
+              ListTile(
+                selected: widget.isCurrent,
+                selectedTileColor: widget.scheme.surfaceContainerHigh,
+                mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                contentPadding: EdgeInsets.symmetric(horizontal: isPlaylist ? 5 : 12, vertical: 4).copyWith(right: 16),
+                leading: ExcludeSemantics(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isPlaylist)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: widget.numberDigits!,
+                            builder: (context, digits, child) => SizedBox(width: _digitWidth * digits, child: child),
+                            child: widget.isCurrent
+                                // The arrow is wider than one digit: centred over the
+                                // column rather than squeezed into it.
+                                ? OverflowBox(
+                                    minWidth: 12,
+                                    maxWidth: 12,
+                                    fit: OverflowBoxFit.deferToChild,
+                                    child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
+                                  )
+                                : Center(
+                                    child: Text(
+                                      '${widget.index + 1}',
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      softWrap: false,
+                                      style: TextStyle(fontSize: 11, color: widget.scheme.onSurfaceVariant),
+                                    ),
+                                  ),
                           ),
+                        ),
+                      SizedBox(
+                        width: 82,
+                        height: 60,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.network(
+                                widget.item.thumbnailUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+                              ),
+                              Positioned(
+                                bottom: 2,
+                                right: 2,
+                                child: _durationBadge(context),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              SizedBox(
-              width: 82,
-              height: 60,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Stack(
-                  fit: StackFit.expand,
+                // The row's one name lives on its title, which is what the tile's own tap node
+                // merges: a label on a wrapper around the tile never reached it.
+                // The row's name is on the row itself (below).
+                title: ExcludeSemantics(
+                  child: Text(
+                    widget.item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
+                    ),
+                  ),
+                ),
+                subtitle: ExcludeSemantics(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.item.channelName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+                        ),
+                      ),
+                      ChannelBadge(
+                        channelId: widget.item.channelId,
+                        isArtistChannel: widget.item.isArtistChannel,
+                        isVerified: widget.item.isVerified,
+                        size: 12,
+                        paddingLeft: 4,
+                      ),
+                    ],
+                  ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Image.network(
-                      widget.item.thumbnailUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
-                    ),
-                    Positioned(
-                      bottom: 2,
-                      right: 2,
-                      child: _durationBadge(context),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            ],
-            ),
-            ),
-            // The row's one name lives on its title, which is what the tile's own tap node
-            // merges: a label on a wrapper around the tile never reached it.
-            // The row's name is on the row itself (below).
-            title: ExcludeSemantics(
-              child: Text(
-                widget.item.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
-                ),
-              ),
-            ),
-            subtitle: ExcludeSemantics(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      widget.item.channelName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
-                    ),
-                  ),
-                  ChannelBadge(
-                    channelId: widget.item.channelId,
-                    isArtistChannel: widget.item.isArtistChannel,
-                    isVerified: widget.item.isVerified,
-                    size: 12,
-                    paddingLeft: 4,
-                  ),
-                ],
-              ),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
-                // box, and a bubble to the left of the X is outside it.
-                ShortcutTooltip(
-                  label: 'Remove',
-                  silent: true,
-                  announce: false,
-                  side: TooltipSide.left,
-                  child: AnimatedCrossFade(
-                    duration: const Duration(milliseconds: 50),
-                    crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                    firstChild: Semantics(
-                      container: true,
-                      label: 'Remove from queue',
-                      child: IconButton(
-                        mouseCursor: SystemMouseCursors.click,
-                        icon: ExcludeSemantics(child: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant)),
-                        onPressed: widget.onRemove,
+                    // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
+                    // box, and a bubble to the left of the X is outside it.
+                    ShortcutTooltip(
+                      label: 'Remove',
+                      silent: true,
+                      announce: false,
+                      side: TooltipSide.left,
+                      child: AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 50),
+                        crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                        firstChild: Semantics(
+                          container: true,
+                          label: 'Remove from queue',
+                          child: IconButton(
+                            mouseCursor: SystemMouseCursors.click,
+                            icon: ExcludeSemantics(child: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant)),
+                            onPressed: widget.onRemove,
+                          ),
+                        ),
+                        secondChild: const SizedBox.shrink(),
                       ),
                     ),
-                    secondChild: const SizedBox.shrink(),
-                  ),
-                ),
-                if (!inert)
-                  // Focusable, with Up/Down to reorder: the keyboard's way of doing
-                  // what dragging does. `ArrowKeyClaim` stops the player's seek and
-                  // volume shortcuts taking the arrows first.
-                  ArrowKeyClaim(
-                    // The `Semantics` is the *outer* one: a `Focus` outside it puts its
-                    // focused flag on the row's node, and Narrator then read the whole row
-                    // when the handle was focused.
-                    child: Semantics(
-                      container: true,
-                      label: 'Use the up and down arrows to reorder',
-                      child: Focus(
-                        onKeyEvent: _onHandleKey,
-                        child: ReorderableDragStartListener(
-                          index: widget.index,
-                          child: MouseRegion(
-                            cursor: SystemMouseCursors.grab,
-                            child: Padding(
-                              padding: const EdgeInsets.all(4),
-                              child: ExcludeSemantics(
-                                child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                    if (!inert)
+                      // Focusable, with Up/Down to reorder: the keyboard's way of doing
+                      // what dragging does. `ArrowKeyClaim` stops the player's seek and
+                      // volume shortcuts taking the arrows first.
+                      ArrowKeyClaim(
+                        // The `Semantics` is the *outer* one: a `Focus` outside it puts its
+                        // focused flag on the row's node, and Narrator then read the whole row
+                        // when the handle was focused.
+                        child: Semantics(
+                          container: true,
+                          label: 'Use the up and down arrows to reorder',
+                          child: Focus(
+                            onKeyEvent: _onHandleKey,
+                            child: ReorderableDragStartListener(
+                              index: widget.index,
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.grab,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: ExcludeSemantics(
+                                    child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
-            onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+                  ],
+                ),
+                onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+              ),
+              // Current indicator. A numbered row draws it in the number's place instead.
+              if (widget.isCurrent && widget.numberDigits == null)
+                Positioned(
+                  left: -0.5,
+                  top: 0,
+                  bottom: 0,
+                  child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
+                ),
+            ],
           ),
-          // Current indicator. A numbered row draws it in the number's place instead.
-          if (widget.isCurrent && widget.numberDigits == null)
-            Positioned(
-              left: -0.5,
-              top: 0,
-              bottom: 0,
-              child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
-            ),
-        ],
         ),
-      ),
       ),
     );
 

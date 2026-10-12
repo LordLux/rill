@@ -201,11 +201,7 @@ VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) 
         ));
   }
   if (item is PlaylistItem) {
-    return () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => PlaylistPage(playlistId: item.id),
-          ),
-        );
+    return () => openPlaylistPage(item.id);
   }
   return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);
 }
