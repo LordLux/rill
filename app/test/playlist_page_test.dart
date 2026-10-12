@@ -6,6 +6,7 @@ import 'package:rill/domain/artist_panel.dart' show ThemedColor;
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/focus_surface.dart';
 import 'package:rill/ui/page_wrapper.dart';
+import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/widgets/share_dialog.dart';
 import 'package:rill/ui/queue_controller.dart';
 
@@ -57,11 +58,19 @@ class FakeMixService implements MixService {
   }
 }
 
+class _SilentPlayback extends PlaybackController {
+  @override
+  PlaybackState build() => const PlaybackState();
+}
+
 void main() {
   testWidgets('clicking row N in the playlist detail page starts the playlist at N', (tester) async {
     final container = ProviderContainer(
       overrides: [
         mixServiceProvider.overrideWithValue(FakeMixService()),
+        // A row starts the playlist the way a tile does, which asks playback
+        // where it is; the real controller would go looking for an engine.
+        playbackProvider.overrideWith(_SilentPlayback.new),
       ],
     );
     addTearDown(container.dispose);

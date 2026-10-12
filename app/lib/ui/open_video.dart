@@ -124,12 +124,19 @@ Future<void> startMixFromTile(
 ///
 /// [title] and [videoCount] are what the tile showed, so the panel can name
 /// the playlist and size it even where the response does not.
+///
+/// The playlist's own page starts it from a row the same way: it hands over the
+/// [loadedItems] it already has and the [continuation] after them, so nothing is
+/// fetched twice and a row from a later page starts at once, at [startIndex].
 Future<void> startPlaylistFromTile(
   BuildContext context,
   WidgetRef ref,
   String playlistId, {
   String? title,
   int? videoCount,
+  List<VideoItem>? loadedItems,
+  String? continuation,
+  int startIndex = 0,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
   final container = ProviderScope.containerOf(context, listen: false);
@@ -141,7 +148,14 @@ Future<void> startPlaylistFromTile(
   showWatchPage(ref);
 
   try {
-    await queue.startPlaylist(playlistId, title: title, videoCount: videoCount);
+    await queue.startPlaylist(
+      playlistId,
+      title: title,
+      videoCount: videoCount,
+      loadedItems: loadedItems,
+      continuation: continuation,
+      startIndex: startIndex,
+    );
   } on Object catch (e) {
     if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
     if (container.read(queueProvider).isEmpty) toMiniPlayerIn(container);

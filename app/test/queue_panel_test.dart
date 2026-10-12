@@ -10,7 +10,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryButton;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemChannels;
+import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemChannels;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
@@ -369,7 +369,7 @@ void main() {
   group('a playlist\'s header menu', () {
     /// A playlist queue long enough to scroll, in a page that scrolls too, as
     /// the watch page mounts it.
-    Future<void> pumpWithMenu(WidgetTester tester) async {
+    Future<void> pumpPanel(WidgetTester tester) async {
       container = ProviderContainer(
         overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
       );
@@ -392,11 +392,53 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
+    }
 
+    Future<void> pumpWithMenu(WidgetTester tester) async {
+      await pumpPanel(tester);
       await tester.tap(find.text('My Playlist'), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
       expect(find.text('Go to Playlist'), findsOneWidget, reason: 'a right-click opens the menu');
     }
+
+    // A menu only the mouse can open is not done (Task 35 §3.4): the header is
+    // already a Tab stop, and the two keys Windows gives a context menu open it.
+    testWidgets('opens from the keyboard, with Shift+F10 and with the context-menu key', (tester) async {
+      await pumpPanel(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsNothing);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f10);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsOneWidget, reason: 'Shift+F10 on the focused header');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsNothing);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsOneWidget, reason: 'the context-menu key on the focused header');
+    });
+
+    testWidgets('Copy link puts the playlist\'s own address on the clipboard and says so', (tester) async {
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+      await pumpWithMenu(tester);
+      await tester.tap(find.text('Copy link'));
+      await tester.pumpAndSettle();
+
+      expect(copied, 'https://www.youtube.com/playlist?list=PL123');
+      expect(find.text('Link copied to clipboard'), findsOneWidget);
+    });
 
     testWidgets('Go to Playlist pushes the playlist\'s page, and Back comes back', (tester) async {
       await pumpWithMenu(tester);

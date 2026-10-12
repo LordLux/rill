@@ -650,7 +650,9 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                 builder: (context, menuController, child) {
                   return Shortcuts(
                     shortcuts: {
+                      // The two keys Windows gives a context menu.
                       SingleActivator(LogicalKeyboardKey.f10, shift: true): const _ContextMenuIntent(),
+                      SingleActivator(LogicalKeyboardKey.contextMenu): const _ContextMenuIntent(),
                     },
                     child: Actions(
                       actions: {
