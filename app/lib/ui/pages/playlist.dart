@@ -18,6 +18,7 @@ import '../focus_surface.dart';
 import '../../theme/screen_values.dart';
 import '../../theme/tokens.dart';
 import '../../domain/artist_panel.dart';
+import '../../domain/feed_item.dart' show VideoItem;
 
 const String playlistRouteName = 'playlist';
 
@@ -71,16 +72,20 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
   @override
   Widget build(BuildContext context) {
     final playlistState = ref.watch(playlistProvider(widget.playlistId));
+    final signedIn = ref.watch(authIdentityProvider.select((identity) => identity.$1));
+    // The page is re-read on a change of identity. Signing in, what is on screen
+    // was read anonymously and stays until the new page lands. Signing out, it
+    // may be a private playlist: it goes at once, tint and all, not when the
+    // re-read answers.
+    final masked = playlistState.isLoading && !signedIn;
 
     return PageWrapper(
       title: const Text('Playlist'),
       // The wrapper paints the page's ground from it too, so it fades in and
       // out with the title bar when the page changes.
-      tint: _PlaylistTint.of(context, playlistState.value?.header).wash,
+      tint: _PlaylistTint.of(context, masked ? null : playlistState.value?.header).wash,
       body: playlistState.when(
-        // A re-read after a sign-in or sign-out keeps the page it has until the
-        // new one lands, instead of dropping back to the skeleton.
-        skipLoadingOnReload: true,
+        skipLoadingOnReload: signedIn,
         data: (state) => _PlaylistContent(state: state, scrollController: _scrollController),
         loading: () => const _PlaylistSkeleton(),
         error: (e, st) => Center(child: Text(e.toString())),
@@ -184,6 +189,8 @@ class _PlaylistContent extends ConsumerWidget {
         header: header,
         title: state.title,
         videoCount: state.videoCount,
+        items: state.items,
+        continuation: state.continuation,
         fillHeight: beside,
       ),
     );
@@ -268,6 +275,8 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
     required this.header,
     required this.title,
     required this.videoCount,
+    required this.items,
+    required this.continuation,
     required this.fillHeight,
   });
 
@@ -276,67 +285,76 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
   final String? title;
   final int? videoCount;
 
+  /// What the page has loaded, and the token after it: "Play all" starts from
+  /// these instead of asking for the first page again.
+  final List<VideoItem> items;
+  final String? continuation;
+
   /// Beside the list: the card runs the height of the page and scrolls inside
   /// itself. Above the list it is as tall as what it holds.
   final bool fillHeight;
 
-  /// From this inner width the artwork sits beside the text instead of over it.
-  static const double _sideBySideWidth = 560;
+  /// Narrower than this, its own margins included, the artwork sits over the
+  /// text instead of beside it. That is a card 640 wide.
+  static const double _stackBelowWidth = 664;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tint = _PlaylistTint.of(context, header);
     final art = header?.thumbnailUrl;
+    // Watched here, in `build`. From inside the layout callback below the
+    // subscription was made after the build had finished and dropped again at
+    // the next one.
+    final signedIn = ref.watch(authIdentityProvider.select((identity) => identity.$1));
 
-    final body = Padding(
-      padding: const EdgeInsets.all(22),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final art = _art(tint);
-          final details = _details(context, ref, tint);
-          if (constraints.maxWidth < _sideBySideWidth) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [art, const SizedBox(height: 18), details],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(width: 300, child: art),
-              const SizedBox(width: 24),
-              Expanded(child: details),
-            ],
-          );
-        },
-      ),
-    );
-
-    return Padding(
-      padding: fillHeight ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      // The card clips, so a button's tooltip is kept inside it.
-      child: TooltipBounds(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(15),
-          clipBehavior: Clip.antiAliasWithSaveLayer,
-          // YouTube's cinematic header, layer for layer: the tint, a blurred and
-          // enlarged copy of the artwork, the gradient, then the content.
-          child: Stack(
-            children: [
-              Positioned.fill(child: AnimatedContainer(duration: _tintFade, color: tint.card)),
-              if (art != null) Positioned.fill(child: _BlurredArt(url: art, scale: 1.6, sigma: 24)),
-              Positioned.fill(
-                child: AnimatedContainer(
-                  duration: _tintFade,
-                  decoration: BoxDecoration(gradient: tint.cardGradient),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final artwork = _art(tint);
+        final details = _details(context, ref, tint, signedIn: signedIn);
+        final body = Padding(
+          padding: const EdgeInsets.all(22),
+          child: constraints.maxWidth < _stackBelowWidth
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [artwork, const SizedBox(height: 18), details],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 300, child: artwork),
+                    const SizedBox(width: 24),
+                    Expanded(child: details),
+                  ],
                 ),
+        );
+
+        return Padding(
+          padding: fillHeight ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          // The card clips, so a button's tooltip is kept inside it.
+          child: TooltipBounds(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(15),
+              clipBehavior: Clip.antiAliasWithSaveLayer,
+              // YouTube's cinematic header, layer for layer: the tint, a blurred and
+              // enlarged copy of the artwork, the gradient, then the content.
+              child: Stack(
+                children: [
+                  Positioned.fill(child: AnimatedContainer(duration: _tintFade, color: tint.card)),
+                  if (art != null) Positioned.fill(child: _BlurredArt(url: art, scale: 1.6, sigma: 24)),
+                  Positioned.fill(
+                    child: AnimatedContainer(
+                      duration: _tintFade,
+                      decoration: BoxDecoration(gradient: tint.cardGradient),
+                    ),
+                  ),
+                  fillHeight ? SilkySingleChildScrollView(child: body) : body,
+                ],
               ),
-              fillHeight ? SilkySingleChildScrollView(child: body) : body,
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -380,7 +398,7 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
     ].join(' • ');
   }
 
-  Widget _details(BuildContext context, WidgetRef ref, _PlaylistTint tint) {
+  Widget _details(BuildContext context, WidgetRef ref, _PlaylistTint tint, {required bool signedIn}) {
     final owner = header?.ownerName;
     final avatar = header?.ownerAvatarUrl;
     final description = header?.description;
@@ -430,7 +448,7 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
         const SizedBox(height: 18),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 340),
-          child: _actions(context, ref, tint),
+          child: _actions(context, ref, tint, signedIn: signedIn),
         ),
         if (description != null && description.isNotEmpty) ...[
           const SizedBox(height: 18),
@@ -441,7 +459,7 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
   }
 
   /// "Play all" as the one filled button, and the rest as round ones beside it.
-  Widget _actions(BuildContext context, WidgetRef ref, _PlaylistTint tint) {
+  Widget _actions(BuildContext context, WidgetRef ref, _PlaylistTint tint, {required bool signedIn}) {
     // [unavailable] is what the bubble says for an action that is not built yet;
     // the icon carries the button's name either way.
     Widget round(IconData icon, String name, {String? unavailable, VoidCallback? onPressed}) => ShortcutTooltip(
@@ -478,7 +496,16 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
                   textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 onPressed: () => unawaited(
-                  startPlaylistFromTile(context, ref, playlistId, title: title, videoCount: videoCount),
+                  playPlaylistFromPage(
+                    context,
+                    ref,
+                    playlistId,
+                    items: items,
+                    index: 0,
+                    continuation: continuation,
+                    title: title,
+                    videoCount: videoCount,
+                  ),
                 ),
               ),
             ),
@@ -491,7 +518,7 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
           ],
         ),
         // Masked the moment there is no account, not when the re-read lands.
-        if (header?.isOwnedByViewer == true && ref.watch(authIdentityProvider.select((identity) => identity.$1))) ...[
+        if (header?.isOwnedByViewer == true && signedIn) ...[
           const SizedBox(height: 8),
           Row(
             children: [
@@ -547,13 +574,14 @@ class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerP
       decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(4)),
     );
 
-    Widget card({required bool beside}) => Padding(
-      padding: beside ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Container(
-        decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(15)),
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          mainAxisSize: beside ? MainAxisSize.max : MainAxisSize.min,
+    // Top-aligned and cut off at the bottom rather than overflowing: nothing here
+    // scrolls, and the page that replaces it does. Only under a bounded height.
+    Widget cutOff(Widget child) => ClipRect(
+      child: OverflowBox(alignment: Alignment.topCenter, maxHeight: double.infinity, child: child),
+    );
+
+    Widget cardContent() => Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ConstrainedBox(
@@ -574,7 +602,16 @@ class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerP
             const SizedBox(height: 18),
             bar(160, 46),
           ],
-        ),
+        );
+
+    Widget card({required bool beside}) => Padding(
+      padding: beside ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Container(
+        decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(15)),
+        padding: const EdgeInsets.all(22),
+        // Beside the list the card is the page's height, which a short window
+        // makes less than what it holds.
+        child: beside ? cutOff(cardContent()) : cardContent(),
       ),
     );
 
@@ -603,14 +640,7 @@ class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerP
       ),
     );
 
-    // As many rows as fit, cut off at the bottom: the list that replaces them scrolls.
-    Widget rows() => ClipRect(
-      child: OverflowBox(
-        alignment: Alignment.topCenter,
-        maxHeight: double.infinity,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [for (var i = 0; i < 12; i++) row()]),
-      ),
-    );
+    List<Widget> rows() => [for (var i = 0; i < 12; i++) row()];
 
     // Said once; the blocks are pictures of nothing.
     return Semantics(
@@ -628,15 +658,20 @@ class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerP
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SizedBox(width: 360, child: card(beside: true)),
-                        Expanded(child: rows()),
+                        Expanded(child: cutOff(Column(mainAxisSize: MainAxisSize.min, children: rows()))),
                       ],
                     ),
                   ),
                 );
               }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [card(beside: false), Expanded(child: rows())],
+              // The card and the rows as one cut-off column: the card alone can
+              // be taller than a short window.
+              return cutOff(
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [card(beside: false), ...rows()],
+                ),
               );
             },
           ),
@@ -751,18 +786,19 @@ class _PlaylistSliverList extends ConsumerWidget {
                         onAddToQueue: () => queueFromTile(ref, item),
                         onWatchLater: () => addToWatchLater(context, item),
                         menu: menuForTile(context, ref, item, spec),
-                        // The tile's own path, from this row: the watch page opens, a
-                        // replaced queue can be undone, and a failure is said.
+                        // From this row: the watch page opens, a replaced queue can be
+                        // undone, a failure is said, and a queue that is already
+                        // this playlist is moved within, not replaced.
                         onTap: () => unawaited(
-                          startPlaylistFromTile(
+                          playPlaylistFromPage(
                             context,
                             ref,
                             state.playlistId,
+                            items: state.items,
+                            index: index,
+                            continuation: state.continuation,
                             title: state.title,
                             videoCount: state.videoCount,
-                            loadedItems: state.items,
-                            continuation: state.continuation,
-                            startIndex: index,
                           ),
                         ),
                       ),
