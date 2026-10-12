@@ -91,6 +91,10 @@ class PlaylistController extends AsyncNotifier<PlaylistState> {
 
     state = AsyncData(currentState.copyWith(loading: true, error: null));
 
+    // This request's own ref, taken before the await. A re-read under another
+    // identity gives the notifier a new one, so `this.ref` read afterwards is
+    // mounted again and the old viewer's page landed on top of the new one's.
+    final ref = this.ref;
     try {
       final page = await ref.read(mixServiceProvider).getPlaylist(arg, continuation: token);
       // The page was closed, or re-read under another identity, while this was out.
