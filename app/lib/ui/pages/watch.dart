@@ -699,7 +699,7 @@ class _PlayerSurface extends ConsumerWidget {
     if (!rounded) return content;
     return ClipRRect(
       borderRadius: BorderRadius.circular(11),
-      clipBehavior: Clip.antiAlias,
+      clipBehavior: Clip.antiAliasWithSaveLayer,
       child: content,
     );
   }
@@ -775,9 +775,11 @@ class _Meta extends ConsumerWidget {
               ),
             ),
             if (detail?.subscriberText != null)
-              Text(
-                detail!.subscriberText!,
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              NoTabSelectionArea(
+                child: Text(
+                  detail!.subscriberText!,
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
               ),
           ],
         ),

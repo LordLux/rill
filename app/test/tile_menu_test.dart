@@ -328,6 +328,33 @@ void main() {
       expect(find.text('Link copied'), findsOneWidget);
     });
 
+    testWidgets('Copy shows a check at the press, makes room for it, and takes it back', (tester) async {
+      await tester.pumpWidget(harness(TileFor(video())));
+      await openMenu(tester);
+      await tester.tap(find.text('Share'));
+      await tester.pumpAndSettle();
+
+      final check = find.ancestor(of: find.byIcon(Icons.check_rounded), matching: find.byType(AnimatedScale));
+      final button = find.ancestor(of: find.text('Copy'), matching: find.byType(FilledButton));
+      expect(tester.widget<AnimatedScale>(check).scale, 0);
+      final restingWidth = tester.getSize(button).width;
+      final restingLeft = tester.getTopLeft(find.text('Copy')).dx;
+
+      await tester.tap(find.text('Copy'));
+      // One frame: the check is asked for before the clipboard has answered.
+      await tester.pump();
+      expect(tester.widget<AnimatedScale>(check).scale, 1);
+
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getSize(button).width, greaterThan(restingWidth + 16), reason: 'room for a 16 px check');
+      expect(tester.getTopLeft(find.text('Copy')).dx, lessThan(restingLeft), reason: 'the word moves left');
+
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.widget<AnimatedScale>(check).scale, 0);
+      expect(tester.getSize(button).width, restingWidth);
+    });
+
     testWidgets("a mix tile's Copy link is the mix's, not its seed video's alone", (tester) async {
       await tester.pumpWidget(harness(TileFor(mixWithSeed)));
       await openMenu(tester);

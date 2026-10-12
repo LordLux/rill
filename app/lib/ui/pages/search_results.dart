@@ -197,6 +197,7 @@ class _SearchFilterBar extends ConsumerWidget {
           ),
           const SizedBox(width: 8),
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: () {
               showDialog(context: context, builder: (_) => const SearchFiltersDialog());
             },

@@ -63,12 +63,15 @@ class NoTabSelectionArea extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Focus(
-    canRequestFocus: false,
-    skipTraversal: true,
-    includeSemantics: false,
-    descendantsAreTraversable: false,
-    child: SelectionArea(child: child),
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.text,
+    child: Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      includeSemantics: false,
+      descendantsAreTraversable: false,
+      child: SelectionArea(child: child),
+    ),
   );
 }
 

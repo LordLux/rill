@@ -8,11 +8,14 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryButton;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/ui/pages/playlist.dart';
+import 'package:rill/ui/player_shell.dart' show currentRouteProvider, homeRouteName, rootNavigatorKey, routeTrackerProvider;
 import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/widgets/queue_panel.dart';
 import 'package:rill/ui/widgets/shortcut_tooltip.dart';
@@ -363,7 +366,127 @@ void main() {
     expect(anchor.menuChildren.isNotEmpty, true, reason: 'menu is present for playlists');
   });
 
-  testWidgets('Mix source shows mix text and hides menu', (tester) async {
+  group('a playlist\'s header menu', () {
+    /// A playlist queue long enough to scroll, in a page that scrolls too, as
+    /// the watch page mounts it.
+    Future<void> pumpWithMenu(WidgetTester tester) async {
+      container = ProviderContainer(
+        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
+      );
+      addTearDown(container.dispose);
+      container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+        items: [for (var i = 1; i <= 20; i++) video('$i')],
+        currentIndex: 0,
+        mix: const MixQueue(playlistId: 'PL123', title: 'My Playlist', isPlaylist: true, exhausted: true, totalCount: 20),
+      ));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          navigatorKey: rootNavigatorKey,
+          navigatorObservers: [container.read(routeTrackerProvider)],
+          home: const Scaffold(
+            body: SingleChildScrollView(
+              child: Column(children: [EmbeddedQueuePanel(maxHeight: 360), SizedBox(height: 2000)]),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('My Playlist'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsOneWidget, reason: 'a right-click opens the menu');
+    }
+
+    testWidgets('Go to Playlist pushes the playlist\'s page, and Back comes back', (tester) async {
+      await pumpWithMenu(tester);
+
+      await tester.tap(find.text('Go to Playlist'));
+      // Not `pumpAndSettle`: the page's spinner never settles while its list is loading.
+      // The menu closes, then the route builds, then it comes on stage.
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+
+      expect(find.byType(PlaylistPage), findsOneWidget);
+      // A real route, reported by the tracker — never a name written into the
+      // provider by hand, which told the shell the watch page had been left
+      // while it was still on screen.
+      expect(container.read(currentRouteProvider), playlistRouteName);
+
+      rootNavigatorKey.currentState!.pop();
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      expect(find.byType(PlaylistPage), findsNothing);
+      expect(container.read(currentRouteProvider), homeRouteName);
+    });
+
+    // The header is the menu's own anchor, so a press on it is not the outside
+    // press that dismisses the menu everywhere else: it has to be handled.
+    testWidgets('a click on the header closes it, and is not also a click on the header', (tester) async {
+      await pumpWithMenu(tester);
+      // The list's own crossfade, among the header's and the rows'.
+      bool expanded() =>
+          tester
+              .widget<AnimatedCrossFade>(
+                find.byWidgetPredicate((w) => w is AnimatedCrossFade && w.firstChild is ConstrainedBox && w.secondChild is SizedBox),
+              )
+              .crossFadeState ==
+          CrossFadeState.showFirst;
+      expect(expanded(), isTrue);
+
+      // Left of where the menu opened, so the press lands on the header and not on the menu.
+      final onHeader = tester.getCenter(find.text('My Playlist')) + const Offset(-30, 0);
+      await tester.tapAt(onHeader);
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsNothing);
+      expect(expanded(), isTrue, reason: 'dismissing the menu does not collapse the queue');
+
+      await tester.tapAt(onHeader);
+      await tester.pumpAndSettle();
+      expect(expanded(), isFalse, reason: 'with no menu open the header collapses as before');
+    });
+
+    testWidgets('a right-click on the header moves it there instead of only closing it', (tester) async {
+      await pumpWithMenu(tester);
+      final before = tester.getTopLeft(find.text('Go to Playlist'));
+
+      await tester.tapAt(tester.getCenter(find.text('My Playlist')) + const Offset(-30, 4), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Go to Playlist'), findsOneWidget, reason: 'open again, in one click');
+      final after = tester.getTopLeft(find.text('Go to Playlist'));
+      expect(after.dx, closeTo(before.dx - 30, 1));
+      expect(after.dy, closeTo(before.dy + 4, 1));
+    });
+
+    testWidgets('closes when the page scrolls its header away', (tester) async {
+      await pumpWithMenu(tester);
+
+      final page = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+      page.jumpTo(40);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Go to Playlist'), findsNothing);
+    });
+
+    testWidgets('closes when the queue itself scrolls', (tester) async {
+      await pumpWithMenu(tester);
+
+      final list = tester
+          .state<ScrollableState>(
+            find.descendant(of: find.byType(ReorderableListView), matching: find.byType(Scrollable)).first,
+          )
+          .position;
+      list.jumpTo(40);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Go to Playlist'), findsNothing);
+    });
+  });
+
+  testWidgets('Mix source shows mix text, and its menu is the link alone', (tester) async {
     container = ProviderContainer();
     addTearDown(container.dispose);
 
@@ -382,7 +505,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final anchor = tester.widget<MenuAnchor>(find.byType(MenuAnchor));
-    expect(anchor.menuChildren.isEmpty, true, reason: 'menu is hidden for mixes');
+    // A mix has a link and no page: one entry, where a playlist has two.
+    expect(anchor.menuChildren, hasLength(1));
   });
 
   // The header builds its collapsed and its expanded subtitle at once and
@@ -490,6 +614,149 @@ void main() {
 
       expect(find.text('1 / 135'), findsOneWidget);
       expect(find.text('1 / 3'), findsNothing);
+    });
+  });
+
+  group("the header menu's link", () {
+    QueueState queueOf(MixQueue? mix) => QueueState(
+          items: [for (var i = 1; i <= 3; i++) video('$i')],
+          currentIndex: 1,
+          mix: mix,
+        );
+
+    test('a mix is the video it is on, in that mix; a playlist is its own page; a plain queue has none', () {
+      expect(
+        queueLinkFor(queueOf(const MixQueue(playlistId: 'RDabc', title: 'My Mix'))),
+        'https://www.youtube.com/watch?v=2&list=RDabc',
+      );
+      expect(
+        queueLinkFor(queueOf(const MixQueue(playlistId: 'PL123', title: 'List', isPlaylist: true))),
+        'https://www.youtube.com/playlist?list=PL123',
+      );
+      expect(queueLinkFor(queueOf(null)), isNull);
+    });
+
+    Future<void> pumpPanel(WidgetTester tester, MixQueue? mix) async {
+      container = ProviderContainer(
+        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
+      );
+      addTearDown(container.dispose);
+      container.read(queueProvider.notifier).debugSetStateForTest(queueOf(mix));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: Scaffold(body: EmbeddedQueuePanel(maxHeight: 360))),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a mix offers Copy link and nowhere to go, and copies the link', (tester) async {
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+      await pumpPanel(tester, const MixQueue(playlistId: 'RDabc', title: 'My Mix'));
+      await tester.tap(find.text('My Mix'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Go to Playlist'), findsNothing, reason: 'a mix has no page');
+      await tester.tap(find.text('Copy link'));
+      await tester.pumpAndSettle();
+      expect(copied, 'https://www.youtube.com/watch?v=2&list=RDabc');
+      expect(find.text('Link copied to clipboard'), findsOneWidget);
+    });
+
+    // Asked of the mix on purpose: its one short entry is the menu that came out
+    // narrow. A playlist's "Go to Playlist" is wide enough to pass on its own.
+    testWidgets('the menu is 200 wide even when all it holds is Copy link', (tester) async {
+      await pumpPanel(tester, const MixQueue(playlistId: 'RDabc', title: 'My Mix'));
+      await tester.tap(find.text('My Mix'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+
+      final row = tester.getSize(find.byType(MenuItemButton));
+      expect(tester.getSize(find.text('Copy link')).width, lessThan(150), reason: 'narrower than the minimum by itself');
+      expect(row.width, 200);
+    });
+
+    testWidgets('a queue put together by hand opens no menu at all', (tester) async {
+      await pumpPanel(tester, null);
+      final header = find.descendant(of: find.byType(EmbeddedQueuePanel), matching: find.byType(InkWell)).first;
+      await tester.tap(header, buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.byType(MenuItemButton), findsNothing);
+    });
+  });
+
+  group('a playlist\'s number column', () {
+    test('widens over the ten rows before a longer number', () {
+      expect(numberColumnDigits(50, 4), 2);
+      expect(numberColumnDigits(90, 4), 2, reason: 'the ramp starts here');
+      expect(numberColumnDigits(95, 4), 2.5);
+      expect(numberColumnDigits(100, 4), 3, reason: 'full width as 100 comes into view');
+      expect(numberColumnDigits(101, 4), 3);
+      expect(numberColumnDigits(990, 4), 3);
+      expect(numberColumnDigits(995, 4), 3.5);
+      expect(numberColumnDigits(1000, 4), 4);
+    });
+
+    test('is never wider than the playlist\'s last number needs', () {
+      expect(numberColumnDigits(98, 2), 2);
+      expect(numberColumnDigits(5000, 3), 3);
+    });
+
+    testWidgets('follows the scroll, and comes back the way it went', (tester) async {
+      container = ProviderContainer(
+        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
+      );
+      addTearDown(container.dispose);
+      container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+        items: [for (var i = 1; i <= 150; i++) video('$i')],
+        currentIndex: 0,
+        mix: const MixQueue(playlistId: 'PL123', title: 'Long', isPlaylist: true, exhausted: true, totalCount: 150),
+      ));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: Scaffold(body: EmbeddedQueuePanel(maxHeight: 360))),
+      ));
+      await tester.pumpAndSettle();
+
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: find.byType(ReorderableListView), matching: find.byType(Scrollable)).first,
+          )
+          .position;
+      final rowExtent = position.extentTotal / 150;
+
+      /// The width of the column the row numbered [number] sits in.
+      double columnOf(int number) =>
+          tester.getSize(find.ancestor(of: find.text('$number'), matching: find.byType(SizedBox)).first).width;
+
+      /// Scroll until [row]'s top edge is at the bottom of the list.
+      Future<void> bringToBottomEdge(double row) async {
+        position.jumpTo((row - 1) * rowExtent - position.viewportDimension);
+        await tester.pumpAndSettle();
+      }
+
+      final atTop = columnOf(2);
+      expect(atTop, lessThan(14), reason: 'single digits do not get the room 150 needs');
+
+      await bringToBottomEdge(60);
+      expect(columnOf(58), closeTo(14, 0.01), reason: 'two digits, well short of 90');
+
+      await bringToBottomEdge(95);
+      expect(columnOf(93), closeTo(17.5, 0.01), reason: 'half way through the ramp');
+
+      await bringToBottomEdge(100);
+      expect(columnOf(98), closeTo(21, 0.01), reason: 'ready before 100 shows');
+
+      await bringToBottomEdge(95);
+      expect(columnOf(93), closeTo(17.5, 0.01), reason: 'the same on the way back up');
+
+      position.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(columnOf(2), atTop);
     });
   });
 }
