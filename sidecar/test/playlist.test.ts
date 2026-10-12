@@ -145,6 +145,21 @@ describe('playlist.get', () => {
     expect(result.videoCount).toBeNull();
   });
 
+  // A continuation page repeats enough of the metadata to build a header from,
+  // and whatever it lacks (the tint, the cover) would replace the first page's.
+  test('the header is the first page\'s: a continuation has none, even with a title to build one from', async () => {
+    const first = sessionOf([page([row('a')], { token: 'next-page-token-longer-than-twenty-characters', title: 'Ado playlist', count: '135' })]);
+    expect((await getPlaylist(first.session, { playlistId: 'PLabc', continuation: null })).header).not.toBeNull();
+
+    const next = sessionOf([page([row('b')], { title: 'Ado playlist', count: '135' })]);
+    const result = await getPlaylist(next.session, { playlistId: 'PLabc', continuation: 'next-page' });
+    expect(result.header).toBeNull();
+    // Still passed on: the queue names and sizes the playlist from these.
+    expect(result.title).toBe('Ado playlist');
+    expect(result.videoCount).toBe(135);
+    expect(result.items.map((item) => item.id)).toEqual(['b']);
+  });
+
   test('unavailable entries are skipped, and the rest of the page ships', async () => {
     const { session } = sessionOf([
       page([row('a'), row('gone1', '[Deleted video]'), row('gone2', '[Private video]'), row('gone3', 'Blocked', { isPlayable: false }), row('b')]),
