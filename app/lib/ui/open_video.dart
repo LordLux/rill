@@ -193,6 +193,49 @@ Future<void> startPlaylistFromTile(
   }));
 }
 
+/// Play a playlist from its own page, from [index] of the [items] it has loaded.
+///
+/// **A queue that is already this playlist is kept.** Another row of the
+/// playlist that is on is a move within it, not a new start: replacing the queue
+/// threw away whatever had been reordered or removed in the panel and offered
+/// an Undo for a queue nobody meant to replace. The entry is found by id for
+/// that reason, since the queue's order may no longer be the page's. A video the
+/// queue does not hold (removed, or on a page it has not reached) starts the
+/// playlist afresh, as does any other queue, through [startPlaylistFromTile]
+/// with what the page already has.
+Future<void> playPlaylistFromPage(
+  BuildContext context,
+  WidgetRef ref,
+  String playlistId, {
+  required List<VideoItem> items,
+  required int index,
+  String? continuation,
+  String? title,
+  int? videoCount,
+}) async {
+  final queue = ref.read(queueProvider);
+  final mix = queue.mix;
+  if (mix != null && mix.isPlaylist && mix.playlistId == playlistId && index < items.length) {
+    final at = queue.entries.indexWhere((entry) => entry.item.id == items[index].id);
+    if (at >= 0) {
+      showWatchPage(ref);
+      if (at != queue.currentIndex) ref.read(queueProvider.notifier).jumpTo(at);
+      return;
+    }
+  }
+  await startPlaylistFromTile(
+    context,
+    ref,
+    playlistId,
+    title: title,
+    videoCount: videoCount,
+    // Nothing loaded yet is not "an empty playlist": let the queue ask.
+    loadedItems: items.isEmpty ? null : items,
+    continuation: continuation,
+    startIndex: index,
+  );
+}
+
 /// What tapping a tile should do, or null when nothing can happen.
 ///
 /// **One handler for every surface**, for the reason `openFromTile` already

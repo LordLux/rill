@@ -53,10 +53,21 @@ class _Playlists implements MixService {
 
   Duration delay = Duration.zero;
 
+  /// How long a continuation takes, when it should outlast a first page.
+  Duration continuationDelay = Duration.zero;
+
+  /// Added to every video number in thousands, so a test can tell which
+  /// answers a list was built from.
+  int era = 0;
+
   @override
   Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async {
     asked.add(continuation);
-    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    // As asked, not as answered: a request that outlives a change still
+    // returns what it was asked for.
+    final era = this.era;
+    final wait = continuation == null ? delay : (continuationDelay > Duration.zero ? continuationDelay : delay);
+    if (wait > Duration.zero) await Future<void>.delayed(wait);
     if (continuation == null) {
       final error = firstPageError;
       if (error != null) throw error;
@@ -81,7 +92,7 @@ class _Playlists implements MixService {
             ),
       title: 'My Playlist',
       videoCount: pages * perPage,
-      items: [for (var i = 0; i < perPage; i++) _video(page * perPage + i)],
+      items: [for (var i = 0; i < perPage; i++) _video(era * 1000 + page * perPage + i)],
       continuation: page + 1 < pages ? 'page-${page + 1}' : null,
     );
   }
@@ -115,8 +126,13 @@ const AuthState _signedOut = AuthState(status: AuthStatus.anonymous);
 
 late ProviderContainer _container;
 
-Future<void> _open(WidgetTester tester, _Playlists playlists, {AuthState auth = _signedOut}) async {
-  tester.view.physicalSize = const Size(1200, 800);
+Future<void> _open(
+  WidgetTester tester,
+  _Playlists playlists, {
+  AuthState auth = _signedOut,
+  Size size = const Size(1200, 800),
+}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
 
@@ -259,6 +275,19 @@ void main() {
       expect(skeleton, findsNothing);
       expect(find.text('Video 0'), findsOneWidget);
     });
+
+    // Nothing in it scrolls, so it is cut off at the bottom: laid out in a
+    // plain column, a window shorter than the header card overflowed.
+    for (final size in const [Size(700, 300), Size(1200, 300)]) {
+      testWidgets('the skeleton fits a ${size.width.toInt()} x ${size.height.toInt()} window', (tester) async {
+        final playlists = _Playlists()..delay = const Duration(milliseconds: 900);
+        await _open(tester, playlists, size: size);
+
+        expect(find.byWidgetPredicate((widget) => widget is Semantics && widget.properties.label == 'Loading playlist'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await _settle(tester);
+      });
+    }
 
     testWidgets('a first page that fails says what was said, and asking again works', (tester) async {
       final playlists = _Playlists()..firstPageError = RpcException('UPSTREAM_ERROR', 'The playlist does not exist.', RpcRetryMode.auto);
@@ -408,7 +437,42 @@ void main() {
     });
   });
 
-  testWidgets('a change of identity reads the page again, and keeps the old one on screen meanwhile', (tester) async {
+  // A page asked for under one identity must not land under the next: the
+  // re-read is the whole of what the new viewer may see.
+  testWidgets('a page still on the wire when the identity changes is dropped', (tester) async {
+    final playlists = _Playlists();
+    await _open(tester, playlists, auth: _signedIn);
+
+    playlists.continuationDelay = const Duration(milliseconds: 900);
+    final list = _list(tester);
+    list.jumpTo(list.maxScrollExtent);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(playlists.asked, [null, 'page-1'], reason: 'the second page is out');
+
+    playlists.era = 1;
+    (_container.read(authProvider.notifier) as _Auth).become(_signedOut);
+    // The re-read answers first, then the old viewer's page, then whatever the
+    // new page went on to ask for.
+    // Looked at every 50 ms and not only at the end: the new page's own next
+    // request would paper over a stale one a moment later.
+    var reRead = false;
+    for (var i = 0; i < 60; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      final items = _container.read(playlistProvider('PL123')).value?.items ?? const <VideoItem>[];
+      reRead = reRead || (items.isNotEmpty && items.first.id == 'v1000');
+      if (!reRead) continue;
+      expect(
+        items.where((item) => !item.id.startsWith('v1')),
+        isEmpty,
+        reason: 'at ${i * 50} ms: nothing the old viewer asked for is in the list the new one sees',
+      );
+    }
+
+    expect(reRead, isTrue);
+    expect(playlists.asked.take(3), [null, 'page-1', null]);
+  });
+
+  testWidgets('signing in reads the page again, and keeps the anonymous one on screen meanwhile', (tester) async {
     final playlists = _Playlists();
     await _open(tester, playlists);
     expect(playlists.asked, [null]);
@@ -422,5 +486,111 @@ void main() {
 
     await _settle(tester);
     expect(find.text('Video 0'), findsOneWidget);
+  });
+
+  // The other direction is not symmetric: what is on screen may be a private
+  // playlist, and it must not outlive the account by the length of a request.
+  testWidgets('signing out takes the page off the screen at once, not when the re-read lands', (tester) async {
+    final playlists = _Playlists(owned: true);
+    await _open(tester, playlists, auth: _signedIn);
+    expect(find.text('My Playlist'), findsOneWidget);
+
+    playlists.delay = const Duration(milliseconds: 400);
+    (_container.read(authProvider.notifier) as _Auth).become(_signedOut);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('My Playlist'), findsNothing);
+    expect(find.text('Video 0'), findsNothing);
+    expect(find.byWidgetPredicate((widget) => widget is Semantics && widget.properties.label == 'Loading playlist'), findsOneWidget);
+
+    await _settle(tester);
+    expect(find.text('Video 0'), findsOneWidget);
+  });
+
+  group('a queue that is already this playlist', () {
+    Future<void> playThenReturn(WidgetTester tester, _Playlists playlists) async {
+      await _open(tester, playlists);
+      await tester.tap(find.text('Video 1'));
+      await _settle(tester);
+      // The "Queue replaced" snack bar of that first start, if any, runs out.
+      await tester.pump(const Duration(seconds: 6));
+      await _settle(tester);
+      expect(_container.read(queueProvider).current?.id, 'v1');
+    }
+
+    testWidgets('is moved within by another row: same entries, no undo, no fetch', (tester) async {
+      final playlists = _Playlists();
+      await playThenReturn(tester, playlists);
+      final before = _container.read(queueProvider).entries;
+      final askedBefore = playlists.asked.length;
+
+      await tester.tap(find.text('Video 3'));
+      await _settle(tester);
+
+      final queue = _container.read(queueProvider);
+      expect(queue.current?.id, 'v3');
+      expect(identical(queue.entries[3], before[3]), isTrue, reason: 'the queue was kept, not rebuilt');
+      expect(find.textContaining('Queue replaced'), findsNothing);
+      expect(playlists.asked.where((token) => token == null), hasLength(1));
+      expect(playlists.asked.length, askedBefore);
+    });
+
+    testWidgets('is restarted from its first video by Play all, without replacing it', (tester) async {
+      final playlists = _Playlists();
+      await playThenReturn(tester, playlists);
+      final before = _container.read(queueProvider).entries;
+
+      await tester.tap(find.text('Play all'));
+      await _settle(tester);
+
+      final queue = _container.read(queueProvider);
+      expect(queue.current?.id, 'v0');
+      expect(identical(queue.entries.first, before.first), isTrue);
+      expect(find.textContaining('Queue replaced'), findsNothing);
+    });
+  });
+
+  testWidgets('Play all starts from what the page has loaded, without asking for page one again', (tester) async {
+    final playlists = _Playlists();
+    await _open(tester, playlists);
+
+    await tester.tap(find.text('Play all'));
+    await _settle(tester);
+
+    expect(_container.read(queueProvider).current?.id, 'v0');
+    expect(playlists.asked.where((token) => token == null), hasLength(1));
+  });
+
+  // The header card stacks its artwork over its text below a width of 664,
+  // its own margins included.
+  testWidgets('the header puts its artwork beside its text from 664 wide, and over it below', (tester) async {
+    await _open(tester, _Playlists());
+
+    Future<void> resize(double width) async {
+      tester.view.physicalSize = Size(width, 800);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    final card = find.byType(TooltipBounds).first;
+    double headerWidth() => tester.getSize(card).width + 24;
+    bool sideBySide() {
+      final art = tester.getRect(find.descendant(of: card, matching: find.byType(AspectRatio)).first);
+      return tester.getTopLeft(find.text('My Playlist')).dy < art.bottom;
+    }
+
+    // Narrow enough for the stacked page layout, where the header is as wide
+    // as the page; what the rail takes is measured, not assumed.
+    await resize(900);
+    final rail = 900 - headerWidth();
+
+    await resize(rail + 664);
+    expect(headerWidth(), 664);
+    expect(sideBySide(), isTrue);
+
+    await resize(rail + 663);
+    expect(headerWidth(), 663);
+    expect(sideBySide(), isFalse);
   });
 }

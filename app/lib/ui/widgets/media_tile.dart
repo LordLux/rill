@@ -240,8 +240,10 @@ class MediaTile extends StatefulWidget {
   /// to nothing.
   final VoidCallback? onTap;
 
-  /// Specifically opens the thumbnail. If provided, tapping the thumbnail executes
-  /// this instead of `onTap`.
+  /// What the thumbnail does when that is not what the rest of the tile does:
+  /// it **plays** what the tile shows, while [onTap] opens it. The thumbnail is
+  /// then a target of its own, named "Play" and the title and reached by Tab,
+  /// and the tile is named "Open", its kind and the title.
   final VoidCallback? onThumbnailTap;
 
   /// The two hover actions. Both sit inside `IconButton`s, which win the gesture
@@ -548,9 +550,12 @@ class _MediaTileState extends State<MediaTile> {
     // Views and age ("1M views • 3y ago"): after who made it, before the badges and the length.
     final secondary = spec.secondaryLine;
     return [
-      // A tile whose thumbnail does something else (a playlist: it plays) says
-      // what the tile itself does, since "Play …" is the thumbnail's name.
-      if (widget.onThumbnailTap != null) 'Open playlist ${spec.title}' else ...[?kind, spec.title],
+      // A tile whose thumbnail plays it says what the tile itself does, since
+      // "Play …" is the thumbnail's name. From the kind, not a fixed word: a
+      // playlist is the only tile with a second action today, not by definition.
+      if (widget.onThumbnailTap != null)
+        ['Open', ?kind?.toLowerCase(), spec.title].join(' ')
+      else ...[?kind, spec.title],
       spec.primaryLine,
       ?secondary,
       if (spec.isMembersOnly) 'Members only',
