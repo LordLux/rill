@@ -1,3 +1,4 @@
+import 'dart:async' show scheduleMicrotask;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -673,6 +674,12 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                             _pressClosedMenu = event.buttons == kPrimaryButton && menuController.isOpen;
                             if (_pressClosedMenu) menuController.close();
                           },
+                          // The flag is this press's alone. Cleared once the press is
+                          // over and its tap has run (the tap is dispatched after this
+                          // listener, in the same turn), or Enter on the header was
+                          // swallowed for good after a click had closed the menu.
+                          onPointerUp: (_) => scheduleMicrotask(() => _pressClosedMenu = false),
+                          onPointerCancel: (_) => scheduleMicrotask(() => _pressClosedMenu = false),
                           child: GestureDetector(
                             excludeFromSemantics: true,
                             // Open or not: an open menu moves to the new place, as it does

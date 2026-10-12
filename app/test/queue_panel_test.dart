@@ -490,6 +490,30 @@ void main() {
       expect(expanded(), isFalse, reason: 'with no menu open the header collapses as before');
     });
 
+    // "That press only closed the menu" was remembered until the next press,
+    // so the keyboard's next press of the header did nothing, every time.
+    testWidgets('after such a click, Enter on the header still collapses it', (tester) async {
+      await pumpWithMenu(tester);
+      bool expanded() =>
+          tester
+              .widget<AnimatedCrossFade>(
+                find.byWidgetPredicate((w) => w is AnimatedCrossFade && w.firstChild is ConstrainedBox && w.secondChild is SizedBox),
+              )
+              .crossFadeState ==
+          CrossFadeState.showFirst;
+
+      await tester.tapAt(tester.getCenter(find.text('My Playlist')) + const Offset(-30, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Go to Playlist'), findsNothing);
+      expect(expanded(), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(expanded(), isFalse, reason: 'the header is focused and Enter presses it');
+    });
+
     testWidgets('a right-click on the header moves it there instead of only closing it', (tester) async {
       await pumpWithMenu(tester);
       final before = tester.getTopLeft(find.text('Go to Playlist'));
