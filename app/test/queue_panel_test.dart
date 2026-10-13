@@ -465,8 +465,10 @@ void main() {
     });
 
     // The header is the menu's own anchor, so a press on it is not the outside
-    // press that dismisses the menu everywhere else: it has to be handled.
-    testWidgets('a click on the header closes it, and is not also a click on the header', (tester) async {
+    // press that dismisses the menu everywhere else: it has to be handled. And
+    // like a click anywhere else, it then does what it would have done: the
+    // header collapses. (For one round it only dismissed; that was reversed.)
+    testWidgets('a click on the header closes it and collapses the queue, in the one click', (tester) async {
       await pumpWithMenu(tester);
       // The list's own crossfade, among the header's and the rows'.
       bool expanded() =>
@@ -483,30 +485,14 @@ void main() {
       await tester.tapAt(onHeader);
       await tester.pumpAndSettle();
       expect(find.text('Go to Playlist'), findsNothing);
-      expect(expanded(), isTrue, reason: 'dismissing the menu does not collapse the queue');
+      expect(expanded(), isFalse, reason: 'the same click collapses it');
 
       await tester.tapAt(onHeader);
       await tester.pumpAndSettle();
-      expect(expanded(), isFalse, reason: 'with no menu open the header collapses as before');
-    });
+      expect(expanded(), isTrue, reason: 'and the next one expands it again');
 
-    // "That press only closed the menu" was remembered until the next press,
-    // so the keyboard's next press of the header did nothing, every time.
-    testWidgets('after such a click, Enter on the header still collapses it', (tester) async {
-      await pumpWithMenu(tester);
-      bool expanded() =>
-          tester
-              .widget<AnimatedCrossFade>(
-                find.byWidgetPredicate((w) => w is AnimatedCrossFade && w.firstChild is ConstrainedBox && w.secondChild is SizedBox),
-              )
-              .crossFadeState ==
-          CrossFadeState.showFirst;
-
-      await tester.tapAt(tester.getCenter(find.text('My Playlist')) + const Offset(-30, 0));
-      await tester.pumpAndSettle();
-      expect(find.text('Go to Playlist'), findsNothing);
-      expect(expanded(), isTrue);
-
+      // Nothing about that click is remembered: the keyboard's next press of
+      // the header works too.
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -752,6 +738,77 @@ void main() {
       await tester.tap(header, buttons: kSecondaryButton);
       await tester.pumpAndSettle();
       expect(find.byType(MenuItemButton), findsNothing);
+    });
+  });
+
+  // The list is lazy, and scrolling to the playing row used to need that row
+  // to be built already: true for "next", false for a playlist started deep.
+  group('the list goes to what is playing', () {
+    Future<void> pumpAt(WidgetTester tester, int index, {bool inPage = false}) async {
+      container = ProviderContainer(
+        overrides: [mixServiceProvider.overrideWithValue(_SilentMixService())],
+      );
+      addTearDown(container.dispose);
+      container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+        items: [for (var i = 1; i <= 150; i++) video('$i')],
+        currentIndex: index,
+        mix: const MixQueue(playlistId: 'PL123', title: 'Long', isPlaylist: true, exhausted: true, totalCount: 150),
+      ));
+      const panel = EmbeddedQueuePanel(maxHeight: 360);
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Scaffold(
+            body: inPage
+                ? const SingleChildScrollView(
+                    child: Column(children: [SizedBox(height: 300), panel, SizedBox(height: 2000)]),
+                  )
+                : panel,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    Finder listScrollable() =>
+        find.descendant(of: find.byType(ReorderableListView), matching: find.byType(Scrollable)).first;
+
+    /// The playing row sits at the top of the list's own viewport.
+    void expectAtTop(WidgetTester tester, String title) {
+      expect(find.text(title), findsOneWidget, reason: '$title is in view');
+      final row = tester.getRect(find.ancestor(of: find.text(title), matching: find.byType(ListTile)).first);
+      final viewport = tester.getRect(listScrollable());
+      expect(row.top, closeTo(viewport.top, 1));
+    }
+
+    testWidgets('when the panel appears with the playhead already deep in the queue', (tester) async {
+      await pumpAt(tester, 100);
+      expectAtTop(tester, 'Video 101');
+    });
+
+    testWidgets('when the playhead jumps to a row far from any that is built', (tester) async {
+      await pumpAt(tester, 0);
+      expect(find.text('Video 121'), findsNothing, reason: 'not built: the list is lazy');
+
+      container.read(queueProvider.notifier).jumpTo(120);
+      await tester.pumpAndSettle();
+      expectAtTop(tester, 'Video 121');
+    });
+
+    // `Scrollable.ensureVisible` scrolls every scrollable above the row, so the
+    // watch page jumped down each time the queue advanced (todo 64).
+    testWidgets('and moves only itself: the page it sits in stays where it is', (tester) async {
+      await pumpAt(tester, 0, inPage: true);
+      final page = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+      expect(page.pixels, 0);
+
+      container.read(queueProvider.notifier).jumpTo(1);
+      await tester.pumpAndSettle();
+      container.read(queueProvider.notifier).jumpTo(60);
+      await tester.pumpAndSettle();
+
+      expectAtTop(tester, 'Video 61');
+      expect(page.pixels, 0, reason: 'the page did not move');
     });
   });
 

@@ -1,9 +1,8 @@
-import 'dart:async' show scheduleMicrotask;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
-import 'package:flutter/rendering.dart' show OverflowBoxFit;
+import 'package:flutter/rendering.dart' show OverflowBoxFit, RenderAbstractViewport;
 import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey, Clipboard, ClipboardData;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -107,9 +106,6 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
   /// The enclosing page's scroll position, watched to close the header menu.
   ScrollPosition? _pageScroll;
 
-  /// The press now in progress closed the header menu, so it is not also a
-  /// click on the header: dismissing a menu should not collapse the queue.
-  bool _pressClosedMenu = false;
   bool _expanded = true;
 
   /// True while the clear-sweep animation is running. Disables taps and
@@ -181,6 +177,9 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     );
     _syncEntries(ref.read(queueProvider).entries);
     _syncNumberDigits();
+    // The playhead does not move for a panel that appears with it already
+    // somewhere: the watch page opening on a queue started at its 80th video.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent(animate: false));
   }
 
   @override
@@ -310,23 +309,48 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
   ///
   /// Called a frame after the playhead moves, so the row's key is measuring
   /// the layout the new `isCurrent` flags produced rather than the stale one.
-  /// A silent no-op when the row is not built at all — off-screen far enough
-  /// that `ReorderableListView`'s cache extent never reached it — rather than
-  /// jumping there first: every real trigger (autoplay, next/previous, or a
-  /// tap on the row itself) starts from a row that is already on screen or
-  /// adjacent to one that is.
-  void _scrollToCurrent() {
+  ///
+  /// **The list's own position, not `Scrollable.ensureVisible`**, which scrolls
+  /// every scrollable above the row as well and took the watch page with it.
+  ///
+  /// **A row that is not built is gone to, not given up on.** The list is lazy,
+  /// and a playlist started at its 80th video, or the panel appearing with the
+  /// playhead already deep in the queue, has no row to measure: the list jumps
+  /// to about where it is and measures it on the next frame ([attempt] bounds
+  /// that). Only a row already in reach is animated to; the rest is a jump.
+  void _scrollToCurrent({bool animate = true, int attempt = 0}) {
     if (!mounted) return;
-    final entry = ref.read(queueProvider).currentEntry;
-    if (entry == null) return;
-    final ctx = _itemKeys[entry]?.currentContext;
-    if (ctx == null) return;
-    Scrollable.ensureVisible(
-      ctx,
-      alignment: 0.0,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
+    void again() {
+      if (attempt >= 4) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent(animate: false, attempt: attempt + 1));
+    }
+
+    final queue = ref.read(queueProvider);
+    final entry = queue.currentEntry;
+    final index = queue.currentIndex;
+    if (entry == null || index == null) return;
+    // The list is not on screen yet: the panel has only just had rows to show.
+    if (!_baseScroll.hasClients) return again();
+    final position = _baseScroll.position;
+    if (!position.hasContentDimensions) return again();
+
+    final row = _itemKeys[entry]?.currentContext?.findRenderObject();
+    if (row == null || !row.attached) {
+      final extent = position.extentTotal / math.max(queue.entries.length, 1);
+      position.jumpTo((index * extent).clamp(position.minScrollExtent, position.maxScrollExtent));
+      return again();
+    }
+
+    final target = RenderAbstractViewport.of(row)
+        .getOffsetToReveal(row, 0.0)
+        .offset
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() < 0.5) return;
+    if (animate) {
+      position.animateTo(target, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+    } else {
+      position.jumpTo(target);
+    }
   }
 
   Future<void> _animateClear(QueueController controller) async {
@@ -668,18 +692,13 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                         key: _headerKey,
                         color: scheme.surfaceContainerHighest,
                         // The header is the menu's own anchor, so a press on it is not
-                        // the "outside" press that closes the menu everywhere else.
+                        // the "outside" press that closes the menu everywhere else:
+                        // it is closed here. The press then does what it would have
+                        // done, as a click anywhere else does once its menu is gone.
                         child: Listener(
                           onPointerDown: (event) {
-                            _pressClosedMenu = event.buttons == kPrimaryButton && menuController.isOpen;
-                            if (_pressClosedMenu) menuController.close();
+                            if (event.buttons == kPrimaryButton && menuController.isOpen) menuController.close();
                           },
-                          // The flag is this press's alone. Cleared once the press is
-                          // over and its tap has run (the tap is dispatched after this
-                          // listener, in the same turn), or Enter on the header was
-                          // swallowed for good after a click had closed the menu.
-                          onPointerUp: (_) => scheduleMicrotask(() => _pressClosedMenu = false),
-                          onPointerCancel: (_) => scheduleMicrotask(() => _pressClosedMenu = false),
                           child: GestureDetector(
                             excludeFromSemantics: true,
                             // Open or not: an open menu moves to the new place, as it does
@@ -688,9 +707,7 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                                 ? null
                                 : menuController.open(position: details.localPosition),
                             child: InkWell(
-                              onTap: _clearing
-                                  ? null
-                                  : () {if (!_pressClosedMenu) _onCollapse();},
+                              onTap: _clearing ? null : () => _onCollapse(),
                               borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
                               child: Padding(
                                 padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
