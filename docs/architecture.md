@@ -1000,6 +1000,17 @@ ergonomics for a file that is iterated on almost entirely by hot reload; it has
 been flagged as non-idiomatic twice, so it is written down rather than argued
 again.
 
+**The queue scrolls its own list to the playing row, and goes to a row that is
+not built.** `_scrollToCurrent` (`queue_panel.dart`) moves the list's own
+position to the row's offset in the list's viewport. It used
+`Scrollable.ensureVisible`, which scrolls every scrollable above the row, so the
+watch page jumped down each time the queue advanced (`todo.md` 64, closed
+2026-10-13). And it gave up when the row was not built, which held while every
+move was to a neighbour and stopped holding with playlists: one started at its
+80th video, or the panel appearing with the playhead already deep in the queue,
+has no row to measure in a lazy list. It now jumps to about where the row is and
+measures on the next frame; only a row already in reach is animated to.
+
 **The queue does not open as a modal sheet.** `showQueuePanel` — a bottom sheet
 wrapping the panel in a fixed-height box — was deleted: a cleared queue draws
 nothing while the sheet stays up as an empty rectangle. The queue belongs under

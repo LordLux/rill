@@ -298,6 +298,9 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
   /// text instead of beside it. That is a card 640 wide.
   static const double _stackBelowWidth = 664;
 
+  /// The artwork's width when it sits beside the text.
+  static const double _sideArtWidth = 300;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tint = _PlaylistTint.of(context, header);
@@ -322,9 +325,16 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 300, child: artwork),
+                    SizedBox(width: _sideArtWidth, child: artwork),
                     const SizedBox(width: 24),
-                    Expanded(child: details),
+                    // Centred against the artwork while it is the shorter of
+                    // the two; a long description still starts at the top.
+                    Expanded(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: _sideArtWidth / ScreenValues.normalAspectRatio),
+                        child: Align(alignment: Alignment.centerLeft, child: details),
+                      ),
+                    ),
                   ],
                 ),
         );
@@ -488,7 +498,9 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
             Expanded(
               child: FilledButton.icon(
                 icon: const Icon(Icons.play_arrow_rounded, size: 30),
-                label: const Text('Play all'),
+                // One line, always: where the block is at its narrowest (beside the
+                // artwork in a 664 header) a wrapping label doubled the button's height.
+                label: const Text('Play all', maxLines: 1, softWrap: false, overflow: TextOverflow.fade),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size(40, 46),
                   backgroundColor: tint.on,
@@ -580,39 +592,74 @@ class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerP
       child: OverflowBox(alignment: Alignment.topCenter, maxHeight: double.infinity, child: child),
     );
 
-    Widget cardContent() => Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 316),
-              child: AspectRatio(
-                aspectRatio: ScreenValues.normalAspectRatio,
+    Widget circle(double diameter) => Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(color: block, shape: BoxShape.circle),
+    );
+
+    Widget art() => AspectRatio(
+      aspectRatio: ScreenValues.normalAspectRatio,
+      child: Container(decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(12))),
+    );
+
+    // The header's text block, line for line: title, owner, counts, then
+    // "Play all" and its three round buttons, with `_details`' own gaps.
+    Widget details() => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        bar(220, 26),
+        const SizedBox(height: 10),
+        Row(mainAxisSize: MainAxisSize.min, children: [circle(24), const SizedBox(width: 8), bar(90, 13)]),
+        const SizedBox(height: 8),
+        bar(200, 13),
+        const SizedBox(height: 18),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 340),
+          child: Row(
+            children: [
+              Expanded(
                 child: Container(
-                  decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(12)),
+                  height: 46,
+                  decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(23)),
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
-            bar(220, 24),
-            const SizedBox(height: 12),
-            bar(120, 13),
-            const SizedBox(height: 8),
-            bar(180, 12),
-            const SizedBox(height: 18),
-            bar(160, 46),
-          ],
-        );
+              for (var i = 0; i < 3; i++) ...[const SizedBox(width: 8), circle(40)],
+            ],
+          ),
+        ),
+      ],
+    );
 
-    Widget card({required bool beside}) => Padding(
-      padding: beside ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Container(
-        decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(15)),
-        padding: const EdgeInsets.all(22),
-        // Beside the list the card is the page's height, which a short window
-        // makes less than what it holds.
-        child: beside ? cutOff(cardContent()) : cardContent(),
-      ),
+    // The same two arrangements as the real header, switched at the same width,
+    // or the page visibly rearranges itself when it arrives.
+    Widget card({required bool beside}) => LayoutBuilder(
+      builder: (context, constraints) {
+        final content = constraints.maxWidth < _PlaylistHeaderWidget._stackBelowWidth
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [art(), const SizedBox(height: 18), details()],
+              )
+            : Row(
+                children: [
+                  SizedBox(width: _PlaylistHeaderWidget._sideArtWidth, child: art()),
+                  const SizedBox(width: 24),
+                  Expanded(child: details()),
+                ],
+              );
+        return Padding(
+          padding: beside ? const EdgeInsets.fromLTRB(12, 12, 4, 12) : const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: Container(
+            decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(15)),
+            padding: const EdgeInsets.all(22),
+            // Beside the list the card is the page's height, which a short window
+            // makes less than what it holds.
+            child: beside ? cutOff(content) : content,
+          ),
+        );
+      },
     );
 
     Widget row() => SizedBox(

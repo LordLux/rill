@@ -289,6 +289,31 @@ void main() {
       });
     }
 
+    // A skeleton laid out differently from the page it stands in for makes the
+    // page jump when it arrives: the artwork is the piece to watch.
+    for (final (size, what) in const [
+      (Size(1250, 800), 'the header beside the list'),
+      (Size(1000, 800), 'the header above the list, artwork beside its text'),
+      (Size(800, 800), 'the header above the list, artwork over its text'),
+    ]) {
+      testWidgets('the skeleton has its artwork where the page will: $what', (tester) async {
+        final playlists = _Playlists()..delay = const Duration(milliseconds: 900);
+        await _open(tester, playlists, size: size);
+
+        final skeleton = find.byWidgetPredicate((widget) => widget is Semantics && widget.properties.label == 'Loading playlist');
+        final placeholder = tester.getRect(find.descendant(of: skeleton, matching: find.byType(AspectRatio)).first);
+
+        await _settle(tester);
+        expect(skeleton, findsNothing);
+        final artwork = tester.getRect(find.descendant(of: find.byType(TooltipBounds).first, matching: find.byType(AspectRatio)).first);
+
+        expect(placeholder.left, closeTo(artwork.left, 1));
+        expect(placeholder.top, closeTo(artwork.top, 1));
+        expect(placeholder.width, closeTo(artwork.width, 1));
+        expect(placeholder.height, closeTo(artwork.height, 1));
+      });
+    }
+
     testWidgets('a first page that fails says what was said, and asking again works', (tester) async {
       final playlists = _Playlists()..firstPageError = RpcException('UPSTREAM_ERROR', 'The playlist does not exist.', RpcRetryMode.auto);
       await _open(tester, playlists);
@@ -588,6 +613,14 @@ void main() {
     await resize(rail + 664);
     expect(headerWidth(), 664);
     expect(sideBySide(), isTrue);
+
+    // Beside the artwork, the text block (title down to the buttons) is
+    // centred on it, not hung from its top with the slack all underneath.
+    final art = tester.getRect(find.descendant(of: card, matching: find.byType(AspectRatio)).first);
+    final top = tester.getRect(find.text('My Playlist')).top;
+    final bottom = tester.getRect(find.ancestor(of: find.text('Play all'), matching: find.bySubtype<FilledButton>())).bottom;
+    expect(bottom - top, lessThan(art.height), reason: 'only a block shorter than the artwork has slack to share');
+    expect((top + bottom) / 2, closeTo(art.center.dy, 1));
 
     await resize(rail + 663);
     expect(headerWidth(), 663);
