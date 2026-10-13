@@ -332,11 +332,15 @@ Share through `share_dialog.dart`. A playlist tile's title opens it, and so does
   channel pages exist (item 61).
 - **Unavailable entries** are omitted by YouTube anonymously and need parameters
   not yet sent, so they have no signal besides not arriving.
-- **"The playlist does not exist." still offers *Try again*.** Task 35 wanted no
-  retry there and one for a network failure, but both arrive as `UPSTREAM_ERROR`
-  (`retry: auto`), so the page cannot tell them apart. Telling them apart is a
-  new error code for "YouTube answered, and the answer is no", which is a change
-  to the contract (`protocol.md` §4), not to this page.
+- **No continuation response has been captured.** `corpus/playlist-get-continuation.json`
+  is a first-page capture parsed as a continuation: it pins the answer's shape,
+  not how a real continuation body is walked. A real one needs a stage in
+  `capture.ts` and a declaration in `fixtures.ts`, then a capture run.
+- **The rest of the corpus is older than the fixtures beside it.** Running
+  `export-contract-corpus` on 2026-10-13 rewrote 21 committed entries, because
+  the local fixtures are a later capture than the one those came from; only the
+  two new `playlist-get-*` entries were kept. A full re-export is a decision of
+  its own, and it would also bring the playlist entries up to F57's view counts.
 - **Not read with Narrator, and not walked with `RILL_FOCUS_PROBE`.** The page's
   Tab order, its tap targets' names and its selectable text are asserted by test
   only (`focus_traversal_test.dart`, `playlist_page_flow_test.dart`).
