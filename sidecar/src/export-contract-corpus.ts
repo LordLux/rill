@@ -6,8 +6,18 @@ import { fileURLToPath } from 'node:url';
 import { parsePlaylistMembership } from './actions/playlist.ts';
 import { parseComments } from './parser/comments.ts';
 import { parseFeed } from './parser/feed.ts';
+import { parsePlaylistPage } from './parser/playlist.ts';
 import { parseVideoDetail } from './parser/video.ts';
-import type { ArtistPanel, Chip, CommentsResult, FeedItem, PlaylistMembershipResult, VideoDetail } from './types.ts';
+import type {
+  ArtistPanel,
+  Chip,
+  CommentsResult,
+  FeedItem,
+  PlaylistMembershipResult,
+  PlaylistResult,
+  VideoDetail,
+  VideoItem,
+} from './types.ts';
 import { logger } from './log.ts';
 
 const log = logger('corpus');
@@ -372,9 +382,80 @@ async function main() {
     log.info('exported sanitised video-detail.json');
   }
 
+  await exportPlaylistGet(files);
   await exportViewerState();
 
   audit();
+}
+
+/**
+ * `playlist.get`'s own answer, sanitised.
+ *
+ * The loop above runs every fixture through `parseFeed`, so the six
+ * `playlist*.json` entries have a feed page's shape and none of them holds what
+ * `playlist.get` adds: the title, the count and the header. The app decodes
+ * those by hand, and nothing checked that the two sides agree on a single key.
+ */
+function sanitisePlaylistResult(result: PlaylistResult, index: number): PlaylistResult {
+  const header = result.header;
+  // Three rows are enough to be a list. More of somebody's private playlist
+  // than a shape reference needs is more than belongs in a public repository.
+  const items = result.items.slice(0, 3).map((item, position) => sanitiseItem(item, position) as VideoItem);
+  return {
+    header:
+      header === null
+        ? null
+        : {
+            thumbnailUrl: header.thumbnailUrl === null ? null : 'https://fake.url/img1.jpg',
+            ownerName: header.ownerName === null ? null : 'Sanitised Channel 1',
+            ownerChannelId: header.ownerChannelId === null ? null : 'chan_001',
+            ownerAvatarUrl: header.ownerAvatarUrl === null ? null : 'https://fake.url/avatar1.jpg',
+            // Kept, as an item's is: a display string the contract passes through.
+            viewCountText: header.viewCountText,
+            description: header.description === null ? null : 'Sanitised Description 1',
+            // `visibility`, `backgroundColor` and `isOwnedByViewer` are the
+            // sidecar's own closed set, YouTube's palette and a flag. They are
+            // the fields this entry exists to pin, and they identify nobody.
+            visibility: header.visibility,
+            backgroundColor: header.backgroundColor,
+            isOwnedByViewer: header.isOwnedByViewer,
+          },
+    title: result.title === null ? null : 'Sanitised Title 1',
+    // How long somebody's own playlist is is theirs. The number of rows kept
+    // says nothing and is still a number where one is expected.
+    videoCount: result.videoCount === null ? null : items.length,
+    items,
+    continuation: sanitiseContinuation(result.continuation, index),
+  };
+}
+
+/**
+ * Two entries, both through `parsePlaylistPage`, the function the handler
+ * itself answers with: a first page of a playlist the viewer owns (a header,
+ * with `visibility` and `isOwnedByViewer` in a known state), and a continuation
+ * (no header).
+ *
+ * **The continuation entry is a first-page capture parsed as a continuation.**
+ * No continuation response has been captured, and one cannot be added without
+ * a full capture run (`fixtures.ts`). What it pins is the answer's shape for a
+ * continuation, which is what the app decodes; it says nothing about how a real
+ * continuation body is walked.
+ */
+async function exportPlaylistGet(files: string[]): Promise<void> {
+  const entries = [
+    { fixture: 'playlist-private-owned.json', out: 'playlist-get-first.json', isContinuation: false },
+    { fixture: 'playlist-public-anon.json', out: 'playlist-get-continuation.json', isContinuation: true },
+  ];
+  for (const [index, entry] of entries.entries()) {
+    if (!files.includes(entry.fixture)) {
+      log.info(`no ${entry.fixture} on this machine: corpus/${entry.out} is left as committed`);
+      continue;
+    }
+    const raw = JSON.parse(await readFile(join(FIXTURES, entry.fixture), 'utf8'));
+    const page = parsePlaylistPage(raw, entry.isContinuation, entry.fixture);
+    await writeFile(join(CORPUS, entry.out), JSON.stringify(sanitisePlaylistResult(page, 60 + index), null, 2), 'utf8');
+    log.info(`exported sanitised ${entry.out}`);
+  }
 }
 
 /**
