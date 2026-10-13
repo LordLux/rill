@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/pages/playlist.dart';
+import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player_shell.dart' show currentRouteProvider, homeRouteName, rootNavigatorKey, routeTrackerProvider;
 import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/widgets/queue_panel.dart';
@@ -536,6 +537,35 @@ void main() {
 
       expect(find.text('Go to Playlist'), findsNothing);
     });
+
+    // The header can leave with no pointer involved, and a menu still open on
+    // an anchor that is gone is the orphan that freezes the accessibility tree.
+    // That freeze only happens in a real build: what these show is that the
+    // menu is closed, and in the second that it is closed by the change itself
+    // (the header stays mounted here, so nothing else would close it).
+    testWidgets('is gone, with no error, when the queue drops to one entry and the panel goes', (tester) async {
+      await pumpWithMenu(tester);
+
+      container.read(queueProvider.notifier).debugSetStateForTest(QueueState(
+        items: [video('1')],
+        currentIndex: 0,
+        mix: const MixQueue(playlistId: 'PL123', title: 'My Playlist', isPlaylist: true, exhausted: true, totalCount: 1),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Go to Playlist'), findsNothing);
+      expect(find.byType(MenuAnchor), findsNothing, reason: 'the panel builds nothing for one entry');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('closes when the player changes layout under it', (tester) async {
+      await pumpWithMenu(tester);
+
+      container.read(playerViewProvider.notifier).toggleTheatre();
+      await tester.pumpAndSettle();
+      expect(find.byType(MenuAnchor), findsOneWidget);
+      expect(find.text('Go to Playlist'), findsNothing);
+    });
   });
 
   testWidgets('Mix source shows mix text, and its menu is the link alone', (tester) async {
@@ -809,6 +839,35 @@ void main() {
 
       expectAtTop(tester, 'Video 61');
       expect(page.pixels, 0, reason: 'the page did not move');
+    });
+
+    testWidgets('and follows playback from row to row while the playing row is in view', (tester) async {
+      await pumpAt(tester, 0);
+
+      container.read(queueProvider.notifier).advance();
+      await tester.pumpAndSettle();
+      expectAtTop(tester, 'Video 2');
+    });
+
+    // Going to a row that is not built made every playhead move a scroll, so a
+    // track ending pulled the list away from wherever it had been scrolled to.
+    testWidgets('but leaves a list the user has scrolled away when playback only steps on', (tester) async {
+      await pumpAt(tester, 0);
+      final list = tester.state<ScrollableState>(listScrollable()).position;
+
+      list.jumpTo(list.maxScrollExtent * 0.6);
+      await tester.pumpAndSettle();
+      final browsed = list.pixels;
+      expect(find.text('Video 1'), findsNothing, reason: 'the playing row is out of view');
+
+      container.read(queueProvider.notifier).advance();
+      await tester.pumpAndSettle();
+      expect(list.pixels, browsed, reason: 'autoplay stepping to the next video does not take the list back');
+
+      // Choosing a row somewhere else is a different thing: that is followed.
+      container.read(queueProvider.notifier).jumpTo(120);
+      await tester.pumpAndSettle();
+      expectAtTop(tester, 'Video 121');
     });
   });
 

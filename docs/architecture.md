@@ -1009,7 +1009,12 @@ watch page jumped down each time the queue advanced (`todo.md` 64, closed
 move was to a neighbour and stopped holding with playlists: one started at its
 80th video, or the panel appearing with the playhead already deep in the queue,
 has no row to measure in a lazy list. It now jumps to about where the row is and
-measures on the next frame; only a row already in reach is animated to.
+measures on the next frame; only a row already in reach is animated to. **One
+move is not followed:** playback stepping to a neighbour (autoplay, next,
+previous) while the playing row is scrolled out of view. Someone browsing a long
+queue would otherwise be taken back to the top of it every time a track ended,
+which the old no-op for an unbuilt row had been preventing by accident. A jump
+to any other row, and a new queue, are followed wherever the list is.
 
 **The queue does not open as a modal sheet.** `showQueuePanel` — a bottom sheet
 wrapping the panel in a fixed-height box — was deleted: a cleared queue draws
