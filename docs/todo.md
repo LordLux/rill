@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 92.** A new item takes it, and the same edit bumps this line.
+**Next number: 93.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -343,7 +343,11 @@ Share through `share_dialog.dart`. A playlist tile's title opens it, and so does
   its own, and it would also bring the playlist entries up to F57's view counts.
 - **Not read with Narrator, and not walked with `RILL_FOCUS_PROBE`.** The page's
   Tab order, its tap targets' names and its selectable text are asserted by test
-  only (`focus_traversal_test.dart`, `playlist_page_flow_test.dart`).
+  only (`focus_traversal_test.dart`, `playlist_page_flow_test.dart`). The
+  semantics probe does walk it now (steps `7b`–`7f`: open, scroll, Play all,
+  back, leave), and logged no `AXTree` error in four release runs on 2026-10-14,
+  three on a public playlist and one on a private one the account owns; that
+  probe presses no Tab.
 
 **Done when:** the four disabled buttons work or are gone, and the owner's
 controls change a real playlist.
@@ -619,6 +623,25 @@ orphaned because nothing says so.
 Churn warning: `architecture.md` references several of these by path inside dated
 findings, so moving them costs doc edits for tidiness only. Low priority on
 purpose.
+
+### 92. A probe that ends with `exit(0)` crashes on the way out, and leaves a dump
+
+Measured 2026-10-14, release build, 5 of 5: four `RILL_SEMANTICS_PROBE=1` runs
+and one `RILL_FOCUS_PROBE=feed` run each logged their last line, then the
+launcher wrote `app CRASHED with code 0xC0000602` about six seconds later, and
+Windows wrote a ~54 MB dump to `%LOCALAPPDATA%\CrashDumps` each time. A crash
+dump holds the session cookie (`CLAUDE.md`), so every probe run leaves one to
+delete by hand.
+
+The code is F27's, and the likely cause is the same static: Dart's `exit()`
+ends the process without the plugin teardown that F27's one-line fix runs in.
+That is a reading of the code path, not of a stack; this machine has no
+`cdb.exe`. Nothing in the run is lost, since the probe has finished.
+
+**Do:** end the probes the way a user does (close the window, so the engine
+shuts down first) instead of calling `exit()`, keeping the exit code; then the
+same five runs should end `exited with code 0x00000000` and write no dump.
+Belongs with item 14 if that is ever done.
 
 ### 15. A portable parser corpus
 
