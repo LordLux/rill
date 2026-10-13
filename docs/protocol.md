@@ -214,7 +214,7 @@ them a placeholder, and an `INFO` alert "Unavailable videos are hidden". The
 parser also drops a tile titled `[Deleted video]` / `[Private video]` or marked
 `isPlayable: false`, as a backstop for a view that does list them (the owner's,
 not yet captured); the title half of that is English-only. An `ERROR` alert in the response
-("The playlist does not exist.") is answered as `UPSTREAM_ERROR` with that text.
+("The playlist does not exist.") is answered as `NOT_FOUND` with that text (§4).
 
 ```ts
 interface PlaylistHeader {
@@ -1631,7 +1631,27 @@ them has a `retry` value:
 | `VIDEO_MEMBERS_ONLY` | `no` | The members slate: thumbnail, the channel, a Join affordance. **Not** an error state |
 | `RATE_LIMITED` | `user` | "YouTube is limiting requests from this connection", with a retry — never "would not open" |
 | `AGE_VERIFICATION_REQUIRED` | `user` | The age-verification slate: "Sign in" when signed out, a plain explanation with no retry when already signed in. **Not** an "Unavailable" state |
+| `NOT_FOUND` | `no` | YouTube's own sentence, and no retry affordance anywhere it is shown |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
+
+**`NOT_FOUND` is YouTube answering that the thing asked for is not there —
+added 2026-10-13.** Not there, or not visible to this viewer: YouTube says "The
+playlist does not exist." for a deleted playlist and for somebody else's private
+one alike, so the code covers both and cannot tell them apart. It is `no` in
+the sense the table above defines, nothing changes until a login does, and
+signing in as the owner is that login. It replaced `UPSTREAM_ERROR` for this
+case because that one is `auto`: the app backed off and asked again for a
+playlist that was never going to be there, then offered a *Try again* that could
+only repeat the sentence.
+
+**Two things it is not.** It is not for a video: every rung of the ladder can
+decline for a video that is fine, which is why `STREAM_UNAVAILABLE` is `user`.
+And it is not for failing to *get* an answer, which stays `UPSTREAM_ERROR`.
+
+**One throw site so far:** `playlist.get`, on an `ERROR` alert in the response.
+Any other handler (`video.info` on a removed video, a channel page) adopts it
+only once its own refusal has been measured; a refusal that only looks alike is
+not evidence.
 
 **`BAD_REQUEST` is for an unknown method or params that fail validation** — the
 request was malformed before anything upstream was asked. It is `no` because
