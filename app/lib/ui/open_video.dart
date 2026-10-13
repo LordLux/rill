@@ -198,8 +198,10 @@ Future<void> startPlaylistFromTile(
 /// **A queue that is already this playlist is kept.** Another row of the
 /// playlist that is on is a move within it, not a new start: replacing the queue
 /// threw away whatever had been reordered or removed in the panel and offered
-/// an Undo for a queue nobody meant to replace. The entry is found by id for
-/// that reason, since the queue's order may no longer be the page's. A video the
+/// an Undo for a queue nobody meant to replace. The entry is the one at the
+/// row's own position when the queue still has that video there; a playlist can
+/// hold a video twice, and its second row is not its first. Otherwise it is found
+/// by id, since an edited queue's order is no longer the page's. A video the
 /// queue does not hold (removed, or on a page it has not reached) starts the
 /// playlist afresh, as does any other queue, through [startPlaylistFromTile]
 /// with what the page already has.
@@ -216,7 +218,9 @@ Future<void> playPlaylistFromPage(
   final queue = ref.read(queueProvider);
   final mix = queue.mix;
   if (mix != null && mix.isPlaylist && mix.playlistId == playlistId && index < items.length) {
-    final at = queue.entries.indexWhere((entry) => entry.item.id == items[index].id);
+    final id = items[index].id;
+    final samePlace = index < queue.entries.length && queue.entries[index].item.id == id;
+    final at = samePlace ? index : queue.entries.indexWhere((entry) => entry.item.id == id);
     if (at >= 0) {
       showWatchPage(ref);
       if (at != queue.currentIndex) ref.read(queueProvider.notifier).jumpTo(at);
