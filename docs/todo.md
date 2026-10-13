@@ -402,17 +402,6 @@ one of the two stages.
 **Done when:** skeleton → placeholders → data with nothing moving except content
 appearing, checked in the running app in each layout.
 
-### 64. Queue auto-scroll scrolls the watch page
-
-When the queue advances, `queue_panel.dart` (`Scrollable.ensureVisible`, around
-line 192) brings the new row into view. `ensureVisible` scrolls **every**
-ancestor `Scrollable`, so it scrolls the watch page too and the page jumps down.
-Scroll only the queue's own list (its controller, or an `ensureVisible` limited
-to the queue's scrollable) and leave the page alone.
-
-**Done when:** the current row stays visible in the queue as it advances, the
-page's offset does not move, and a widget test asserts the second.
-
 ### 65. Player: the background shows outside the rounded corners
 
 With the controls bar open, the player's background shows a few pixels outside
