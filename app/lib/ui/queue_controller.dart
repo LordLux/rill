@@ -489,6 +489,23 @@ class PlaylistHeader {
     required this.isOwnedByViewer,
   });
 
+  /// The header as `playlist.get` sends it. The one place its keys are named:
+  /// the app and `contract_test.dart` both decode through here, so a key the
+  /// sidecar renames fails a test instead of leaving a field quietly empty.
+  factory PlaylistHeader.fromJson(Map<String, dynamic> json) => PlaylistHeader(
+        thumbnailUrl: json['thumbnailUrl'] as String?,
+        ownerName: json['ownerName'] as String?,
+        ownerChannelId: json['ownerChannelId'] as String?,
+        ownerAvatarUrl: json['ownerAvatarUrl'] as String?,
+        viewCountText: json['viewCountText'] as String?,
+        description: json['description'] as String?,
+        visibility: json['visibility'] as String?,
+        backgroundColor: json['backgroundColor'] == null
+            ? null
+            : ThemedColor.fromJson(json['backgroundColor'] as Map<String, dynamic>),
+        isOwnedByViewer: json['isOwnedByViewer'] as bool? ?? false,
+      );
+
   final String? thumbnailUrl;
   final String? ownerName;
   final String? ownerChannelId;
@@ -504,6 +521,19 @@ class PlaylistHeader {
 @immutable
 class PlaylistResult {
   const PlaylistResult({this.header, this.title, this.videoCount, required this.items, this.continuation});
+
+  /// One `playlist.get` answer. See [PlaylistHeader.fromJson] for why here.
+  factory PlaylistResult.fromJson(Map<String, dynamic> json) {
+    final header = json['header'] as Map<String, dynamic>?;
+    return PlaylistResult(
+      header: header == null ? null : PlaylistHeader.fromJson(header),
+      title: json['title'] as String?,
+      videoCount: (json['videoCount'] as num?)?.toInt(),
+      items: _videosFrom(json['items']),
+      continuation: json['continuation'] as String?,
+    );
+  }
+
   final PlaylistHeader? header;
   final String? title;
   final int? videoCount;
@@ -557,28 +587,7 @@ class RpcMixService implements MixService {
       'playlistId': playlistId,
       'continuation': ?continuation,
     }) as Map<String, dynamic>;
-    final header = response['header'] as Map<String, dynamic>?;
-    return PlaylistResult(
-      header: header == null
-          ? null
-          : PlaylistHeader(
-              thumbnailUrl: header['thumbnailUrl'] as String?,
-              ownerName: header['ownerName'] as String?,
-              ownerChannelId: header['ownerChannelId'] as String?,
-              ownerAvatarUrl: header['ownerAvatarUrl'] as String?,
-              viewCountText: header['viewCountText'] as String?,
-              description: header['description'] as String?,
-              visibility: header['visibility'] as String?,
-              backgroundColor: header['backgroundColor'] == null
-                  ? null
-                  : ThemedColor.fromJson(header['backgroundColor'] as Map<String, dynamic>),
-              isOwnedByViewer: header['isOwnedByViewer'] as bool? ?? false,
-            ),
-      title: response['title'] as String?,
-      videoCount: (response['videoCount'] as num?)?.toInt(),
-      items: _videosFrom(response['items']),
-      continuation: response['continuation'] as String?,
-    );
+    return PlaylistResult.fromJson(response);
   }
 
   @override
@@ -595,17 +604,18 @@ class RpcMixService implements MixService {
     );
   }
 
-  /// A mix panel is videos by construction, but the wire type is `FeedItem[]`
-  /// like every other list method. Anything that is not a video is dropped
-  /// rather than queued as something unplayable.
-  static List<VideoItem> _videosFrom(Object? raw) {
-    final out = <VideoItem>[];
-    for (final entry in (raw as List<dynamic>? ?? const <dynamic>[])) {
-      final item = FeedItem.fromJson(entry as Map<String, dynamic>);
-      if (item is VideoItem) out.add(item);
-    }
-    return out;
+}
+
+/// A mix panel is videos by construction, but the wire type is `FeedItem[]`
+/// like every other list method. Anything that is not a video is dropped
+/// rather than queued as something unplayable.
+List<VideoItem> _videosFrom(Object? raw) {
+  final out = <VideoItem>[];
+  for (final entry in (raw as List<dynamic>? ?? const <dynamic>[])) {
+    final item = FeedItem.fromJson(entry as Map<String, dynamic>);
+    if (item is VideoItem) out.add(item);
   }
+  return out;
 }
 
 final mixServiceProvider = Provider<MixService>((ref) => const RpcMixService());
@@ -1033,9 +1043,15 @@ class QueueController extends Notifier<QueueState> {
       // per playhead move rather than a timer nobody would remember to cancel.
       if (ticket == _extendTicket && state.mix?.playlistId == playlistId) {
         _mixError = '$e';
+        // A playlist's page that answers `no` (`NOT_FOUND`: the playlist was
+        // deleted, or made private, while it played) is not asked for again:
+        // the next advance would get the same answer, for every video left.
+        // What is loaded plays on, and the panel still says it could not load
+        // more. A mix is left as it was, retrying on the next move.
+        final gone = source.isPlaylist && e is RpcException && e.retry == RpcRetryMode.no;
         // The error is not part of the state, so nothing would redraw the
-        // panel to show it. A new state object with the same contents does.
-        state = state._with(state.entries, state.currentIndex);
+        // panel to show it. A new state object does.
+        state = gone ? state.mixExhausted() : state._with(state.entries, state.currentIndex);
       }
     } finally {
       // An abandoned request must not clear the flag of the one that replaced it.

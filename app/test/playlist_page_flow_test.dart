@@ -52,6 +52,9 @@ class _Playlists implements MixService {
   /// How many of the next continuation requests fail.
   int failNext = 0;
 
+  /// What a failing continuation throws, when it should be more than a dead network.
+  Object? failWith;
+
   /// Thrown for the first page for as long as it is set.
   Object? firstPageError;
 
@@ -77,7 +80,7 @@ class _Playlists implements MixService {
       if (error != null) throw error;
     } else if (failNext > 0) {
       failNext--;
-      throw StateError('network down');
+      throw failWith ?? StateError('network down');
     }
     final page = continuation == null ? 0 : int.parse(continuation.substring('page-'.length));
     return PlaylistResult(
@@ -335,20 +338,55 @@ void main() {
       });
     }
 
-    testWidgets('a first page that fails says what was said, and asking again works', (tester) async {
-      final playlists = _Playlists()..firstPageError = RpcException('UPSTREAM_ERROR', 'The playlist does not exist.', RpcRetryMode.auto);
+    testWidgets('a first page that could not be got says so, and asking again works', (tester) async {
+      final playlists = _Playlists()..firstPageError = RpcException('UPSTREAM_ERROR', 'YouTube did not answer.', RpcRetryMode.auto);
       await _open(tester, playlists);
 
-      expect(find.text('The playlist does not exist.'), findsOneWidget);
+      expect(find.text('YouTube did not answer.'), findsOneWidget);
       expect(find.text('Video 0'), findsNothing);
 
       playlists.firstPageError = null;
       await tester.tap(find.text('Try again'));
       await _settle(tester);
 
-      expect(find.text('The playlist does not exist.'), findsNothing);
+      expect(find.text('YouTube did not answer.'), findsNothing);
       expect(find.text('Video 0'), findsOneWidget);
       expect(playlists.asked, [null, null]);
+    });
+
+    // `NOT_FOUND` is YouTube's answer, not a failure to get one: its retry is
+    // `no`, and a button that could only repeat the sentence is not offered
+    // (`protocol.md` §4).
+    testWidgets('a playlist that is not there says so in YouTube\'s words, with nothing to press', (tester) async {
+      final playlists = _Playlists()..firstPageError = RpcException('NOT_FOUND', 'The playlist does not exist.', RpcRetryMode.no);
+      await _open(tester, playlists);
+
+      expect(find.text('The playlist does not exist.'), findsOneWidget);
+      expect(find.text('Try again'), findsNothing);
+      expect(find.text('Retry'), findsNothing);
+
+      // And nothing else asks again either.
+      await _container.read(playlistProvider('PL123').notifier).retry();
+      await _settle(tester);
+      expect(playlists.asked, [null]);
+    });
+
+    testWidgets('a later page that is not there says so at the foot, with no retry', (tester) async {
+      final playlists = _Playlists()
+        ..failNext = 99
+        ..failWith = RpcException('NOT_FOUND', 'The playlist does not exist.', RpcRetryMode.no);
+      await _open(tester, playlists);
+
+      final list = _list(tester);
+      list.jumpTo(list.maxScrollExtent);
+      await _settle(tester);
+      list.jumpTo(list.maxScrollExtent);
+      await _settle(tester);
+
+      expect(find.text('The playlist does not exist.'), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
+      expect(_page().items, hasLength(20), reason: 'what was loaded is still there');
+      expect(playlists.asked, [null, 'page-1']);
     });
   });
 
@@ -481,6 +519,28 @@ void main() {
       expect(find.byType(PlaylistPage), findsOneWidget);
       expect(_container.read(queueProvider).isEmpty, isTrue);
     });
+
+    // Starting a playlist that is not there: the queue it would have replaced
+    // is back, YouTube's sentence is said, and nothing offers to ask again.
+    testWidgets('that is not there puts the old queue back and says so, with no retry', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final playlists = await pumpTile(tester);
+      playlists.firstPageError = RpcException('NOT_FOUND', 'The playlist does not exist.', RpcRetryMode.no);
+      _container.read(queueProvider.notifier).debugSetStateForTest(QueueState(items: [_video(900), _video(901)], currentIndex: 0));
+
+      await tester.tap(find.bySemanticsLabel('Play A playlist'));
+      await _settle(tester);
+
+      expect(find.text('The playlist does not exist.'), findsOneWidget);
+      expect(find.byType(SnackBarAction), findsNothing, reason: 'no Retry, and no Undo: nothing was replaced');
+      final queue = _container.read(queueProvider);
+      expect(queue.mix, isNull);
+      expect(queue.entries.map((entry) => entry.item.id), ['v900', 'v901']);
+      expect(playlists.asked, [null], reason: 'asked once');
+      await tester.pump(const Duration(seconds: 6));
+      await _settle(tester);
+      semantics.dispose();
+    });
   });
 
   // A page asked for under one identity must not land under the next: the
@@ -532,6 +592,29 @@ void main() {
 
     await _settle(tester);
     expect(find.text('Video 0'), findsOneWidget);
+  });
+
+  // The identity is `(signed in, handle)`, and the handle arrives a moment after
+  // the sign-in: two changes for one person. Watched directly, the page was
+  // fetched twice and dropped back to its first rows twice.
+  testWidgets('a sign-in whose handle arrives afterwards is one re-read, not two', (tester) async {
+    final playlists = _Playlists();
+    await _open(tester, playlists);
+    final auth = _container.read(authProvider.notifier) as _Auth;
+
+    auth.become(const AuthState(status: AuthStatus.authenticated));
+    await _settle(tester);
+    auth.become(_signedIn);
+    await _settle(tester);
+    expect(playlists.asked, [null, null], reason: 'the handle becoming known is the same viewer');
+
+    // Someone else, or nobody, is a different viewer: each is read for.
+    auth.become(const AuthState(status: AuthStatus.authenticated, accountHandle: '@another'));
+    await _settle(tester);
+    expect(playlists.asked, [null, null, null]);
+    auth.become(_signedOut);
+    await _settle(tester);
+    expect(playlists.asked, [null, null, null, null]);
   });
 
   // The other direction is not symmetric: what is on screen may be a private
@@ -609,6 +692,31 @@ void main() {
       expect(queue.current?.id, 'v0');
       expect(identical(queue.entries.first, before.first), isTrue);
       expect(find.textContaining('Queue replaced'), findsNothing);
+    });
+
+    // The one row a move within the queue cannot reach: the one it is already
+    // on, once it has played out. The click opened the watch page on a stopped
+    // player and nothing played.
+    testWidgets('plays again from its last row once it has played out', (tester) async {
+      final playlists = _Playlists(pages: 1, perPage: 3);
+      await playThenReturn(tester, playlists);
+
+      await tester.tap(find.text('Video 2'));
+      await _settle(tester);
+      _container.read(queueProvider.notifier).playedOut();
+      final finished = _container.read(queueProvider);
+      expect(finished.current?.id, 'v2');
+      expect(finished.playedOut, isTrue, reason: 'the last video ended with nothing after it');
+
+      await tester.tap(find.text('Video 2'));
+      await _settle(tester);
+
+      final queue = _container.read(queueProvider);
+      expect(queue.current?.id, 'v2');
+      expect(queue.playedOut, isFalse);
+      expect(queue.version, greaterThan(finished.version), reason: 'the playhead moved, which is what makes playback open it');
+      await tester.pump(const Duration(seconds: 6));
+      await _settle(tester);
     });
   });
 

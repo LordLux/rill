@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/data/rpc/client.dart' show RpcException, RpcRetryMode;
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/queue_controller.dart';
 
@@ -63,7 +64,7 @@ class FakeMixService implements MixService {
     }
     if (continuation != null && failures > 0) {
       failures--;
-      throw StateError('network down');
+      throw failWith ?? StateError('network down');
     }
     if (continuation != null && emptyPages > 0) {
       emptyPages--;
@@ -91,6 +92,9 @@ class FakeMixService implements MixService {
 
   /// How many continuation requests fail before they start working.
   int failures = 0;
+
+  /// What a failing request throws, when it should be more than a dead network.
+  Object? failWith;
 
   /// How many continuation requests answer with no videos and a next token.
   int emptyPages = 0;
@@ -344,6 +348,33 @@ void main() {
       expect(queue.mixError, isNull);
       expect(stateOf(c).items, hasLength(50));
       expect(stateOf(c).mix!.exhausted, isTrue);
+    });
+
+    // A playlist deleted or made private while it plays answers its next page
+    // with `NOT_FOUND`, whose retry is `no`. Retried on every queue change, that
+    // was one request per video for everything still loaded.
+    test('a page that answers "no" keeps the queue, says so, and is not asked for again', () async {
+      final service = FakeMixService(totalPages: 3)
+        ..failures = 99
+        ..failWith = RpcException('NOT_FOUND', 'The playlist does not exist.', RpcRetryMode.no);
+      final c = containerWith(service);
+      final queue = controllerOf(c);
+
+      await queue.startPlaylist('PL123');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(stateOf(c).items, hasLength(25), reason: 'what loaded is kept, and plays on');
+      expect(queue.mixError, contains('The playlist does not exist.'));
+      final asked = service.getPlaylistCalls;
+
+      for (var i = 0; i < 3; i++) {
+        queue.advance();
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(service.getPlaylistCalls, asked, reason: 'the answer would be the same');
+      expect(stateOf(c).currentIndex, 3);
+      expect(queue.mixError, isNotNull, reason: 'the panel still says it could not load more');
     });
   });
 

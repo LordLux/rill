@@ -221,7 +221,12 @@ Future<void> playPlaylistFromPage(
     final id = items[index].id;
     final samePlace = index < queue.entries.length && queue.entries[index].item.id == id;
     final at = samePlace ? index : queue.entries.indexWhere((entry) => entry.item.id == id);
-    if (at >= 0) {
+    // The one move a jump cannot make: to the row the queue is already on,
+    // after it has played out. Nothing moves, so nothing plays, and the click
+    // opened the watch page on a stopped player. That row starts the playlist
+    // afresh from itself, below, like a row of a playlist that is not on.
+    final finishedHere = at == queue.currentIndex && queue.playedOut;
+    if (at >= 0 && !finishedHere) {
       showWatchPage(ref);
       if (at != queue.currentIndex) ref.read(queueProvider.notifier).jumpTo(at);
       return;
