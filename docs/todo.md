@@ -896,6 +896,13 @@ same login speaks for. Measure how youtube.com switches (which request, which
 header or cookie changes), then decide: switch within one login, or keep several
 logins. Everything Task 31 added for identity changes applies.
 
+**One place is known not to be ready for it.** The playlist page hides what it
+shows while it is re-read only when the viewer has *no* account
+(`skipLoadingOnReload: signedIn`, `ui/pages/playlist.dart`). Switching from one
+account to another keeps the first account's page on screen until the second's
+read answers, and that page may be a private playlist. It has to hide whenever
+the identity that read the page is not the current one.
+
 **Done when:** switching shows the other account's feed and account state without
 signing out, and switching back restores the first.
 

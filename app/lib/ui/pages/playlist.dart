@@ -63,8 +63,16 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
     super.dispose();
   }
 
+  /// Ask for the next page when the end of what is loaded is near.
+  ///
+  /// From a scroll, and from a page landing: a page can hold very few rows
+  /// (YouTube leaves unavailable videos out and still sends a continuation), and
+  /// a list too short to scroll would never ask by scrolling.
   void _onScroll() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 400) {
+    if (!mounted || !_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (!position.hasContentDimensions) return;
+    if (position.pixels >= position.maxScrollExtent - 400) {
       ref.read(playlistProvider(widget.playlistId).notifier).loadNext();
     }
   }
@@ -72,6 +80,15 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
   @override
   Widget build(BuildContext context) {
     final playlistState = ref.watch(playlistProvider(widget.playlistId));
+    // Only when a page brought something: an empty page that repeats its own
+    // token would otherwise be asked for again, for ever.
+    ref.listen(playlistProvider(widget.playlistId), (previous, next) {
+      final was = previous?.value;
+      final now = next.value;
+      if (now == null || now.loading) return;
+      if (was != null && was.items.length == now.items.length && was.continuation == now.continuation) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+    });
     final signedIn = ref.watch(authIdentityProvider.select((identity) => identity.$1));
     // The page is re-read on a change of identity. Signing in, what is on screen
     // was read anonymously and stays until the new page lands. Signing out, it
