@@ -97,24 +97,34 @@ export function parsePlaylistHeader(raw: Json): { title: string | null; videoCou
   // Description
   const description = text(get(raw, 'sidebar', 'playlistSidebarRenderer', 'items', '0', 'playlistSidebarPrimaryInfoRenderer', 'description')) ?? null;
 
-  // Visibility and ownership
-  const oldDropdown = asArray(get(raw, 'sidebar', 'playlistSidebarRenderer', 'items', '0', 'playlistSidebarPrimaryInfoRenderer', 'privacyForm', 'dropdownFormFieldRenderer', 'entries'));
-  const newDropdown = asArray(get(raw, 'header', 'pageHeaderRenderer', 'content', 'pageHeaderViewModel', 'actions', 'privacyForm', 'dropdownFormFieldRenderer', 'entries'));
-  const dropdown = oldDropdown.length > 0 ? oldDropdown : newDropdown;
-  const isOwnedByViewer = dropdown.length > 0;
+  // Visibility and ownership.
+  //
+  // The viewer's own playlist carries a privacy dropdown in the sidebar, and
+  // its selected entry is the visibility (0 private, 1 public, 2 unlisted). The
+  // entries are under `dropdown.dropdownRenderer`: the path read until
+  // 2026-10-13 stopped one level short of them, so every owned playlist came
+  // out as somebody else's and a private one as public, with nothing asserting
+  // otherwise (measured against the three owned fixtures). Watch Later has no
+  // dropdown; its classic header says `isEditable` and names its privacy.
+  const dropdown = asArray(
+    get(raw, 'sidebar', 'playlistSidebarRenderer', 'items', '0', 'playlistSidebarPrimaryInfoRenderer',
+      'privacyForm', 'dropdownFormFieldRenderer', 'dropdown', 'dropdownRenderer', 'entries'),
+  );
+  const classicHeader = get(raw, 'header', 'playlistHeaderRenderer');
+  const isOwnedByViewer = dropdown.length > 0 || get(classicHeader, 'isEditable') === true;
 
-  let visibility: 'public' | 'unlisted' | 'private' | null = null;
-  if (isOwnedByViewer) {
-    const selected = dropdown.find(e => get(e, 'privacyDropdownItemRenderer', 'isSelected') === true);
-    const val = get(selected, 'privacyDropdownItemRenderer', 'int32Value');
-    visibility = val === 0 ? 'private' : val === 1 ? 'public' : val === 2 ? 'unlisted' : null;
-  } else {
-    const unlisted = get(raw, 'microformat', 'microformatDataRenderer', 'unlisted') === true;
-    const privacyStr = str(get(raw, 'header', 'playlistHeaderRenderer', 'privacy'));
-    if (privacyStr === 'PRIVATE') visibility = 'private';
-    else if (privacyStr === 'UNLISTED') visibility = 'unlisted';
-    else visibility = unlisted ? 'unlisted' : 'public';
-  }
+  const selected = dropdown.find((entry) => get(entry, 'privacyDropdownItemRenderer', 'isSelected') === true);
+  const chosen = get(selected, 'privacyDropdownItemRenderer', 'int32Value');
+  const privacy = str(get(classicHeader, 'privacy'));
+  const visibility: PlaylistHeader['visibility'] =
+    chosen === 0 ? 'private'
+    : chosen === 1 ? 'public'
+    : chosen === 2 ? 'unlisted'
+    : privacy === 'PRIVATE' ? 'private'
+    : privacy === 'UNLISTED' ? 'unlisted'
+    // Somebody else's playlist says only whether it is unlisted.
+    : get(raw, 'microformat', 'microformatDataRenderer', 'unlisted') === true ? 'unlisted'
+    : 'public';
 
   const backgroundColor = headerTint(raw);
 
@@ -133,21 +143,20 @@ export function parsePlaylistHeader(raw: Json): { title: string | null; videoCou
   return { title, videoCount, header };
 }
 
-export async function getPlaylist(
-  session: Session,
-  params: { playlistId: string; continuation: string | null },
-): Promise<PlaylistResult> {
-  const { playlistId, continuation } = params;
-
-  // The client sends the id as tiles carry it; `/browse` wants it `VL`-prefixed.
-  const browseId = playlistId.startsWith('VL') ? playlistId : `VL${playlistId}`;
-
-  const raw = (continuation
-    ? await session.execute('/browse', { continuation })
-    : await session.execute('/browse', { browseId })) as Json;
-
-  const refusal = refusalFrom(raw, playlistId);
-  if (refusal) throw new RpcError('UPSTREAM_ERROR', refusal);
+/**
+ * One `/browse` response for a playlist, as `playlist.get` answers it.
+ *
+ * Pure, and the one place the answer is built: the handler and the corpus
+ * exporter both call it, so what the contract tests decode is what the app is
+ * sent. Before this the exporter ran these fixtures through `parseFeed`, and
+ * `playlist.get`'s own fields were in no corpus entry at all.
+ *
+ * Throws `NOT_FOUND` when YouTube's answer is that there is no such playlist
+ * for this viewer. [label] is only for the log.
+ */
+export function parsePlaylistPage(raw: Json, isContinuation: boolean, label = 'playlist'): PlaylistResult {
+  const refusal = refusalFrom(raw, label);
+  if (refusal) throw new RpcError('NOT_FOUND', refusal);
 
   const feed = parseFeed(raw, 'playlist');
   const items = feed.items.filter((item): item is VideoItem => item.kind === 'video');
@@ -161,5 +170,21 @@ export async function getPlaylist(
   // header missing its tint or its cover would replace the whole one the
   // client is showing. The title and the count are still passed on.
   const parsed = parsePlaylistHeader(raw);
-  return { ...parsed, header: continuation ? null : parsed.header, items, continuation: feed.continuation };
+  return { ...parsed, header: isContinuation ? null : parsed.header, items, continuation: feed.continuation };
+}
+
+export async function getPlaylist(
+  session: Session,
+  params: { playlistId: string; continuation: string | null },
+): Promise<PlaylistResult> {
+  const { playlistId, continuation } = params;
+
+  // The client sends the id as tiles carry it; `/browse` wants it `VL`-prefixed.
+  const browseId = playlistId.startsWith('VL') ? playlistId : `VL${playlistId}`;
+
+  const raw = (continuation
+    ? await session.execute('/browse', { continuation })
+    : await session.execute('/browse', { browseId })) as Json;
+
+  return parsePlaylistPage(raw, continuation !== null, playlistId);
 }

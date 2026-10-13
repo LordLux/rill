@@ -63,6 +63,24 @@ export type EnvelopeErrorCode =
    * succeed, so the retry affordance is honest, not decorative.
    */
   | 'AGE_VERIFICATION_REQUIRED'
+  /**
+   * YouTube answered, and the answer is that the thing asked for does not
+   * exist — or is not visible to this viewer, which YouTube words identically:
+   * "The playlist does not exist." is what both a deleted playlist and someone
+   * else's private one say.
+   *
+   * Distinct from `UPSTREAM_ERROR` because that one means *no usable answer*,
+   * and is `auto`: the app backed off and re-asked for a playlist that was never
+   * going to be there, then offered a *Try again* that could only say the same
+   * thing. `no` in the table's own sense — nothing changes until a login does,
+   * and signing in as the owner is that login.
+   *
+   * **Not for a video.** The ladder can decline for a video that is fine, which
+   * is why `STREAM_UNAVAILABLE` is `user`. And one throw site so far,
+   * `playlist.get`'s `ERROR` alert: another handler adopts it only once its own
+   * refusal has been measured (`protocol.md` §4).
+   */
+  | 'NOT_FOUND'
   | 'UPSTREAM_ERROR';
 
 /**
@@ -132,8 +150,17 @@ const RETRY_BY_CODE: Readonly<Record<EnvelopeErrorCode, RetryMode>> = Object.fre
   // told what is happening and chooses when to try again.
   RATE_LIMITED: 'user',
   AGE_VERIFICATION_REQUIRED: 'user',
+  // `no`: the same question gets the same answer until whoever is asking
+  // changes. A retry button here is a button that repeats a sentence.
+  NOT_FOUND: 'no',
   UPSTREAM_ERROR: 'auto',
 });
+
+/**
+ * Every code an envelope can carry. For the check that `protocol.md` §4's table
+ * lists the same codes with the same `retry` (`contract-docs.test.ts`).
+ */
+export const ENVELOPE_ERROR_CODES = Object.freeze(Object.keys(RETRY_BY_CODE) as EnvelopeErrorCode[]);
 
 /** The two codes that never reach an envelope. Kept next to the table above. */
 const INTERNAL_SIGNALS: ReadonlySet<string> = new Set<InternalSignalCode>([
