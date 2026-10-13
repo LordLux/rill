@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test';
 import { RpcError } from '../src/errors.ts';
 import type { Session } from '../src/innertube/session.ts';
 import { parseFeed } from '../src/parser/feed.ts';
-import { getPlaylist, parsePlaylistHeader } from '../src/parser/playlist.ts';
+import { getPlaylist, parsePlaylistHeader, parsePlaylistPage } from '../src/parser/playlist.ts';
 import type { Json } from '../src/parser/tree.ts';
 
 const FIXTURES = join(import.meta.dir, '..', 'fixtures');
@@ -172,8 +172,70 @@ describe('playlist.get', () => {
     const { session } = sessionOf([page([], { alert: ['ERROR', 'The playlist does not exist.'] })]);
     const failure = await getPlaylist(session, { playlistId: 'PLabc', continuation: null }).catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(RpcError);
-    expect((failure as RpcError).code).toBe('UPSTREAM_ERROR');
-    expect((failure as RpcError).message).toBe('The playlist does not exist.');
+    // YouTube answered, and the answer is no: not a failure to get an answer
+    // (`UPSTREAM_ERROR`, which the app retries by itself), and nothing a retry
+    // changes.
+    expect((failure as RpcError).code).toBe('NOT_FOUND');
+    expect((failure as RpcError).retry).toBe('no');
+    expect((failure as RpcError).toEnvelope()).toEqual({
+      code: 'NOT_FOUND',
+      message: 'The playlist does not exist.',
+      retry: 'no',
+    });
+  });
+
+  // Ownership and visibility are the viewer's, and were wrong with an all-green
+  // suite: the privacy dropdown was read one level short of its entries, so an
+  // owned playlist was nobody's and a private one was public. A fixture in each
+  // known state is the only thing that says otherwise (CLAUDE.md, viewer state).
+  for (const [name, visibility, owned] of [
+    ['playlist-private-owned', 'private', true],
+    ['playlist-unlisted-owned', 'unlisted', true],
+    ['playlist-public-owned', 'public', true],
+    ['playlist-wl', 'private', true],
+    ['playlist-public-anon', 'public', false],
+    ['playlist', 'public', false],
+  ] as const) {
+    test.if(hasFixture(name))(`the captured ${name} is ${visibility}, and ${owned ? 'the viewer\'s' : 'not the viewer\'s'}`, () => {
+      const { header } = parsePlaylistPage(fixture(name), false);
+      expect(header?.visibility).toBe(visibility);
+      expect(header?.isOwnedByViewer).toBe(owned);
+    });
+  }
+
+  test('the privacy dropdown\'s selected entry is the visibility, and having one is owning it', () => {
+    const withDropdown = (selected: number) => ({
+      metadata: { playlistMetadataRenderer: { title: 'Mine' } },
+      sidebar: {
+        playlistSidebarRenderer: {
+          items: [
+            {
+              playlistSidebarPrimaryInfoRenderer: {
+                privacyForm: {
+                  dropdownFormFieldRenderer: {
+                    dropdown: {
+                      dropdownRenderer: {
+                        entries: [0, 1, 2].map((value) => ({
+                          privacyDropdownItemRenderer: { int32Value: value, isSelected: value === selected },
+                        })),
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    for (const [value, visibility] of [[0, 'private'], [1, 'public'], [2, 'unlisted']] as const) {
+      const { header } = parsePlaylistHeader(withDropdown(value) as Json);
+      expect(header?.visibility).toBe(visibility);
+      expect(header?.isOwnedByViewer).toBe(true);
+    }
+    const { header } = parsePlaylistHeader({ metadata: { playlistMetadataRenderer: { title: 'Theirs' } } });
+    expect(header?.isOwnedByViewer).toBe(false);
+    expect(header?.visibility).toBe('public');
   });
 
   test('any other alert leaves the list alone', async () => {

@@ -26,6 +26,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { ENVELOPE_ERROR_CODES, retryModeFor, type EnvelopeErrorCode } from '../src/errors.ts';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SRC = join(ROOT, 'sidecar', 'src');
 
@@ -502,6 +504,74 @@ describe('method existence in protocol.md, server.ts, and Dart calls', () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. The error table is the error table
+// ---------------------------------------------------------------------------
+
+/**
+ * `protocol.md` §4's "Envelope errors" table, as `code -> retry`.
+ *
+ * The app's whole reaction to a failure hangs off `retry`, and the doc is where
+ * a new handler's author reads what a code means. A code added to `errors.ts`
+ * and not to the table is undocumented; one whose `retry` differs between the
+ * two tells the app one thing and its author another.
+ */
+function scanErrorTable(markdown: string): Map<string, string> {
+  const start = markdown.indexOf('**Envelope errors.**');
+  const rows = new Map<string, string>();
+  if (start < 0) return rows;
+  let inTable = false;
+  for (const line of markdown.slice(start).split(/\r?\n/)) {
+    const row = /^\|\s*`([A-Z_]+)`\s*\|\s*`(auto|user|no)`\s*\|/.exec(line);
+    if (row) {
+      inTable = true;
+      rows.set(row[1]!, row[2]!);
+    } else if (inTable && !line.startsWith('|')) {
+      break;
+    }
+  }
+  return rows;
+}
+
+function errorTableMismatches(table: Map<string, string>, codes: readonly string[], retryOf: (code: string) => string): string[] {
+  const problems: string[] = [];
+  for (const code of codes) {
+    if (!table.has(code)) problems.push(`errors.ts has ${code} but protocol.md §4's table does not`);
+    else if (table.get(code) !== retryOf(code)) {
+      problems.push(`${code} is \`${retryOf(code)}\` in errors.ts and \`${table.get(code)}\` in protocol.md §4`);
+    }
+  }
+  for (const code of table.keys()) {
+    if (!codes.includes(code)) problems.push(`protocol.md §4's table lists ${code}, which errors.ts does not define`);
+  }
+  return problems;
+}
+
+describe('the error codes in protocol.md §4 are the ones errors.ts ships', () => {
+  const table = scanErrorTable(doc('docs/protocol.md'));
+  const retryOf = (code: string) => retryModeFor(code as EnvelopeErrorCode);
+
+  test('the table was found at all', () => {
+    expect(table.size).toBeGreaterThanOrEqual(8);
+  });
+
+  test('the same codes, each with the same retry', () => {
+    expect(errorTableMismatches(table, ENVELOPE_ERROR_CODES, retryOf)).toEqual([]);
+  });
+
+  test('the check can actually fail', () => {
+    const codes = ['A', 'B'];
+    const retry = (code: string) => (code === 'A' ? 'no' : 'user');
+    expect(errorTableMismatches(new Map([['A', 'no'], ['B', 'user']]), codes, retry)).toEqual([]);
+    // A row dropped from the table, a retry that disagrees, a row for nothing.
+    expect(errorTableMismatches(new Map([['A', 'no']]), codes, retry)).toHaveLength(1);
+    expect(errorTableMismatches(new Map([['A', 'user'], ['B', 'user']]), codes, retry)).toHaveLength(1);
+    expect(errorTableMismatches(new Map([['A', 'no'], ['B', 'user'], ['C', 'no']]), codes, retry)).toHaveLength(1);
+    // And the scanner stops at the table's end rather than reading the next one.
+    expect([...scanErrorTable('**Envelope errors.**\n\n| Code | `retry` | UI |\n| --- | --- | --- |\n| `A` | `no` | x |\n\ntext\n\n| `B` | `user` | y |').keys()]).toEqual(['A']);
   });
 });
 
