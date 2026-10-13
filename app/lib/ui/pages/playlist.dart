@@ -194,7 +194,9 @@ class _PlaylistContent extends ConsumerWidget {
       if (state.error case final error?) {
         return _PlaylistUnavailable(
           message: error,
-          onRetry: () => ref.read(playlistProvider(state.playlistId).notifier).retry(),
+          // None for `NOT_FOUND`: the sentence is YouTube's answer, not a failure
+          // to get one (`protocol.md` §4).
+          onRetry: state.canRetry ? () => ref.read(playlistProvider(state.playlistId).notifier).retry() : null,
         );
       }
     }
@@ -745,12 +747,15 @@ class _PlaylistSkeletonState extends State<_PlaylistSkeleton> with SingleTickerP
   }
 }
 
-/// The page when its first request failed: what was said, and a way to ask again.
+/// The page when its first request failed: what was said, and a way to ask
+/// again where asking again could say something else.
 class _PlaylistUnavailable extends StatelessWidget {
   const _PlaylistUnavailable({required this.message, required this.onRetry});
 
   final String message;
-  final VoidCallback onRetry;
+
+  /// Null when a retry would only repeat the answer.
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -764,8 +769,10 @@ class _PlaylistUnavailable extends StatelessWidget {
             Icon(Icons.error_outline, color: scheme.error, size: 48),
             const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurface)),
-            const SizedBox(height: 12),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+            if (onRetry != null) ...[
+              const SizedBox(height: 12),
+              FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+            ],
           ],
         ),
       ),
@@ -809,10 +816,13 @@ class _PlaylistSliverList extends ConsumerWidget {
                 child: Column(
                   children: [
                     Text(state.error!),
-                    TextButton(
-                      onPressed: () => ref.read(playlistProvider(state.playlistId).notifier).retry(),
-                      child: const Text('Retry'),
-                    ),
+                    // A playlist deleted while its page is open answers its
+                    // next page with `NOT_FOUND`: said, and not offered again.
+                    if (state.canRetry)
+                      TextButton(
+                        onPressed: () => ref.read(playlistProvider(state.playlistId).notifier).retry(),
+                        child: const Text('Retry'),
+                      ),
                   ],
                 ),
               );
