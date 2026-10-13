@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
-import 'package:flutter/rendering.dart' show OverflowBoxFit, RenderAbstractViewport;
+import 'package:flutter/rendering.dart' show OverflowBoxFit, RenderAbstractViewport, RenderBox;
 import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey, Clipboard, ClipboardData;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,8 +10,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
+import '../audio_mode_controller.dart';
 import '../focus_ring.dart';
 import '../focus_surface.dart';
+import '../player/view_mode.dart';
+import '../player_shell.dart' show currentRouteProvider;
 import '../queue_controller.dart';
 import '../spoken.dart';
 import 'channel_badge.dart';
@@ -323,6 +326,8 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     void again() {
       if (attempt >= 4) return;
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent(animate: false, attempt: attempt + 1));
+      // A post-frame callback waits for a frame; it does not ask for one.
+      WidgetsBinding.instance.scheduleFrame();
     }
 
     final queue = ref.read(queueProvider);
@@ -351,6 +356,35 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     } else {
       position.jumpTo(target);
     }
+  }
+
+  /// Whether the list goes to the playing row after the playhead moved.
+  ///
+  /// **Not when the user has scrolled that row out of view and playback only
+  /// stepped to a neighbour** (autoplay, next, previous): they are looking for
+  /// something further down, and every track ending would take them back to the
+  /// top of it. A jump anywhere else is someone choosing a row, a new queue has
+  /// nothing to keep, and a row that was in view is followed as it always was.
+  bool _followsPlayhead(QueueState? previous, QueueState next) {
+    final was = previous?.currentIndex;
+    final now = next.currentIndex;
+    if (previous == null || was == null || now == null) return true;
+    if (previous.mix?.playlistId != next.mix?.playlistId) return true;
+    if ((now - was).abs() != 1) return true;
+    return _rowInView(previous.currentEntry);
+  }
+
+  /// Whether [entry]'s row is at least partly inside the list's viewport. Read
+  /// before the frame the move rebuilds, so it is where the row was drawn last.
+  bool _rowInView(QueueEntry? entry) {
+    if (entry == null || !_baseScroll.hasClients) return true;
+    final position = _baseScroll.position;
+    if (!position.hasContentDimensions) return true;
+    final row = _itemKeys[entry]?.currentContext?.findRenderObject();
+    // Not built is as far out of view as a row gets.
+    if (row is! RenderBox || !row.attached) return false;
+    final top = RenderAbstractViewport.of(row).getOffsetToReveal(row, 0.0).offset;
+    return top + row.size.height > position.pixels && top < position.pixels + position.viewportDimension;
   }
 
   Future<void> _animateClear(QueueController controller) async {
@@ -593,20 +627,35 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     // the listener exists only to reconcile the controllers before it does.
     ref.listen<List<QueueEntry>>(
       queueProvider.select((q) => q.entries),
-      (previous, next) => _syncEntries(next),
+      (previous, next) {
+        _syncEntries(next);
+        // One entry or none and the panel builds nothing: its header goes, and
+        // the menu must not still be open when it does (below).
+        if (next.length <= 1) _closeHeaderMenu();
+      },
     );
+
+    // The header's menu is an overlay anchored on the header, and an anchor
+    // that leaves the tree in one frame with its menu open is the orphan that
+    // freezes the accessibility tree (F51). A scroll and a click are handled
+    // where they happen; these are the ways the header goes with no pointer
+    // involved: the panel moving to another layout, and the page being left.
+    // Listeners run before the frame that rebuilds, which is the point.
+    ref.listen(playerViewProvider, (_, _) => _closeHeaderMenu());
+    ref.listen(audioModeProvider, (_, _) => _closeHeaderMenu());
+    ref.listen(currentRouteProvider, (_, _) => _closeHeaderMenu());
 
     // `version` bumps exactly when the playhead moves to a different track —
     // autoplay advancing, the next/previous shortcuts, and jumping to a row —
     // and deliberately not on a reorder or a Clear (which keeps the same
     // track playing). That is exactly "any change in the video being played",
-    // so it is the one signal this needs rather than three separate ones.
-    ref.listen<int>(
-      queueProvider.select((q) => q.version),
-      (previous, next) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
-      },
-    );
+    // so it is the one signal this needs rather than three separate ones. The
+    // whole state is listened to only for what the playhead moved *from*.
+    ref.listen<QueueState>(queueProvider, (previous, next) {
+      if (previous != null && previous.version == next.version) return;
+      if (!_followsPlayhead(previous, next)) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
+    });
 
     if (queue.entries.length <= 1 && !_clearing && !_popping) {
       return const SizedBox.shrink();

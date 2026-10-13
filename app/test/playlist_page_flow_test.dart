@@ -35,12 +35,16 @@ VideoItem _video(int n) => VideoItem(
 
 /// A playlist of [pages] pages of [perPage], behind `page-N` tokens.
 class _Playlists implements MixService {
-  _Playlists({this.pages = 3, this.owned = false});
+  _Playlists({this.pages = 3, this.owned = false, this.perPage = 20, this.repeats = const {}});
 
-  static const int perPage = 20;
+  final int perPage;
 
   final int pages;
   final bool owned;
+
+  /// Positions that hold another position's video: `{7: 2}` puts video 2 in
+  /// the eighth row as well as the third, as a playlist may.
+  final Map<int, int> repeats;
 
   /// The continuation of every request, in order; null is the first page.
   final List<String?> asked = [];
@@ -92,7 +96,10 @@ class _Playlists implements MixService {
             ),
       title: 'My Playlist',
       videoCount: pages * perPage,
-      items: [for (var i = 0; i < perPage; i++) _video(era * 1000 + page * perPage + i)],
+      items: [
+        for (var i = 0; i < perPage; i++)
+          _video(era * 1000 + (repeats[page * perPage + i] ?? page * perPage + i)),
+      ],
       continuation: page + 1 < pages ? 'page-${page + 1}' : null,
     );
   }
@@ -184,6 +191,20 @@ void main() {
       await _settle(tester);
       expect(playlists.asked, [null, 'page-1']);
       expect(_page().items, hasLength(40));
+    });
+
+    // A page can hold very few rows and still point at a next one: YouTube
+    // leaves unavailable videos out. A list too short to scroll never asked for
+    // more by scrolling, and the rest of the playlist could not be reached.
+    testWidgets('pages too short to scroll are followed until the list fills or ends', (tester) async {
+      final playlists = _Playlists(pages: 3, perPage: 2);
+      await _open(tester, playlists);
+      await _settle(tester);
+
+      expect(playlists.asked, [null, 'page-1', 'page-2']);
+      expect(_page().items, hasLength(6));
+      expect(_page().continuation, isNull);
+      expect(find.text('Video 5'), findsOneWidget);
     });
 
     testWidgets('a null continuation ends it', (tester) async {
@@ -559,6 +580,21 @@ void main() {
       expect(find.textContaining('Queue replaced'), findsNothing);
       expect(playlists.asked.where((token) => token == null), hasLength(1));
       expect(playlists.asked.length, askedBefore);
+    });
+
+    // A playlist may hold a video twice. Found by id alone, its second row
+    // played from its first.
+    testWidgets('goes to the row that was clicked when the same video is in it twice', (tester) async {
+      final playlists = _Playlists(repeats: const {4: 2});
+      await playThenReturn(tester, playlists);
+
+      expect(find.text('Video 2'), findsNWidgets(2), reason: 'rows 3 and 5 are the same video');
+      await tester.tap(find.text('Video 2').last);
+      await _settle(tester);
+
+      final queue = _container.read(queueProvider);
+      expect(queue.currentIndex, 4, reason: 'the fifth row, not the third');
+      expect(queue.next?.id, 'v5');
     });
 
     testWidgets('is restarted from its first video by Play all, without replacing it', (tester) async {
