@@ -474,15 +474,16 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
         ],
         const SizedBox(height: 8),
         NoTabSelectionArea(child: Text(_meta(), style: TextStyle(fontSize: 12.5, color: tint.onMuted))),
+        // Above the actions, where youtube.com has it.
+        if (description != null && description.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(description, style: TextStyle(fontSize: 13, height: 1.4, color: tint.onMuted)),
+        ],
         const SizedBox(height: 18),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 340),
           child: _actions(context, ref, tint, signedIn: signedIn),
         ),
-        if (description != null && description.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          Text(description, style: TextStyle(fontSize: 13, height: 1.4, color: tint.onMuted)),
-        ],
       ],
     );
   }

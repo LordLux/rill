@@ -1224,7 +1224,9 @@ youtube.com's: only the title, the owner's name and the count.
   ("Playlist" / "Album" / "Podcast"), and the first two videos as
   `"<title> · <duration>"` rows, each with its own `watchEndpoint`. youtube.com
   also shows "Updated 4 days ago"; that row was absent from the captured search
-  fixtures, so find where it appears before promising it.
+  fixtures, so find where it appears before promising it. Its search tile also
+  ends with a "View full playlist" link and a line of the playlist's description
+  (seen 2026-10-14); neither has been looked for in a response.
 - **Contract:** new `PlaylistItem` fields go in all five places
   (`contract-docs.test.ts`), the Dart model and the corpus sanitiser.
 
