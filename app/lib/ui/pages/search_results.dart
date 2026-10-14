@@ -10,6 +10,7 @@ import '../page_wrapper.dart';
 import '../player_shell.dart' show openWatch, rootNavigatorKey;
 import '../widgets/artist_panel_card.dart';
 import '../widgets/feed_view.dart';
+import 'playlist.dart' show openPlaylistPage;
 
 const String searchRouteName = 'search';
 
@@ -28,20 +29,27 @@ class CurrentSearchQuery extends Notifier<String?> {
 final currentSearchQueryProvider = NotifierProvider<CurrentSearchQuery, String?>(CurrentSearchQuery.new);
 
 /// What submitting the search box does: a pasted link to one video plays that
-/// video, and anything else is searched.
+/// video, a pasted link to a playlist opens its page, and anything else is
+/// searched.
 ///
 /// **Not left to YouTube's search.** It answers a `watch?v=` link with the video
 /// but a `/shorts/` link with nothing — measured 2026-09-26, the response held no
 /// result at all, only the query echoed in its filter links and an ad — so a
 /// Short could not be reached by pasting its link unless the app read the link
-/// itself.
+/// itself. A playlist the viewer keeps private or unlisted is in no search
+/// either.
 void openSearchOrVideo(WidgetRef ref, String text) {
   final videoId = videoIdFromLink(text);
-  if (videoId == null) {
-    openSearch(ref, text);
+  if (videoId != null) {
+    openWatch(ref, placeholderVideoItem(videoId));
     return;
   }
-  openWatch(ref, placeholderVideoItem(videoId));
+  final playlistId = playlistIdFromLink(text);
+  if (playlistId != null) {
+    openPlaylistPage(playlistId);
+    return;
+  }
+  openSearch(ref, text);
 }
 
 /// Pushes the results page, the same way `openWatch` pushes the watch page —
