@@ -1140,10 +1140,17 @@ parser strips — so a Short could not be reached by pasting its link. Accepted:
 `?feature=share`, `&t=` and `&si=` ignored. **A link and nothing else**: a sentence
 that contains one is a search, and so is a bare 11-character id, which is
 indistinguishable from a word. A `list=` is ignored — the video opens, not the
-playlist — and a playlist or channel link is still searched. The video opens
+playlist — and a channel link is still searched. The video opens
 through the same `openWatch` a tile tap uses, on a placeholder tile that
 `video.info` replaces a moment later (`placeholderVideoItem`, shared with
 `RILL_OPEN_VIDEO`).
+
+**A pasted `youtube.com/playlist?list=…` link opens that playlist's page — added
+2026-10-14.** `playlistIdFromLink`, the same file and the same "a link and
+nothing else" rule. It is the only way in to a playlist no search returns: one
+the viewer keeps private or unlisted, while the Playlists page is not built.
+Only the playlist's own address counts; `watch?v=…&list=…` stays the video, as
+above. A mix (`RD…`) has no page, so its link is not one.
 
 #### A control that needs an account is disabled and says why — decided 2026-09-21
 

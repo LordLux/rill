@@ -442,6 +442,8 @@ function scanDartCalls(files: Array<{name: string, content: string}>, namespaces
     for (const m of content.matchAll(/['"]([a-zA-Z]+\.[a-zA-Z0-9]+)['"]/g)) {
       const literal = m[1]!;
       const parts = literal.split('.');
+      // `import 'playlist.dart'` from a file beside it is a file, not a method.
+      if (parts[1] === 'dart') continue;
       if (parts.length === 2 && namespaces.has(parts[0]!)) {
         calls.add(literal);
       }
