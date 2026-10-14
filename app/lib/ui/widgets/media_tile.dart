@@ -240,6 +240,12 @@ class MediaTile extends StatefulWidget {
   /// to nothing.
   final VoidCallback? onTap;
 
+  /// What the thumbnail does when that is not what the rest of the tile does:
+  /// it **plays** what the tile shows, while [onTap] opens it. The thumbnail is
+  /// then a target of its own, named "Play" and the title and reached by Tab,
+  /// and the tile is named "Open", its kind and the title.
+  final VoidCallback? onThumbnailTap;
+
   /// The two hover actions. Both sit inside `IconButton`s, which win the gesture
   /// arena against the tile behind them — so pressing one does not also navigate
   /// (task §6). That is asserted in `media_tile_tap_test.dart` as behaviour,
@@ -258,35 +264,46 @@ class MediaTile extends StatefulWidget {
   /// to open from somewhere, and a callback has no position to give it.
   final List<TileMenuItem> menu;
 
+  /// The widest a large wide tile's thumbnail gets. Null is the search page's
+  /// 400 (250 for a Short); a list of rows wants a smaller one, and the row
+  /// then takes its height from whichever of the thumbnail and the text is taller.
+  final double? thumbnailWidth;
+
   const MediaTile({
     super.key,
     required this.spec,
     this.onTap,
+    this.onThumbnailTap,
     this.onWatchLater,
     this.onAddToQueue,
     this.menu = const [],
   }) : layout = MediaTileLayout.standard,
-       size = MediaTileSize.standard;
+       size = MediaTileSize.standard,
+       thumbnailWidth = null;
 
   const MediaTile.wide({
     super.key,
     required this.spec,
     this.onTap,
+    this.onThumbnailTap,
     this.onWatchLater,
     this.onAddToQueue,
     this.menu = const [],
     this.size = MediaTileSize.standard,
+    this.thumbnailWidth,
   }) : layout = MediaTileLayout.wide;
 
   const MediaTile.shorts({
     super.key,
     required this.spec,
     this.onTap,
+    this.onThumbnailTap,
     this.onWatchLater,
     this.onAddToQueue,
     this.menu = const [],
   }) : layout = MediaTileLayout.shorts,
-       size = MediaTileSize.standard;
+       size = MediaTileSize.standard,
+       thumbnailWidth = null;
 
   @override
   State<MediaTile> createState() => _MediaTileState();
@@ -533,8 +550,12 @@ class _MediaTileState extends State<MediaTile> {
     // Views and age ("1M views • 3y ago"): after who made it, before the badges and the length.
     final secondary = spec.secondaryLine;
     return [
-      ?kind,
-      spec.title,
+      // A tile whose thumbnail plays it says what the tile itself does, since
+      // "Play …" is the thumbnail's name. From the kind, not a fixed word: a
+      // playlist is the only tile with a second action today, not by definition.
+      if (widget.onThumbnailTap != null)
+        ['Open', ?kind?.toLowerCase(), spec.title].join(' ')
+      else ...[?kind, spec.title],
       spec.primaryLine,
       ?secondary,
       if (spec.isMembersOnly) 'Members only',
@@ -545,6 +566,24 @@ class _MediaTileState extends State<MediaTile> {
 
   /// A piece of the tile that [_narration] already says: kept on screen, out of the tree.
   Widget _quiet(Widget child) => ExcludeSemantics(child: child);
+
+  Widget _interactiveThumbnail({required void Function(PointerEvent) onEnter, required void Function(PointerEvent) onExit, required Widget child}) {
+    final region = MouseRegion(onEnter: onEnter, onExit: onExit, child: child);
+    if (widget.onThumbnailTap == null) return region;
+    // A second target with its own action, so its own name and its own Tab stop:
+    // left to the mouse, the keyboard could open a playlist's page but not play it.
+    // `container`, or its name merges up into the tile's and the two read as one
+    // button called "Open playlist …, Play …".
+    return Semantics(
+      container: true,
+      child: KeyboardTap(
+        label: 'Play ${widget.spec.title}',
+        borderRadius: 12,
+        onTap: widget.onThumbnailTap,
+        child: region,
+      ),
+    );
+  }
 
   String _getBadgeText(bool isStation, bool isLive, bool isMix) {
     if (isStation) return 'STATION';
@@ -692,7 +731,7 @@ class _MediaTileState extends State<MediaTile> {
                   children: [
                     // MouseRegion for preview that covers the background
                     Positioned.fill(
-                      child: MouseRegion(
+                      child: _interactiveThumbnail(
                         onEnter: (_) => _onEnterPreview(),
                         onExit: (_) => _onExitPreview(),
                         child: Stack(
@@ -1186,10 +1225,11 @@ class _MediaTileState extends State<MediaTile> {
     Widget Function({bool showAvatar}) bottomArea,
   ) {
     // The watch page sidebar uses standard wide tiles and needs them to stay wide
-    // even in narrow spaces. The fallback is only for large tiles (search results).
+    // even in narrow spaces. The fallback is only for large tiles (search results),
+    // and not for one given its own thumbnail width, which fits a narrow row as it is.
     final bool isEffectiveWide =
         widget.layout == MediaTileLayout.wide &&
-        (widget.size == MediaTileSize.standard || constraints.maxWidth >= 483);
+        (widget.size == MediaTileSize.standard || widget.thumbnailWidth != null || constraints.maxWidth >= 483);
 
     final Widget layout = switch (widget.layout) {
       MediaTileLayout.wide when isEffectiveWide => Row(
@@ -1201,7 +1241,7 @@ class _MediaTileState extends State<MediaTile> {
                   fit: FlexFit.loose,
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxWidth: widget.spec.isShort ? 250 : 400,
+                      maxWidth: widget.thumbnailWidth ?? (widget.spec.isShort ? 250 : 400),
                     ),
                     child: topArea(isShort: widget.spec.isShort),
                   ),

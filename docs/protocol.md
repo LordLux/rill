@@ -198,22 +198,60 @@ shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 | `captions.get` | `{videoId, trackId, style?, offset?}` | `CaptionTrackContent` — §3.8 |
 | `video.related` | `{videoId, continuation?}` | `{items[], continuation?}` |
 | `video.comments` | `{videoId, continuation?}` | `{items[], continuation?, chips?, commentCount, createParams}` — `createParams` is the comment box's submit token, null when the viewer cannot comment |
-| `playlist.get` | `{playlistId, continuation?}` | `{items[], continuation?}` — **not implemented** |
+| `playlist.get` | `{playlistId, continuation?}` | `PlaylistResult` — `{title, videoCount, items[], continuation}` |
 | `mix.start` | `{playlistId, videoId?, params?}` | `{playlistId, title, items[]}` |
 | `mix.extend` | `{playlistId, afterVideoId}` | `{items[], exhausted}` |
 | `search.query` | `{q, continuation?, filters?}` | `{items[], continuation?, artist?}` |
 | `search.suggest` | `{q}` | `{suggestions[]}` |
 
-**`playlist.get` is specified and does not exist.** There is no handler for it
-in `rpc/server.ts` — calling it answers `Unknown method`. The row stays because
-the shape is still the intended one, but it is marked so the table cannot be
-read as a list of things that work. Found while implementing Task 26, which hit
-the same thing with `mix.start`.
+**`playlist.get` is a paginated list, not a sliding window.** Unlike a mix, a
+playlist has a fixed end. It is read from `/browse VL<id>`, 100 entries to a
+page; `continuation` is the next page's token and is `null` on the last one,
+which is the only way a playlist ends. **Unavailable (private or deleted)
+entries are left out by YouTube itself** — measured 2026-10-06 on a public
+playlist read anonymously: 135 claimed, 133 lockups across both pages, none of
+them a placeholder, and an `INFO` alert "Unavailable videos are hidden". The
+parser also drops a tile titled `[Deleted video]` / `[Private video]` or marked
+`isPlayable: false`, as a backstop for a view that does list them (the owner's,
+not yet captured); the title half of that is English-only. An `ERROR` alert in the response
+("The playlist does not exist.") is answered as `NOT_FOUND` with that text (§4).
 
-**`feed.watchLater` and `feed.history` are specified and do not exist,** the same
-way `playlist.get` above is. Watch Later and history are reachable today only as
-writes (`action.addToWatchLater` / `action.removeFromPlaylist`); the feed
-surfaces are intended but not built.
+```ts
+interface PlaylistHeader {
+  thumbnailUrl: string | null;
+  ownerName: string | null;
+  ownerChannelId: string | null;
+  ownerAvatarUrl: string | null;
+  viewCountText: string | null;
+  description: string | null;
+  visibility: 'public' | 'unlisted' | 'private' | null;
+  backgroundColor: ThemedColor | null;
+  isOwnedByViewer: boolean;
+}
+
+interface PlaylistResult {
+  header: PlaylistHeader | null; // null on continuation pages
+  title: string | null;        // the playlist's name
+  videoCount: number | null;   // every entry, unavailable ones included
+  items: VideoItem[];
+  continuation: string | null;
+}
+```
+
+`title` and `videoCount` come from the page's header. **`videoCount` can be
+larger than the items the pages add up to**, because it counts the unavailable
+entries too — measured 2026-10-06: a playlist reporting 135 paged out as
+100 + 33. The client shows it as the list's length only while pages are still to
+come, and its own count once the last one has landed. Treat both as possibly
+`null` on any page; the client falls back to what the tile showed.
+
+**A playlist tile's `videoCount` is its thumbnail badge** (`"134 videos"`), on
+both generations. The metadata rows of a `lockupViewModel` hold the owner's name
+and the first two videos' titles, and until 2026-10-06 the parser took the first
+number it found in them: `8Click` shipped as 8 videos, and `[1 HOUR] · 1:00:02`
+as 110002. A tile with no badge has `videoCount: null`.
+
+**`feed.watchLater` and `feed.history` are specified and do not exist.** Watch Later and history are reachable today only as writes (`action.addToWatchLater` / `action.removeFromPlaylist`); the feed surfaces are intended but not built.
 
 #### Comments — Task 27
 
@@ -1593,7 +1631,27 @@ them has a `retry` value:
 | `VIDEO_MEMBERS_ONLY` | `no` | The members slate: thumbnail, the channel, a Join affordance. **Not** an error state |
 | `RATE_LIMITED` | `user` | "YouTube is limiting requests from this connection", with a retry — never "would not open" |
 | `AGE_VERIFICATION_REQUIRED` | `user` | The age-verification slate: "Sign in" when signed out, a plain explanation with no retry when already signed in. **Not** an "Unavailable" state |
+| `NOT_FOUND` | `no` | YouTube's own sentence, and no retry affordance anywhere it is shown |
 | `UPSTREAM_ERROR` | `auto` | App backs off and retries silently |
+
+**`NOT_FOUND` is YouTube answering that the thing asked for is not there —
+added 2026-10-13.** Not there, or not visible to this viewer: YouTube says "The
+playlist does not exist." for a deleted playlist and for somebody else's private
+one alike, so the code covers both and cannot tell them apart. It is `no` in
+the sense the table above defines, nothing changes until a login does, and
+signing in as the owner is that login. It replaced `UPSTREAM_ERROR` for this
+case because that one is `auto`: the app backed off and asked again for a
+playlist that was never going to be there, then offered a *Try again* that could
+only repeat the sentence.
+
+**Two things it is not.** It is not for a video: every rung of the ladder can
+decline for a video that is fine, which is why `STREAM_UNAVAILABLE` is `user`.
+And it is not for failing to *get* an answer, which stays `UPSTREAM_ERROR`.
+
+**One throw site so far:** `playlist.get`, on an `ERROR` alert in the response.
+Any other handler (`video.info` on a removed video, a channel page) adopts it
+only once its own refusal has been measured; a refusal that only looks alike is
+not evidence.
 
 **`BAD_REQUEST` is for an unknown method or params that fail validation** — the
 request was malformed before anything upstream was asked. It is `no` because

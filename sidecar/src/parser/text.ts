@@ -196,7 +196,7 @@ export function exactCountFromText(value: unknown): number | null {
 
 /** Classifies a metadata string as a view count. "22K views", "1.2M watching". */
 export function isViewCountText(value: string): boolean {
-  return /\b(view|views|watching|waiting)\b/i.test(value);
+  return /\b(view|views|watching|waiting)\b/i.test(value) || /^\d+(?:\.\d+)?[KMB]$/i.test(value);
 }
 
 /** Classifies a metadata string as a publish date. "1 hour ago", "Streamed 2 days ago". */
@@ -507,4 +507,48 @@ export function metadataRowTexts(contentMetadata: Json): string[][] {
       .map((part) => text(get(part, 'text')))
       .filter((value): value is string => value !== null),
   );
+}
+
+const VIEW_UNIT = /\b(views?|watching|waiting)\b/i;
+
+/**
+ * The classic playlist row's one-line summary: `videoInfo.runs` reading
+ * `"84K" • "3d ago"`. It is what an owned playlist and Watch Later ship in
+ * place of `viewCountText` / `publishedTimeText`, and it carries no label at
+ * all, so the count is recognised by shape and the unit is supplied here.
+ * 327 of 327 captured rows have exactly this layout (2026-10-07).
+ */
+export function videoInfoTexts(videoInfo: Json): { viewCountText: string | null; publishedText: string | null } {
+  const runs = asArray(get(videoInfo, 'runs'))
+    .map((run) => str(get(run, 'text'))?.trim() ?? null)
+    .filter((value): value is string => value !== null);
+  const count = runs.find((run) => VIEW_UNIT.test(run) || /^\d[\d.,]*\s?[KMB]?$/i.test(run)) ?? null;
+  return {
+    viewCountText: count === null || VIEW_UNIT.test(count) ? count : `${count} ${count === '1' ? 'view' : 'views'}`,
+    publishedText: runs.find(isPublishedText) ?? null,
+  };
+}
+
+/**
+ * A lockup's view count, as a string that says what it counts.
+ *
+ * A playlist row ships the bare number ("622K") beside a play icon, and the
+ * unit only in the part's `accessibilityLabel` ("622 thousand views"). Every
+ * other surface ships "622K views", so the unit is put back here rather than
+ * leaving one DTO field with two meanings. The label also classifies a count
+ * too small to carry a magnitude ("532"), which `isViewCountText` cannot tell
+ * from any other number. Measured 2026-10-07.
+ */
+export function lockupViewCountText(contentMetadata: Json): string | null {
+  for (const row of asArray(get(contentMetadata, 'metadataRows'))) {
+    for (const part of asArray(get(row, 'metadataParts'))) {
+      const value = text(get(part, 'text'));
+      if (value === null) continue;
+      if (VIEW_UNIT.test(value)) return value;
+      const unit = VIEW_UNIT.exec(str(get(part, 'accessibilityLabel')) ?? '')?.[0];
+      if (unit) return `${value} ${unit.toLowerCase()}`;
+      if (isViewCountText(value)) return value;
+    }
+  }
+  return null;
 }

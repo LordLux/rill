@@ -4,20 +4,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 
 import '../data/rpc/client.dart';
+import '../domain/artist_panel.dart';
 import '../domain/feed_item.dart';
 
-/// The mix a queue is playing, when it is playing one (Task 26 §3).
+/// The list a queue is playing, when it is playing one: a mix (Task 26 §3) or
+/// a playlist (Task 34).
 ///
-/// **The queue has to know it is a mix**, because the end-of-queue behaviour
-/// differs: a hand-built queue stops (Task 14, verified and unchanged), a mix
-/// extends. Carrying that as a field on the state rather than a flag somewhere
-/// else means every mutation either preserves it or drops it deliberately, and
-/// the panel can name the mix without asking anyone.
+/// **The queue has to know**, because the end-of-queue behaviour differs: a
+/// hand-built queue stops (Task 14, verified and unchanged), a mix re-anchors
+/// and a playlist pages. Carrying that as a field on the state rather than a
+/// flag somewhere else means every mutation either preserves it or drops it
+/// deliberately, and the panel can name the list without asking anyone.
 @immutable
 class MixQueue {
-  const MixQueue({required this.playlistId, this.title, this.exhausted = false});
+  const MixQueue({
+    required this.playlistId,
+    this.title,
+    this.exhausted = false,
+    this.isPlaylist = false,
+    this.continuation,
+    this.totalCount,
+  });
 
-  /// The `RD…` id. What `mix.extend` is keyed on.
+  /// The `RD…` id `mix.extend` is keyed on, or a playlist's own id.
   final String playlistId;
 
   /// "My Mix", "Mix - <video>", "Chroma: Today's Dance Hits". Null if absent.
@@ -30,10 +39,29 @@ class MixQueue {
   /// longer places in the sequence) and both mean the same thing here.
   final bool exhausted;
 
-  MixQueue copyWith({bool? exhausted}) => MixQueue(
+  /// A playlist rather than a mix: it pages through [continuation] and never
+  /// goes near `mix.extend`.
+  final bool isPlaylist;
+
+  /// The next page's token. Null for a mix, and for a playlist with no more
+  /// pages.
+  final String? continuation;
+
+  /// How many videos YouTube says the playlist holds, where it said.
+  ///
+  /// Counts unavailable entries, which never reach the queue — so it is what
+  /// the panel shows only until the last page has landed.
+  final int? totalCount;
+
+  static const Object _unchanged = Object();
+
+  MixQueue copyWith({bool? exhausted, Object? continuation = _unchanged}) => MixQueue(
         playlistId: playlistId,
         title: title,
         exhausted: exhausted ?? this.exhausted,
+        isPlaylist: isPlaylist,
+        continuation: identical(continuation, _unchanged) ? this.continuation : continuation as String?,
+        totalCount: totalCount,
       );
 
   @override
@@ -41,10 +69,13 @@ class MixQueue {
       other is MixQueue &&
       other.playlistId == playlistId &&
       other.title == title &&
-      other.exhausted == exhausted;
+      other.exhausted == exhausted &&
+      other.isPlaylist == isPlaylist &&
+      other.continuation == continuation &&
+      other.totalCount == totalCount;
 
   @override
-  int get hashCode => Object.hash(playlistId, title, exhausted);
+  int get hashCode => Object.hash(playlistId, title, exhausted, isPlaylist, continuation, totalCount);
 
   @override
   String toString() => 'MixQueue($playlistId, exhausted: $exhausted)';
@@ -102,6 +133,7 @@ class QueueState {
     this.version = 0,
     this.mix,
     this.startingMixId,
+    this.playedOut = false,
   });
 
   /// The queue itself. Order is position; each element is an identity
@@ -122,6 +154,24 @@ class QueueState {
   final MixQueue? mix;
 
   bool get isMix => mix != null;
+
+  /// The last video played to its end and there was nothing after it.
+  ///
+  /// Not the same as [MixQueue.exhausted], which is known as soon as the last
+  /// page lands — possibly with a hundred videos still to play. Dropped by
+  /// every mutation, since each one builds a new state without it.
+  final bool playedOut;
+
+  /// How long the list is, for the panel's `n / total`.
+  ///
+  /// A playlist that is still paging holds fewer videos than it has, so the
+  /// count YouTube gave stands in until the last page lands.
+  int get displayLength {
+    final source = mix;
+    final total = source?.totalCount;
+    final paging = source != null && source.isPlaylist && !source.exhausted;
+    return paging && total != null && total > entries.length ? total : entries.length;
+  }
 
   /// The `RD…` id of a mix whose `mix.start` is on the wire, or null.
   ///
@@ -185,6 +235,22 @@ class QueueState {
     mix: mix,
     startingMixId: startingMixId,
   );
+
+  /// The same queue, playing the same thing, with [mix] replaced — a new page
+  /// token, or the end.
+  QueueState _withMix(MixQueue mix) => QueueState._(
+    entries,
+    currentIndex: currentIndex,
+    version: version,
+    mix: mix,
+    startingMixId: startingMixId,
+  );
+
+  /// The last video finished with nothing after it. See [playedOut].
+  QueueState finished() {
+    if (playedOut || next != null || currentIndex == null) return this;
+    return QueueState._(entries, currentIndex: currentIndex, version: version, mix: mix, playedOut: true);
+  }
 
   /// Append. Starts playback only if nothing was playing.
   QueueState appended(VideoItem item) {
@@ -314,11 +380,11 @@ class QueueState {
   /// The playhead moves by construction, so `version` increments and playback
   /// opens `items.first`. Entries are minted fresh because none of them
   /// survived — this is the one mutation where that is correct.
-  QueueState startedMix(List<VideoItem> items, MixQueue mix) {
+  QueueState startedMix(List<VideoItem> items, MixQueue mix, {int startIndex = 0}) {
     if (items.isEmpty) return this;
     return QueueState._(
       [for (final item in items) QueueEntry(item)],
-      currentIndex: 0,
+      currentIndex: startIndex,
       version: version + 1,
       mix: mix,
     );
@@ -355,12 +421,14 @@ class QueueState {
   QueueState mixExhausted() {
     final current = mix;
     if (current == null || current.exhausted) return this;
-    return QueueState._(
-      entries,
-      currentIndex: currentIndex,
-      version: version,
-      mix: current.copyWith(exhausted: true),
-    );
+    return _withMix(current.copyWith(exhausted: true, continuation: null));
+  }
+
+  /// More of the playlist is behind [continuation].
+  QueueState playlistContinuesAt(String continuation) {
+    final current = mix;
+    if (current == null) return this;
+    return _withMix(current.copyWith(continuation: continuation));
   }
 
   /// Clears the queue except the current entry and anything in [keep] — the
@@ -407,6 +475,74 @@ class MixStart {
   final List<VideoItem> items;
 }
 
+@immutable
+class PlaylistHeader {
+  const PlaylistHeader({
+    required this.thumbnailUrl,
+    required this.ownerName,
+    required this.ownerChannelId,
+    required this.ownerAvatarUrl,
+    required this.viewCountText,
+    required this.description,
+    required this.visibility,
+    required this.backgroundColor,
+    required this.isOwnedByViewer,
+  });
+
+  /// The header as `playlist.get` sends it. The one place its keys are named:
+  /// the app and `contract_test.dart` both decode through here, so a key the
+  /// sidecar renames fails a test instead of leaving a field quietly empty.
+  factory PlaylistHeader.fromJson(Map<String, dynamic> json) => PlaylistHeader(
+        thumbnailUrl: json['thumbnailUrl'] as String?,
+        ownerName: json['ownerName'] as String?,
+        ownerChannelId: json['ownerChannelId'] as String?,
+        ownerAvatarUrl: json['ownerAvatarUrl'] as String?,
+        viewCountText: json['viewCountText'] as String?,
+        description: json['description'] as String?,
+        visibility: json['visibility'] as String?,
+        backgroundColor: json['backgroundColor'] == null
+            ? null
+            : ThemedColor.fromJson(json['backgroundColor'] as Map<String, dynamic>),
+        isOwnedByViewer: json['isOwnedByViewer'] as bool? ?? false,
+      );
+
+  final String? thumbnailUrl;
+  final String? ownerName;
+  final String? ownerChannelId;
+  final String? ownerAvatarUrl;
+  final String? viewCountText;
+  final String? description;
+  final String? visibility;
+  final ThemedColor? backgroundColor;
+  final bool isOwnedByViewer;
+}
+
+/// What `playlist.get` answers: one page of a playlist.
+@immutable
+class PlaylistResult {
+  const PlaylistResult({this.header, this.title, this.videoCount, required this.items, this.continuation});
+
+  /// One `playlist.get` answer. See [PlaylistHeader.fromJson] for why here.
+  factory PlaylistResult.fromJson(Map<String, dynamic> json) {
+    final header = json['header'] as Map<String, dynamic>?;
+    return PlaylistResult(
+      header: header == null ? null : PlaylistHeader.fromJson(header),
+      title: json['title'] as String?,
+      videoCount: (json['videoCount'] as num?)?.toInt(),
+      items: _videosFrom(json['items']),
+      continuation: json['continuation'] as String?,
+    );
+  }
+
+  final PlaylistHeader? header;
+  final String? title;
+  final int? videoCount;
+  final List<VideoItem> items;
+
+  /// Null on the last page.
+  final String? continuation;
+}
+
 /// What `mix.extend` answers.
 @immutable
 class MixExtension {
@@ -425,6 +561,7 @@ class MixExtension {
 abstract class MixService {
   Future<MixStart> start(String playlistId, {String? videoId, String? params});
   Future<MixExtension> extend(String playlistId, String afterVideoId);
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation});
 }
 
 class RpcMixService implements MixService {
@@ -445,6 +582,15 @@ class RpcMixService implements MixService {
   }
 
   @override
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async {
+    final response = await RpcClient.instance.call('playlist.get', {
+      'playlistId': playlistId,
+      'continuation': ?continuation,
+    }) as Map<String, dynamic>;
+    return PlaylistResult.fromJson(response);
+  }
+
+  @override
   Future<MixExtension> extend(String playlistId, String afterVideoId) async {
     final response = await RpcClient.instance.call('mix.extend', {
       'playlistId': playlistId,
@@ -458,17 +604,18 @@ class RpcMixService implements MixService {
     );
   }
 
-  /// A mix panel is videos by construction, but the wire type is `FeedItem[]`
-  /// like every other list method. Anything that is not a video is dropped
-  /// rather than queued as something unplayable.
-  static List<VideoItem> _videosFrom(Object? raw) {
-    final out = <VideoItem>[];
-    for (final entry in (raw as List<dynamic>? ?? const <dynamic>[])) {
-      final item = FeedItem.fromJson(entry as Map<String, dynamic>);
-      if (item is VideoItem) out.add(item);
-    }
-    return out;
+}
+
+/// A mix panel is videos by construction, but the wire type is `FeedItem[]`
+/// like every other list method. Anything that is not a video is dropped
+/// rather than queued as something unplayable.
+List<VideoItem> _videosFrom(Object? raw) {
+  final out = <VideoItem>[];
+  for (final entry in (raw as List<dynamic>? ?? const <dynamic>[])) {
+    final item = FeedItem.fromJson(entry as Map<String, dynamic>);
+    if (item is VideoItem) out.add(item);
   }
+  return out;
 }
 
 final mixServiceProvider = Provider<MixService>((ref) => const RpcMixService());
@@ -495,6 +642,22 @@ class QueueController extends Notifier<QueueState> {
   /// appending them again. The guard is the difference between one round trip
   /// and a queue with everything in it twice.
   bool _extending = false;
+
+  /// Which request [_extending] is about.
+  ///
+  /// Replacing the queue has to be able to start a new top-up at once, so it
+  /// clears [_extending] — and the request that was out is still out. Without
+  /// this its answer was matched by playlist id alone: start a playlist, start
+  /// another, press Undo, and the restored queue asked for its next page again
+  /// while the first request for that same page was still coming. Both
+  /// appended it. A request whose ticket is no longer current is dropped whole.
+  int _extendTicket = 0;
+
+  /// Forget the top-up that is out, if any. Its answer will be ignored.
+  void _abandonExtension() {
+    _extendTicket++;
+    _extending = false;
+  }
 
   /// Autoplay reached the end of the mix while a top-up was on the wire.
   ///
@@ -549,6 +712,9 @@ class QueueController extends Notifier<QueueState> {
     _maybeExtend();
   }
 
+  @visibleForTesting
+  void debugSetStateForTest(QueueState next) => _set(next);
+
   /// Open a video now. The one the feed and the related rail both call.
   void play(VideoItem item) => _edit(state.playingNow(item));
 
@@ -602,6 +768,16 @@ class QueueController extends Notifier<QueueState> {
     return moved;
   }
 
+  /// The current video played to its end and [advance] had nowhere to go.
+  ///
+  /// Separate from [advance] because the Next button calls that too, and
+  /// pressing it on the last video is not that video finishing. Says nothing
+  /// while a top-up is awaited: more may be about to arrive.
+  void playedOut() {
+    if (_advanceWhenExtended) return;
+    state = state.finished();
+  }
+
   /// Step back one. Returns false at the front of the queue, where the button
   /// is disabled anyway — both halves so neither is the only guard.
   bool back() {
@@ -652,7 +828,7 @@ class QueueController extends Notifier<QueueState> {
     final previous = state.isEmpty ? null : state;
     _replaced = null;
     _mixError = null;
-    _extending = false;
+    _abandonExtension();
     _advanceWhenExtended = false;
     state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
 
@@ -680,6 +856,68 @@ class QueueController extends Notifier<QueueState> {
     ));
   }
 
+  Future<void> startPlaylist(
+    String playlistId, {
+    String? title,
+    int? videoCount,
+    List<VideoItem>? loadedItems,
+    String? continuation,
+    int startIndex = 0,
+  }) async {
+    if (isStartingMix) return;
+
+    final previous = state.isEmpty ? null : state;
+    _replaced = null;
+    _mixError = null;
+    _abandonExtension();
+    _advanceWhenExtended = false;
+    state = QueueState._(const [], version: state.version + 1, startingMixId: playlistId);
+
+    List<VideoItem> items;
+    String? finalContinuation;
+    String? finalTitle = title;
+    int? finalVideoCount = videoCount;
+
+    if (loadedItems != null) {
+      if (loadedItems.isEmpty) {
+        _rollBack(previous);
+        return;
+      }
+      items = loadedItems;
+      finalContinuation = continuation;
+    } else {
+      final PlaylistResult result;
+      try {
+        result = await ref.read(mixServiceProvider).getPlaylist(playlistId);
+      } catch (_) {
+        _rollBack(previous);
+        rethrow;
+      }
+      if (result.items.isEmpty) {
+        _rollBack(previous);
+        throw StateError('playlist.get returned no items for $playlistId');
+      }
+      items = result.items;
+      finalContinuation = result.continuation;
+      finalTitle = result.title ?? title;
+      finalVideoCount = result.videoCount ?? videoCount;
+    }
+
+    _replaced = previous;
+    _set(state.startedMix(
+      items,
+      startIndex: startIndex,
+      MixQueue(
+        playlistId: playlistId,
+        title: finalTitle,
+        isPlaylist: true,
+        continuation: finalContinuation,
+        exhausted: finalContinuation == null,
+        totalCount: finalVideoCount,
+      ),
+    ));
+  }
+
   /// A start that failed puts back what it cleared.
   ///
   /// The queue was emptied when the tap landed, so leaving it empty here would
@@ -698,7 +936,7 @@ class QueueController extends Notifier<QueueState> {
     if (previous == null) return;
     _replaced = null;
     _mixError = null;
-    _extending = false;
+    _abandonExtension();
     // `version` must move or the playback controller will not reopen the video
     // the user was on: it listens for a playhead change, and restoring a
     // snapshot is one. Entries are carried forward, so the panel reads the
@@ -711,47 +949,127 @@ class QueueController extends Notifier<QueueState> {
   /// Deliberately fire-and-forget: this runs off an ordinary queue mutation
   /// and nothing waits for it. A failure leaves the queue exactly as playable
   /// as it was.
-  void _maybeExtend() {
+  ///
+  /// **A playlist keeps [playlistLookahead] videos loaded past the playhead**,
+  /// a page after a page, from the moment it starts — not the mix's five. It
+  /// is finite and the user was shown its length, so a panel that stops at row
+  /// 100 until playback reaches row 95 reads as a broken list. But not all of
+  /// it either: a Watch Later of 5,000 is fifty requests on every play. One
+  /// request at a time, each started by the last one landing (`_extend`'s
+  /// tail), so the first video's `playback.open` never queues behind more than
+  /// one page. Scrolling the panel to the end of what is loaded asks for more
+  /// ([loadMoreOfPlaylist]).
+  void _maybeExtend({bool pastLookahead = false}) {
     final mix = state.mix;
     if (mix == null || mix.exhausted || _extending) return;
-    final remaining = state.remainingAfterCurrent;
-    if (remaining == null || remaining > extendThreshold) return;
     if (state.entries.isEmpty) return;
+    final remaining = state.remainingAfterCurrent;
+    if (remaining == null) return;
+    if (mix.isPlaylist) {
+      // A playlist's end is its null continuation, whatever else is set.
+      if (mix.continuation == null) return;
+      if (!pastLookahead && remaining >= playlistLookahead) return;
+    } else {
+      if (remaining > extendThreshold) return;
+    }
 
     _extending = true;
-    unawaited(_extend(mix.playlistId, state.entries.last.item.id));
+    unawaited(_extend(mix, ++_extendTicket));
   }
 
-  Future<void> _extend(String playlistId, String anchor) async {
+  /// How many videos a playlist keeps loaded after the one playing.
+  ///
+  /// Two pages. Enough that the panel shows a long run of what is coming and
+  /// that skipping cannot outrun it; small enough that a playlist of thousands
+  /// costs three requests to start instead of dozens.
+  static const int playlistLookahead = 200;
+
+  /// The panel was scrolled to the end of what is loaded: fetch one more page
+  /// of the playlist, whatever the playhead's margin is.
+  ///
+  /// One page per call and nothing while a request is out, so a scroll that
+  /// fires this on every frame is one request. A no-op for a mix, a hand-built
+  /// queue, and a playlist that has all its pages.
+  void loadMoreOfPlaylist() {
+    if (state.mix?.isPlaylist ?? false) _maybeExtend(pastLookahead: true);
+  }
+
+  /// One top-up: a mix re-anchors on its last video (F24), a playlist asks for
+  /// its next page. The two never share a request.
+  Future<void> _extend(MixQueue source, int ticket) async {
+    final playlistId = source.playlistId;
+    final service = ref.read(mixServiceProvider);
     var landed = false;
+    // Whether playback that stalled at the end has something to move onto. A
+    // playlist's last page is exhausted *and* has videos on it; an exhausted
+    // mix leaves playback stopped, as it always has.
+    var playable = false;
     try {
-      final result = await ref.read(mixServiceProvider).extend(playlistId, anchor);
-      // The mix may have been replaced or cleared while this was in flight.
-      // Appending to a queue that is no longer this mix is the one genuinely
-      // wrong outcome available here.
-      if (state.mix?.playlistId != playlistId) return;
+      final List<VideoItem> items;
+      final String? continuation;
+      final bool exhausted;
+      if (source.isPlaylist) {
+        final page = await service.getPlaylist(playlistId, continuation: source.continuation);
+        items = page.items;
+        continuation = page.continuation;
+        exhausted = continuation == null;
+      } else {
+        final result = await service.extend(playlistId, state.entries.last.item.id);
+        items = result.items;
+        continuation = null;
+        exhausted = result.exhausted;
+      }
+      // The list may have been replaced or cleared while this was in flight.
+      // Appending to a queue that is no longer this one is the one genuinely
+      // wrong outcome available here. The ticket covers the case the id cannot:
+      // the same list, put back, with a newer request already out for it.
+      if (ticket != _extendTicket || state.mix?.playlistId != playlistId) return;
       _mixError = null;
-      if (result.items.isNotEmpty) state = state.extendedWith(result.items);
-      if (result.exhausted) state = state.mixExhausted();
-      landed = result.items.isNotEmpty && !result.exhausted;
+      if (items.isNotEmpty) state = state.extendedWith(items);
+      if (exhausted) {
+        state = state.mixExhausted();
+      } else if (continuation != null) {
+        state = state.playlistContinuesAt(continuation);
+      }
+      // A playlist page can hold nothing playable and still point at a next
+      // one; the loader goes on as long as the token moved. A mix that returns
+      // nothing has nothing to re-anchor on, so it stops as before.
+      final emptyButContinues = source.isPlaylist && continuation != source.continuation;
+      landed = !exhausted && (items.isNotEmpty || emptyButContinues);
+      playable = source.isPlaylist ? items.isNotEmpty : landed;
     } on Object catch (e) {
       // Not fatal (§4): the queue plays what it has. Not marked exhausted
       // either, so the next advance retries — a natural backoff of one attempt
       // per playhead move rather than a timer nobody would remember to cancel.
-      if (state.mix?.playlistId == playlistId) _mixError = '$e';
+      if (ticket == _extendTicket && state.mix?.playlistId == playlistId) {
+        _mixError = '$e';
+        // A playlist's page that answers `no` (`NOT_FOUND`: the playlist was
+        // deleted, or made private, while it played) is not asked for again:
+        // the next advance would get the same answer, for every video left.
+        // What is loaded plays on, and the panel still says it could not load
+        // more. A mix is left as it was, retrying on the next move.
+        final gone = source.isPlaylist && e is RpcException && e.retry == RpcRetryMode.no;
+        // The error is not part of the state, so nothing would redraw the
+        // panel to show it. A new state object does.
+        state = gone ? state.mixExhausted() : state._with(state.entries, state.currentIndex);
+      }
     } finally {
-      _extending = false;
+      // An abandoned request must not clear the flag of the one that replaced it.
+      if (ticket == _extendTicket) _extending = false;
     }
+    if (ticket != _extendTicket) return;
 
     // Playback stalled at the end waiting for exactly this. `advance` goes
     // through `_set`, so it also re-checks the threshold. A failure or an
     // exhausted mix leaves playback stopped — the panel says which.
     if (_advanceWhenExtended) {
       _advanceWhenExtended = false;
-      if (landed) {
+      if (playable) {
         advance();
         return;
       }
+      // Nothing to move onto, so the video that ended was the last.
+      if (_mixError == null) state = state.finished();
     }
     // A batch smaller than the threshold — a curated list tapering off — can
     // leave the queue still under it. The append above writes `state` directly
@@ -764,3 +1082,4 @@ class QueueController extends Notifier<QueueState> {
 }
 
 final queueProvider = NotifierProvider<QueueController, QueueState>(QueueController.new);
+

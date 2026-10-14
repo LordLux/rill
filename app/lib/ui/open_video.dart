@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'pages/playlist.dart';
 
 import '../data/rpc/client.dart';
 import '../domain/feed_item.dart';
@@ -118,6 +119,132 @@ Future<void> startMixFromTile(
   }));
 }
 
+/// Start a playlist from a tile: [startMixFromTile]'s tap, rollback and undo,
+/// over `playlist.get` instead of `mix.start`.
+///
+/// [title] and [videoCount] are what the tile showed, so the panel can name
+/// the playlist and size it even where the response does not.
+///
+/// The playlist's own page starts it from a row the same way: it hands over the
+/// [loadedItems] it already has and the [continuation] after them, so nothing is
+/// fetched twice and a row from a later page starts at once, at [startIndex].
+Future<void> startPlaylistFromTile(
+  BuildContext context,
+  WidgetRef ref,
+  String playlistId, {
+  String? title,
+  int? videoCount,
+  List<VideoItem>? loadedItems,
+  String? continuation,
+  int startIndex = 0,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final container = ProviderScope.containerOf(context, listen: false);
+  final queue = container.read(queueProvider.notifier);
+  final resumeAt = container.read(playbackProvider).item == null
+      ? null
+      : container.read(playbackProvider.notifier).currentPosition;
+
+  showWatchPage(ref);
+
+  try {
+    await queue.startPlaylist(
+      playlistId,
+      title: title,
+      videoCount: videoCount,
+      loadedItems: loadedItems,
+      continuation: continuation,
+      startIndex: startIndex,
+    );
+  } on Object catch (e) {
+    if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+    if (container.read(queueProvider).isEmpty) toMiniPlayerIn(container);
+    final message = switch (e) {
+      RpcException(code: 'AUTH_REQUIRED') => 'Sign in to play playlists',
+      RpcException(:final message) => message,
+      _ => 'Could not start this playlist — $e',
+    };
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+    return;
+  }
+
+  if (!queue.canUndoStartMix) return;
+  final snackBar = messenger.showSnackBar(
+    SnackBar(
+      duration: const Duration(seconds: 5),
+      persist: false,
+      content: Text(title == null ? 'Queue replaced by the playlist' : 'Queue replaced by $title'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          queue.undoStartMix();
+          if (resumeAt != null) container.read(playbackProvider.notifier).resumeAt(resumeAt);
+        },
+      ),
+    ),
+  );
+
+  final watch = container.listen(queueProvider, (_, _) {
+    if (!queue.canUndoStartMix) snackBar.close();
+  });
+  unawaited(snackBar.closed.then((reason) {
+    watch.close();
+    if (reason != SnackBarClosedReason.action) queue.discardStartMixUndo();
+  }));
+}
+
+/// Play a playlist from its own page, from [index] of the [items] it has loaded.
+///
+/// **A queue that is already this playlist is kept.** Another row of the
+/// playlist that is on is a move within it, not a new start: replacing the queue
+/// threw away whatever had been reordered or removed in the panel and offered
+/// an Undo for a queue nobody meant to replace. The entry is the one at the
+/// row's own position when the queue still has that video there; a playlist can
+/// hold a video twice, and its second row is not its first. Otherwise it is found
+/// by id, since an edited queue's order is no longer the page's. A video the
+/// queue does not hold (removed, or on a page it has not reached) starts the
+/// playlist afresh, as does any other queue, through [startPlaylistFromTile]
+/// with what the page already has.
+Future<void> playPlaylistFromPage(
+  BuildContext context,
+  WidgetRef ref,
+  String playlistId, {
+  required List<VideoItem> items,
+  required int index,
+  String? continuation,
+  String? title,
+  int? videoCount,
+}) async {
+  final queue = ref.read(queueProvider);
+  final mix = queue.mix;
+  if (mix != null && mix.isPlaylist && mix.playlistId == playlistId && index < items.length) {
+    final id = items[index].id;
+    final samePlace = index < queue.entries.length && queue.entries[index].item.id == id;
+    final at = samePlace ? index : queue.entries.indexWhere((entry) => entry.item.id == id);
+    // The one move a jump cannot make: to the row the queue is already on,
+    // after it has played out. Nothing moves, so nothing plays, and the click
+    // opened the watch page on a stopped player. That row starts the playlist
+    // afresh from itself, below, like a row of a playlist that is not on.
+    final finishedHere = at == queue.currentIndex && queue.playedOut;
+    if (at >= 0 && !finishedHere) {
+      showWatchPage(ref);
+      if (at != queue.currentIndex) ref.read(queueProvider.notifier).jumpTo(at);
+      return;
+    }
+  }
+  await startPlaylistFromTile(
+    context,
+    ref,
+    playlistId,
+    title: title,
+    videoCount: videoCount,
+    // Nothing loaded yet is not "an empty playlist": let the queue ask.
+    loadedItems: items.isEmpty ? null : items,
+    continuation: continuation,
+    startIndex: index,
+  );
+}
+
 /// What tapping a tile should do, or null when nothing can happen.
 ///
 /// **One handler for every surface**, for the reason `openFromTile` already
@@ -139,7 +266,25 @@ VoidCallback? tapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) 
           title: item.title,
         ));
   }
+  if (item is PlaylistItem) {
+    return () => openPlaylistPage(item.id);
+  }
   return watchTargetFor(item) == null ? null : () => openFromTile(ref, item);
+}
+
+/// What tapping the thumbnail specifically should do.
+/// Returns null if the thumbnail should just use the tile's main [tapHandlerFor].
+VoidCallback? thumbnailTapHandlerFor(BuildContext context, WidgetRef ref, FeedItem item) {
+  if (item is PlaylistItem) {
+    return () => unawaited(startPlaylistFromTile(
+          context,
+          ref,
+          item.id,
+          title: item.title,
+          videoCount: item.videoCount,
+        ));
+  }
+  return null;
 }
 
 /// Add to the queue from a tile, for the kinds that can be queued.

@@ -26,12 +26,14 @@ import {
   durationToSeconds,
   isPublishedText,
   isViewCountText,
+  lockupViewCountText,
   metadataRowTexts,
   scanBadges,
   scanOwnerBadges,
   scanTileActions,
   text,
   tileId,
+  videoInfoTexts,
 } from './text.ts';
 import { isRendererKey, normaliseRendererName } from './vocabulary.ts';
 
@@ -87,6 +89,15 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   // shape we do not model. Either way there is no title to ship.
   if (!title) return null;
 
+  // A backstop, and an English-only one. Measured 2026-10-06: a public playlist
+  // read anonymously never contains its unavailable entries — YouTube leaves
+  // them out and says so in an alert — so this has nothing to catch there. It
+  // is for a view that does list them (the owner's), which has not been
+  // captured; when one is, key this on whatever that tile carries instead.
+  if (title === '[Deleted video]' || title === '[Private video]') {
+    return null;
+  }
+
   const thumbnailUrl = bestImageUrl(node['contentImage']);
   const badges = scanBadges(node['contentImage']);
   const rows = metadataRowTexts(get(metadata, 'metadata', 'contentMetadataViewModel'));
@@ -94,7 +105,10 @@ export function mapLockup(node: JsonObject): FeedItem | null {
 
   if (/PLAYLIST|PODCAST|ALBUM/i.test(contentType)) {
     const subtitle = flatRows[0] ?? null;
-    const videoCount = flatRows.map(countFromText).find((n) => n !== null) ?? null;
+    // The count is the thumbnail's badge ("134 videos"), and nowhere else. The
+    // metadata rows hold the owner and the first two videos' titles, so the
+    // first number in them is whatever those happen to contain — protocol.md §3.3.
+    const videoCount = badges.labels.map(countFromText).find((n) => n !== null) ?? null;
 
     if (isMixId(id) || badges.labels.some((label) => /^mix$/i.test(label))) {
       return {
@@ -169,7 +183,7 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     durationSeconds: badges.isLive ? null : badges.durationSeconds,
     isLive: badges.isLive || detailRows.some((row) => /watching now/i.test(row)),
     isStation: badges.isStation,
-    viewCountText: detailRows.find(isViewCountText) ?? null,
+    viewCountText: lockupViewCountText(get(metadata, 'metadata', 'contentMetadataViewModel')),
     publishedText: detailRows.find(isPublishedText) ?? null,
     descriptionSnippet: null,
     badges: badges.labels,
@@ -195,6 +209,10 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
   const title = text(node['title']) ?? text(node['headline']);
   if (!title) return null;
 
+  if (node['isPlayable'] === false || title === '[Deleted video]' || title === '[Private video]') {
+    return null;
+  }
+
   const byline = node['longBylineText'] ?? node['ownerText'] ?? node['shortBylineText'];
   const badges = scanBadges(node);
   const actions = scanTileActions(node);
@@ -205,7 +223,11 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     badges.durationSeconds ??
     (typeof node['lengthSeconds'] === 'string' ? Number(node['lengthSeconds']) : null);
 
-  const viewCountText = text(node['viewCountText']) ?? text(node['shortViewCountText']);
+  // An owned playlist's rows and Watch Later's carry neither field: both facts
+  // are in `videoInfo`, and without it those tiles had no second line at all.
+  const info = videoInfoTexts(node['videoInfo']);
+  const viewCountText =
+    text(node['viewCountText']) ?? text(node['shortViewCountText']) ?? info.viewCountText;
 
   // Classic tiles signal live three ways: a LIVE badge, a LIVE-styled time
   // overlay (both caught by scanBadges), or a "watching now" view count.
@@ -224,7 +246,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     isLive,
     isStation: badges.isStation,
     viewCountText,
-    publishedText: text(node['publishedTimeText']),
+    publishedText: text(node['publishedTimeText']) ?? info.publishedText,
     descriptionSnippet:
       text(get(asArray(node['detailedMetadataSnippets'])[0], 'snippetText')) ??
       text(node['descriptionSnippet']) ??

@@ -264,7 +264,7 @@ rl.on('line', (line) => {
       // retry:"user" — the §4 shape the watch page has to offer a retry out of.
       // The ladder's floor is a very good bet and not a promise (F9), so this is
       // a state a user can retry out of, and the retry has to actually work.
-      opens.push({ videoId: req.params?.videoId, preload: req.params?.preload === true });
+      opens.push({ videoId: req.params?.videoId, playlistId: req.params?.playlistId, preload: req.params?.preload === true });
       const isPreload = req.params?.preload === true;
       if (req.params?.videoId === BROKEN_ID) {
         process.stdout.write(JSON.stringify({

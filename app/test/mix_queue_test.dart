@@ -30,6 +30,8 @@ List<VideoItem> videos(int count, {int from = 0}) =>
 
 /// A counting stand-in for the two RPCs.
 class FakeMixService implements MixService {
+  @override Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async => throw UnimplementedError();
+
   FakeMixService({this.pageSize = 24, this.pages = 1000, this.failExtends = false});
 
   int startCalls = 0;
@@ -716,6 +718,8 @@ void main() {
 
 /// A service whose `start` throws until `fail` is cleared.
 class FailingStartService implements MixService {
+  @override Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async => throw UnimplementedError();
+
   bool fail = true;
 
   @override

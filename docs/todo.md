@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 89.** A new item takes it, and the same edit bumps this line.
+**Next number: 94.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -314,41 +314,70 @@ has the app's calls, media_kit's belief and mpv's real `pause` side by side.
 **Done when:** the cause is known and fixed, or recorded if it is outside the
 app.
 
-### 58. Playlists do not play: clicking one does nothing
-
-Reported 2026-10-01. A `PlaylistItem` tile (feed, search) opens nothing. Mixes
-play because they have their own path (`mix.start` / `mix.extend`,
-`startMixFromTile` in `open_video.dart`, `architecture.md` F24); playlists have
-none. `playlist.get` is in `protocol.md` §3.3 marked **not implemented**, and
-Guard 2 (`sidecar/test/contract-docs.test.ts`) keeps that marking honest, so the
-handler and the removal of the marking land in the same change.
-
-- **Sidecar:** `playlist.get {playlistId, continuation?}` → items and
-  continuation. Unlike a mix (F24), a playlist is finite and pages with real
-  continuations. Measure the response first (`/browse` with `VL<id>`, or `/next`
-  with `playlistId`); a community reference is a hypothesis (`CLAUDE.md`).
-- **Queue:** start from the first item (or the tapped one) and load further pages
-  as the queue nears its end, the way a mix extends.
-- **Reporting:** pass the `playlistId` to `/player` so `playback.report` carries
-  `list=` (F25), as mixes do.
-- **Unavailable or private entries** are skipped, never a dead end.
-
-**Done when:** a playlist plays from its tile, the queue holds it in order and
-keeps loading past the first page, and a watch inside it is reported with `list=`.
-
 ### 59. Playlist detail page
 
-The page youtube.com opens with "View full playlist": cover, title, owner, video
-count, visibility, description, share, play all, shuffle, and every video.
-**Depends on item 58's `playlist.get`**; measure which header fields come back
-for a public, an unlisted, a private and the viewer's own playlist. The viewer's
-own playlists add editing (title, visibility, removing a video):
-`action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
-anything else is measured first. Share reuses `share_dialog.dart`.
+The page is built (Task 35, `ui/pages/playlist.dart`): a header card with the
+artwork, title, owner, counts, visibility and description over the playlist's
+own tint (`architecture.md` F55, F56), the whole list with paging, Play all, and
+Share through `share_dialog.dart`. A playlist tile's title opens it, and so does
+"Go to Playlist" in the queue header's menu. What is left:
 
-**Done when:** every playlist tile has a way to open the page, the page shows the
-header and the whole list with paging, and the owner-only controls appear only on
-the viewer's own playlists.
+- **Save, Shuffle, and the owner's Add videos and Edit** are drawn disabled, each
+  saying it is not available yet. Shuffle is a queue order; the other three need
+  their requests measured first.
+- **The header's actions, as decided on 2026-10-14** (replaces the row above
+  once built; one row for everyone, no second row for the owner):
+  - A split button: **Play all**, and its menu **Shuffle**, **Play in reverse**,
+    **Play next**, **Add to queue**.
+  - **Save**, on someone else's playlist only. **Share**.
+  - A three-dot menu: **Show unavailable videos** (the request is unmeasured);
+    and on the viewer's own playlist **Add all to…**, **Edit playlist details**,
+    **Settings**, **Delete**.
+  - On the viewer's own playlist, an **"Add videos"** row with a dotted border at
+    the top of the list. It is not a row of the playlist and takes no number.
+    youtube.com's own dialog is a Google web page Rill cannot show; ours would
+    be a link or a search, then the edit the Save dialog already makes. Last.
+  - Both menus sit in a card that scrolls, so each needs the close-on-scroll
+    guard the queue header's menu has (`architecture.md` §2.8).
+- **Row numbers stay the playback position** (decided 2026-10-14): 1 is what
+  plays first, as in the queue panel, whatever order the playlist is sorted in.
+- **Shuffle is done in the client** (F58: youtube.com's server only picks a
+  random start). Decided 2026-10-14: start on a random row of what is loaded,
+  at once; then load every page and shuffle all the rest, the whole playlist
+  and not page by page. Play in reverse loads every page first too.
+- **Play next and Add to queue turn the queue into a plain one** (decided
+  2026-10-14). Today a queue keeps its source through any edit and keeps
+  extending from it. A mix stops being one: what is loaded stays, nothing more
+  is fetched. A playlist with pages still unloaded loads them all first, then
+  becomes plain. The header then says "Queue", and the number column and
+  "Go to Playlist" go. The playlist being added is loaded in full by a loader of
+  its own, since the queue has one loader today.
+- **Editing the viewer's own playlist** (title, visibility, removing a video):
+  `action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
+  anything else is measured first.
+- **The owner is text, not a link.** `ownerChannelId` is carried and unused until
+  channel pages exist (item 61).
+- **Unavailable entries** are omitted by YouTube anonymously and need parameters
+  not yet sent, so they have no signal besides not arriving.
+- **No continuation response has been captured.** `corpus/playlist-get-continuation.json`
+  is a first-page capture parsed as a continuation: it pins the answer's shape,
+  not how a real continuation body is walked. A real one needs a stage in
+  `capture.ts` and a declaration in `fixtures.ts`, then a capture run.
+- **The rest of the corpus is older than the fixtures beside it.** Running
+  `export-contract-corpus` on 2026-10-13 rewrote 21 committed entries, because
+  the local fixtures are a later capture than the one those came from; only the
+  two new `playlist-get-*` entries were kept. A full re-export is a decision of
+  its own, and it would also bring the playlist entries up to F57's view counts.
+- **Not read with Narrator, and not walked with `RILL_FOCUS_PROBE`.** The page's
+  Tab order, its tap targets' names and its selectable text are asserted by test
+  only (`focus_traversal_test.dart`, `playlist_page_flow_test.dart`). The
+  semantics probe does walk it now (steps `7b`–`7f`: open, scroll, Play all,
+  back, leave), and logged no `AXTree` error in four release runs on 2026-10-14,
+  three on a public playlist and one on a private one the account owns; that
+  probe presses no Tab.
+
+**Done when:** the four disabled buttons work or are gone, and the owner's
+controls change a real playlist.
 
 ### 60. History screen
 
@@ -408,17 +437,6 @@ one of the two stages.
 **Done when:** skeleton → placeholders → data with nothing moving except content
 appearing, checked in the running app in each layout.
 
-### 64. Queue auto-scroll scrolls the watch page
-
-When the queue advances, `queue_panel.dart` (`Scrollable.ensureVisible`, around
-line 192) brings the new row into view. `ensureVisible` scrolls **every**
-ancestor `Scrollable`, so it scrolls the watch page too and the page jumps down.
-Scroll only the queue's own list (its controller, or an `ensureVisible` limited
-to the queue's scrollable) and leave the page alone.
-
-**Done when:** the current row stays visible in the queue as it advances, the
-page's offset does not move, and a widget test asserts the second.
-
 ### 65. Player: the background shows outside the rounded corners
 
 With the controls bar open, the player's background shows a few pixels outside
@@ -426,6 +444,11 @@ its corner radius. Likely the controls' backdrop or gradient is clipped
 differently from the video (or not at all), or the two clips anti-alias
 differently. Everything inside the rounded player should sit under one clip
 (`player_shell.dart`, `controls.dart`).
+
+**As of 2026-10-12** the watch page's player clip (`watch.dart`,
+`_PlayerSurface`) uses `Clip.antiAliasWithSaveLayer`, which draws everything
+first and clips once (`architecture.md` §2.8). Still to check: 150 % scaling,
+and whether the miniplayer and the fullscreen layer need the same.
 
 **Done when:** nothing shows outside the radius with the controls open or closed,
 at 100 % and 150 % display scaling.
@@ -450,8 +473,36 @@ the browser, or in the app when it is a YouTube link (`domain/youtube_link.dart`
 parses those); a timestamp seeks the current video when the comment belongs to
 it.
 
+**State on 2026-10-14:** a timestamp run already has a tap that seeks
+(`_CommentText` in `widgets/comments_section.dart`), a link run has none, and
+neither works in the running app as reported that day. Why the timestamp's tap
+does not land is not looked into: start there, since nothing has to be built for
+it. A comment under another video than the one playing must not seek.
+
 **Done when:** all three work in the running app, with a widget test for a
 timestamp seeking and a link being dispatched.
+
+### 93. Playlist page: links in the description do nothing
+
+A playlist's description is drawn as plain text (`_PlaylistDescription`,
+`ui/pages/playlist.dart`), so a link in it cannot be clicked or reached by Tab.
+The watch page's description already does this for a video (`LinkifiedText`,
+`ui/pages/watch.dart`): it finds the links in plain text, which is all
+`PlaylistHeader.description` is.
+
+- A YouTube link opens in the app: a video on the watch page, a playlist on its
+  page (`videoIdFromLink`, `playlistIdFromLink`). Anything else opens in the
+  browser.
+- The link colour has to be legible on every playlist tint; the theme's accent
+  is not, which is why "Show more" uses the card's own ink.
+- Each link is a Tab stop, in the header's order before "Show more", and only
+  the links in the three visible lines while it is collapsed, as on the watch
+  page.
+- The three-line measure in `_PlaylistDescription` has to measure the same
+  spans it draws.
+
+**Done when:** a link in a playlist's description opens, by mouse and by
+keyboard, with a widget test for each of the two destinations.
 
 ### 68. Search: filter chips
 
@@ -627,6 +678,25 @@ orphaned because nothing says so.
 Churn warning: `architecture.md` references several of these by path inside dated
 findings, so moving them costs doc edits for tidiness only. Low priority on
 purpose.
+
+### 92. A probe that ends with `exit(0)` crashes on the way out, and leaves a dump
+
+Measured 2026-10-14, release build, 5 of 5: four `RILL_SEMANTICS_PROBE=1` runs
+and one `RILL_FOCUS_PROBE=feed` run each logged their last line, then the
+launcher wrote `app CRASHED with code 0xC0000602` about six seconds later, and
+Windows wrote a ~54 MB dump to `%LOCALAPPDATA%\CrashDumps` each time. A crash
+dump holds the session cookie (`CLAUDE.md`), so every probe run leaves one to
+delete by hand.
+
+The code is F27's, and the likely cause is the same static: Dart's `exit()`
+ends the process without the plugin teardown that F27's one-line fix runs in.
+That is a reading of the code path, not of a stack; this machine has no
+`cdb.exe`. Nothing in the run is lost, since the probe has finished.
+
+**Do:** end the probes the way a user does (close the window, so the engine
+shuts down first) instead of calling `exit()`, keeping the exit code; then the
+same five runs should end `exited with code 0x00000000` and write no dump.
+Belongs with item 14 if that is ever done.
 
 ### 15. A portable parser corpus
 
@@ -908,6 +978,13 @@ same login speaks for. Measure how youtube.com switches (which request, which
 header or cookie changes), then decide: switch within one login, or keep several
 logins. Everything Task 31 added for identity changes applies.
 
+**One place is known not to be ready for it.** The playlist page hides what it
+shows while it is re-read only when the viewer has *no* account
+(`skipLoadingOnReload: signedIn`, `ui/pages/playlist.dart`). Switching from one
+account to another keeps the first account's page on screen until the second's
+read answers, and that page may be a private playlist. It has to hide whenever
+the identity that read the page is not the current one.
+
 **Done when:** switching shows the other account's feed and account state without
 signing out, and switching back restores the first.
 
@@ -953,6 +1030,20 @@ bell its count and a panel. Signed-in only.
 **Done when:** the bell shows the real unread count and opens the real list.
 
 ---
+
+### 90. Routes pile up between the watch page and a playlist's page
+
+"Go to Playlist" in the queue header pushes the playlist's page over the watch
+page, and playing a row from there pushes a new watch page over that
+(`showWatchPageIn` pushes whenever the current route is not `watch`). Each round
+trip adds two routes, all kept mounted, and Back walks every one of them. A
+search from the watch page has the same shape. Only the watch page on top claims
+the player (`isTopWatchPage`, `watch.dart`), so nothing breaks: it is memory and
+a long way back.
+
+**Done when:** opening a video from a page that was itself opened from the watch
+page returns to the watch page already there instead of stacking a second one,
+or the stack is shown to be harmless and this item is deleted.
 
 ## Triggered — read when one of these fires
 
@@ -1005,6 +1096,36 @@ wrong path.
 
 ## Far future — ideas, not commitments
 
+### 91. A backdrop material for the app's surfaces
+
+Wanted later, not designed: the app's surface taking a material instead of a
+flat colour. Two different things have been called this, and they are built
+differently:
+
+- **A translucent title bar the page scrolls under**, blurred. In-app only: the
+  page's body laid out behind the bar and a blur in the bar itself. It touches
+  the caption layer, which is clipped below the bar on the assumption that the
+  bar is opaque (`_BelowTopBarClipper`, `player_shell.dart`), and whether a blur
+  samples the video texture has to be measured, not assumed.
+- **A window material from the OS** (Mica, Acrylic). Mica is Windows 11 only, and
+  the development machine is Windows 10, where Acrylic is the nearest thing. It
+  needs the Flutter view itself to be transparent, so every opaque ground in the
+  app becomes a decision.
+
+Either could follow **what is playing**. A colour from the video has to come
+from something already decoded off the UI isolate (the thumbnail, a storyboard
+frame, `nowPlayingBackdropProvider`), never from polling the player (CLAUDE.md
+invariant 9).
+
+**Where it plugs in.** Every page paints its title bar, rail and ground from one
+shared value, `PageChrome` (`ui/page_wrapper.dart`, `architecture.md` §2.8),
+which is a colour today. A material would widen that value rather than add a
+second mechanism, and it does not need the title bar moved above the
+`Navigator`, which was rejected for the keyboard's sake.
+
+**Done when:** one of the two is chosen and specified as a task, or the idea is
+dropped and this item deleted.
+
 ### 80. SponsorBlock
 
 Skip sponsor segments using the community SponsorBlock database. A third-party
@@ -1053,6 +1174,16 @@ What `docs/tasks/32` found and deliberately left, each one small:
 - **The vertical-video volume slider** mounts above its speaker button, so a Tab
   onto the speaker opens a slider that sits *before* it in reading order and the
   next Tab does not land on it. Horizontal layout is correct and tested.
+- **The queue header's right-click menu** (Task 34) closes on scroll now
+  (`architecture.md` §2.8). Whether focus moves into it and returns, and how
+  Narrator reads it, were not checked.
+- **The watch page's view count and date** show their exact values in an overlay
+  `Tooltip` (a `ShortcutTooltip` without `silent`), inside a page that scrolls.
+  Seen in a node log on 2026-10-07, added and removed cleanly; `silent: true` is
+  the conversion.
+- **The artist shelf's left chevron** is a Tab stop that exists only while the
+  shelf is scrolled. The tiles are reachable without it, so it may want
+  `ExcludeFocus`.
 - **The comment box's Escape** does not cancel (Cancel does); the filters dialog
   and the player's submenus close on Escape through their own paths.
 
@@ -1135,3 +1266,28 @@ otherwise only pays when a screen reader asks), writes a ring of tree dumps once
 - **Before removing:** if the error was seen in that time, check that it is explained
   (`axtree-error-diagnosis` memory, `architecture.md` F51); if not, extend the date.
 - Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.
+
+### 89. Distinct playlist tile
+
+A playlist tile looks like a mix tile (stacked cards) and says far less than
+youtube.com's: only the title, the owner's name and the count.
+
+- **Look:** a video-count bar instead of the mix's stacked cards, so the two are
+  told apart at a glance.
+- **Content the response already has** (search `lockupViewModel`, measured
+  2026-10-06): the owner's channel id (row 0's `browseEndpoint`), the type label
+  ("Playlist" / "Album" / "Podcast"), and the first two videos as
+  `"<title> · <duration>"` rows, each with its own `watchEndpoint`. youtube.com
+  also shows "Updated 4 days ago"; that row was absent from the captured search
+  fixtures, so find where it appears before promising it. Its search tile also
+  ends with a line of the playlist's description (seen 2026-10-14), which has
+  not been looked for in a response.
+- **Not wanted: youtube.com's "View full playlist" link.** There the tile plays
+  the first video and that link is the only way to the playlist's page. Here it
+  is the other way round on purpose: the tile opens the page and the thumbnail
+  plays (decided 2026-10-14).
+- **Contract:** new `PlaylistItem` fields go in all five places
+  (`contract-docs.test.ts`), the Dart model and the corpus sanitiser.
+
+**Done when:** a playlist tile cannot be mistaken for a mix, and shows what
+YouTube's does where the response carries it.

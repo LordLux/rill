@@ -1,27 +1,96 @@
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey;
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:flutter/rendering.dart' show OverflowBoxFit, RenderAbstractViewport, RenderBox;
+import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyRepeatEvent, LogicalKeyboardKey, Clipboard, ClipboardData;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../domain/feed_item.dart';
 import '../../theme/tokens.dart';
+import '../audio_mode_controller.dart';
 import '../focus_ring.dart';
 import '../focus_surface.dart';
+import '../player/view_mode.dart';
+import '../player_shell.dart' show currentRouteProvider;
 import '../queue_controller.dart';
 import '../spoken.dart';
 import 'channel_badge.dart';
 import 'shortcut_tooltip.dart';
 import 'media_tile.dart' show DurationBadgeTone, durationToneFor, formatVideoDuration;
+import '../pages/playlist.dart' show openPlaylistPage;
 
 /// A row's exit when its own X is pressed: the clear sweep's slide, then the
 /// collapse that closes the gap the sweep never has to (architecture §2.8).
 const Duration _rowSlide = Duration(milliseconds: 200);
 const Duration _rowExit = Duration(milliseconds: 340);
 
+/// How close to the end of the loaded rows a scroll has to get before the next
+/// page of a playlist is asked for: about five rows.
+const double _loadMoreWithin = 360;
+
+/// How many rows of one batch play the staggered entrance.
+const int _staggeredArrivals = 12;
+
 /// Where the slide ends and the collapse begins, as a fraction of [_rowExit].
 const double _rowSlidePhase = 200 / 340;
+
+/// The header menu's rows, and through them the menu: never narrower than this.
+///
+/// On the rows because `MenuStyle.minimumSize` does not do it: the panel is laid
+/// out at the width of its widest row inside the box that minimum sizes, so a
+/// menu holding only "Copy link" stayed as narrow as those two words.
+final ButtonStyle _headerMenuItemStyle = MenuItemButton.styleFrom(minimumSize: const Size(200, 48));
+
+/// The number column's width per digit, at the row number's 11 px.
+const double _digitWidth = 7;
+
+/// Over how many rows the number column widens ahead of a longer number.
+const double _digitRampRows = 10;
+
+/// A row's height before the list has laid one out to measure.
+const double _nominalRowExtent = 80;
+
+/// How many digits wide a playlist's number column is, when [bottomRow] is the
+/// number of the row at the list's bottom edge — fractional, so 90.5 is row 90
+/// half scrolled in.
+///
+/// A function of position alone, so it is the same scrolling either way: the
+/// column takes the ten rows before a longer number to widen for it, and is
+/// full width as that number comes into view. Never wider than [maxDigits],
+/// which is what the playlist's last row needs.
+@visibleForTesting
+double numberColumnDigits(double bottomRow, int maxDigits) {
+  final row = math.max(bottomRow, 1.0);
+  var digits = 1;
+  var longer = 10.0; // the first number with one more digit
+  while (row >= longer) {
+    digits++;
+    longer *= 10;
+  }
+  final ramp = ((row - (longer - _digitRampRows)) / _digitRampRows).clamp(0.0, 1.0);
+  return math.min(digits + ramp, maxDigits.toDouble());
+}
+
+/// The address of what the queue is playing through, or null for a queue put
+/// together by hand, which has none.
+///
+/// A playlist is its own page. A mix has no page: YouTube addresses one as a
+/// video *in* it, `watch?v=…&list=RD…`, so the link is the video the queue is on.
+@visibleForTesting
+String? queueLinkFor(QueueState queue) {
+  final mix = queue.mix;
+  if (mix == null) return null;
+  final playing = queue.current?.id;
+  if (mix.isPlaylist || playing == null) return 'https://www.youtube.com/playlist?list=${mix.playlistId}';
+  return 'https://www.youtube.com/watch?v=$playing&list=${mix.playlistId}';
+}
+
+class _ContextMenuIntent extends Intent {
+  const _ContextMenuIntent();
+}
 
 class EmbeddedQueuePanel extends ConsumerStatefulWidget {
   const EmbeddedQueuePanel({super.key, this.maxHeight = 400.0, this.borderRadius, this.onCollapse});
@@ -35,6 +104,11 @@ class EmbeddedQueuePanel extends ConsumerStatefulWidget {
 }
 
 class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with TickerProviderStateMixin {
+  final MenuController _headerMenuCtrl = MenuController();
+
+  /// The enclosing page's scroll position, watched to close the header menu.
+  ScrollPosition? _pageScroll;
+
   bool _expanded = true;
 
   /// True while the clear-sweep animation is running. Disables taps and
@@ -81,6 +155,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
   final ScrollController _baseScroll = ScrollController();
   late final SilkyScrollController _listScroll = SilkyScrollController(clientController: _baseScroll);
 
+  /// How many digits wide a playlist's number column is right now, for every
+  /// row at once. Follows the scroll position ([numberColumnDigits]).
+  final ValueNotifier<double> _numberDigits = ValueNotifier<double>(1);
+
   /// Key on the list's ConstrainedBox to measure visible bounds.
   final GlobalKey _listBoxKey = GlobalKey();
 
@@ -101,6 +179,49 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       duration: const Duration(milliseconds: 400),
     );
     _syncEntries(ref.read(queueProvider).entries);
+    _syncNumberDigits();
+    // The playhead does not move for a panel that appears with it already
+    // somewhere: the watch page opening on a queue started at its 80th video.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent(animate: false));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The page the panel sits in: scrolling it moves the header out from under its menu.
+    final pageScroll = Scrollable.maybeOf(context)?.position;
+    if (_pageScroll != pageScroll) {
+      _pageScroll?.removeListener(_closeHeaderMenu);
+      _pageScroll = pageScroll;
+      _pageScroll?.addListener(_closeHeaderMenu);
+    }
+  }
+
+  void _closeHeaderMenu() {
+    if (_headerMenuCtrl.isOpen) _headerMenuCtrl.close();
+  }
+
+  /// Size the number column for the rows in view. [metrics] is the list's
+  /// scroll position; without one it is read from the controller, and before
+  /// the list has laid out it is worked out from the panel's height.
+  void _syncNumberDigits([ScrollMetrics? metrics]) {
+    if (!mounted) return;
+    final queue = ref.read(queueProvider);
+    final count = queue.entries.length;
+    if (count == 0 || !(queue.mix?.isPlaylist ?? false)) return;
+
+    final at = metrics ?? (_baseScroll.hasClients ? _baseScroll.position : null);
+    var rowExtent = _nominalRowExtent;
+    var bottom = math.max(0.0, widget.maxHeight - 66.0);
+    if (at != null && at.hasContentDimensions && at.hasViewportDimension) {
+      rowExtent = at.extentTotal / count;
+      bottom = at.extentBefore + at.extentInside;
+    }
+    if (rowExtent <= 0) return;
+
+    // The row whose top edge is at the bottom of the list: the next to appear.
+    final bottomRow = math.min(bottom / rowExtent, count.toDouble()) + 1;
+    _numberDigits.value = numberColumnDigits(bottomRow, '${queue.displayLength}'.length);
   }
 
   @override
@@ -124,6 +245,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       c.dispose();
     }
     _removing.clear();
+    try {
+      _pageScroll?.removeListener(_closeHeaderMenu);
+    } catch (_) {}
+    _numberDigits.dispose();
     _baseScroll.dispose();
     _listScroll.dispose();
     super.dispose();
@@ -167,6 +292,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
       final ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
       _itemCtrls[entry] = ctrl;
       if (opening && i == 0) continue;
+      // A playlist page is a hundred rows. Only the first screenful of a batch
+      // can be seen arriving; the rest are simply there, rather than each
+      // holding a timer for up to five seconds to slide in off screen.
+      if (arrival >= _staggeredArrivals) continue;
 
       // The entrance is the dismissal backwards: 1 → 0 slides in from the right.
       ctrl.value = 1.0;
@@ -183,23 +312,79 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
   ///
   /// Called a frame after the playhead moves, so the row's key is measuring
   /// the layout the new `isCurrent` flags produced rather than the stale one.
-  /// A silent no-op when the row is not built at all — off-screen far enough
-  /// that `ReorderableListView`'s cache extent never reached it — rather than
-  /// jumping there first: every real trigger (autoplay, next/previous, or a
-  /// tap on the row itself) starts from a row that is already on screen or
-  /// adjacent to one that is.
-  void _scrollToCurrent() {
+  ///
+  /// **The list's own position, not `Scrollable.ensureVisible`**, which scrolls
+  /// every scrollable above the row as well and took the watch page with it.
+  ///
+  /// **A row that is not built is gone to, not given up on.** The list is lazy,
+  /// and a playlist started at its 80th video, or the panel appearing with the
+  /// playhead already deep in the queue, has no row to measure: the list jumps
+  /// to about where it is and measures it on the next frame ([attempt] bounds
+  /// that). Only a row already in reach is animated to; the rest is a jump.
+  void _scrollToCurrent({bool animate = true, int attempt = 0}) {
     if (!mounted) return;
-    final entry = ref.read(queueProvider).currentEntry;
-    if (entry == null) return;
-    final ctx = _itemKeys[entry]?.currentContext;
-    if (ctx == null) return;
-    Scrollable.ensureVisible(
-      ctx,
-      alignment: 0.0,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
+    void again() {
+      if (attempt >= 4) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent(animate: false, attempt: attempt + 1));
+      // A post-frame callback waits for a frame; it does not ask for one.
+      WidgetsBinding.instance.scheduleFrame();
+    }
+
+    final queue = ref.read(queueProvider);
+    final entry = queue.currentEntry;
+    final index = queue.currentIndex;
+    if (entry == null || index == null) return;
+    // The list is not on screen yet: the panel has only just had rows to show.
+    if (!_baseScroll.hasClients) return again();
+    final position = _baseScroll.position;
+    if (!position.hasContentDimensions) return again();
+
+    final row = _itemKeys[entry]?.currentContext?.findRenderObject();
+    if (row == null || !row.attached) {
+      final extent = position.extentTotal / math.max(queue.entries.length, 1);
+      position.jumpTo((index * extent).clamp(position.minScrollExtent, position.maxScrollExtent));
+      return again();
+    }
+
+    final target = RenderAbstractViewport.of(row)
+        .getOffsetToReveal(row, 0.0)
+        .offset
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() < 0.5) return;
+    if (animate) {
+      position.animateTo(target, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+    } else {
+      position.jumpTo(target);
+    }
+  }
+
+  /// Whether the list goes to the playing row after the playhead moved.
+  ///
+  /// **Not when the user has scrolled that row out of view and playback only
+  /// stepped to a neighbour** (autoplay, next, previous): they are looking for
+  /// something further down, and every track ending would take them back to the
+  /// top of it. A jump anywhere else is someone choosing a row, a new queue has
+  /// nothing to keep, and a row that was in view is followed as it always was.
+  bool _followsPlayhead(QueueState? previous, QueueState next) {
+    final was = previous?.currentIndex;
+    final now = next.currentIndex;
+    if (previous == null || was == null || now == null) return true;
+    if (previous.mix?.playlistId != next.mix?.playlistId) return true;
+    if ((now - was).abs() != 1) return true;
+    return _rowInView(previous.currentEntry);
+  }
+
+  /// Whether [entry]'s row is at least partly inside the list's viewport. Read
+  /// before the frame the move rebuilds, so it is where the row was drawn last.
+  bool _rowInView(QueueEntry? entry) {
+    if (entry == null || !_baseScroll.hasClients) return true;
+    final position = _baseScroll.position;
+    if (!position.hasContentDimensions) return true;
+    final row = _itemKeys[entry]?.currentContext?.findRenderObject();
+    // Not built is as far out of view as a row gets.
+    if (row is! RenderBox || !row.attached) return false;
+    final top = RenderAbstractViewport.of(row).getOffsetToReveal(row, 0.0).offset;
+    return top + row.size.height > position.pixels && top < position.pixels + position.viewportDimension;
   }
 
   Future<void> _animateClear(QueueController controller) async {
@@ -384,10 +569,10 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     await _shrinkCtrl.forward();
     if (!mounted) return;
   }
-  
+
   void _onCollapse() {
     if (_clearing) return;
-    
+
     if (widget.onCollapse != null) {
       widget.onCollapse!();
     } else {
@@ -442,182 +627,321 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
     // the listener exists only to reconcile the controllers before it does.
     ref.listen<List<QueueEntry>>(
       queueProvider.select((q) => q.entries),
-      (previous, next) => _syncEntries(next),
+      (previous, next) {
+        _syncEntries(next);
+        // One entry or none and the panel builds nothing: its header goes, and
+        // the menu must not still be open when it does (below).
+        if (next.length <= 1) _closeHeaderMenu();
+      },
     );
+
+    // The header's menu is an overlay anchored on the header, and an anchor
+    // that leaves the tree in one frame with its menu open is the orphan that
+    // freezes the accessibility tree (F51). A scroll and a click are handled
+    // where they happen; these are the ways the header goes with no pointer
+    // involved: the panel moving to another layout, and the page being left.
+    // Listeners run before the frame that rebuilds, which is the point.
+    ref.listen(playerViewProvider, (_, _) => _closeHeaderMenu());
+    ref.listen(audioModeProvider, (_, _) => _closeHeaderMenu());
+    ref.listen(currentRouteProvider, (_, _) => _closeHeaderMenu());
 
     // `version` bumps exactly when the playhead moves to a different track —
     // autoplay advancing, the next/previous shortcuts, and jumping to a row —
     // and deliberately not on a reorder or a Clear (which keeps the same
     // track playing). That is exactly "any change in the video being played",
-    // so it is the one signal this needs rather than three separate ones.
-    ref.listen<int>(
-      queueProvider.select((q) => q.version),
-      (previous, next) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
-      },
-    );
+    // so it is the one signal this needs rather than three separate ones. The
+    // whole state is listened to only for what the playhead moved *from*.
+    ref.listen<QueueState>(queueProvider, (previous, next) {
+      if (previous != null && previous.version == next.version) return;
+      if (!_followsPlayhead(previous, next)) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
+    });
 
     if (queue.entries.length <= 1 && !_clearing && !_popping) {
       return const SizedBox.shrink();
     }
 
+    // Rows arriving, the panel resizing and the queue becoming a playlist all
+    // change what is in view without a scroll.
+    final numbered = queue.mix?.isPlaylist ?? false;
+    if (numbered) WidgetsBinding.instance.addPostFrameCallback((_) => _syncNumberDigits());
+
     final nextItem = queue.next;
 
     Widget panel = Material(
       key: _panelKey,
-        color: scheme.surfaceContainer,
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
-          borderRadius: widget.borderRadius ?? BorderRadius.circular(12),
-          side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(0),
-              child: Material(
+      color: scheme.surfaceContainer,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: widget.borderRadius ?? BorderRadius.circular(12),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(0),
+            child: Material(
               color: Colors.transparent,
-              child: Ink(
-                key: _headerKey,
-                color: scheme.surfaceContainerHighest,
-                child: InkWell(
-                  onTap: _clearing ? null : () => _onCollapse(),
-                  borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
-                  child: Padding(
-                    padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  // A mix says so, and says which one. The queue
-                                  // behaves differently at its end — it extends
-                                  // rather than stopping — so the panel naming
-                                  // it is not decoration (Task 26 §3).
-                                  if (queue.isMix) ...[
-                                    Icon(Icons.podcasts, size: 15, color: scheme.onSurfaceVariant),
-                                    const SizedBox(width: 6),
-                                  ],
-                                  Expanded(
-                                    child: Text(
-                                      _headerTitle(queue, nextItem),
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: scheme.onSurface,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Builder(
-                                builder: (context) {
-                                  // Both states built every time. Passing the *current*
-                                  // subtitle to both slots meant the text swapped
-                                  // instantly and the crossfade faded between two
-                                  // copies of the same thing.
-                                  Widget subtitleFor(bool expanded) {
-                                    final (text, icon) = _headerSubtitle(queue, controller, expanded);
-                                    return _mixSubtitle(
-                                      icon,
-                                      Text(
-                                        text,
-                                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    );
-                                  }
-
-                                  return AnimatedCrossFade(
-                                    duration: const Duration(milliseconds: 200),
-                                    crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                                    // subtitle slides upwards when appearing
-                                    firstChild: subtitleFor(false),
-                                    secondChild: subtitleFor(true),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
+              child: MenuAnchor(
+                controller: _headerMenuCtrl,
+                style: MenuStyle(
+                  backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
+                  shape: const WidgetStatePropertyAll(
+                    RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                  ),
+                  mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+                ),
+                menuChildren: [
+                  if (queue.mix?.isPlaylist ?? false)
+                    MenuItemButton(
+                      style: _headerMenuItemStyle,
+                      leadingIcon: const Icon(Icons.playlist_play),
+                      onPressed: () => openPlaylistPage(queue.mix!.playlistId),
+                      child: const Text('Go to Playlist'),
+                    ),
+                  // A mix too: it has a link, only no page to go to.
+                  if (queueLinkFor(queue) case final url?)
+                    MenuItemButton(
+                      style: _headerMenuItemStyle,
+                      leadingIcon: const Icon(Icons.link),
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: url));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Link copied to clipboard'),
+                              behavior: SnackBarBehavior.floating,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text('Copy link'),
+                    ),
+                ],
+                builder: (context, menuController, child) {
+                  return Shortcuts(
+                    shortcuts: {
+                      // The two keys Windows gives a context menu.
+                      SingleActivator(LogicalKeyboardKey.f10, shift: true): const _ContextMenuIntent(),
+                      SingleActivator(LogicalKeyboardKey.contextMenu): const _ContextMenuIntent(),
+                    },
+                    child: Actions(
+                      actions: {
+                        _ContextMenuIntent: CallbackAction<_ContextMenuIntent>(
+                          // Nothing to offer on a queue put together by hand, so no empty menu.
+                          onInvoke: (_) => menuController.isOpen
+                              ? menuController.close()
+                              : (queueLinkFor(queue) == null ? null : menuController.open()),
                         ),
-                        AnimatedCrossFade(
-                          duration: const Duration(milliseconds: 200),
-                          crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                          firstChild: Row(
-                            children: [
-                              TextButton(
-                                onPressed: _clearing ? null : () => _animateClear(controller),
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  foregroundColor: scheme.onSurface,
-                                ),
+                      },
+                      child: Ink(
+                        key: _headerKey,
+                        color: scheme.surfaceContainerHighest,
+                        // The header is the menu's own anchor, so a press on it is not
+                        // the "outside" press that closes the menu everywhere else:
+                        // it is closed here. The press then does what it would have
+                        // done, as a click anywhere else does once its menu is gone.
+                        child: Listener(
+                          onPointerDown: (event) {
+                            if (event.buttons == kPrimaryButton && menuController.isOpen) menuController.close();
+                          },
+                          child: GestureDetector(
+                            excludeFromSemantics: true,
+                            // Open or not: an open menu moves to the new place, as it does
+                            // for a right-click anywhere else.
+                            onSecondaryTapUp: (details) => queueLinkFor(queue) == null
+                                ? null
+                                : menuController.open(position: details.localPosition),
+                            child: InkWell(
+                              onTap: _clearing ? null : () => _onCollapse(),
+                              borderRadius: _expanded ? const BorderRadius.vertical(top: Radius.circular(12)) : BorderRadius.circular(12),
+                              child: Padding(
+                                padding: EdgeInsets.only(left: 16, top: 12, bottom: 12, right: 6),
                                 child: Row(
                                   children: [
-                                    RotationTransition(
-                                      turns: _iconSpinCtrl.drive(
-                                        Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              // A mix says so, and says which one. The queue
+                                              // behaves differently at its end — it extends
+                                              // rather than stopping — so the panel naming
+                                              // it is not decoration (Task 26 §3).
+                                              if (queue.isMix) ...[
+                                                Icon(
+                                                  queue.mix!.isPlaylist ? Icons.playlist_play : Icons.podcasts,
+                                                  size: queue.mix!.isPlaylist ? 18 : 15,
+                                                  color: scheme.onSurfaceVariant,
+                                                ),
+                                                const SizedBox(width: 6),
+                                              ],
+                                              Expanded(
+                                                child: Text(
+                                                  _headerTitle(queue, nextItem),
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: scheme.onSurface,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Builder(
+                                            builder: (context) {
+                                              // Both states built every time. Passing the *current*
+                                              // subtitle to both slots meant the text swapped
+                                              // instantly and the crossfade faded between two
+                                              // copies of the same thing.
+                                              Text line(String text) => Text(
+                                                text,
+                                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              );
+
+                                              // A playlist keeps its position where it is and
+                                              // changes only what follows it.
+                                              if (queue.mix?.isPlaylist ?? false) {
+                                                Widget tail(bool expanded) {
+                                                  final text = _playlistTail(queue, controller, expanded);
+                                                  return text == null ? const SizedBox(width: double.infinity) : line(' · $text');
+                                                }
+
+                                                final same = _playlistTail(queue, controller, false) == _playlistTail(queue, controller, true);
+                                                return Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    line(_position(queue)),
+                                                    Expanded(
+                                                      // One widget when both states say the same thing,
+                                                      // so there is nothing to animate and nothing said twice.
+                                                      child: same
+                                                          ? tail(_expanded)
+                                                          : AnimatedCrossFade(
+                                                              duration: const Duration(milliseconds: 200),
+                                                              alignment: Alignment.topLeft,
+                                                              crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                              firstChild: tail(false),
+                                                              secondChild: tail(true),
+                                                            ),
+                                                    ),
+                                                  ],
+                                                );
+                                              }
+
+                                              Widget subtitleFor(bool expanded) {
+                                                final (text, icon) = _headerSubtitle(queue, controller, expanded);
+                                                return _mixSubtitle(icon, line(text));
+                                              }
+
+                                              return AnimatedCrossFade(
+                                                duration: const Duration(milliseconds: 200),
+                                                crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                // subtitle slides upwards when appearing
+                                                firstChild: subtitleFor(false),
+                                                secondChild: subtitleFor(true),
+                                              );
+                                            },
+                                          ),
+                                        ],
                                       ),
-                                      child: const Icon(Icons.clear_all_sharp, size: 18),
                                     ),
-                                    const SizedBox(width: 4),
-                                    const Text('Clear'),
+                                    AnimatedCrossFade(
+                                      duration: const Duration(milliseconds: 200),
+                                      crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                                      firstChild: Row(
+                                        children: [
+                                          TextButton(
+                                            onPressed: _clearing ? null : () => _animateClear(controller),
+                                            style: TextButton.styleFrom(
+                                              visualDensity: VisualDensity.compact,
+                                              foregroundColor: scheme.onSurface,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                RotationTransition(
+                                                  turns: _iconSpinCtrl.drive(
+                                                    Tween(begin: 0.0, end: 0.5).chain(CurveTween(curve: Curves.easeOutCubic)),
+                                                  ),
+                                                  child: const Icon(Icons.clear_all_sharp, size: 18),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                const Text('Clear'),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 2),
+                                        ],
+                                      ),
+                                      secondChild: const SizedBox.shrink(),
+                                    ),
+                                    // The tooltip is outside the rotation (it would be turned upside down) and opens to
+                                    // the left: above the button is outside the panel, which clips it.
+                                    ShortcutTooltip(
+                                      label: _expanded ? 'Collapse queue' : 'Expand queue',
+                                      silent: true,
+                                      side: TooltipSide.left,
+                                      child: AnimatedRotation(
+                                        turns: _expanded ? 0 : 0.5,
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutCubic,
+                                        child: IconButton(
+                                          // The icon names the button: `IconButton(tooltip:)` used to.
+                                          icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
+                                          color: scheme.onSurfaceVariant,
+                                          onPressed: _clearing ? null : () => _onCollapse(),
+                                        ),
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 2),
-                            ],
-                          ),
-                          secondChild: const SizedBox.shrink(),
-                        ),
-                        // The tooltip is outside the rotation (it would be turned upside down) and opens to
-                        // the left: above the button is outside the panel, which clips it.
-                        ShortcutTooltip(
-                          label: _expanded ? 'Collapse queue' : 'Expand queue',
-                          silent: true,
-                          side: TooltipSide.left,
-                          child: AnimatedRotation(
-                            turns: _expanded ? 0 : 0.5,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOutCubic,
-                            child: IconButton(
-                              // The icon names the button: `IconButton(tooltip:)` used to.
-                              icon: Icon(Icons.keyboard_arrow_up, semanticLabel: _expanded ? 'Collapse queue' : 'Expand queue'),
-                              color: scheme.onSurfaceVariant,
-                              onPressed: _clearing ? null : () => _onCollapse(),
                             ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
             ),
-            ),
-            // Queue List
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 300),
-              sizeCurve: Curves.easeOutCubic,
-              firstCurve: Curves.easeOut,
-              secondCurve: Curves.easeOut,
-              crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-              secondChild: const SizedBox(width: double.infinity, height: 0),
-              firstChild: ConstrainedBox(
-                key: _listBoxKey,
-                constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
-                child: SilkyScroll(
-                  controller: _listScroll,
-                  builder: (context, scrollController, physics, _) {
-                    return ReorderableListView.builder(
+          ),
+          // Queue List
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 300),
+            sizeCurve: Curves.easeOutCubic,
+            firstCurve: Curves.easeOut,
+            secondCurve: Curves.easeOut,
+            crossFadeState: _expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+            secondChild: const SizedBox(width: double.infinity, height: 0),
+            firstChild: ConstrainedBox(
+              key: _listBoxKey,
+              constraints: BoxConstraints(maxHeight: math.max(0.0, widget.maxHeight - 66.0)),
+              child: SilkyScroll(
+                controller: _listScroll,
+                builder: (context, scrollController, physics, _) {
+                  // A playlist loads only so far ahead of the playhead; reaching the
+                  // end of what is here asks for the next page.
+                  return NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      final metrics = notification.metrics;
+                      if (metrics.axis == Axis.vertical && metrics.extentAfter < _loadMoreWithin) {
+                        controller.loadMoreOfPlaylist();
+                      }
+                      if (notification.depth == 0) _syncNumberDigits(metrics);
+                      if (notification is ScrollUpdateNotification) _closeHeaderMenu();
+                      return false;
+                    },
+                    child: ReorderableListView.builder(
                       scrollController: scrollController,
                       shrinkWrap: true,
                       buildDefaultDragHandles: false,
@@ -630,27 +954,32 @@ class _EmbeddedQueuePanelState extends ConsumerState<EmbeddedQueuePanel> with Ti
                           key: ValueKey(_itemKeys.putIfAbsent(entry, GlobalKey.new)),
                           order: NumericFocusOrder(1.0 + index),
                           child: _QueueItemTile(
-                          key: _itemKeys.putIfAbsent(entry, GlobalKey.new),
-                          entry: entry,
-                          index: index,
-                          itemCount: queue.entries.length,
-                          isCurrent: index == queue.currentIndex,
-                          scheme: scheme,
-                          controller: controller,
-                          dismissAnimation: _itemCtrls[entry],
-                          removeAnimation: _removing[entry],
-                          clearing: _clearing,
-                          onRemove: () => _requestRemove(entry, controller),
-                        ));
+                            key: _itemKeys.putIfAbsent(entry, GlobalKey.new),
+                            entry: entry,
+                            index: index,
+                            itemCount: queue.entries.length,
+                            isCurrent: index == queue.currentIndex,
+                            // A playlist has an order worth showing; a mix and a
+                            // hand-built queue do not.
+                            numberDigits: numbered ? _numberDigits : null,
+                            scheme: scheme,
+                            controller: controller,
+                            dismissAnimation: _itemCtrls[entry],
+                            removeAnimation: _removing[entry],
+                            clearing: _clearing,
+                            onRemove: () => _requestRemove(entry, controller),
+                          ),
+                        );
                       },
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
 
     panel = Padding(
       padding: const EdgeInsets.only(bottom: 20),
@@ -825,7 +1154,7 @@ class _ParticlePainter extends CustomPainter {
 /// not assemble, so which mix it is, is the only thing that identifies it.
 String _headerTitle(QueueState queue, VideoItem? nextItem) {
   final mix = queue.mix;
-  if (mix != null) return mix.title ?? 'Mix';
+  if (mix != null) return mix.title ?? (mix.isPlaylist ? 'Playlist' : 'Mix');
   return nextItem != null ? 'Next: ${nextItem.title}' : 'Queue';
 }
 
@@ -837,18 +1166,53 @@ String _headerTitle(QueueState queue, VideoItem? nextItem) {
 /// the denominator climb would reasonably read it as the list changing under
 /// them rather than as the thing working. What a mix shows instead is what is
 /// coming next, and — per §4 — whether it has stopped.
+///
+/// A playlist does not come through here: it always shows its position, with
+/// [_playlistTail] after it.
+///
+/// **"End of" is said when the last video has finished, not when the list is
+/// known to be finite.** Until the last of them ends, the line says what is
+/// next, and then that this is the last one.
 (String, Widget?) _headerSubtitle(QueueState queue, QueueController controller, bool expanded) {
-  final position = queue.currentIndex != null ? '${queue.currentIndex! + 1} / ${queue.items.length}' : '${queue.items.length} items';
-
   final mix = queue.mix;
 
-  if (expanded) return ('Mixes are playlists YouTube makes for you', null);
-  if (mix == null) return (position, null);
+  if (expanded) {
+    if (mix != null) return ('Mixes are playlists YouTube makes for you', null);
+    return (_position(queue), null);
+  }
+
+  if (mix == null) return (_position(queue), null);
   if (controller.mixError != null) return ('Paused. Couldn\'t load more', null);
-  if (mix.exhausted) return ('End of mix', null);
+  if (queue.playedOut) return ('End of mix', null);
 
   final nextItem = queue.next;
-  return (nextItem?.title != null ? 'Next: ${nextItem?.title}' : 'Mix', null);
+  if (nextItem != null) return ('Next: ${nextItem.title}', null);
+  // Nothing after this one. Only "last" once nothing more can arrive — before
+  // that a top-up is still out, and the list simply names itself.
+  if (mix.exhausted) return ('Last video', null);
+  return ('Mix', null);
+}
+
+/// `3 / 135`. A playlist's total is YouTube's count while pages are still to
+/// come (`displayLength`), which is why it can be shown for one and not for a mix.
+String _position(QueueState queue) {
+  final total = queue.displayLength;
+  return queue.currentIndex != null ? '${queue.currentIndex! + 1} / $total' : '$total items';
+}
+
+/// What follows a playlist's position, or null for nothing.
+///
+/// The error and the end are said in both states, because the open list shows
+/// neither. What is next, and that this is the last one, the open list already
+/// shows — so those are the collapsed panel's alone.
+String? _playlistTail(QueueState queue, QueueController controller, bool expanded) {
+  if (controller.mixError != null) return 'Paused. Couldn\'t load more';
+  if (queue.playedOut) return 'End of playlist';
+  if (expanded) return null;
+
+  final nextItem = queue.next;
+  if (nextItem != null) return 'Next: ${nextItem.title}';
+  return (queue.mix?.exhausted ?? false) ? 'Last video' : null;
 }
 
 class _QueueItemTile extends StatefulWidget {
@@ -858,6 +1222,7 @@ class _QueueItemTile extends StatefulWidget {
     required this.index,
     required this.itemCount,
     required this.isCurrent,
+    this.numberDigits,
     required this.scheme,
     required this.controller,
     required this.onRemove,
@@ -870,6 +1235,11 @@ class _QueueItemTile extends StatefulWidget {
   final int index;
   final int itemCount;
   final bool isCurrent;
+
+  /// Non-null for a playlist: the row shows its position, in a column this
+  /// many digits wide — a fraction while the list scrolls towards longer
+  /// numbers. The playing row shows its arrow there.
+  final ValueListenable<double>? numberDigits;
   final ColorScheme scheme;
   final QueueController controller;
   final VoidCallback onRemove;
@@ -979,6 +1349,7 @@ class _QueueItemTileState extends State<_QueueItemTile> {
       clock: clock,
     );
     return [
+      if (widget.numberDigits != null) 'number ${widget.index + 1}',
       widget.item.title,
       widget.item.channelName,
       if (widget.isCurrent) 'now playing',
@@ -989,158 +1360,190 @@ class _QueueItemTileState extends State<_QueueItemTile> {
   @override
   Widget build(BuildContext context) {
     final inert = widget.clearing || widget.removing;
+    final bool isPlaylist = widget.numberDigits != null;
 
     // The row fills the panel edge to edge, so the ring sits inside it.
     Widget tile = FocusRingShape(
       inflate: -1,
       child: MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        includeSemantics: false,
-        onFocusChange: (has) {
-          if (_focusWithin != has) setState(() => _focusWithin = has);
-        },
-        child: Stack(
-        children: [
-          // The row is one thing to listen to — "title, channel, duration" — with its Remove
-          // and Reorder as separate nodes of their own (`container: true`); left to merge, the
-          // row read as "group", and the handle read the whole row followed by its hint.
-          ListTile(
-            selected: widget.isCurrent,
-            selectedTileColor: widget.scheme.surfaceContainerHigh,
-            mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4).copyWith(right: 16),
-            leading: ExcludeSemantics(
-              child: SizedBox(
-              width: 82,
-              height: 60,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Stack(
-                  fit: StackFit.expand,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          includeSemantics: false,
+          onFocusChange: (has) {
+            if (_focusWithin != has) setState(() => _focusWithin = has);
+          },
+          child: Stack(
+            children: [
+              // The row is one thing to listen to — "title, channel, duration" — with its Remove
+              // and Reorder as separate nodes of their own (`container: true`); left to merge, the
+              // row read as "group", and the handle read the whole row followed by its hint.
+              ListTile(
+                selected: widget.isCurrent,
+                selectedTileColor: widget.scheme.surfaceContainerHigh,
+                mouseCursor: inert ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                contentPadding: EdgeInsets.symmetric(horizontal: isPlaylist ? 5 : 12, vertical: 4).copyWith(right: 16),
+                leading: ExcludeSemantics(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isPlaylist)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: widget.numberDigits!,
+                            builder: (context, digits, child) => SizedBox(width: _digitWidth * digits, child: child),
+                            child: widget.isCurrent
+                                // The arrow is wider than one digit: centred over the
+                                // column rather than squeezed into it.
+                                ? OverflowBox(
+                                    minWidth: 12,
+                                    maxWidth: 12,
+                                    fit: OverflowBoxFit.deferToChild,
+                                    child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
+                                  )
+                                : Center(
+                                    child: Text(
+                                      '${widget.index + 1}',
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      softWrap: false,
+                                      style: TextStyle(fontSize: 11, color: widget.scheme.onSurfaceVariant),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      SizedBox(
+                        width: 82,
+                        height: 60,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.network(
+                                widget.item.thumbnailUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
+                              ),
+                              Positioned(
+                                bottom: 2,
+                                right: 2,
+                                child: _durationBadge(context),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // The row's one name lives on its title, which is what the tile's own tap node
+                // merges: a label on a wrapper around the tile never reached it.
+                // The row's name is on the row itself (below).
+                title: ExcludeSemantics(
+                  child: Text(
+                    widget.item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
+                    ),
+                  ),
+                ),
+                subtitle: ExcludeSemantics(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.item.channelName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
+                        ),
+                      ),
+                      ChannelBadge(
+                        channelId: widget.item.channelId,
+                        isArtistChannel: widget.item.isArtistChannel,
+                        isVerified: widget.item.isVerified,
+                        size: 12,
+                        paddingLeft: 4,
+                      ),
+                    ],
+                  ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Image.network(
-                      widget.item.thumbnailUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(color: widget.scheme.surfaceContainerHighest),
-                    ),
-                    Positioned(
-                      bottom: 2,
-                      right: 2,
-                      child: _durationBadge(context),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            ),
-            // The row's one name lives on its title, which is what the tile's own tap node
-            // merges: a label on a wrapper around the tile never reached it.
-            // The row's name is on the row itself (below).
-            title: ExcludeSemantics(
-              child: Text(
-                widget.item.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: widget.isCurrent ? widget.scheme.primary : widget.scheme.onSurface,
-                ),
-              ),
-            ),
-            subtitle: ExcludeSemantics(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      widget.item.channelName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: widget.scheme.onSurfaceVariant),
-                    ),
-                  ),
-                  ChannelBadge(
-                    channelId: widget.item.channelId,
-                    isArtistChannel: widget.item.isArtistChannel,
-                    isVerified: widget.item.isVerified,
-                    size: 12,
-                    paddingLeft: 4,
-                  ),
-                ],
-              ),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
-                // box, and a bubble to the left of the X is outside it.
-                ShortcutTooltip(
-                  label: 'Remove',
-                  silent: true,
-                  announce: false,
-                  side: TooltipSide.left,
-                  child: AnimatedCrossFade(
-                    duration: const Duration(milliseconds: 50),
-                    crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                    firstChild: Semantics(
-                      container: true,
-                      label: 'Remove from queue',
-                      child: IconButton(
-                        mouseCursor: SystemMouseCursors.click,
-                        icon: ExcludeSemantics(child: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant)),
-                        onPressed: widget.onRemove,
+                    // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
+                    // box, and a bubble to the left of the X is outside it.
+                    ShortcutTooltip(
+                      label: 'Remove',
+                      silent: true,
+                      announce: false,
+                      side: TooltipSide.left,
+                      child: AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 50),
+                        crossFadeState: !inert && (_isHovered || (_focusWithin && _keyboard)) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                        firstChild: Semantics(
+                          container: true,
+                          label: 'Remove from queue',
+                          child: IconButton(
+                            mouseCursor: SystemMouseCursors.click,
+                            icon: ExcludeSemantics(child: Icon(Icons.close, size: 18, color: widget.scheme.onSurfaceVariant)),
+                            onPressed: widget.onRemove,
+                          ),
+                        ),
+                        secondChild: const SizedBox.shrink(),
                       ),
                     ),
-                    secondChild: const SizedBox.shrink(),
-                  ),
-                ),
-                if (!inert)
-                  // Focusable, with Up/Down to reorder: the keyboard's way of doing
-                  // what dragging does. `ArrowKeyClaim` stops the player's seek and
-                  // volume shortcuts taking the arrows first.
-                  ArrowKeyClaim(
-                    // The `Semantics` is the *outer* one: a `Focus` outside it puts its
-                    // focused flag on the row's node, and Narrator then read the whole row
-                    // when the handle was focused.
-                    child: Semantics(
-                      container: true,
-                      label: 'Use the up and down arrows to reorder',
-                      child: Focus(
-                        onKeyEvent: _onHandleKey,
-                        child: ReorderableDragStartListener(
-                          index: widget.index,
-                          child: MouseRegion(
-                            cursor: SystemMouseCursors.grab,
-                            child: Padding(
-                              padding: const EdgeInsets.all(4),
-                              child: ExcludeSemantics(
-                                child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                    if (!inert)
+                      // Focusable, with Up/Down to reorder: the keyboard's way of doing
+                      // what dragging does. `ArrowKeyClaim` stops the player's seek and
+                      // volume shortcuts taking the arrows first.
+                      ArrowKeyClaim(
+                        // The `Semantics` is the *outer* one: a `Focus` outside it puts its
+                        // focused flag on the row's node, and Narrator then read the whole row
+                        // when the handle was focused.
+                        child: Semantics(
+                          container: true,
+                          label: 'Use the up and down arrows to reorder',
+                          child: Focus(
+                            onKeyEvent: _onHandleKey,
+                            child: ReorderableDragStartListener(
+                              index: widget.index,
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.grab,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: ExcludeSemantics(
+                                    child: Icon(Icons.drag_handle, size: 18, color: widget.scheme.onSurfaceVariant),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
-            onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+                  ],
+                ),
+                onTap: inert ? null : () => widget.controller.jumpTo(widget.index),
+              ),
+              // Current indicator. A numbered row draws it in the number's place instead.
+              if (widget.isCurrent && widget.numberDigits == null)
+                Positioned(
+                  left: -0.5,
+                  top: 0,
+                  bottom: 0,
+                  child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
+                ),
+            ],
           ),
-          // Current indicator
-          if (widget.isCurrent)
-            Positioned(
-              left: -0.5,
-              top: 0,
-              bottom: 0,
-              child: Icon(Icons.play_arrow, color: widget.scheme.onSurfaceVariant, size: 12),
-            ),
-        ],
         ),
-      ),
       ),
     );
 

@@ -27,6 +27,11 @@ const ENVELOPE_CODES: EnvelopeErrorCode[] = [
   'VIDEO_UPCOMING',
   'VIDEO_MEMBERS_ONLY',
   'RATE_LIMITED',
+  // Missing from this list from the day the code was added until 2026-10-13:
+  // a hand-kept list drifts, which is what `contract-docs.test.ts`'s check of
+  // the table against `errors.ts` is now for.
+  'AGE_VERIFICATION_REQUIRED',
+  'NOT_FOUND',
   'UPSTREAM_ERROR',
 ];
 
@@ -81,6 +86,8 @@ describe('retry modes', () => {
       ['VIDEO_UPCOMING', 'no'],
       ['VIDEO_MEMBERS_ONLY', 'no'],
       ['RATE_LIMITED', 'user'],
+      ['AGE_VERIFICATION_REQUIRED', 'user'],
+      ['NOT_FOUND', 'no'],
       ['UPSTREAM_ERROR', 'auto'],
     ]);
   });

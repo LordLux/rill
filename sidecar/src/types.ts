@@ -246,6 +246,37 @@ export interface FeedResult {
 }
 
 // ---------------------------------------------------------------------------
+// Playlist
+// ---------------------------------------------------------------------------
+
+export interface PlaylistHeader {
+  thumbnailUrl: string | null;
+  ownerName: string | null;
+  ownerChannelId: string | null;
+  ownerAvatarUrl: string | null;
+  viewCountText: string | null;
+  description: string | null;
+  visibility: 'public' | 'unlisted' | 'private' | null;
+  backgroundColor: ThemedColor | null;
+  isOwnedByViewer: boolean;
+}
+
+export interface PlaylistResult {
+  /** The playlist's own metadata. First page only; null on a continuation. */
+  header: PlaylistHeader | null;
+  /**
+   * The playlist's name, wherever the page carries it: always on the first
+   * page, and on a continuation that repeats the metadata. Not a sign of a
+   * first page; only a non-null `header` is.
+   */
+  title: string | null;
+  /** Every entry, unavailable ones included. As `title`: where the page carries it. */
+  videoCount: number | null;
+  items: VideoItem[];
+  continuation: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
 

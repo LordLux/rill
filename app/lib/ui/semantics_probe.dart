@@ -11,8 +11,10 @@
 /// `Failed to update ui::AXTree` between consecutive markers.
 ///
 /// `RILL_SEMANTICS_PROBE_VIDEO=<id>` picks the video (default one with a busy
-/// comments section). The semantics tree is dumped to
-/// `%TEMP%\rill-semantics-after-open.txt` once the video's page has settled.
+/// comments section) and `RILL_SEMANTICS_PROBE_PLAYLIST=<id>` the playlist whose
+/// page steps `7b`–`7f` walk (default a public one). The semantics tree is dumped to
+/// `%TEMP%\rill-semantics-after-open.txt` once the video's page has settled, and
+/// to `rill-semantics-playlist.txt` once the playlist's has.
 /// Unset, this costs one environment lookup at startup. `architecture.md` F51
 /// has what it found; re-run it on every Flutter pin bump.
 library;
@@ -28,6 +30,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'player/settings_menu.dart' show SettingsPage, playerMenuProvider;
 import 'player/view_mode.dart';
+import 'pages/playlist.dart' show openPlaylistPage;
 import 'player_shell.dart';
 import 'queue_controller.dart';
 import '../domain/youtube_link.dart';
@@ -284,6 +287,28 @@ Future<void> _probe(ProviderContainer container) async {
     });
 
     await _step('7-back-to-feed', () => toMiniPlayerIn(container));
+
+    // The playlist page (Task 35), over the feed with the miniplayer up. Opened
+    // by id, so it needs no sign-in; an owned playlist adds the owner's buttons.
+    final playlistId = Platform.environment['RILL_SEMANTICS_PROBE_PLAYLIST']?.trim().isNotEmpty == true
+        ? Platform.environment['RILL_SEMANTICS_PROBE_PLAYLIST']!.trim()
+        : 'PLOzDu-MXXLlgKMA3S2FXY_XVyDrukc0si';
+    await _step('7b-open-playlist', () => openPlaylistPage(playlistId));
+    _dumpTree('playlist');
+    await _step('7c-scroll-playlist', () {
+      for (var i = 0; i < 6; i++) {
+        _scrollAt(Offset(size.width * 0.7, size.height * 0.6), 600);
+      }
+    });
+    // The queue becomes the playlist, and the watch page goes over this one.
+    await _step('7d-play-all', () {
+      final target = _findText(RegExp(r'^Play all$'));
+      _say('play all at $target');
+      if (target != null) _tapAt(target);
+    });
+    await _step('7e-back-to-playlist', () => toMiniPlayerIn(container));
+    await _step('7f-leave-playlist', () => rootNavigatorKey.currentState?.maybePop());
+
     await _step('8-end', () {});
 
     _say('done');
