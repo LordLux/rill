@@ -325,6 +325,33 @@ Share through `share_dialog.dart`. A playlist tile's title opens it, and so does
 - **Save, Shuffle, and the owner's Add videos and Edit** are drawn disabled, each
   saying it is not available yet. Shuffle is a queue order; the other three need
   their requests measured first.
+- **The header's actions, as decided on 2026-10-14** (replaces the row above
+  once built; one row for everyone, no second row for the owner):
+  - A split button: **Play all**, and its menu **Shuffle**, **Play in reverse**,
+    **Play next**, **Add to queue**.
+  - **Save**, on someone else's playlist only. **Share**.
+  - A three-dot menu: **Show unavailable videos** (the request is unmeasured);
+    and on the viewer's own playlist **Add all to…**, **Edit playlist details**,
+    **Settings**, **Delete**.
+  - On the viewer's own playlist, an **"Add videos"** row with a dotted border at
+    the top of the list. It is not a row of the playlist and takes no number.
+    youtube.com's own dialog is a Google web page Rill cannot show; ours would
+    be a link or a search, then the edit the Save dialog already makes. Last.
+  - Both menus sit in a card that scrolls, so each needs the close-on-scroll
+    guard the queue header's menu has (`architecture.md` §2.8).
+- **Row numbers stay the playback position** (decided 2026-10-14): 1 is what
+  plays first, as in the queue panel, whatever order the playlist is sorted in.
+- **Shuffle is done in the client** (F58: youtube.com's server only picks a
+  random start). Decided 2026-10-14: start on a random row of what is loaded,
+  at once; then load every page and shuffle all the rest, the whole playlist
+  and not page by page. Play in reverse loads every page first too.
+- **Play next and Add to queue turn the queue into a plain one** (decided
+  2026-10-14). Today a queue keeps its source through any edit and keeps
+  extending from it. A mix stops being one: what is loaded stays, nothing more
+  is fetched. A playlist with pages still unloaded loads them all first, then
+  becomes plain. The header then says "Queue", and the number column and
+  "Go to Playlist" go. The playlist being added is loaded in full by a loader of
+  its own, since the queue has one loader today.
 - **Editing the viewer's own playlist** (title, visibility, removing a video):
   `action.removeFromPlaylist`, `playlist.create` and `playlist.delete` exist,
   anything else is measured first.
