@@ -17,6 +17,7 @@ import 'package:rill/theme/accent.dart';
 import 'package:rill/theme/app_theme.dart';
 import 'package:rill/ui/auth_controller.dart';
 import 'package:rill/ui/feed_controller.dart';
+import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/open_video.dart' show TileMenuItem;
 import 'package:rill/ui/pages/feed.dart';
 import 'package:rill/ui/page_wrapper.dart';
@@ -163,6 +164,11 @@ final FeedState _feedState = FeedState(
 
 /// `playlist.get` answering one short page, for the playlist page's own walk.
 class _OnePagePlaylist implements MixService {
+  _OnePagePlaylist({this.count = 3});
+
+  /// How many videos the page holds.
+  final int count;
+
   @override
   Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async => PlaylistResult(
         header: const PlaylistHeader(
@@ -177,9 +183,9 @@ class _OnePagePlaylist implements MixService {
           isOwnedByViewer: false,
         ),
         title: 'My Playlist',
-        videoCount: 3,
+        videoCount: count,
         items: [
-          for (var i = 0; i < 3; i++)
+          for (var i = 0; i < count; i++)
             VideoItem(
               kind: 'video',
               id: 'vid_$i',
@@ -380,6 +386,43 @@ void main() {
       await pumpPage(tester);
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       semantics.dispose();
+    });
+
+    testWidgets('Tab onto a row below the fold leaves it room, as it does a comment', (tester) async {
+      // A row is a media tile, which draws its own ring; the app's ring left it
+      // out of the scroll as well, so each row stopped at the very edge.
+      KeyboardNavigation.install();
+      bigWindow(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mixServiceProvider.overrideWithValue(_OnePagePlaylist(count: 14))],
+          child: MaterialApp(
+            theme: buildRillTheme(kDefaultAccent),
+            builder: (context, child) => FocusRing(child: child!),
+            home: const PlaylistPage(playlistId: 'PL123'),
+          ),
+        ),
+      );
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      var scrolled = false;
+      String? last;
+      for (var i = 0; i < 30 && last != 'Video 9'; i++) {
+        last = (await tabThrough(tester, 1)).single;
+        await tester.pump();
+        await tester.pump();
+        if (!RegExp(r'^Video \d+$').hasMatch(last)) continue;
+        final node = FocusManager.instance.primaryFocus!;
+        final scrollable = Scrollable.of(node.context!);
+        final viewport = scrollable.context.findRenderObject()! as RenderBox;
+        final bottom = viewport.localToGlobal(Offset.zero).dy + viewport.size.height;
+        scrolled = scrolled || scrollable.position.pixels > 0;
+        expect(node.rect.bottom, lessThanOrEqualTo(bottom - 59), reason: '$last keeps its room at the bottom');
+      }
+      expect(last, 'Video 9');
+      expect(scrolled, isTrue, reason: 'the walk has to pass the fold, or it shows nothing');
     });
   });
 
