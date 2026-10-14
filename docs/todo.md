@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 93.** A new item takes it, and the same edit bumps this line.
+**Next number: 94.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -446,8 +446,36 @@ the browser, or in the app when it is a YouTube link (`domain/youtube_link.dart`
 parses those); a timestamp seeks the current video when the comment belongs to
 it.
 
+**State on 2026-10-14:** a timestamp run already has a tap that seeks
+(`_CommentText` in `widgets/comments_section.dart`), a link run has none, and
+neither works in the running app as reported that day. Why the timestamp's tap
+does not land is not looked into: start there, since nothing has to be built for
+it. A comment under another video than the one playing must not seek.
+
 **Done when:** all three work in the running app, with a widget test for a
 timestamp seeking and a link being dispatched.
+
+### 93. Playlist page: links in the description do nothing
+
+A playlist's description is drawn as plain text (`_PlaylistDescription`,
+`ui/pages/playlist.dart`), so a link in it cannot be clicked or reached by Tab.
+The watch page's description already does this for a video (`LinkifiedText`,
+`ui/pages/watch.dart`): it finds the links in plain text, which is all
+`PlaylistHeader.description` is.
+
+- A YouTube link opens in the app: a video on the watch page, a playlist on its
+  page (`videoIdFromLink`, `playlistIdFromLink`). Anything else opens in the
+  browser.
+- The link colour has to be legible on every playlist tint; the theme's accent
+  is not, which is why "Show more" uses the card's own ink.
+- Each link is a Tab stop, in the header's order before "Show more", and only
+  the links in the three visible lines while it is collapsed, as on the watch
+  page.
+- The three-line measure in `_PlaylistDescription` has to measure the same
+  spans it draws.
+
+**Done when:** a link in a playlist's description opens, by mouse and by
+keyboard, with a widget test for each of the two destinations.
 
 ### 68. Search: filter chips
 
