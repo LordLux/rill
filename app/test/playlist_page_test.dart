@@ -24,7 +24,10 @@ VideoItem video(String id) => VideoItem(
     );
 
 class FakeMixService implements MixService {
-  FakeMixService({this.tint, this.delay = Duration.zero});
+  FakeMixService({this.tint, this.description, this.delay = Duration.zero});
+
+  /// The header's description; null is a playlist with none.
+  final String? description;
 
   /// How long the page takes to arrive. Past the route transition, the page
   /// underneath is off stage by the time the tint lands.
@@ -47,7 +50,7 @@ class FakeMixService implements MixService {
         ownerChannelId: null,
         ownerAvatarUrl: null,
         viewCountText: null,
-        description: null,
+        description: description,
         visibility: 'public',
         backgroundColor: tint,
         isOwnedByViewer: false,
@@ -126,6 +129,24 @@ void main() {
           findsOneWidget,
         );
       }
+    });
+
+    testWidgets('puts the description between the owner and the actions, as youtube.com does', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() => tester.view.reset());
+      await tester.pumpWidget(ProviderScope(
+        overrides: [mixServiceProvider.overrideWithValue(FakeMixService(description: 'What this is'))],
+        child: const MaterialApp(home: PlaylistPage(playlistId: 'PL123')),
+      ));
+      for (int i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      final owner = tester.getRect(find.text('Owner'));
+      final description = tester.getRect(find.text('What this is'));
+      final actions = tester.getRect(find.text('Play all'));
+      expect(description.top, greaterThanOrEqualTo(owner.bottom));
+      expect(description.bottom, lessThanOrEqualTo(actions.top));
     });
 
     testWidgets('shares the playlist through the share dialog, with its own address', (tester) async {
