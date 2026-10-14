@@ -196,9 +196,10 @@ ShapeBorder _inkShape(InkResponse ink) {
 /// field (which draws its own) or a [RinglessFocusNode]. Its shape is the
 /// control's own ([ringStyleFor]).
 ///
-/// It also scrolls the focused control into view. Flutter's Tab traversal is meant
-/// to, but the watch page's nested slivers and smooth-scroll view left focus
-/// thousands of pixels off screen with the page not following.
+/// It also scrolls the focused control into view, a [RinglessFocusNode]'s
+/// included. Flutter's Tab traversal is meant to, but the watch page's nested
+/// slivers and smooth-scroll view left focus thousands of pixels off screen with
+/// the page not following, and where it does follow it stops at the very edge.
 ///
 /// **And a click moves keyboard focus to the control under it**, or the nearest one
 /// when nothing there takes focus (the video surface: the play button), so the next
@@ -217,6 +218,9 @@ class FocusRing extends StatefulWidget {
 class _FocusRingState extends State<FocusRing> {
   bool _following = false;
   FocusNode? _node;
+
+  /// The control last scrolled into view; [_node] is the one the ring is around.
+  FocusNode? _shown;
   Rect? _rect;
   ({ShapeBorder shape, double inflate}) _style = (
     shape: _defaultShape,
@@ -243,22 +247,33 @@ class _FocusRingState extends State<FocusRing> {
 
   void _onModeChanged(FocusHighlightMode mode) => _onFocusChanged();
 
-  bool _wantsRing(FocusNode? node) {
-    if (node == null || node is FocusScopeNode || node is RinglessFocusNode)
-      return false;
+  /// Whether [node] is a control the keyboard walked onto.
+  bool _keyboardFocused(FocusNode? node) {
+    if (node == null || node is FocusScopeNode) return false;
     if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional)
       return false;
 
     final context = node.context;
     if (context == null || !context.mounted) return false;
-    // A text field draws its own.
+    // A text field draws its own ring and brings itself into view.
     return context.findAncestorWidgetOfExactType<EditableText>() == null;
   }
 
   void _onFocusChanged() {
     final node = FocusManager.instance.primaryFocus;
-    final wants = _wantsRing(node);
-    if (!wants) {
+    if (!_keyboardFocused(node)) {
+      _node = null;
+      _shown = null;
+      if (_rect != null && mounted) setState(() => _rect = null);
+      return;
+    }
+    // Brought into view whether or not the ring is ours to draw: a media tile
+    // draws its own, and was left at the very edge of the page for it.
+    if (!identical(node, _shown)) {
+      _shown = node;
+      _scrollIntoView(node!);
+    }
+    if (node is RinglessFocusNode) {
       _node = null;
       if (_rect != null && mounted) setState(() => _rect = null);
       return;
@@ -266,7 +281,6 @@ class _FocusRingState extends State<FocusRing> {
     if (!identical(node, _node)) {
       _node = node;
       _style = ringStyleFor(node!.context!);
-      _scrollIntoView(node);
     }
     _follow();
   }
