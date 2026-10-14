@@ -164,20 +164,21 @@ final FeedState _feedState = FeedState(
 
 /// `playlist.get` answering one short page, for the playlist page's own walk.
 class _OnePagePlaylist implements MixService {
-  _OnePagePlaylist({this.count = 3});
+  _OnePagePlaylist({this.count = 3, this.description});
 
   /// How many videos the page holds.
   final int count;
+  final String? description;
 
   @override
   Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async => PlaylistResult(
-        header: const PlaylistHeader(
+        header: PlaylistHeader(
           thumbnailUrl: null,
           ownerName: 'Owner',
           ownerChannelId: null,
           ownerAvatarUrl: null,
           viewCountText: null,
-          description: null,
+          description: description,
           visibility: 'public',
           backgroundColor: null,
           isOwnedByViewer: false,
@@ -386,6 +387,30 @@ void main() {
       await pumpPage(tester);
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       semantics.dispose();
+    });
+
+    testWidgets('a long description\'s "Show more" is a stop before the actions, and Enter opens it', (tester) async {
+      bigWindow(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mixServiceProvider.overrideWithValue(_OnePagePlaylist(description: 'A long description. ' * 40))],
+          child: MaterialApp(theme: buildRillTheme(kDefaultAccent), home: const PlaylistPage(playlistId: 'PL123')),
+        ),
+      );
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect((await tabThrough(tester, 10)).sublist(7), ['Log in', 'Show more', 'Play all']);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Show less'), findsOneWidget);
+      expect(focused(), 'Show less', reason: 'the toggle keeps the focus it was pressed with');
     });
 
     testWidgets('Tab onto a row below the fold leaves it room, as it does a comment', (tester) async {
