@@ -149,6 +149,48 @@ void main() {
       expect(description.bottom, lessThanOrEqualTo(actions.top));
     });
 
+    Future<void> openWith(WidgetTester tester, String description) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() => tester.view.reset());
+      await tester.pumpWidget(ProviderScope(
+        overrides: [mixServiceProvider.overrideWithValue(FakeMixService(description: description))],
+        child: const MaterialApp(home: PlaylistPage(playlistId: 'PL123')),
+      ));
+      for (int i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    testWidgets('caps a long description at three lines, with "Show more" to open it', (tester) async {
+      final long = 'A line of the description. ' * 60;
+      await openWith(tester, long);
+
+      final capped = tester.getSize(find.text(long));
+      final playAll = tester.getRect(find.text('Play all'));
+      // Three lines, not one: an ellipsis with no line count truncates to a single line.
+      expect(capped.height, closeTo(3 * 13 * 1.4, 1));
+      expect(find.text('Show more'), findsOneWidget);
+      expect(tester.getRect(find.text('Show more')).bottom, lessThanOrEqualTo(playAll.top), reason: 'above the actions');
+      expect(playAll.bottom, lessThan(800), reason: '"Play all" is still on the page');
+
+      await tester.tap(find.text('Show more'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Show less'), findsOneWidget);
+      expect(tester.getSize(find.text(long)).height, greaterThan(capped.height * 2));
+
+      await tester.tap(find.text('Show less'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Show more'), findsOneWidget);
+      expect(tester.getSize(find.text(long)).height, capped.height);
+    });
+
+    testWidgets('offers no "Show more" for a description that fits', (tester) async {
+      await openWith(tester, 'Short.');
+      expect(find.text('Short.'), findsOneWidget);
+      expect(find.text('Show more'), findsNothing);
+    });
+
     testWidgets('shares the playlist through the share dialog, with its own address', (tester) async {
       await open(tester);
       await tester.tap(find.byIcon(Icons.reply));
