@@ -1,5 +1,5 @@
-/// What counts as "a pasted link to one video" — the rule the search box uses to
-/// open a video instead of searching for it (`openSearchOrVideo`).
+/// What counts as "a pasted link to one video", and to a playlist — the rules the
+/// search box uses to open either instead of searching for it (`openSearchOrVideo`).
 ///
 /// **Mutation** run against this file: drop the `shorts` case from
 /// `videoIdFromLink` and the first group fails on every `/shorts/` link, which is
@@ -74,6 +74,56 @@ void main() {
 
     for (final entry in cases.entries) {
       test(entry.key, () => expect(videoIdFromLink(entry.value), isNull));
+    }
+  });
+
+  group('a link to a playlist is that playlist', () {
+    const id = 'PLrEnWoR732-BHrPp_Pm8_VleD68f9s14-';
+
+    final cases = <String, String>{
+      'https://www.youtube.com/playlist?list=$id': id,
+      'https://youtube.com/playlist?list=$id': id,
+      'https://m.youtube.com/playlist?list=$id&si=abc123': id,
+      'https://music.youtube.com/playlist?list=OLAK5uy_abc-DEF_123': 'OLAK5uy_abc-DEF_123',
+      'youtube.com/playlist?list=$id': id,
+      'https://www.youtube.com/playlist/?list=$id': id,
+      'HTTPS://WWW.YOUTUBE.COM/playlist?list=$id': id,
+      '  https://www.youtube.com/playlist?list=$id\n': id,
+      // The viewer's own lists have short ids.
+      'https://www.youtube.com/playlist?list=WL': 'WL',
+      'https://www.youtube.com/playlist?list=LL': 'LL',
+    };
+
+    for (final entry in cases.entries) {
+      test(entry.key.trim(), () => expect(playlistIdFromLink(entry.key), entry.value));
+    }
+  });
+
+  group('anything else is not a playlist', () {
+    const id = 'PLrEnWoR732-BHrPp_Pm8_VleD68f9s14-';
+    final cases = <String, String>{
+      'nothing': '',
+      'a search': 'my playlist',
+      'a sentence with a link in it': 'see https://www.youtube.com/playlist?list=$id',
+      'a bare id': id,
+      // The video is what was linked; the list rides along.
+      'a video in a playlist': 'https://www.youtube.com/watch?v=q_QyaPhykuI&list=$id',
+      'a short link to a video in a playlist': 'https://youtu.be/q_QyaPhykuI?list=$id',
+      // A mix has no page of its own.
+      'a mix': 'https://www.youtube.com/playlist?list=RDq_QyaPhykuI',
+      'a playlist link with no list': 'https://www.youtube.com/playlist',
+      'an empty list': 'https://www.youtube.com/playlist?list=',
+      'a list with a character it cannot have': 'https://www.youtube.com/playlist?list=PL!abc',
+      'a longer path': 'https://www.youtube.com/playlist/more?list=$id',
+      'a channel': 'https://www.youtube.com/@ado',
+      'another site with the same path': 'https://vimeo.com/playlist?list=$id',
+      'a host that only ends like youtube': 'https://notyoutube.com/playlist?list=$id',
+      'youtu.be, which has no playlist address': 'https://youtu.be/playlist?list=$id',
+      'a scheme that is not a web one': 'ftp://youtube.com/playlist?list=$id',
+    };
+
+    for (final entry in cases.entries) {
+      test(entry.key, () => expect(playlistIdFromLink(entry.value), isNull));
     }
   });
 

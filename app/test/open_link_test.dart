@@ -1,5 +1,6 @@
-/// Submitting the search box: a pasted link to one video plays it, and
-/// everything else is searched (`openSearchOrVideo`).
+/// Submitting the search box: a pasted link to one video plays it, a pasted
+/// link to a playlist opens its page, and everything else is searched
+/// (`openSearchOrVideo`).
 ///
 /// Through the real function, the real shell and the fake sidecar — the sidecar
 /// records every `search.query`, which is how "the link was not searched" is
@@ -10,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
+import 'package:rill/ui/pages/playlist.dart' show playlistRouteName;
 import 'package:rill/ui/pages/search_results.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/view_mode.dart';
@@ -43,6 +45,26 @@ Future<void> settleReal(WidgetTester tester, {bool settle = true}) async {
 
 const shortLink = 'https://www.youtube.com/shorts/SbRTk0ca7WY?feature=share';
 
+/// `playlist.get`, which the fake sidecar does not speak: an empty playlist, and
+/// a record of which one was asked for.
+class _Playlists implements MixService {
+  final List<String> asked = [];
+
+  @override
+  Future<PlaylistResult> getPlaylist(String playlistId, {String? continuation}) async {
+    asked.add(playlistId);
+    return const PlaylistResult(header: null, title: 'Pasted', items: []);
+  }
+
+  @override
+  Future<MixStart> start(String playlistId, {String? videoId, String? params}) async => throw UnimplementedError();
+
+  @override
+  Future<MixExtension> extend(String playlistId, String afterVideoId) async => throw UnimplementedError();
+}
+
+late _Playlists _playlists;
+
 /// One button per thing a user can submit.
 class TestApp extends ConsumerWidget {
   const TestApp({super.key});
@@ -63,6 +85,7 @@ class TestApp extends ConsumerWidget {
           children: [
             submit('short link', shortLink),
             submit('watch link', 'https://www.youtube.com/watch?v=q_QyaPhykuI&t=42s'),
+            submit('playlist link', 'https://www.youtube.com/playlist?list=PL_pasted-1&si=abc'),
             submit('query', 'lofi beats'),
             submit('sentence', 'watch this https://youtu.be/q_QyaPhykuI please'),
           ],
@@ -99,9 +122,11 @@ void main() {
   setUp(() async {
     await RpcClient.instance.call('test.reset', {});
     engine = FakeEngine();
+    _playlists = _Playlists();
     _disposed = false;
     container = ProviderContainer(
       overrides: [
+        mixServiceProvider.overrideWithValue(_playlists),
         playbackEngineProvider.overrideWithValue(engine),
         windowChromeProvider.overrideWithValue(NoWindowChrome()),
       ],
@@ -142,6 +167,19 @@ void main() {
 
     expect(container.read(queueProvider).current?.id, 'q_QyaPhykuI');
     expect(container.read(currentRouteProvider), watchRouteName);
+    expect(await searched(tester), isEmpty);
+  });
+
+  testLink('a pasted playlist link opens that playlist\'s page, and is never searched', (tester) async {
+    await pumpApp(tester);
+
+    await tester.tap(find.text('playlist link'));
+    await tester.pump();
+    await settleReal(tester, settle: false);
+
+    expect(container.read(currentRouteProvider), playlistRouteName);
+    expect(_playlists.asked, ['PL_pasted-1'], reason: 'the id, without what rides along');
+    expect(container.read(queueProvider).isEmpty, isTrue, reason: 'the page opens; nothing plays');
     expect(await searched(tester), isEmpty);
   });
 
