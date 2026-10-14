@@ -477,7 +477,7 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
         // Above the actions, where youtube.com has it.
         if (description != null && description.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text(description, style: TextStyle(fontSize: 13, height: 1.4, color: tint.onMuted)),
+          _PlaylistDescription(text: description, color: tint.onMuted, linkColor: tint.on),
         ],
         const SizedBox(height: 18),
         ConstrainedBox(
@@ -564,6 +564,80 @@ class _PlaylistHeaderWidget extends ConsumerWidget {
     );
   }
 
+}
+
+/// The playlist's description: three lines, and "Show more" when there are more,
+/// as the watch page does a video's. Uncapped it pushed "Play all" down the card.
+class _PlaylistDescription extends StatefulWidget {
+  const _PlaylistDescription({required this.text, required this.color, required this.linkColor});
+
+  final String text;
+  final Color color;
+
+  /// "Show more", in the card's own ink: the theme's accent is not legible on
+  /// every tint.
+  final Color linkColor;
+
+  static const int _collapsedLines = 3;
+
+  @override
+  State<_PlaylistDescription> createState() => _PlaylistDescriptionState();
+}
+
+class _PlaylistDescriptionState extends State<_PlaylistDescription> {
+  bool _expanded = false;
+
+  @override
+  void didUpdateWidget(_PlaylistDescription oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) _expanded = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(fontSize: 13, height: 1.4, color: widget.color);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: DefaultTextStyle.of(context).style.merge(style)),
+          maxLines: _PlaylistDescription._collapsedLines,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final overflows = painter.didExceedMaxLines;
+        painter.dispose();
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedSize(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              alignment: Alignment.topLeft,
+              child: Text(
+                widget.text,
+                style: style,
+                maxLines: _expanded ? null : _PlaylistDescription._collapsedLines,
+                overflow: _expanded ? TextOverflow.clip : TextOverflow.ellipsis,
+              ),
+            ),
+            if (overflows || _expanded) ...[
+              const SizedBox(height: 3),
+              KeyboardTap(
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Text(
+                  _expanded ? 'Show less' : 'Show more',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: widget.linkColor),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 }
 
 /// The page before its first response: the header card and a column of rows,
