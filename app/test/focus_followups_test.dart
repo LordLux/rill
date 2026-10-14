@@ -151,6 +151,37 @@ void main() {
       }
     });
 
+    testWidgets('a control that draws its own ring is given the same room', (tester) async {
+      // A media tile's node: left out of the ring, and for a while out of the
+      // scroll with it.
+      final nodes = [for (var i = 0; i < 30; i++) RinglessFocusNode(debugLabel: 'r$i')];
+      addTearDown(() {
+        for (final node in nodes) {
+          node.dispose();
+        }
+      });
+      await tester.pumpWidget(MaterialApp(
+        builder: (context, child) => FocusRing(child: child!),
+        home: Scaffold(
+          body: ListView(
+            children: [
+              for (final node in nodes) SizedBox(height: 48, child: Focus(focusNode: node, child: const SizedBox.expand())),
+            ],
+          ),
+        ),
+      ));
+      final viewport = tester.getRect(find.byType(Scrollable));
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      for (var i = 0; i < 20; i++) {
+        await tabThrough(tester, 1);
+        await tester.pump();
+        await tester.pump();
+        final rect = FocusManager.instance.primaryFocus!.rect;
+        expect(rect.bottom, lessThanOrEqualTo(viewport.bottom - 59), reason: 'stop $i keeps its room at the bottom');
+      }
+      expect(scrollable.position.pixels, greaterThan(0), reason: 'the walk passed the fold');
+    });
+
     testWidgets('a mouse click does not scroll anything into view', (tester) async {
       // A tall page: the button far down is off screen. Clicking it with the mouse
       // must not scroll (the ring's scroll-to-focus is for Tab only).
