@@ -1029,22 +1029,6 @@ bell its count and a panel. Signed-in only.
 
 **Done when:** the bell shows the real unread count and opens the real list.
 
----
-
-### 90. Routes pile up between the watch page and a playlist's page
-
-"Go to Playlist" in the queue header pushes the playlist's page over the watch
-page, and playing a row from there pushes a new watch page over that
-(`showWatchPageIn` pushes whenever the current route is not `watch`). Each round
-trip adds two routes, all kept mounted, and Back walks every one of them. A
-search from the watch page has the same shape. Only the watch page on top claims
-the player (`isTopWatchPage`, `watch.dart`), so nothing breaks: it is memory and
-a long way back.
-
-**Done when:** opening a video from a page that was itself opened from the watch
-page returns to the watch page already there instead of stacking a second one,
-or the stack is shown to be harmless and this item is deleted.
-
 ## Triggered — read when one of these fires
 
 ### 18. Evaluate freezed 4.0.1

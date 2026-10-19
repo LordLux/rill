@@ -324,4 +324,60 @@ void main() {
       expect(section, homeRouteName);
     });
   });
+
+  group('removing a route', () {
+    // `[home, watch₁, playlist, watch₂]`: the old observer reported the route
+    // *below* the removed one, which is `home` while `watch₂` is on screen.
+    Future<(MaterialPageRoute<void>, MaterialPageRoute<void>)> pumpBuried(WidgetTester tester) async {
+      await pumpApp(tester);
+      final buried = page(watchRouteName);
+      nav.push(buried);
+      await tester.pumpAndSettle();
+      nav.push(page('playlist'));
+      await tester.pumpAndSettle();
+      final top = page(watchRouteName);
+      nav.push(top);
+      await tester.pumpAndSettle();
+      return (buried, top);
+    }
+
+    testWidgets('from under the top changes neither the route nor the section', (tester) async {
+      final (buried, _) = await pumpBuried(tester);
+      expect(current, watchRouteName);
+      expect(section, 'playlist');
+
+      nav.removeRoute(buried);
+      await tester.pumpAndSettle();
+
+      expect(current, watchRouteName, reason: 'watch₂ is still the page on screen');
+      expect(section, 'playlist', reason: 'and the rail was not told it went home');
+    });
+
+    testWidgets('the route that is on top reports what is under it', (tester) async {
+      final (_, top) = await pumpBuried(tester);
+
+      nav.removeRoute(top);
+      await tester.pumpAndSettle();
+
+      expect(current, 'playlist');
+    });
+
+    testWidgets('a replaced page is reported once, and a buried one not at all', (tester) async {
+      await pumpApp(tester);
+      final under = page('subscriptions');
+      nav.push(under);
+      await tester.pumpAndSettle();
+      nav.push(page(watchRouteName));
+      await tester.pumpAndSettle();
+
+      nav.replace(oldRoute: under, newRoute: page('playlist'));
+      await tester.pumpAndSettle();
+      expect(current, watchRouteName, reason: 'the page on top did not change');
+      expect(section, 'subscriptions', reason: 'the section is only what was on top');
+
+      nav.pop();
+      await tester.pumpAndSettle();
+      expect(current, 'playlist', reason: 'the replacement is what Back now reaches');
+    });
+  });
 }
