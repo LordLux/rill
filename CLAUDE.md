@@ -825,6 +825,12 @@ the answer.
   (`PageChrome`, `ui/page_wrapper.dart`; `architecture.md` §2.8). **A test for
   this passes for the wrong reason unless whatever sets the state arrives after
   the route transition** — before that the page underneath is still live.
+- **At most one watch route exists. `showWatchPageIn` is the only place that
+  pushes one — Task 36.** Opening a video from a page over the watch page
+  (a playlist, the search results) pushes the new watch route and removes the
+  buried one, so Back goes page by page. `RouteTracker` keeps its own stack and
+  reports its top: an observer's `previousRoute` is wrong for a route removed
+  from the middle, and would float the miniplayer and light the wrong rail entry.
 
 ## Accessibility
 

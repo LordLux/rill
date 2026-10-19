@@ -117,11 +117,24 @@ final transientRouteOpenProvider =
 /// takeover, not a real navigation away from whatever page is underneath it
 /// — closer to `PopupRoute` than to an ordinary `PageRoute` push — so it is
 /// routed through `_transient` instead of `_report` here too.
+///
+/// **It keeps its own stack of page routes and reports the top of it — never
+/// the `previousRoute` an observer callback is handed.** For a pop that is the
+/// route underneath, which is the top. For `didRemove` it is not: removing a
+/// route from the middle of `[feed, watch₁, playlist, watch₂]` hands over
+/// `feed`, the route below the removed one, while `watch₂` is on screen. The
+/// shell would then float the miniplayer over the watch page, light the wrong
+/// rail entry and reset the view mode, all for a navigation that never
+/// happened. Removing a route that is not on top reports nothing
+/// (`showWatchPageIn` does exactly that, Task 36).
 class RouteTracker extends NavigatorObserver {
   RouteTracker({required this.onPageRoute, required this.onTransientChange});
 
   final void Function(String? routeName) onPageRoute;
   final void Function(bool pushed) onTransientChange;
+
+  /// The reportable page routes, bottom first.
+  final List<Route<dynamic>> _pages = [];
 
   /// A `PageRoute` this tracker should report as a real navigation — every
   /// one except a full-screen dialog, which behaves like a popup instead.
@@ -149,6 +162,7 @@ class RouteTracker extends NavigatorObserver {
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     _closeTooltips();
     if (_isReportablePage(route)) {
+      _pages.add(route);
       _report(route);
     } else if (_isTransient(route)) {
       _transient(true);
@@ -159,7 +173,8 @@ class RouteTracker extends NavigatorObserver {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     _closeTooltips();
     if (_isReportablePage(route)) {
-      _report(previousRoute);
+      _pages.remove(route);
+      _report(_pages.lastOrNull);
     } else if (_isTransient(route)) {
       _transient(false);
     }
@@ -167,8 +182,11 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _closeTooltips();
     if (_isReportablePage(route)) {
-      _report(previousRoute);
+      final wasTop = identical(_pages.lastOrNull, route);
+      _pages.remove(route);
+      if (wasTop) _report(_pages.lastOrNull);
     } else if (_isTransient(route)) {
       _transient(false);
     }
@@ -177,7 +195,22 @@ class RouteTracker extends NavigatorObserver {
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
     _closeTooltips();
-    if (newRoute != null && _isReportablePage(newRoute)) _report(newRoute);
+    final newIsPage = newRoute != null && _isReportablePage(newRoute);
+    final at = oldRoute == null ? -1 : _pages.indexOf(oldRoute);
+    if (at < 0) {
+      if (newIsPage) {
+        _pages.add(newRoute);
+        _report(newRoute);
+      }
+      return;
+    }
+    final wasTop = at == _pages.length - 1;
+    if (newIsPage) {
+      _pages[at] = newRoute;
+    } else {
+      _pages.removeAt(at);
+    }
+    if (wasTop) _report(_pages.lastOrNull);
   }
 }
 
@@ -339,14 +372,29 @@ void toMiniPlayerIn(ProviderContainer container) {
   rootNavigatorKey.currentState?.maybePop();
 }
 
+/// The watch route this function last pushed. `Navigator` has no public list of
+/// its routes, and this is the only place a watch route is pushed.
+Route<void>? _watchRoute;
+
+/// Shows the watch page, and keeps it to one (`architecture.md` §2.8).
+///
+/// A page opened over the watch page (a playlist, the search results) that then
+/// plays something does not stack a second one: the new watch route goes on top
+/// and the buried one is removed, so Back leads to the page the video was
+/// opened from and then to what was under the old watch page. The push comes
+/// first, so the buried route is never the one on top.
 void showWatchPageIn(ProviderContainer container) {
   if (container.read(currentRouteProvider) == watchRouteName) return;
-  rootNavigatorKey.currentState?.push(
-    MaterialPageRoute<void>(
-      settings: const RouteSettings(name: watchRouteName),
-      builder: (_) => const WatchPage(),
-    ),
+  final navigator = rootNavigatorKey.currentState;
+  if (navigator == null) return;
+  final buried = _watchRoute;
+  final route = MaterialPageRoute<void>(
+    settings: const RouteSettings(name: watchRouteName),
+    builder: (_) => const WatchPage(),
   );
+  _watchRoute = route;
+  navigator.push(route);
+  if (buried != null && buried.navigator == navigator && buried.isActive) navigator.removeRoute(buried);
 }
 
 ProviderContainer _containerOf(WidgetRef ref) =>
