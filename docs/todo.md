@@ -1050,12 +1050,25 @@ refused here, so this is argued, not measured); the real wait in `openWatch`
 (`--concurrency=3`: one run in three still failed, one test); a stray timer from
 yt-dlp (fixed, and the failures continued).
 
-**Not yet tried:** closing VS Code, so its analysis server is not competing;
-`--reporter expanded` on a failing run to keep every exception in order, since
-"Test failed. See exception logs above" has been the only line the guard keeps;
-whether `RpcClient.instance` (one bun sidecar per test file) is slow to answer
-under the load; the real-time `Future.delayed` waits that other tests use in
-place of a condition.
+**With VS Code closed (2026-10-19, nine `rill check` runs):** seven passed, two
+failed one test each — `open_link_test` "anything else is searched" and
+`account_identity_test` "the re-fetch keeps the page". Better than half, still not
+green. Both wait a fixed real-time 400 ms for the fake sidecar
+(`settleReal`) and then assert on what it answered; the first reads the
+sidecar's search log, which is empty if the request had not arrived. That is a
+suspect, not a finding: running those two files six times with every core
+saturated by busy loops passed six of six.
+
+**The guard now prints what a failed test printed** (the last 30 lines, minus the
+sidecar's `Shell:` echo), because "Test failed. See exception logs above" was
+all it kept and the exception itself is a `print`. The next red run says what
+failed and where. Read it before changing a wait.
+
+**Not yet tried:** replacing the fixed waits with a wait for the sidecar to go
+idle (`RpcClient` has a private `_pending` map that could be read for it) in the
+files that use `settleReal`, `runAsync(… delayed(400 ms))` or the like
+(`player_controls_test` ×7, `focus_watch_page_test` ×3, `keyboard_resync_test`
+×2, and one each in six others).
 
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
 

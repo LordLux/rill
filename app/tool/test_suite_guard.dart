@@ -79,6 +79,12 @@ Future<void> main(List<String> args) async {
   /// that test's `testDone`. A failure was a name and nothing else, so a red CI run
   /// meant guessing at the cause from the name alone (2026-09-26).
   final testErrors = <int, String>{};
+  /// Test id -> what the test printed. Flutter prints a failed expectation's own
+  /// text ("Expected: … Actual: …", the finder that matched nothing) as ordinary
+  /// output and reports only "Test failed. See exception logs above." as the
+  /// error, so a failure that happened once in a long run was a name and nothing
+  /// to read (2026-10-19, `todo.md` 94). Kept so the lines can be shown under it.
+  final testPrints = <int, List<String>>{};
   final failures = <String>[];
   var sawAnyEvent = false;
 
@@ -122,6 +128,10 @@ Future<void> main(List<String> args) async {
           final suite = suitePaths[suiteId] ?? 'suite $suiteId';
           testNames[testId] = '$suite: $name';
         }
+      case 'print':
+        final id = decoded['testID'] as int?;
+        final message = decoded['message'] as String?;
+        if (id != null && message != null) testPrints.putIfAbsent(id, () => []).add(message);
       case 'error':
         final id = decoded['testID'] as int?;
         final message = (decoded['error'] as String? ?? '').trim();
@@ -137,7 +147,8 @@ Future<void> main(List<String> args) async {
               'unnamed test $id (a load, setUpAll or tearDownAll — '
                   'result: ${decoded['result']})';
           final why = testErrors[id];
-          failures.add(why == null ? name : '$name\n${_indented(why)}');
+          final printed = _printedTail(testPrints[id]);
+          failures.add([name, if (why != null) _indented(why), if (printed.isNotEmpty) printed].join('\n'));
         }
     }
   }
@@ -189,6 +200,21 @@ Future<void> main(List<String> args) async {
   }
 
   exit(testExit);
+}
+
+/// The last of what a failed test printed, which is where its real exception is.
+/// Capped, and the `Shell:` lines the sidecar process echoes are left out.
+String _printedTail(List<String>? printed, {int maxLines = 30}) {
+  if (printed == null) return '';
+  final lines = [
+    for (final chunk in printed)
+      for (final line in chunk.split('\n'))
+        if (line.trim().isNotEmpty && !line.startsWith('Shell:')) line,
+  ];
+  if (lines.isEmpty) return '';
+  final shown = lines.length > maxLines ? lines.sublist(lines.length - maxLines) : lines;
+  final cut = lines.length > maxLines ? '      … (${lines.length - maxLines} earlier lines)\n' : '';
+  return '      printed:\n$cut${shown.map((line) => '        $line').join('\n')}';
 }
 
 /// The first lines of an error, indented under the test it belongs to. A whole
