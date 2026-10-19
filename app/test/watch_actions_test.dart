@@ -22,6 +22,7 @@ import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 /// Matches `ACTION_FAIL_ID` in `fake_sidecar.ts`.
 const String actionFailId = 'actionfail1';
@@ -63,7 +64,7 @@ class TestApp extends ConsumerWidget {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 /// The auth state the harness builds with. Authenticated unless a test says

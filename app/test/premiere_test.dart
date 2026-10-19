@@ -19,6 +19,7 @@ import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/widgets/media_tile.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 /// Matches `PREMIERE_ID` / `PREMIERE_AT_MS` in `fake_sidecar.ts`.
 const String premiereId = 'premiere1';
@@ -69,7 +70,7 @@ class TestApp extends ConsumerWidget {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 void main() {

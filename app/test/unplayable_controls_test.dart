@@ -29,6 +29,7 @@ import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 VideoItem video(String id) => VideoItem(
       kind: 'video',
@@ -67,7 +68,7 @@ class TestApp extends ConsumerWidget {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 /// The id, and what makes it unplayable — the fake sidecar's own ids.

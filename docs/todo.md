@@ -1064,11 +1064,27 @@ sidecar's `Shell:` echo), because "Test failed. See exception logs above" was
 all it kept and the exception itself is a `print`. The next red run says what
 failed and where. Read it before changing a wait.
 
-**Not yet tried:** replacing the fixed waits with a wait for the sidecar to go
-idle (`RpcClient` has a private `_pending` map that could be read for it) in the
-files that use `settleReal`, `runAsync(… delayed(400 ms))` or the like
-(`player_controls_test` ×7, `focus_watch_page_test` ×3, `keyboard_resync_test`
-×2, and one each in six others).
+**First printed failure (2026-10-19):** `scrubber_chapters_widget_test`, "pumpAndSettle
+timed out" inside `settleReal`. That is the mechanism: the helper waits a fixed
+400 ms of real time for the fake sidecar, and if the answer has not come the page
+is still showing a loading indicator, which animates until it does, so
+`pumpAndSettle` never settles. Whether 400 ms is enough depends on how busy the
+machine is.
+
+**Changed:** `test/sidecar_idle.dart` (`waitForSidecar`, `settleWithSidecar`) waits
+until `RpcClient.pendingCallCount` is 0, pumping frames meanwhile, and the 13 test
+files that had their own fixed wait before a `pumpAndSettle` now call it after
+that wait, so none waits less than before. It settles **once**, not until quiet:
+waiting for the call that settling itself starts changed two scrubber tests, which
+had been passing with it in flight (found by running them). With the fixed wait
+cut to 0 ms the old helper had not finished after 400 s (the file takes about 25 s)
+while the new one finished in 29 s, with two failures that need the real wait;
+whether the change makes ten full runs pass is **not yet measured**.
+
+**Not changed:** `player_controls_test` has six more inline waits of 100–300 ms,
+`keyboard_resync_test` two of 50 ms, and `tile_menu_test`,
+`focus_traversal_test` and `scrubber_chapters_widget_test` one each; none of
+those was in a failure.
 
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
 

@@ -10,6 +10,7 @@ import 'package:rill/ui/player/controls.dart';
 import 'package:rill/ui/player_shell.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 VideoItem testVideo(String id) => VideoItem(
       kind: 'video',
@@ -34,7 +35,7 @@ void disposeContainer() {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 Future<void> boot() async {

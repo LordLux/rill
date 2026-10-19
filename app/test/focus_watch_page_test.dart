@@ -28,6 +28,7 @@ import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
 import 'focus_traversal_test.dart' show focused, tabThrough;
+import 'sidecar_idle.dart';
 
 VideoItem video(String id) => VideoItem(
       kind: 'video',
@@ -110,7 +111,7 @@ void main() {
     }
     await tester.pump();
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
-    await tester.pumpAndSettle();
+    await settleWithSidecar(tester);
   }
 
   /// Whether the controls bar is showing: its fade is at 1, not 0.
@@ -149,7 +150,7 @@ void main() {
         openWatchIn(container, video('ratelimited1'));
         await tester.pump();
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
-        await tester.pumpAndSettle();
+        await settleWithSidecar(tester);
         expect(find.text('Try again'), findsOneWidget, reason: 'the slate is showing');
         if (fullscreen) {
           container.read(playerViewProvider.notifier).toggleFullscreen();
@@ -213,6 +214,7 @@ void main() {
         }
         await tester.pump();
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+        await waitForSidecar(tester);
         for (var i = 0; i < 6; i++) {
           await tester.pump(const Duration(milliseconds: 300));
         }

@@ -19,6 +19,7 @@ import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 /// Match `RATE_LIMITED_ID` and `BROKEN_ID` in `fake_sidecar.ts`.
 const String rateLimitedId = 'ratelimited1';
@@ -64,7 +65,7 @@ class TestApp extends ConsumerWidget {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 void main() {
