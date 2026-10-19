@@ -27,6 +27,7 @@ import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 late FakeEngine engine;
 late ProviderContainer container;
@@ -42,6 +43,7 @@ void disposeContainer() {
 /// A real wait for the sidecar, then the frames it caused.
 Future<void> settleReal(WidgetTester tester) async {
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+  await waitForSidecar(tester);
   await tester.pump();
   for (var i = 0; i < 6; i++) {
     await tester.pump(const Duration(milliseconds: 200));

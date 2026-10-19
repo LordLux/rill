@@ -35,6 +35,7 @@ import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 VideoItem video(String id) => VideoItem(
       kind: 'video',
@@ -73,7 +74,7 @@ Future<void> openQuality(WidgetTester tester) async {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 /// Reset for one test. **The sidecar is not restarted** — see [main]'s

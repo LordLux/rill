@@ -20,6 +20,7 @@ import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 late FakeEngine engine;
 late ProviderContainer container;
@@ -36,8 +37,9 @@ void disposeContainer() {
 Future<void> settleReal(WidgetTester tester, {bool settle = true}) async {
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
   if (settle) {
-    await tester.pumpAndSettle();
+    await settleWithSidecar(tester);
   } else {
+    await waitForSidecar(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   }

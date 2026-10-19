@@ -42,6 +42,11 @@ class RpcClient {
 
   @visibleForTesting
   int? get processId => _process?.pid;
+
+  /// Calls sent and not yet answered. A widget test waits on this instead of a
+  /// fixed delay for the fake sidecar (`test/sidecar_idle.dart`).
+  @visibleForTesting
+  int get pendingCallCount => _pending.length;
   
   Map<String, dynamic>? capabilities;
   Completer<void>? _readyCompleter;

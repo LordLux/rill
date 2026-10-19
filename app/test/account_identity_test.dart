@@ -25,6 +25,7 @@ import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
 
 import 'fake_engine.dart';
+import 'sidecar_idle.dart';
 
 /// Matches `SUBSCRIBED_ID` / `LIKED_ID` in `fake_sidecar.ts`.
 const String subscribedId = 'subbed1';
@@ -70,7 +71,7 @@ class TestApp extends ConsumerWidget {
 
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await tester.pumpAndSettle();
+  await settleWithSidecar(tester);
 }
 
 AuthController get auth => container.read(authProvider.notifier);
