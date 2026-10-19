@@ -1029,6 +1029,8 @@ bell its count and a panel. Signed-in only.
 
 **Done when:** the bell shows the real unread count and opens the real list.
 
+---
+
 ## Triggered — read when one of these fires
 
 ### 18. Evaluate freezed 4.0.1

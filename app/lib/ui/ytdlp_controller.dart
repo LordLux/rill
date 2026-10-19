@@ -19,7 +19,13 @@ final ytDlpRegistryProvider = Provider<YtDlpRegistryConsent>((ref) => const Win3
 /// calling `resolveYtDlp()` inline) purely so a test can fix it at
 /// [YtDlpLocation.onPath] without a real PATH entry, the one case this
 /// controller has to treat specially: never touched, never scheduled.
-final ytDlpResolutionProvider = Provider<YtDlpResolution>((ref) => resolveYtDlp());
+final ytDlpResolutionProvider = Provider<YtDlpResolution>((ref) => ytDlpResolver());
+
+/// What [ytDlpResolutionProvider] asks. `test/flutter_test_config.dart` replaces
+/// it, so a test run does not depend on the yt-dlp installed on the machine: an
+/// app-managed copy schedules a 30 s check, and a page that mounts the account
+/// button then fails with a pending timer (todo 94, since closed).
+YtDlpResolution Function() ytDlpResolver = resolveYtDlp;
 final ytDlpHttpProvider = Provider<UpdateHttp>((ref) => IoUpdateHttp());
 final ytDlpDownloaderProvider = Provider<YtDlpDownloader>((ref) => YtDlpDownloader(http: ref.watch(ytDlpHttpProvider)));
 final ytDlpClockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
