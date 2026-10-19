@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 94.** A new item takes it, and the same edit bumps this line.
+**Next number: 95.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1028,6 +1028,36 @@ marking as read), add the sidecar method and its protocol entry, then give the
 bell its count and a panel. Signed-in only.
 
 **Done when:** the bell shows the real unread count and opens the real list.
+
+### 94. The Flutter suite is red in about half of full runs, on different tests each time
+
+Measured 2026-10-19 on an 8-core Windows machine with VS Code's Dart language
+server running, after the yt-dlp fix (that one was deterministic and is fixed).
+Ten full runs: five passed, five failed 1–5 tests each, never the same set —
+`focus_watch_page_test` (two different tests), `focus_traversal_test`,
+`nav_rail_selection_test`, `captions_test`, `comments_section_test` ("widget is
+off-screen or obscured"), `scrubber_chapters_widget_test` (a drag, and once a
+10-minute timeout), and in one run `restore_watchdog_test` and
+`rpc_client_test` at 30 s. **Every one of them passes alone** (6 of 6, 5 of 5, and
+under a CPU burner) and on a re-run. The failures are in files that share nothing
+with each other, and the same ones appear with `flutter test` run directly, so it
+is the suite and not the guard.
+
+**Ruled out:** Task 36 (the failing files never remove a route, and the failures
+include files that do not navigate at all; a run on the tree without it was
+refused here, so this is argued, not measured); the real wait in `openWatch`
+(shortened from 400 ms to 20 ms, the Tab-order test still passed); parallelism
+(`--concurrency=3`: one run in three still failed, one test); a stray timer from
+yt-dlp (fixed, and the failures continued).
+
+**Not yet tried:** closing VS Code, so its analysis server is not competing;
+`--reporter expanded` on a failing run to keep every exception in order, since
+"Test failed. See exception logs above" has been the only line the guard keeps;
+whether `RpcClient.instance` (one bun sidecar per test file) is slow to answer
+under the load; the real-time `Future.delayed` waits that other tests use in
+place of a condition.
+
+**Done when:** ten consecutive full `rill check` runs pass on this machine.
 
 ---
 
