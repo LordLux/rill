@@ -23,12 +23,25 @@ function fixture(name: string): unknown {
 function hasFixture(name: string): boolean {
   return existsSync(join(FIXTURES, `${name}.json`));
 }
+/**
+ * Whether this machine's capture of [name] happens to hold a song card.
+ *
+ * **A mix capture is one moment** (CLAUDE.md, "Fixtures are one moment"): the
+ * card was in the capture these assertions were written against and is not in
+ * every later one, so asserting on it made the suite red or green by when
+ * `bun run capture` last ran. The assertions that need the fixture's own card
+ * run only when it has one; the ones below them build the same card by hand and
+ * always run.
+ */
+function hasMusicCard(name: string): boolean {
+  return hasFixture(name) && readFileSync(join(FIXTURES, `${name}.json`), 'utf8').includes('"videoAttributeViewModel"');
+}
 
 /** What every real song card carries, and the synthetic ones below must too: a bare card is not recognised as a song (`parser/music.ts`'s `isSongCard`). */
 const SONG = { imageStyle: 'VIDEO_ATTRIBUTE_IMAGE_STYLE_SQUARE' };
 
 describe('music attribution', () => {
-  test.skipIf(!hasFixture('mix'))('reads the song, artist and album off the card', () => {
+  test.skipIf(!hasMusicCard('mix'))('reads the song, artist and album off the card', () => {
     const tracks = parseMusicTracks(fixture('mix'));
 
     expect(tracks).toHaveLength(1);
@@ -39,7 +52,7 @@ describe('music attribution', () => {
     expect(tracks[0]!.album).toBe('鷺巣詩郎 what if? 高橋洋子ver. 通常版');
   });
 
-  test.skipIf(!hasFixture('mix'))('sizes the cover, and does not double-size it', () => {
+  test.skipIf(!hasMusicCard('mix'))('sizes the cover, and does not double-size it', () => {
     const [track] = parseMusicTracks(fixture('mix'));
     const url = track!.coverUrl;
 
@@ -56,10 +69,50 @@ describe('music attribution', () => {
     expect(parseMusicTracks(fixture('watch'))).toEqual([]);
   });
 
-  test.skipIf(!hasFixture('mix'))('reaches VideoDetail.music through the ordinary parse', () => {
+  test.skipIf(!hasMusicCard('mix'))('reaches VideoDetail.music through the ordinary parse', () => {
     // The field is wired in, not just parseable in isolation — the gap these
     // two being separate would leave is a parser nothing calls.
     const detail = parseVideoDetail(fixture('mix'));
+    expect(detail.music).toHaveLength(1);
+    expect(detail.music[0]!.title).toBe('what if?');
+  });
+
+  /** A song card as the mix capture of 2026-08 carried it, built by hand so these do not depend on a capture. */
+  const WHAT_IF = {
+    videoAttributeViewModel: {
+      ...SONG,
+      title: 'what if?',
+      subtitle: 'Yoko Takahashi',
+      secondarySubtitle: { content: '鷺巣詩郎 what if? 高橋洋子ver. 通常版' },
+      image: { sources: [{ url: 'https://yt3.googleusercontent.com/cover' }] },
+    },
+  };
+
+  test('reads the song, artist and album off a hand-built card', () => {
+    const tracks = parseMusicTracks({ cards: [WHAT_IF] });
+
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0]!.title).toBe('what if?');
+    expect(tracks[0]!.artist).toBe('Yoko Takahashi');
+    expect(tracks[0]!.album).toBe('鷺巣詩郎 what if? 高橋洋子ver. 通常版');
+  });
+
+  test('sizes a hand-built card\'s cover once', () => {
+    const [track] = parseMusicTracks({ cards: [WHAT_IF] });
+    const url = track!.coverUrl;
+
+    expect(url).toBe('https://yt3.googleusercontent.com/cover=s1200');
+    expect(url!.match(/=s\d+/g)).toHaveLength(1);
+  });
+
+  test.skipIf(!hasFixture('watch'))('reaches VideoDetail.music through the ordinary parse, from a card in a real watch page', () => {
+    // A real watch page with no music section (`watch.json`) and one card put
+    // where the panel would be: the parse is the ordinary one, only the card is
+    // supplied. `parseMusicTracks` collects every card in the body, as the real
+    // panel's index moves between responses.
+    const body = { ...(fixture('watch') as Record<string, unknown>), injectedPanel: { cards: [WHAT_IF] } };
+    const detail = parseVideoDetail(body);
+
     expect(detail.music).toHaveLength(1);
     expect(detail.music[0]!.title).toBe('what if?');
   });

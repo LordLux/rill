@@ -329,8 +329,9 @@ async function handleRequest(request: RpcRequest) {
       // carried one, so this never calls `mapChip` and the result omits it —
       // `ItemListResult`, not `FeedResult`, per the table in `types.ts`.
       const { parseFeed } = await import('../parser/feed.ts');
-      const session = await getBrowseSession();
+      // Validated before the session: a bad request must not wait on the network.
       const continuation = optionalString(params, 'continuation', 'feed.subscriptions');
+      const session = await getBrowseSession();
       const raw = continuation
         ? await session.execute('/browse', { continuation })
         : await fetchBaseBrowse('FEsubscriptions');
@@ -349,8 +350,9 @@ async function handleRequest(request: RpcRequest) {
       // alphabetical, confirmed stable across a page boundary) — there is no
       // sort parameter to expose.
       const { parseFeed } = await import('../parser/feed.ts');
-      const session = await getBrowseSession();
+      // Validated before the session: a bad request must not wait on the network.
       const continuation = optionalString(params, 'continuation', 'subscriptions.channels');
+      const session = await getBrowseSession();
       const raw = continuation
         ? await session.execute('/browse', { continuation })
         : await fetchBaseBrowse('FEchannels');
