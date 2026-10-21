@@ -72,11 +72,6 @@ Future<void> openQuality(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 /// Reset for one test. **The sidecar is not restarted** — see [main]'s
 /// `setUpAll`.
 Future<void> boot() async {
@@ -553,7 +548,7 @@ void main() {
     // assertions below would pass because the list had not arrived yet —
     // vacuously, which is the failure mode this whole test is about.
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
-    await tester.pumpAndSettle();
+    await settleWithSidecar(tester);
 
     engine.volumes.clear();
     engine.seeks.clear();
@@ -1000,7 +995,7 @@ void main() {
   testWidgets('a video with no caption tracks draws no CC button at all', (tester) async {
     await pumpWatching(tester, queue: const ['nocaps1']);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
-    await tester.pumpAndSettle();
+    await settleWithSidecar(tester);
 
     expect(container.read(captionsProvider).isLoadingTracks, isFalse,
         reason: 'the list has answered, so this is a settled absence');

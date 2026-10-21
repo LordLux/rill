@@ -20,7 +20,7 @@ import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
-import 'sidecar_idle.dart';
+import 'sidecar_idle.dart' hide settleReal;
 
 late FakeEngine engine;
 late ProviderContainer container;

@@ -150,6 +150,8 @@ Future<void> main(List<String> args) async {
           final printed = _printedTail(testPrints[id]);
           failures.add([name, if (why != null) _indented(why), if (printed.isNotEmpty) printed].join('\n'));
         }
+        // Only a failure reads them, and a run prints tens of thousands of lines.
+        testPrints.remove(decoded['testID'] as int?);
     }
   }
 

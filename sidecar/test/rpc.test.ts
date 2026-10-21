@@ -350,6 +350,13 @@ describe('RPC Transport', () => {
         'subscriptions.channels',
         { continuation: 42 },
       ],
+      [
+        // Validated before the browse session is made: a bad request must not
+        // wait on the network (both handlers once did, and this one timed out).
+        'feed.subscriptions with a non-string continuation',
+        'feed.subscriptions',
+        { continuation: 42 },
+      ],
       ['search.query with no q', 'search.query', {}],
       ['search.query with a blank q', 'search.query', { q: '   ' }],
       [

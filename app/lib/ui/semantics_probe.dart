@@ -12,7 +12,8 @@
 ///
 /// `RILL_SEMANTICS_PROBE_VIDEO=<id>` picks the video (default one with a busy
 /// comments section) and `RILL_SEMANTICS_PROBE_PLAYLIST=<id>` the playlist whose
-/// page steps `7b`–`7f` walk (default a public one). The semantics tree is dumped to
+/// page steps `7b`–`7f` walk, and `7g`–`7k` (Task 36: the playlist over the watch
+/// page, Play all, Back twice) (default a public one). The semantics tree is dumped to
 /// `%TEMP%\rill-semantics-after-open.txt` once the video's page has settled, and
 /// to `rill-semantics-playlist.txt` once the playlist's has.
 /// Unset, this costs one environment lookup at startup. `architecture.md` F51
@@ -308,6 +309,18 @@ Future<void> _probe(ProviderContainer container) async {
     });
     await _step('7e-back-to-playlist', () => toMiniPlayerIn(container));
     await _step('7f-leave-playlist', () => rootNavigatorKey.currentState?.maybePop());
+
+    // Task 36: a page over the watch page that plays something removes the buried
+    // watch route in the frame the new one is pushed. Play all is that play.
+    await _step('7g-watch-again', () => openWatchIn(container, placeholderVideoItem(videoId)));
+    await _step('7h-playlist-over-watch', () => openPlaylistPage(playlistId));
+    await _step('7i-play-removes-buried-watch', () {
+      final target = _findText(RegExp(r'^Play all$'));
+      _say('play all at $target');
+      if (target != null) _tapAt(target);
+    });
+    await _step('7j-back-to-playlist', () => rootNavigatorKey.currentState?.maybePop());
+    await _step('7k-back-to-feed', () => rootNavigatorKey.currentState?.maybePop());
 
     await _step('8-end', () {});
 

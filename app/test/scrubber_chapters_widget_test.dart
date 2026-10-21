@@ -54,11 +54,6 @@ void disposeContainer() {
   container.dispose();
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 Future<void> boot() async {
   await RpcClient.instance.call('test.reset', {});
   engine = FakeEngine();

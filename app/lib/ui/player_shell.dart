@@ -136,6 +136,17 @@ class RouteTracker extends NavigatorObserver {
   /// The reportable page routes, bottom first.
   final List<Route<dynamic>> _pages = [];
 
+  /// The navigator [_pages] belongs to. The tracker lives as long as its
+  /// container, a navigator may not, and routes left from a previous one would be
+  /// reported after a pop in the next.
+  NavigatorState? _owner;
+
+  void _ownNavigator() {
+    if (identical(navigator, _owner)) return;
+    _pages.clear();
+    _owner = navigator;
+  }
+
   /// A `PageRoute` this tracker should report as a real navigation — every
   /// one except a full-screen dialog, which behaves like a popup instead.
   bool _isReportablePage(Route<dynamic> route) => route is PageRoute && !route.fullscreenDialog;
@@ -160,6 +171,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _ownNavigator();
     _closeTooltips();
     if (_isReportablePage(route)) {
       _pages.add(route);
@@ -171,6 +183,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _ownNavigator();
     _closeTooltips();
     if (_isReportablePage(route)) {
       _pages.remove(route);
@@ -182,6 +195,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _ownNavigator();
     _closeTooltips();
     if (_isReportablePage(route)) {
       final wasTop = identical(_pages.lastOrNull, route);
@@ -194,6 +208,7 @@ class RouteTracker extends NavigatorObserver {
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _ownNavigator();
     _closeTooltips();
     final newIsPage = newRoute != null && _isReportablePage(newRoute);
     final at = oldRoute == null ? -1 : _pages.indexOf(oldRoute);
@@ -376,7 +391,8 @@ void toMiniPlayerIn(ProviderContainer container) {
 /// its routes, and this is the only place a watch route is pushed.
 Route<void>? _watchRoute;
 
-/// Shows the watch page, and keeps it to one (`architecture.md` §2.8).
+/// Shows the watch page, and keeps it to one (`architecture.md` §2.8, "One watch
+/// route").
 ///
 /// A page opened over the watch page (a playlist, the search results) that then
 /// plays something does not stack a second one: the new watch route goes on top

@@ -69,11 +69,6 @@ class TestApp extends ConsumerWidget {
   }
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 AuthController get auth => container.read(authProvider.notifier);
 
 /// Ends a test the way `watch_actions_test.dart` does: the playback controller's

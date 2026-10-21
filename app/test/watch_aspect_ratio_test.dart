@@ -33,11 +33,6 @@ void disposeContainer() {
   container.dispose();
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 Future<void> boot() async {
   RpcClient.instance.killForTest();
   await Future<void>.delayed(const Duration(milliseconds: 150));

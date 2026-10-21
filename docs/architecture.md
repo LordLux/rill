@@ -931,6 +931,23 @@ structure rather than features. The watch page, the mini-player and the
 fullscreen layer each mount the *same* `Video` widget; moving between them
 creates and frees nothing. Only one may be mounted at a time.
 
+**One watch route.** Opening a video from a page that sits over the watch page (a
+playlist's page, the search results) pushes a new watch route and removes the
+buried one, so Back goes to the page the video was opened from and then to what
+was under the old watch page, and no more than one watch route exists
+(`showWatchPageIn`, the only place one is pushed; Task 36, 2026-10-18). Popping
+back to the existing watch page was rejected: it throws away the page the user
+came from, which is the one Back is most likely meant to reach. The removal has to
+be invisible to everything that follows the route. `RouteTracker` hands
+`didRemove` the route *below* the removed one, which for a route in the middle of
+the stack is not the page on screen, so it reports the top of its own stack of
+page routes instead and reports nothing for a removal that is not of the top;
+otherwise the miniplayer floats over the new watch page, the rail lights the
+wrong entry and the view mode resets. The push comes before the removal, so the
+buried route is never the one on top. A tap on the row that is already playing
+takes the same path, so it too ends with the watch page on top and Back on the
+page that was tapped from.
+
 **One caption layer, three mount points, positioned by
 `CompositedTransformFollower`.** `LibassLayer` is mounted once in
 `player_shell.dart:382–401`, outside all three video mount-point branches, and

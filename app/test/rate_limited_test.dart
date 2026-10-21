@@ -63,11 +63,6 @@ class TestApp extends ConsumerWidget {
   }
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 void main() {
   test('the state knows a throttle from any other failure', () {
     const throttled = PlaybackState(error: 'x', errorCode: 'RATE_LIMITED', errorRetry: RpcRetryMode.user);

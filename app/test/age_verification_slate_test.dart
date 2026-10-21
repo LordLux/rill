@@ -74,11 +74,6 @@ class TestApp extends ConsumerWidget {
   }
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 void main() {
   setUpAll(() async {
     await RpcClient.instance.killForTestAndWait();

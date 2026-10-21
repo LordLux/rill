@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 95.** A new item takes it, and the same edit bumps this line.
+**Next number: 96.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1071,22 +1071,42 @@ is still showing a loading indicator, which animates until it does, so
 `pumpAndSettle` never settles. Whether 400 ms is enough depends on how busy the
 machine is.
 
-**Changed:** `test/sidecar_idle.dart` (`waitForSidecar`, `settleWithSidecar`) waits
-until `RpcClient.pendingCallCount` is 0, pumping frames meanwhile, and the 13 test
-files that had their own fixed wait before a `pumpAndSettle` now call it after
-that wait, so none waits less than before. It settles **once**, not until quiet:
+**Changed:** `test/sidecar_idle.dart` (`settleReal`, `waitForSidecar`,
+`settleWithSidecar`) waits until `RpcClient.pendingCallCount` is 0, pumping frames
+meanwhile, for at most 8 s (a test that holds a call open on purpose passes
+`timeout: Duration.zero`). The eleven files that each had their own copy of
+`settleReal` now import the one, so none waits less than before and a new file
+cannot copy the old one; `save_dialog_test`, `open_link_test`,
+`one_watch_page_test`, `focus_watch_page_test` and two waits in
+`player_controls_test` call the pieces. It settles **once**, not until quiet:
 waiting for the call that settling itself starts changed two scrubber tests, which
 had been passing with it in flight (found by running them). With the fixed wait
 cut to 0 ms the old helper had not finished after 400 s (the file takes about 25 s)
 while the new one finished in 29 s, with two failures that need the real wait;
 whether the change makes ten full runs pass is **not yet measured**.
 
-**Not changed:** `player_controls_test` has six more inline waits of 100–300 ms,
-`keyboard_resync_test` two of 50 ms, and `tile_menu_test`,
-`focus_traversal_test` and `scrubber_chapters_widget_test` one each; none of
-those was in a failure.
+**Not changed:** the other real-time waits are not waits for the sidecar
+(`keyboard_resync_test` waits on a platform channel, `tile_menu_test` already
+polls a condition, the rest in `player_controls_test` and
+`scrubber_chapters_widget_test` poll the engine); none was in a failure.
 
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
+
+### 95. No real song card is committed, so the music parser's input shape is pinned by a hand-built one
+
+`sidecar/test/music.test.ts` read the song card out of the local `fixtures/mix.json`.
+`fixtures/` is gitignored, and a later capture of a mix did not hold the card
+(measured 2026-10-18, a capture from 2026-08-28), so the three tests that read it
+now skip, with a warning, when it is absent, and the same assertions run on a card
+written by hand. That card encodes what `parser/music.ts` reads (`title`,
+`subtitle`, `secondarySubtitle.content`, `image.sources[0].url`, the square image
+style), so if YouTube changes the shape the parser and the test change together
+and stay green. Wanted: capture a mix whose video credits a song, take the one
+`videoAttributeViewModel` out of it, sanitise it and commit it into `corpus/` with
+the other sanitised entries, and have the tests read that.
+
+**Done when:** a committed real card is what `music.test.ts` asserts against, on any
+machine.
 
 ---
 
