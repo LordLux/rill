@@ -27,7 +27,7 @@ import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
 
 import 'fake_engine.dart';
-import 'sidecar_idle.dart';
+import 'sidecar_idle.dart' hide settleReal;
 
 late FakeEngine engine;
 late ProviderContainer container;
@@ -245,6 +245,32 @@ void main() {
     expect(section, playlistRouteName, reason: 'the rail stays where the click was, and the removal did not move it');
     expect(container.read(miniPlayerShownProvider), isFalse);
     expect(miniplayer, isNot(contains(true)), reason: 'the miniplayer is never floated over the new watch page');
+  });
+
+  testWatch('the row that is already playing takes the same path: one watch route, Back on the playlist page', (tester) async {
+    await watchThenPlaylist(tester);
+    await tester.tap(find.text('Video 1'));
+    await tester.pump();
+    await settleReal(tester);
+    expect(container.read(queueProvider).current?.id, 'pl1');
+
+    // Over the watch page again, and tap what is playing.
+    openPlaylistPage('PL_one');
+    await settleReal(tester);
+    expect(find.byType(PlaylistPage), findsOneWidget);
+    final opens = engine.opened.length;
+    // The buried watch page's queue lists it too; the row is the one on the playlist page.
+    await tester.tap(find.descendant(of: find.byType(PlaylistPage), matching: find.text('Video 1')));
+    await tester.pump();
+    await settleReal(tester);
+
+    expect(current, watchRouteName);
+    expect(watchPages, findsOneWidget, reason: 'the watch page that was under the playlist page is the one removed');
+    expect(engine.opened.length, opens, reason: 'the queue is already on that row: nothing is reopened');
+
+    await back(tester);
+    expect(find.byType(PlaylistPage), findsOneWidget);
+    expect(current, playlistRouteName);
   });
 
   testWatch('removing it does not reopen or reload the video', (tester) async {

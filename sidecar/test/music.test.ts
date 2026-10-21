@@ -12,8 +12,11 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { logger } from '../src/log.ts';
 import { parseMusicTracks } from '../src/parser/music.ts';
 import { parseVideoDetail } from '../src/parser/video.ts';
+
+const log = logger('music-test');
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 
@@ -35,6 +38,16 @@ function hasFixture(name: string): boolean {
  */
 function hasMusicCard(name: string): boolean {
   return hasFixture(name) && readFileSync(join(FIXTURES, `${name}.json`), 'utf8').includes('"videoAttributeViewModel"');
+}
+
+if (hasFixture('mix') && !hasMusicCard('mix')) {
+  // Said out loud, as `corpus.test.ts` does for an absent fixtures directory: a
+  // skip nobody sees reads as a pass (`todo.md` 95 — no real card is committed).
+  log.warn(
+    '[music] fixtures/mix.json holds no song card — skipping the three tests that read the ' +
+      'captured one; the hand-built card below still runs. A fresh `bun run capture` of a mix ' +
+      'that credits a song brings them back.',
+  );
 }
 
 /** What every real song card carries, and the synthetic ones below must too: a bare card is not recognised as a song (`parser/music.ts`'s `isSongCard`). */

@@ -72,11 +72,6 @@ class TestApp extends ConsumerWidget {
   }
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 void main() {
   // The two-signal rule as pure logic. It became a pure function so that this
   // group could exist — with a `WidgetRef` in the signature the only way to

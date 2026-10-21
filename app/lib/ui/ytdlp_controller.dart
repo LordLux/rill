@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/rpc/client.dart';
@@ -24,7 +25,8 @@ final ytDlpResolutionProvider = Provider<YtDlpResolution>((ref) => ytDlpResolver
 /// What [ytDlpResolutionProvider] asks. `test/flutter_test_config.dart` replaces
 /// it, so a test run does not depend on the yt-dlp installed on the machine: an
 /// app-managed copy schedules a 30 s check, and a page that mounts the account
-/// button then fails with a pending timer (todo 94, since closed).
+/// button then fails with a pending timer (29 tests did, 2026-10-18).
+@visibleForTesting
 YtDlpResolution Function() ytDlpResolver = resolveYtDlp;
 final ytDlpHttpProvider = Provider<UpdateHttp>((ref) => IoUpdateHttp());
 final ytDlpDownloaderProvider = Provider<YtDlpDownloader>((ref) => YtDlpDownloader(http: ref.watch(ytDlpHttpProvider)));

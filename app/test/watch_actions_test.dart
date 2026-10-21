@@ -62,11 +62,6 @@ class TestApp extends ConsumerWidget {
   }
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 /// The auth state the harness builds with. Authenticated unless a test says
 /// otherwise, because that is what nearly every case here is about.
 AuthStatus _authStatus = AuthStatus.authenticated;

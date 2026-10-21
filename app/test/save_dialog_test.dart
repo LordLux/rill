@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
 import 'package:rill/ui/widgets/save_dialog.dart';
 
+import 'sidecar_idle.dart' show waitForSidecar;
+
 /// Matches `ACTION_FAIL_ID` in `fake_sidecar.ts`.
 const String actionFailId = 'actionfail1';
 
@@ -31,6 +33,7 @@ Widget harness(String videoId) => MaterialApp(
 /// window can reach, not a token amount.
 Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
+  await waitForSidecar(tester);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 350));
 }

@@ -66,11 +66,6 @@ class TestApp extends ConsumerWidget {
   }
 }
 
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 /// The id, and what makes it unplayable — the fake sidecar's own ids.
 const unplayable = <String, String>{
   'members1': 'a members-only video',

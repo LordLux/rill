@@ -46,16 +46,6 @@ void disposeContainer() {
   container.dispose();
 }
 
-/// Let the real sidecar answer.
-///
-/// `testWidgets` runs in a fake-async zone where a real subprocess's I/O never
-/// progresses, so a `pump` loop waits forever on a response that cannot arrive.
-/// `runAsync` steps outside it for exactly as long as the round trip needs.
-Future<void> settleReal(WidgetTester tester, [int millis = 400]) async {
-  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: millis)));
-  await settleWithSidecar(tester);
-}
-
 Future<void> boot() async {
   RpcClient.instance.killForTest();
   await Future<void>.delayed(const Duration(milliseconds: 150));
