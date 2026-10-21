@@ -326,7 +326,7 @@ cd sidecar && bun run build     # the sidecar alone — a release app needs `ril
 setup.bat                       # fresh machine: FVM SDK, pub get, codegen, lint gate
 cd app && fvm dart run build_runner build --delete-conflicting-outputs   # codegen — see below
 cd app && fvm flutter run -d windows   # debug build with hot reload
-rill build                      # compile sidecar and app, bundle, and stop
+rill build                      # compile sidecar and app, bundle, and stop (needs `nuget` on PATH: winget install Microsoft.NuGet)
 rill run                        # build, bundle, then launch the exe in this terminal
 rill open                       # launch the last release build as-is, no build
 rill check                      # flutter test guard + lint gate
