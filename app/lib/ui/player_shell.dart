@@ -376,7 +376,9 @@ void openWatchIn(ProviderContainer container, VideoItem item) {
 void toMiniPlayer(WidgetRef ref) => toMiniPlayerIn(_containerOf(ref));
 
 void toMiniPlayerIn(ProviderContainer container) {
-  container.read(playerViewProvider.notifier).reset();
+  // Fullscreen only: popping while borderless strands the window, and theatre is
+  // the watch page's own layout (`view_mode.dart`).
+  container.read(playerViewProvider.notifier).leaveFullscreen();
   if (container.read(currentRouteProvider) != watchRouteName) return;
   // **Never pop somebody else's dialog.** `currentRouteProvider` now ignores
   // popups, so it still reads `watch` while a share dialog or a menu is open —

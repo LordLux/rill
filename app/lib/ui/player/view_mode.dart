@@ -57,11 +57,17 @@ class PlayerViewController extends Notifier<PlayerViewState> {
   PlayerViewState build() {
     // The anti-stranding rules, both of them, in the object that owns the state
     // rather than in whichever widget happens to notice. Leaving the watch route
-    // or losing the video drops both modes — otherwise "go fullscreen, then
-    // navigate" is a borderless window showing a feed, with the OS chrome gone
-    // and no player left to press `Esc` at.
+    // drops fullscreen, and losing the video drops both modes — otherwise "go
+    // fullscreen, then navigate" is a borderless window showing a feed, with the OS
+    // chrome gone and no player left to press `Esc` at.
+    //
+    // **Theatre is not dropped on leaving the route (2026-10-22).** It is a layout
+    // of the watch page and nothing else reads it, so it strands nothing. Dropping it
+    // re-laid the watch page out *while a Back's transition still showed it* — a few
+    // frames of the normal layout, and a Back slower than a push, which covers the
+    // page instead — and the user came back to a page that had forgotten it.
     ref.listen(currentRouteProvider, (previous, next) {
-      if (next != watchRouteName) reset();
+      if (next != watchRouteName) leaveFullscreen();
     });
     ref.listen(playbackProvider.select((playback) => playback.item == null), (previous, next) {
       if (next) reset();
@@ -91,10 +97,16 @@ class PlayerViewController extends Notifier<PlayerViewState> {
 
   /// Back to an ordinary window and an ordinary layout.
   ///
-  /// The anti-stranding rule, stated once: leaving the watch route or stopping
-  /// playback drops both modes. Without it, "enter fullscreen, navigate" leaves
-  /// a borderless window showing a feed.
+  /// Stopping playback drops both modes: with no video there is nothing for
+  /// either to be a mode of.
   void reset() => _set(const PlayerViewState());
+
+  /// Hands the window back, and leaves the layout alone.
+  ///
+  /// The anti-stranding rule, stated once: leaving the watch route drops
+  /// fullscreen. Without it, "enter fullscreen, navigate" leaves a borderless
+  /// window showing a feed. Theatre stays as the user left it.
+  void leaveFullscreen() => _set(state.copyWith(fullscreen: false));
 
   void _set(PlayerViewState next) {
     if (next == state) return;
