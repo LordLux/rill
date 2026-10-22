@@ -825,6 +825,26 @@ the answer.
   (`PageChrome`, `ui/page_wrapper.dart`; `architecture.md` §2.8). **A test for
   this passes for the wrong reason unless whatever sets the state arrives after
   the route transition** — before that the page underneath is still live.
+- **The app ends itself after its window is gone, and must — measured 2026-10-21.**
+  Returning from `wWinMain` into the C runtime's exit left the 0.10.x process alive,
+  spinning on one thread with the launcher waiting on it: the window closed, the
+  process did not, and the in-app updater's installer rolled back twice ("Some
+  applications could not be shut down"). `main.cpp` calls `TerminateProcess` after
+  the window and engine are destroyed. The cause, from a debugger attach: the
+  `flutter_inappwebview_windows` plugin's DLL detach releases a D3D11 device and the
+  Intel graphics driver spins inside it (`todo.md` 97). Do not move that call or
+  "tidy" it back into a `return`.
+  `rill.iss` has `CloseApplications=force` because the installer's arguments come
+  from the old version. A log that lacks the launcher's `app exited with code` line
+  means the app did not exit.
+- **A restarted sidecar is a new process, and it is anonymous — measured 2026-10-21.**
+  It holds the session cookie and the open playback sessions in memory only, so after
+  an exit-and-supervise or `RpcClient.restart()` the app still showed the account (and
+  the cached feed looked right) while like, subscribe and every call needing the account
+  failed, and `playback.report` failed against a session it no longer knew. State the
+  app sets on the sidecar is re-sent from `RpcClient.onRestarted`
+  (`restoreAuthWhenSidecarRestarts`); a new thing the sidecar remembers goes there too.
+  yt-dlp restarts it only when `YT_DLP_PATH` changes. Playback sessions are `todo.md` 96.
 - **At most one watch route exists. `showWatchPageIn` is the only place that
   pushes one — Task 36.** Opening a video from a page over the watch page
   (a playlist, the search results) pushes the new watch route and removes the

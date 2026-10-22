@@ -45,7 +45,14 @@ WizardStyle=modern
 
 ; Restart Manager closes a running Rill (and the sidecar it spawned) so its
 ; files can be replaced. The in-app updater quits first, so this is a backstop.
-CloseApplications=yes
+;
+; **force, and it is the installer's setting rather than a switch the app passes.**
+; Measured 2026-10-21: the 0.10.x app did not end when its window closed (it spun
+; on one thread inside the C runtime's exit, todo 97), so a polite close failed
+; with "Some applications could not be shut down" and the install rolled back, twice.
+; The arguments come from the version being replaced, so only the new installer
+; can carry the fix to an install that already has the bug.
+CloseApplications=force
 RestartApplications=no
 
 [Tasks]
