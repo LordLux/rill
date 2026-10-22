@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 96.** A new item takes it, and the same edit bumps this line.
+**Next number: 98.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1091,6 +1091,56 @@ polls a condition, the rest in `player_controls_test` and
 `scrubber_chapters_widget_test` poll the engine); none was in a failure.
 
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
+
+### 97. `flutter_inappwebview_windows` hangs the process's exit on an Intel GPU
+
+Found 2026-10-21 (`architecture.md` §2.14). After the window is gone the 0.10.x
+process never ended. A read-only `cdb` attach (`-pv`, `~*kb`, no dump) named it:
+in `DLL_PROCESS_DETACH` the plugin's static destructors release a Direct3D 11
+device and the Intel driver `igd10um64xe` spins inside that release. `main.cpp` now
+ends the process itself with `TerminateProcess`, so users do not see it; the cause
+is upstream (the plugin or the driver) and stays, and any exit that reaches the
+ordinary path (a crash handler, `exit()` from elsewhere) would hang the same way.
+
+**Open:** whether a machine without an Intel GPU hangs (it was seen on one with
+`igd10um64xe`/`igdgmm64` only); whether the plugin can be kept from creating its D3D
+device until the login page opens (the device exists after an idle launch with no
+WebView); an upstream report to `flutter_inappwebview` with the stack. A newer
+driver or plugin may make the hard exit unnecessary — re-test by temporarily
+returning from `wWinMain` and closing the window.
+
+**Done when:** an upstream issue is filed or the plugin's device is no longer made
+at startup, and the hard exit's comment says which.
+
+---
+
+### 96. A restarted sidecar loses its playback sessions, so watch reporting stops
+
+Found 2026-10-21 from a 0.10.2 log, in the same event as the lost cookie. Thirty
+seconds after launch the yt-dlp check installed a newer copy and restarted the
+sidecar; from then on every 15 s `playback.report` failed with *"no open session
+'…'. Report before playback.close, and only against a sessionId playback.open
+returned"* until the next video was opened — two minutes of watching in that log
+registered nothing, and `playback.report` is what keeps the recommender trained
+(CLAUDE.md, "`playback.report` is load-bearing").
+
+**Already fixed, by 2026-10-21:** the cookie (`RpcClient.onRestarted` →
+`AuthController.restore`, so a restarted sidecar is signed in again), and the
+trigger (yt-dlp restarts the sidecar only when `YT_DLP_PATH` changes, not when the
+file at the same path is replaced). **Still open:** the sidecar is a new process on
+every restart, however it comes about (it exits and is supervised back, or a first
+yt-dlp download restarts it), and the app's open playback session is an id it no
+longer knows. After a restart the playback controller has to open the session
+again for the video that is playing, without reloading the stream. Check what
+`playback.open` does and costs for a video already open before choosing how; a
+second `playback.open` re-resolves the ladder, which is the expensive part, so
+a report-only way back in may be needed.
+
+**Done when:** after a sidecar restart mid-video, `playback.report` carries on
+against a session the new sidecar knows, with no reopen of the stream, and a test
+restarts the fake sidecar under a playing video and sees the reports land.
+
+---
 
 ### 95. No real song card is committed, so the music parser's input shape is pinned by a hand-built one
 

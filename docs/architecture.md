@@ -2144,6 +2144,31 @@ the feed it reads is §2.13's.
   ran. Measured the same day, a release build started from a shell whose own
   job forbids breakaway: the installer still broke away, and it finished two
   seconds after the launcher had exited.
+- **The app has to end when its window closes, and for 0.10.x it did not
+  (measured 2026-10-21, `todo.md` 97).** Two updates (0.10.28, 0.10.35) failed with
+  the installer's own log saying *"Some applications could not be shut down"* and
+  rolling back, while the 2026-09-27 check above had passed against a stub that
+  exits when told to. The real app's window closed and its process did not: one
+  thread, about half a core, every DLL still mapped, no window, the launcher
+  waiting on it. A trace of the runner's shutdown showed `WM_DESTROY`, the message
+  loop and the window's destructor all finishing within ~100 ms, so the spin is
+  after `wWinMain` returns. **A read-only `cdb` attach to the hung 0.10.2 process
+  named it:** `rill → ExitProcess → ntdll!LdrShutdownProcess →`
+  `flutter_inappwebview_windows_plugin`'s `DLL_PROCESS_DETACH`, whose static
+  destructors (`execute_onexit_table`) release a Direct3D 11 device, and in that
+  release the **Intel graphics driver, `igd10um64xe`**, spins on a memory value that
+  never changes (`mov rax,[rbx+0x900610]` under `d3d11!CRasterizerState` teardown),
+  because its worker threads were already gone. The plugin makes that device when it
+  registers, so it exists whether or not a WebView was ever opened; whether a machine
+  without an Intel GPU is affected was not measured. It is why every log since Oct 18
+  lacks the launcher's `app exited with code` line. **Two changes, because the
+  installer's arguments come from the version being replaced:** `main.cpp` ends
+  the process itself after the window is gone (`TerminateProcess`, so no DLL's
+  detach runs), measured 242 and 364 ms from close to both processes gone, log
+  ending `app exited with code 0x00000000`; and `rill.iss` sets
+  `CloseApplications=force`, which only the *new* installer can carry to an install
+  that already has the bug (Inno's documentation says `force` applies in a silent
+  setup; no installer was built here to see it end a hung process).
 - **The first updater-enabled release has to be installed by hand.** Every
   release before it has no updater, and no way to know its own version.
 
