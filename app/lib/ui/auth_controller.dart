@@ -316,6 +316,17 @@ class AuthController extends Notifier<AuthState> {
 
 final authProvider = NotifierProvider<AuthController, AuthState>(AuthController.new);
 
+/// A restarted sidecar starts with no cookie, so the stored one is installed and
+/// verified again — the same `restore` as at launch. Without it the app kept
+/// showing the account while the sidecar was anonymous: the feed (cached) looked
+/// right, and like, subscribe and the rest failed (`todo.md` 96, 2026-10-21).
+///
+/// A function over the container rather than something `AuthController` does in
+/// `build`, so a test's own controller is never wired to the process-wide client.
+void restoreAuthWhenSidecarRestarts(ProviderContainer container) {
+  RpcClient.instance.onRestarted = () => container.read(authProvider.notifier).restore();
+}
+
 /// Who is signed in, as a value: `(signed in, account handle)`.
 ///
 /// **Anything derived from the account must `watch` this and re-read when it
