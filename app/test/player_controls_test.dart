@@ -718,6 +718,76 @@ void main() {
     disposeContainer();
   });
 
+  group('theatre is the watch page\'s own layout, and leaving the page does not drop it', () {
+    // Reported 2026-10-22 on a release build: with theatre on, a Back showed the
+    // normal layout for a few frames while the page animated out, was slower than
+    // opening a page over the watch page, and the next visit had lost theatre.
+    // Every one of those is the same thing: the mode was reset when the route
+    // changed, which re-laid the watch page out under its own transition.
+    Future<List<bool>> theatreSeenDuring(WidgetTester tester, Future<void> Function() action) async {
+      final seen = <bool>[];
+      final subscription = container.listen(playerViewProvider.select((view) => view.theatre), (_, next) => seen.add(next));
+      await action();
+      subscription.close();
+      return seen;
+    }
+
+    Route<void> page(String name) =>
+        MaterialPageRoute<void>(settings: RouteSettings(name: name), builder: (_) => const Scaffold(body: Text('results')));
+
+    testWidgets('a Back from the watch page never shows the normal layout, and the next visit still has theatre', (tester) async {
+      await pumpWatching(tester);
+      container.read(playerViewProvider.notifier).toggleTheatre();
+      await tester.pumpAndSettle();
+      expect(container.read(playerViewProvider).theatre, isTrue);
+
+      final seen = await theatreSeenDuring(tester, () async {
+        rootNavigatorKey.currentState!.pop();
+        await tester.pumpAndSettle();
+      });
+
+      expect(seen, isEmpty, reason: 'theatre was never turned off, not even for a frame');
+      expect(container.read(playerViewProvider).theatre, isTrue);
+
+      showWatchPageIn(container);
+      await tester.pumpAndSettle();
+      expect(container.read(playerViewProvider).theatre, isTrue, reason: 'and the page it comes back to is in theatre');
+      disposeContainer();
+    });
+
+    testWidgets('opening a page over the watch page, and coming back, keeps theatre too', (tester) async {
+      await pumpWatching(tester);
+      container.read(playerViewProvider.notifier).toggleTheatre();
+      await tester.pumpAndSettle();
+
+      final seen = await theatreSeenDuring(tester, () async {
+        rootNavigatorKey.currentState!.push(page('search'));
+        await tester.pumpAndSettle();
+        rootNavigatorKey.currentState!.pop();
+        await tester.pumpAndSettle();
+      });
+
+      expect(seen, isEmpty);
+      expect(container.read(playerViewProvider).theatre, isTrue);
+      disposeContainer();
+    });
+
+    testWidgets('the mini-player button leaves fullscreen and keeps theatre', (tester) async {
+      await pumpWatching(tester);
+      container.read(playerViewProvider.notifier).toggleTheatre();
+      await tester.tap(find.byKey(playerFullscreenKey));
+      await tester.pumpAndSettle();
+      expect(container.read(playerViewProvider), const PlayerViewState(theatre: true, fullscreen: true));
+
+      toMiniPlayerIn(container);
+      await tester.pumpAndSettle();
+
+      expect(container.read(playerViewProvider), const PlayerViewState(theatre: true), reason: 'the window came back, the layout did not change');
+      expect(window.requests, [true, false]);
+      disposeContainer();
+    });
+  });
+
   testWidgets('stopping playback while fullscreen releases the window', (tester) async {
     await pumpWatching(tester);
     await tester.tap(find.byKey(playerFullscreenKey));
