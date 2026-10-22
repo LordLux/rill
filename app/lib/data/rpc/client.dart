@@ -36,6 +36,18 @@ class RpcClient {
   /// [restart].
   Map<String, String> extraEnvironment = {};
 
+  /// Called once each time the sidecar has been started *again* — after it
+  /// exited and was restarted, or after [restart] — and never after the first
+  /// start. A new process knows nothing the old one was told, above all the
+  /// session cookie: it comes up anonymous while the app still shows the account,
+  /// and every call that needs the account then fails (`todo.md` 96). Whoever holds
+  /// that state re-sends it from here. Not awaited by [start], and an error in it
+  /// is logged, not thrown.
+  Future<void> Function()? onRestarted;
+
+  /// Set when the next successful start is a restart, so [onRestarted] fires.
+  bool _restartedStart = false;
+
   Process? _process;
   int _nextId = 1;
   final Map<int, Completer<dynamic>> _pending = {};
@@ -332,13 +344,24 @@ class RpcClient {
       
       await _readyCompleter!.future;
       _restartBackoffMs = 1000;
-      
+
       // Supervision: Re-run auth.verify after restart if capabilities already exist
       if (capabilities != null) {
         try {
           await call('auth.verify', {});
         } catch (e) {
           stderr.writeln('harness: auth.verify failed on restart: $e');
+        }
+      }
+
+      if (_restartedStart) {
+        _restartedStart = false;
+        final hook = onRestarted;
+        // After `start` has returned, not inside it: the hook makes calls of its own.
+        if (hook != null) {
+          Future<void>.microtask(hook).catchError((Object e) {
+            stderr.writeln('rill rpc: after-restart hook failed: $e');
+          });
         }
       }
     } catch (e) {
@@ -467,6 +490,7 @@ class RpcClient {
 
     Timer(Duration(milliseconds: _restartBackoffMs), () {
       _restartBackoffMs = (_restartBackoffMs * 2).clamp(1000, 30000);
+      _restartedStart = true;
       start();
     });
   }
@@ -558,7 +582,13 @@ class RpcClient {
   /// exit before starting the next one, for the same Windows pipe-teardown
   /// race documented on `_spawn`.
   Future<void> restart() async {
+    // `killForTest` clears these for the next test; a restart is not that.
+    final hook = onRestarted;
+    final mock = mockCommand;
     await killForTestAndWait();
+    onRestarted = hook;
+    mockCommand = mock;
+    _restartedStart = true;
     await start();
   }
 
@@ -575,6 +605,8 @@ class RpcClient {
     _handlerChain = Future<void>.value();
     capabilities = null;
     mockCommand = null;
+    _restartedStart = false;
+    onRestarted = null;
     _isFatalError = false;
     _isDisposed = false; // Reset for next test
   }

@@ -147,6 +147,8 @@ Future<void> main() async {
   // `authRefreshProvider` when the answer lands. Anonymous browsing works
   // meanwhile, which is the whole reason it is a supported state.
   unawaited(container.read(authProvider.notifier).restore());
+  // And again whenever the sidecar comes back from an exit or a restart.
+  restoreAuthWhenSidecarRestarts(container);
   // `RILL_COOKIE_DUMP=1`: the WebView2 jar, names only (Task 33 §1).
   unawaited(dumpCookieJar('startup'));
 

@@ -49,12 +49,25 @@ final ytDlpTimerFactoryProvider = Provider<YtDlpTimerFactory>((ref) => Timer.new
 /// Restarts the sidecar so a freshly written `YT_DLP_PATH` takes effect
 /// (architecture.md "yt-dlp"). A `Provider` rather than calling
 /// `RpcClient.instance` directly, so a test can swap in a no-op.
+///
+/// **Only when the path the sidecar was started with changes.** It reads
+/// `YT_DLP_PATH` once, at its own startup, so a first download (none → a path)
+/// needs a new process; replacing the file at the path it already has does not.
+/// Restarting for that dropped the sidecar's session cookie and its playback
+/// sessions, thirty seconds after every launch that found a newer yt-dlp (`todo.md` 96).
 final ytDlpRestartSidecarProvider = Provider<Future<void> Function(String? path)>(
   (ref) => (path) async {
-    RpcClient.instance.extraEnvironment = path == null ? {} : {'YT_DLP_PATH': path};
+    final next = path == null ? <String, String>{} : {'YT_DLP_PATH': path};
+    if (!ytDlpSidecarNeedsRestart(RpcClient.instance.extraEnvironment, next)) return;
+    RpcClient.instance.extraEnvironment = next;
     await RpcClient.instance.restart();
   },
 );
+
+/// Whether a sidecar started with [current] has to be started again to see [next].
+@visibleForTesting
+bool ytDlpSidecarNeedsRestart(Map<String, String> current, Map<String, String> next) =>
+    current['YT_DLP_PATH'] != next['YT_DLP_PATH'];
 
 final ytDlpControllerProvider = NotifierProvider<YtDlpController, YtDlpState>(YtDlpController.new);
 
