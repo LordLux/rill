@@ -454,14 +454,17 @@ void main() {
     });
   });
 
-  group('a click moves keyboard focus to the closest control, with no ring', () {
+  group('a click does not move keyboard focus', () {
+    // Removed 2026-10-23: a click used to move focus to the closest control (the video
+    // surface focused the play button), so Tab and a screen reader started from somewhere
+    // the user had not asked for.
     Widget app(Widget body) => MaterialApp(
       theme: buildRillTheme(kDefaultAccent),
       builder: (context, child) => FocusRing(child: child!),
       home: Scaffold(body: body),
     );
 
-    testWidgets('clicking a surface that takes no focus focuses the nearest control', (tester) async {
+    testWidgets('clicking a surface that takes no focus leaves focus where it was', (tester) async {
       bigWindow(tester);
       // A tile-like surface (not focusable) with two buttons below it.
       await tester.pumpWidget(app(Column(
@@ -473,9 +476,7 @@ void main() {
         ],
       )));
 
-      // The keyboard has been used: focus is on the top button, ring showing.
       expect(await tabThrough(tester, 1), ['top']);
-      expect(FocusManager.instance.highlightMode, FocusHighlightMode.traditional);
 
       // A click low on the surface, just above the "near" button.
       final surface = tester.getRect(find.byKey(const ValueKey('surface')));
@@ -483,26 +484,27 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(focused(), 'near', reason: 'focus went to the closest control, not left on "top"');
-      expect(FocusManager.instance.highlightMode, FocusHighlightMode.touch, reason: 'a pointer did it, so no ring');
+      expect(focused(), 'top', reason: 'the click did not carry focus to "near"');
 
-      // The next Tab carries on from there.
-      expect(await tabThrough(tester, 1), ['far']);
+      // The next Tab carries on from where the keyboard was, not from the click.
+      expect(await tabThrough(tester, 1), ['near']);
     });
 
-    testWidgets('clicking a control itself leaves focus on it', (tester) async {
+    testWidgets('clicking a button presses it and leaves focus where the keyboard had it', (tester) async {
       bigWindow(tester);
+      var pressed = 0;
       await tester.pumpWidget(app(Column(
         children: [
           TextButton(key: const ValueKey('a'), onPressed: () {}, child: const Text('a')),
-          TextButton(key: const ValueKey('b'), onPressed: () {}, child: const Text('b')),
+          TextButton(key: const ValueKey('b'), onPressed: () => pressed++, child: const Text('b')),
         ],
       )));
       await tabThrough(tester, 1);
       await tester.tap(find.byKey(const ValueKey('b')));
       await tester.pump();
       await tester.pump();
-      expect(focused(), 'b');
+      expect(pressed, 1, reason: 'the click still works');
+      expect(focused(), 'a', reason: 'a click is not a focus change; the keyboard is where it was');
     });
   });
 
