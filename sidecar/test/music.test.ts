@@ -27,26 +27,28 @@ function hasFixture(name: string): boolean {
   return existsSync(join(FIXTURES, `${name}.json`));
 }
 /**
- * Whether this machine's capture of [name] happens to hold a song card.
+ * Whether this machine's capture of [name] holds the one song card these assertions
+ * were written against ("what if?", by Yoko Takahashi).
  *
  * **A mix capture is one moment** (CLAUDE.md, "Fixtures are one moment"): the
- * card was in the capture these assertions were written against and is not in
+ * card was in the capture the assertions were written against and is not in
  * every later one, so asserting on it made the suite red or green by when
- * `bun run capture` last ran. The assertions that need the fixture's own card
- * run only when it has one; the ones below them build the same card by hand and
- * always run.
+ * `bun run capture` last ran. Any song card is not enough, either: a later mix
+ * crediting another song would turn the guarded tests red for the wrong reason.
+ * The assertions that need that card run only when the fixture has it; the ones
+ * below them build the same card by hand and always run.
  */
 function hasMusicCard(name: string): boolean {
-  return hasFixture(name) && readFileSync(join(FIXTURES, `${name}.json`), 'utf8').includes('"videoAttributeViewModel"');
+  return hasFixture(name) && parseMusicTracks(fixture(name)).some((track) => track.title === 'what if?');
 }
 
 if (hasFixture('mix') && !hasMusicCard('mix')) {
   // Said out loud, as `corpus.test.ts` does for an absent fixtures directory: a
   // skip nobody sees reads as a pass (`todo.md` 95 — no real card is committed).
   log.warn(
-    '[music] fixtures/mix.json holds no song card — skipping the three tests that read the ' +
-      'captured one; the hand-built card below still runs. A fresh `bun run capture` of a mix ' +
-      'that credits a song brings them back.',
+    '[music] fixtures/mix.json does not hold the "what if?" song card — skipping the three tests ' +
+      'that read the captured one; the hand-built card below still runs. A capture of that mix ' +
+      'brings them back.',
   );
 }
 
