@@ -15,6 +15,7 @@ import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/audio_mode_controller.dart';
 import 'package:rill/ui/auth_controller.dart';
+import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/hide_queue_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/controls.dart';
@@ -57,7 +58,8 @@ class TestApp extends ConsumerWidget {
     return MaterialApp(
       navigatorKey: rootNavigatorKey,
       navigatorObservers: [ref.watch(routeTrackerProvider)],
-      builder: (context, child) => PlayerShell(child: child ?? const SizedBox.shrink()),
+      // As `main.dart` nests them: the ring above the shell, which is what moves focus on a click.
+      builder: (context, child) => FocusRing(child: PlayerShell(child: child ?? const SizedBox.shrink())),
       home: testHome(),
     );
   }
@@ -477,17 +479,60 @@ void main() {
       finish();
     });
 
-    testWidgets('Space after a mouse click still pauses', (tester) async {
+    testWidgets('Space after a click on a control presses that control, once, and does not pause', (tester) async {
       await openWatch(tester);
       engine.setPlaying(true);
 
-      // A click leaves the button focused, and Space after a click has always
-      // meant pause — only a keyboard-reached focus yields it.
-      await tester.tap(find.text('Fake Channel').first);
+      // The click focuses Mute (`FocusRing`). Space is then the key that presses it, as
+      // anywhere; the player used to take it for pause as well, because a handled key
+      // still reaches the focus tree: click Like, press Space, and the like came off.
+      await tester.tap(find.byKey(playerMuteKey));
+      await tester.pump();
+      await tester.pump();
+      final volumesAfterClick = engine.volumes.length;
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+
+      expect(engine.playing, isTrue, reason: 'Space did not pause: a control had it');
+      expect(engine.volumes.length, volumesAfterClick + 1, reason: 'and pressed Mute exactly once');
+      finish();
+    });
+
+    testWidgets('Space after a click on the picture pauses, and presses nothing', (tester) async {
+      await openWatch(tester);
+      engine.setPlaying(true);
+
+      // Mute was clicked, then the picture: the click on the background takes focus off
+      // Mute, so Space is the pause key again and Mute is not pressed by it.
+      await tester.tap(find.byKey(playerMuteKey));
+      await tester.pump();
+      await tester.pump();
+      final volumesAfterClick = engine.volumes.length;
+      await tester.tapAt(tester.getCenter(find.byKey(FakeEngine.surfaceKey)));
+      await tester.pump();
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
       await tester.pump();
-      expect(engine.playing, isFalse);
+
+      expect(engine.volumes.length, volumesAfterClick, reason: 'Mute was not pressed by that Space');
+      finish();
+    });
+
+    testWidgets('T and Esc do nothing off the watch page, so a theatre that outlives it is not undone', (tester) async {
+      testHome = () => const PageWrapper(title: Text('Home'), body: SizedBox.shrink());
+      addTearDown(() => testHome = () => const Scaffold(body: SizedBox.shrink()));
+      await openWatch(tester);
+      container.read(playerViewProvider.notifier).toggleTheatre();
+      toMiniPlayerIn(container);
+      await tester.pumpAndSettle();
+      expect(container.read(playerViewProvider).theatre, isTrue, reason: 'theatre survived leaving the page');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(container.read(playerViewProvider).theatre, isTrue, reason: 'Esc on the home page is not the player\'s');
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+      await tester.pump();
+      expect(container.read(playerViewProvider).theatre, isTrue, reason: 'nor is T');
       finish();
     });
   });
