@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 98.** A new item takes it, and the same edit bumps this line.
+**Next number: 100.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1072,6 +1072,79 @@ polls a condition, the rest in `player_controls_test` and
 `scrubber_chapters_widget_test` poll the engine); none was in a failure.
 
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
+
+### 98. The watch page shows no player controls while a video loads
+
+Reported 2026-10-23. From the moment a video opens until it has loaded the player area
+is a spinner and nothing else, so nothing can be done during the wait, which on a slow
+open is several seconds. `pages/watch.dart` (the `Stack` that ends the player area)
+mounts `PlayerControls` only when `!playback.isLoading && !fullscreen && isTopWatchPage`,
+and draws `SizedBox.shrink()` in its place while loading.
+
+**Wanted:** the controls are there from the first frame and every one of them does
+something sensible before the media exists:
+- **Pause / play:** records what the viewer wants. Paused while loading means it opens
+  paused, shows its first frame and waits; it does not start itself. The button shows the
+  wanted state, not the engine's.
+- **Mute / volume:** applied at once (the engine exists; nothing has to load first).
+- **Quality and captions:** choosing one while loading changes what is being loaded,
+  replacing the request in flight (a new `playback.open` for that height, the old one
+  cancelled) rather than waiting for the first to finish and then switching; captions are a
+  preference the open applies when it gets there.
+- **Next / previous / a row of the queue:** cancel the open in flight and load the wanted
+  video at once. `RpcClient.callCancelable` and `$cancel` exist for the request; the
+  engine's own `open` has to be abandoned too.
+- **The scrubber** has no duration yet: drawn, disabled, no seeking.
+
+**Care:** one wanted-state object (`PlaybackIntent`-like: playing, muted, quality, captions)
+that survives an open and is applied when the media is ready, rather than each control
+growing its own "pending" flag. The bar has `GlobalKey`s and a semantics history
+(CLAUDE.md, Accessibility): mounting it from the start is the *safer* order, but the
+fullscreen layer and `PlayerLayerGate` must still never mount it in two places in a frame,
+and `autoHideDelay` hides it only while playing, so it stays up through a load. This
+shares its mechanism with item 99 (opening paused and playing when ready).
+
+**Done when:** each of the above is a test that opens a video through the fake sidecar
+with its answer held back, presses the control, and checks what the engine and the queue
+end up doing; and the semantics probe still reports 0 `AXTree` errors.
+
+---
+
+### 99. A video can play without sound while its audio is still attaching
+
+Reported 2026-10-23. After a video has loaded, the picture sometimes starts while the audio
+has not arrived: it plays silent while the spinner is still turning, then the sound joins.
+Wanted: show the first frame as soon as it exists, but do not play until everything,
+audio included, is ready.
+
+**Where, from the code:** `data/playback/engine.dart` `open` calls
+`_player.open(Media(videoUrl), play: play)`, which starts playing the video-only URL as
+soon as it opens, and only then waits for the duration and calls
+`setAudioTrack(AudioTrack.uri(audioUrl))`. The audio is a second URL that has to be
+fetched and demuxed after the video is already running. An audio-only open does it the
+other way (`audio-files` at load, F42), so mpv has both streams before it starts.
+
+**Two ways, to be measured before choosing:**
+1. Open paused (`play: false`), attach the audio, wait until the audio track is selected
+   and the demuxer is no longer buffering, then play if the caller wanted play. The first
+   frame is shown paused. Needs a ready signal from the event streams (hard invariant 9:
+   no `getProperty` polling): `player.stream.tracks`, `.audioParams`, `.buffering`.
+2. Load the audio at open through `audio-files`, as audio-only does, so mpv starts with both.
+   `architecture.md` F15 says `audio-add … select` is ignored until a file is loaded and has a
+   duration, which is why video mode attaches afterwards; find out whether `audio-files` at
+   load has a cost in video mode (start time, seeking, the quality switch, `retainSubtitle`) before
+   taking it.
+
+**Care:** `open`'s `play` argument already means something (a restore opens paused), and a
+quality switch reopens mid-video, where a pause would be a visible stall; the wait for audio
+needs a bound so a broken audio URL cannot hold the picture forever (then play without it,
+and say so on stderr).
+
+**Done when:** with the audio URL's response delayed, the engine does not report playing until
+the audio is ready, the first frame is shown in the meantime, and a test with the fake engine
+covers the order (open paused → audio attached → play).
+
+---
 
 ### 97. `flutter_inappwebview_windows` hangs the process's exit on an Intel GPU
 
