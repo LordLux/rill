@@ -34,6 +34,7 @@ import 'player/view_mode.dart';
 import 'pages/playlist.dart' show openPlaylistPage;
 import 'player_shell.dart';
 import 'queue_controller.dart';
+import '../data/hard_exit.dart';
 import '../domain/youtube_link.dart';
 
 void runSemanticsProbe(ProviderContainer container) {
@@ -345,8 +346,8 @@ Future<void> _probe(ProviderContainer container) async {
     _say('done');
   } on Object catch (error, stack) {
     _say('FAILED $error\n$stack');
-    exit(1);
+    hardExit(1);
   }
   await stderr.flush();
-  exit(0);
+  hardExit(0);
 }

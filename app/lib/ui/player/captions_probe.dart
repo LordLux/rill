@@ -24,6 +24,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/hard_exit.dart';
 import '../../data/playback/engine.dart';
 import '../../domain/playback_source.dart';
 import '../captions_controller.dart';
@@ -106,7 +107,7 @@ Future<void> _syntheticProbe(ProviderContainer container) async {
   final engine = container.read(playbackEngineProvider);
   if (engine is! MediaKitEngine) {
     _say('FAILED synthetic mode needs the real engine');
-    exit(1);
+    hardExit(1);
   }
 
   int? textureId() => engine.videoController.id.value;
@@ -121,7 +122,7 @@ Future<void> _syntheticProbe(ProviderContainer container) async {
   final path = Platform.environment['RILL_CAPTIONS_MEDIA']?.trim();
   if (path == null || path.isEmpty) {
     _say('FAILED set RILL_CAPTIONS_MEDIA to a local video file');
-    exit(1);
+    hardExit(1);
   }
   final variant = PlaybackVariant(
     videoUrl: path,
@@ -140,7 +141,7 @@ Future<void> _syntheticProbe(ProviderContainer container) async {
     }
     if (engine.position <= Duration.zero) {
       _say('FAILED the local source did not start');
-      exit(1);
+      hardExit(1);
     }
 
     // The same settle trap as `controls_probe`: media_kit frees and recreates
@@ -204,9 +205,9 @@ Future<void> _syntheticProbe(ProviderContainer container) async {
     _say('done');
   } on Object catch (error, stack) {
     _say('FAILED $error\n$stack');
-    exit(1);
+    hardExit(1);
   }
-  exit(0);
+  hardExit(0);
 }
 
 Future<void> _probe(ProviderContainer container) async {
@@ -230,12 +231,12 @@ Future<void> _probe(ProviderContainer container) async {
       if (failure.error != null) {
         _say('FAILED playback error ${failure.errorCode}: ${failure.error} '
             '(retry: ${failure.errorRetry?.name})');
-        exit(1);
+        hardExit(1);
       }
       if (DateTime.now().isAfter(deadline)) {
         _say('FAILED nothing started playing within 60 s '
             '(source=${failure.source != null} loading=${failure.isLoading})');
-        exit(1);
+        hardExit(1);
       }
       await _wait(250);
     }
@@ -267,7 +268,7 @@ Future<void> _probe(ProviderContainer container) async {
     if (list.isEmpty) {
       _say('no caption tracks on this video — pick another with RILL_OPEN_VIDEO');
       _say('done');
-      exit(0);
+      hardExit(0);
     }
 
     // --- 1. attaching must not rebuild the output --------------------------
@@ -343,7 +344,7 @@ Future<void> _probe(ProviderContainer container) async {
     _say('done');
   } on Object catch (error, stack) {
     _say('FAILED $error\n$stack');
-    exit(1);
+    hardExit(1);
   }
-  exit(0);
+  hardExit(0);
 }

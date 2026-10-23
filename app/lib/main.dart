@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'data/hard_exit.dart';
 import 'data/log_capture.dart';
 import 'data/playback/engine.dart';
 import 'data/playback/mpv_log.dart';
@@ -170,7 +171,7 @@ void _runAudioProbe(String plan) {
   final steps = plan.split(',').map(ProbeStep.parse).nonNulls.toList();
   if (steps.isEmpty) {
     stderr.writeln('probe: nothing parseable in "$plan"');
-    exit(2);
+    hardExit(2);
   }
 
   final engine = MediaKitEngine(
@@ -193,9 +194,9 @@ void _runAudioProbe(String plan) {
       await probe.run();
     } on Object catch (error, stack) {
       stderr.writeln('probe: FAILED $error\n$stack');
-      exit(1);
+      hardExit(1);
     }
-    exit(0);
+    hardExit(0);
   });
 }
 

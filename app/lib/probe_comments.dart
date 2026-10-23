@@ -46,6 +46,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'data/comments_source.dart';
+import 'data/hard_exit.dart';
 import 'domain/comment.dart';
 import 'ui/widgets/comments_section.dart';
 
@@ -598,5 +599,5 @@ Future<void> main() async {
   }
   await _out?.flush();
   await _out?.close();
-  exit(0);
+  hardExit(0);
 }

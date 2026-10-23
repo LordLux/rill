@@ -777,12 +777,18 @@ the answer.
   to watch focus** — it carries a semantics node by default, and one above the
   player brought the fault back (~1 450 errors a run, 2026-10-02): an observer is
   `Focus(canRequestFocus: false, skipTraversal: true, includeSemantics: false)`.
-  **The semantics probe alone proves little: run it with the focus probe**
-  (`RILL_SEMANTICS_PROBE=1 RILL_FOCUS_PROBE=watch`), because the volume `Slider`
+  **The semantics probe alone proves little: run the focus probe too**
+  (`RILL_FOCUS_PROBE=watch`), because the volume `Slider`
   failed whenever it opened (now `VolumeBar`, not a `Slider`; the scrubber went the same way,
   `ScrubberBar`, 2026-10-05) and an animated
   `Scrollable.ensureVisible` through the comments failed every frame (now a jump),
-  and neither runs without Tab presses. `architecture.md` F51.
+  and neither runs without Tab presses. **As two runs, not one:** both probes in one
+  process end it when the focus probe finishes, before the semantics probe's steps `7g`–`7k`
+  (the Task 36 flow), so that part never ran (2026-10-23). **Neither probe can catch a
+  Narrator that starts after the app:** they turn accessibility on at startup, so the bridge
+  gets every node from the first frame, and a late Narrator got none and rejected every update
+  (332 errors; `RILL_SEMANTICS_DUMP` did this by default until 2026-10-23, `todo.md` 87). That
+  needs a person with Narrator started second. `architecture.md` F51.
 - **Keyboard navigation is a state: on at Tab, off at any click, off at Escape.**
   Flutter calls the *mouse* "keyboard-like" (`FocusHighlightMode.traditional`), so
   anything keyed to it draws and scrolls on clicks. Key it to

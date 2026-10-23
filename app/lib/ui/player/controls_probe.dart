@@ -22,6 +22,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/hard_exit.dart';
 import '../../data/playback/engine.dart';
 import '../playback_controller.dart';
 import 'controls.dart';
@@ -66,7 +67,7 @@ Future<void> _probe(ProviderContainer container) async {
         container.read(playbackProvider).source == null) {
       if (DateTime.now().isAfter(deadline)) {
         _say('FAILED nothing started playing within 60 s');
-        exit(1);
+        hardExit(1);
       }
       await _wait(250);
     }
@@ -196,7 +197,7 @@ Future<void> _probe(ProviderContainer container) async {
     _say('done');
   } on Object catch (error, stack) {
     _say('FAILED $error\n$stack');
-    exit(1);
+    hardExit(1);
   }
-  exit(0);
+  hardExit(0);
 }

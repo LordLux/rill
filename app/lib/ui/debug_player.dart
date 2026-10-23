@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../data/hard_exit.dart';
 import '../data/playback/engine.dart';
 import '../data/rpc/client.dart';
 import '../theme/accent.dart';
@@ -414,7 +415,7 @@ class _HarnessPageState extends State<HarnessPage> {
     stderr.writeln(encoded);
 
     await _player.dispose();
-    exit(0);
+    hardExit(0);
   }
 
   @override
