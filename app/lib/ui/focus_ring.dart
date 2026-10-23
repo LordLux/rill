@@ -201,11 +201,11 @@ ShapeBorder _inkShape(InkResponse ink) {
 /// slivers and smooth-scroll view left focus thousands of pixels off screen with
 /// the page not following, and where it does follow it stops at the very edge.
 ///
-/// **And a click moves keyboard focus to the control under it**, or the nearest one
-/// when nothing there takes focus (the video surface: the play button), so the next
-/// Tab continues from where the pointer just was — with no ring, since a pointer
-/// did it. Only when the click itself left focus alone: a button, a dialog or a
-/// menu that took focus keeps it.
+/// **A click does not move keyboard focus.** It used to (to the control under the
+/// pointer, or the nearest one), so the next Tab continued from where the pointer
+/// had been; removed 2026-10-23, because Tab and a screen reader then started from
+/// somewhere the user had not asked for. A click on a surface that takes no focus
+/// leaves focus where it was; a control that takes focus on a click still does.
 class FocusRing extends StatefulWidget {
   const FocusRing({super.key, required this.child});
 
@@ -226,9 +226,6 @@ class _FocusRingState extends State<FocusRing> {
     shape: _defaultShape,
     inflate: _defaultInflate,
   );
-
-  FocusNode? _downFocus;
-  FocusScopeNode? _downScope;
 
   @override
   void initState() {
@@ -357,86 +354,13 @@ class _FocusRingState extends State<FocusRing> {
     });
   }
 
-  // ---- A click moves keyboard focus to the closest control ---------------------
-
-  FocusScopeNode _deepestScope() {
-    var scope = FocusManager.instance.rootScope;
-    while (scope.focusedChild is FocusScopeNode) {
-      scope = scope.focusedChild! as FocusScopeNode;
-    }
-    return scope;
-  }
-
-  void _onPointerDown(PointerDownEvent event) {
-    _downFocus = FocusManager.instance.primaryFocus;
-    _downScope = _deepestScope();
-  }
-
-  void _onPointerUp(PointerUpEvent event) {
-    final position = event.position;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusClosestTo(position));
-  }
-
-  void _focusClosestTo(Offset point) {
-    if (!mounted) return;
-    final now = FocusManager.instance.primaryFocus;
-    // The click moved focus itself — a button, a dialog or a menu took it — or opened
-    // another route: leave it be.
-    if (!identical(now, _downFocus) || !identical(_deepestScope(), _downScope)) return;
-    if (now != null && now is! FocusScopeNode) {
-      if (now.context?.findAncestorWidgetOfExactType<EditableText>() != null) return;
-      if (now.rect.inflate(2).contains(point)) return;
-    }
-
-    FocusNode? best;
-    var bestArea = double.infinity;
-    var bestDistance = double.infinity;
-    for (final candidate in _deepestScope().traversalDescendants) {
-      final context = candidate.context;
-      if (context == null || !context.mounted) continue;
-      final rect = candidate.rect;
-      if (rect.isEmpty) continue;
-      if (rect.contains(point)) {
-        // Under the pointer: the smallest one is the most specific.
-        final area = rect.width * rect.height;
-        if (bestDistance > 0 || area < bestArea) {
-          best = candidate;
-          bestArea = area;
-          bestDistance = 0;
-        }
-      } else if (bestDistance > 0) {
-        final dx = point.dx < rect.left
-            ? rect.left - point.dx
-            : (point.dx > rect.right ? point.dx - rect.right : 0.0);
-        final dy = point.dy < rect.top
-            ? rect.top - point.dy
-            : (point.dy > rect.bottom ? point.dy - rect.bottom : 0.0);
-        final distance = dx * dx + dy * dy;
-        if (distance < bestDistance) {
-          best = candidate;
-          bestDistance = distance;
-        }
-      }
-    }
-    // `requestFocus` after a pointer event leaves the highlight mode on "touch", so
-    // no ring is drawn — which is the point: the pointer did this.
-    best?.requestFocus();
-  }
-
   @override
   Widget build(BuildContext context) {
     final rect = _rect;
     return Stack(
       textDirection: TextDirection.ltr,
       children: [
-        Positioned.fill(
-          child: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: _onPointerDown,
-            onPointerUp: _onPointerUp,
-            child: widget.child,
-          ),
-        ),
+        Positioned.fill(child: widget.child),
         if (rect != null && !rect.isEmpty)
           Positioned.fill(
             child: IgnorePointer(
