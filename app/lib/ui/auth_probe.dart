@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../data/auth/cookie_jar_dump.dart';
+import '../data/hard_exit.dart';
 import '../data/auth/web_session_cookies.dart';
 import '../data/auth/youtube_cookies.dart';
 
@@ -148,7 +149,7 @@ class _AuthProbeAppState extends State<_AuthProbeApp> {
     }
 
     stderr.writeln(failures == 0 ? 'auth-probe: ALL PASS' : 'auth-probe: $failures FAILURE(S)');
-    exit(failures == 0 ? 0 : 1);
+    hardExit(failures == 0 ? 0 : 1);
   }
 
   @override

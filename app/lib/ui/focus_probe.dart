@@ -26,6 +26,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'player/controls.dart';
 import 'player/view_mode.dart';
+import '../data/hard_exit.dart';
 import '../domain/youtube_link.dart';
 import 'player_shell.dart';
 import 'queue_controller.dart';
@@ -546,8 +547,8 @@ Future<void> _probe(ProviderContainer container, String mode) async {
     _say('done');
   } on Object catch (error, stack) {
     _say('FAILED $error\n$stack');
-    exit(1);
+    hardExit(1);
   }
   await stderr.flush();
-  exit(0);
+  hardExit(0);
 }

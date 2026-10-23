@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:rill/data/hard_exit.dart';
 import 'package:rill/data/playback/engine.dart';
 import 'package:rill/domain/playback_source.dart';
 
@@ -153,7 +154,7 @@ Future<void> _run(MediaKitEngine engine) async {
   }
 
   await out.close();
-  exit(0);
+  hardExit(0);
 }
 
 
@@ -269,5 +270,5 @@ Future<void> _runOpenPaths(MediaKitEngine engine) async {
     log('# $st');
   }
   await out.close();
-  exit(0);
+  hardExit(0);
 }

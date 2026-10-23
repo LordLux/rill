@@ -33,6 +33,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/hard_exit.dart';
 import '../../data/playback/engine.dart';
 import '../../data/rpc/client.dart';
 import '../../domain/playback_source.dart';
@@ -126,11 +127,11 @@ Future<void> _fexpProbe() async {
     record['launchConstant'] = all.length == 1;
     record['launchFlagged'] = all.length == 1 ? all.first : null;
     await _emit(record);
-    exit(0);
+    hardExit(0);
   } on Object catch (error) {
     record['probeError'] = '$error';
     await _emit(record);
-    exit(2);
+    hardExit(2);
   }
 }
 
@@ -211,7 +212,7 @@ Future<void> _probe(ProviderContainer container) async {
     if (frameAt != null) {
       record['outcome'] = 'played';
       await _emit(record);
-      exit(0);
+      hardExit(0);
     }
 
     // Which of the two failures this was. `engine-timeout` is the audio-attach
@@ -296,7 +297,7 @@ Future<void> _probe(ProviderContainer container) async {
     }
 
     await _emit(record);
-    exit(0);
+    hardExit(0);
   } on Object catch (error, stack) {
     record['outcome'] = 'probe-broke';
     record['probeError'] = '$error';
@@ -304,7 +305,7 @@ Future<void> _probe(ProviderContainer container) async {
     record['mpvErrors'] = mpvErrors;
     record['mpvLog'] = mpvLog;
     await _emit(record);
-    exit(2);
+    hardExit(2);
   } finally {
     unawaited(errorSub?.cancel());
     unawaited(logSub?.cancel());

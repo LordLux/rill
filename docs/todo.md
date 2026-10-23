@@ -679,25 +679,6 @@ Churn warning: `architecture.md` references several of these by path inside date
 findings, so moving them costs doc edits for tidiness only. Low priority on
 purpose.
 
-### 92. A probe that ends with `exit(0)` crashes on the way out, and leaves a dump
-
-Measured 2026-10-14, release build, 5 of 5: four `RILL_SEMANTICS_PROBE=1` runs
-and one `RILL_FOCUS_PROBE=feed` run each logged their last line, then the
-launcher wrote `app CRASHED with code 0xC0000602` about six seconds later, and
-Windows wrote a ~54 MB dump to `%LOCALAPPDATA%\CrashDumps` each time. A crash
-dump holds the session cookie (`CLAUDE.md`), so every probe run leaves one to
-delete by hand.
-
-The code is F27's, and the likely cause is the same static: Dart's `exit()`
-ends the process without the plugin teardown that F27's one-line fix runs in.
-That is a reading of the code path, not of a stack; this machine has no
-`cdb.exe`. Nothing in the run is lost, since the probe has finished.
-
-**Do:** end the probes the way a user does (close the window, so the engine
-shuts down first) instead of calling `exit()`, keeping the exit code; then the
-same five runs should end `exited with code 0x00000000` and write no dump.
-Belongs with item 14 if that is ever done.
-
 ### 15. A portable parser corpus
 
 `sidecar/fixtures/` is gitignored and must stay that way — it holds raw InnerTube
@@ -1101,6 +1082,12 @@ device and the Intel driver `igd10um64xe` spins inside that release. `main.cpp` 
 ends the process itself with `TerminateProcess`, so users do not see it; the cause
 is upstream (the plugin or the driver) and stays, and any exit that reaches the
 ordinary path (a crash handler, `exit()` from elsewhere) would hang the same way.
+The probes and diagnostics, which ended with `exit()` and so crashed and left a
+~22 MB dump holding the session cookie each time (`0xC0000602`/`0xC0000005`, 5 of 5
+in 2026-10-14 and again 2026-10-22/23), now end with `hardExit` (`data/hard_exit.dart`,
+the same `TerminateProcess`): the semantics probe's 25 steps ended `app exited
+with code 0x00000000`, 0 `AXTree` errors, no new dump (2026-10-23). The five old dumps
+are still in `%LOCALAPPDATA%\CrashDumps` and hold the cookie: delete them.
 
 **Open:** whether a machine without an Intel GPU hangs (it was seen on one with
 `igd10um64xe`/`igdgmm64` only); whether the plugin can be kept from creating its D3D

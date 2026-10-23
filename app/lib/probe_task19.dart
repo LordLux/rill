@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:rill/data/hard_exit.dart';
 import 'package:rill/data/playback/engine.dart';
 import 'package:rill/domain/playback_source.dart';
 
@@ -53,7 +54,7 @@ class _ProbeAppState extends State<_ProbeApp> {
     
     await Future.delayed(Duration(seconds: 2));
     await out.close();
-    exit(0);
+    hardExit(0);
   }
 
   @override
