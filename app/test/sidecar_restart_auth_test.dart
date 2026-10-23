@@ -56,6 +56,37 @@ void main() {
       expect(calls, 1, reason: 'one restart, one call');
     });
 
+    test('a crash, and a call made while the client waits to restart, still fires it once', () async {
+      // The supervised path: the process dies, the client schedules a restart after a backoff,
+      // and a call that arrives in that window starts the new process itself. The hook is for
+      // that restart as much as for the timer's.
+      var calls = 0;
+      RpcClient.instance.onRestarted = () async => calls++;
+      await RpcClient.instance.call('test.echo', {'msg': 'up'});
+
+      // The crash answers nothing, so the call is failed by the exit (`UPSTREAM_ERROR`).
+      await expectLater(RpcClient.instance.call('test.crash', {}), throwsA(isA<RpcException>()));
+      expect(RpcClient.instance.pendingCallCount, 0);
+
+      // During the backoff, before its timer has fired.
+      expect(await RpcClient.instance.call('test.echo', {'msg': 'after the crash'}), 'after the crash');
+      await _until(() => calls > 0);
+      // Past the backoff, so the timer's own start has had its turn too.
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+
+      expect(calls, 1, reason: 'one process died, the hook ran once, not never and not twice');
+    });
+
+    test('a call that is waiting for the sidecar to start is counted as pending', () async {
+      await RpcClient.instance.killForTestAndWait();
+      RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
+
+      final call = RpcClient.instance.call('test.echo', {'msg': 'first'});
+      expect(RpcClient.instance.pendingCallCount, 1, reason: 'not yet written to a sidecar that is still starting');
+      expect(await call, 'first');
+      expect(RpcClient.instance.pendingCallCount, 0);
+    });
+
     test('an error in it is not an error in start', () async {
       RpcClient.instance.onRestarted = () async => throw StateError('hook failed');
       await RpcClient.instance.restart();
