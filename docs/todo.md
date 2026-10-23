@@ -1371,8 +1371,9 @@ enough in it to find the node can be kept or sent — for the developer testing,
 ### 87. Remove the default-on semantics dump (due 2026-11-28)
 
 `RILL_SEMANTICS_DUMP` was made **on by default in a dev build** (no `RILL_VERSION`) on 2026-10-06 to
-collect node logs for the intermittent `AXTree` error. It forces semantics on (a cost the app
-otherwise only pays when a screen reader asks), writes a ring of tree dumps once a second to
+collect node logs for the intermittent `AXTree` error. It used to force semantics on, which broke
+Narrator started after the app (2026-10-23); it now follows the platform's semantics and forces them
+only for `=1`. It writes a ring of tree dumps once a second to
 `%TEMP%` and keeps a 4 MB node-change log.
 
 - **On or after 2026-11-28:** delete `_dumpWanted`'s dev-build default in `ui/semantics_probe.dart`

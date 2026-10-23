@@ -476,7 +476,7 @@ void main() {
     testWidgets('has two names: one to play it, one to open it', (tester) async {
       final semantics = tester.ensureSemantics();
       await pumpTile(tester);
-      expect(find.bySemanticsLabel('Play A playlist'), findsOneWidget);
+      expect(find.bySemanticsLabel('Play first video'), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp(r'^Open playlist A playlist')), findsOneWidget);
       semantics.dispose();
     });
@@ -485,7 +485,7 @@ void main() {
       final semantics = tester.ensureSemantics();
       final playlists = await pumpTile(tester);
 
-      await tester.tap(find.bySemanticsLabel('Play A playlist'));
+      await tester.tap(find.bySemanticsLabel('Play first video'));
       await _settle(tester);
       expect(_container.read(queueProvider).mix?.playlistId, 'PL123');
       // Once for the start; the queue then pages ahead by itself.
@@ -528,7 +528,7 @@ void main() {
       playlists.firstPageError = RpcException('NOT_FOUND', 'The playlist does not exist.', RpcRetryMode.no);
       _container.read(queueProvider.notifier).debugSetStateForTest(QueueState(items: [_video(900), _video(901)], currentIndex: 0));
 
-      await tester.tap(find.bySemanticsLabel('Play A playlist'));
+      await tester.tap(find.bySemanticsLabel('Play first video'));
       await _settle(tester);
 
       expect(find.text('The playlist does not exist.'), findsOneWidget);
