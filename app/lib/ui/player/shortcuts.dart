@@ -101,16 +101,18 @@ bool textEntryHasFocus() {
   return context.findAncestorWidgetOfExactType<EditableText>() != null;
 }
 
-/// Whether the keyboard user has Tabbed onto a control that handles Space.
+/// Whether a control that handles Space has focus.
 ///
 /// The player's handler is global and runs before the focus tree, so without
 /// this a focused button never sees Space — it would pause the video instead,
 /// and a control reached by Tab could not be pressed with the key that presses
-/// it. **Only for focus reached by keyboard** (`highlightMode` is `traditional`):
-/// a button that was merely *clicked* keeps focus too, and Space after a click
-/// has always meant pause. `k` pauses either way, and no other key is touched.
+/// it. **However it got focus, by Tab or by a click** (changed 2026-10-23): a
+/// handled key still reaches the focus tree, so a control left to the player's
+/// Space was pressed *and* the video paused — click Like, press Space, and the
+/// like came off. A click on the picture or the background focuses nothing (and
+/// drops a control's focus, `FocusRing`), so Space after one still pauses. `k`
+/// pauses either way, and no other key is touched.
 bool keyboardFocusHandlesActivate() {
-  if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return false;
   final context = FocusManager.instance.primaryFocus?.context;
   if (context == null) return false;
   final action = Actions.maybeFind<ActivateIntent>(context);
@@ -124,9 +126,9 @@ bool _isArrow(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.arrowDown;
 
 /// Whether the focused widget uses the arrow keys itself: a `Slider`, or anything
-/// under an [ArrowKeyClaim]. Keyboard focus only, as above.
+/// under an [ArrowKeyClaim]. However it got focus, as above: a slider that was clicked
+/// moved *and* the video seeked.
 bool focusClaimsArrows() {
-  if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return false;
   final context = FocusManager.instance.primaryFocus?.context;
   if (context == null) return false;
   return context.findAncestorWidgetOfExactType<Slider>() != null ||
@@ -332,8 +334,15 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
       case PlayerAction.fullscreen:
         view.toggleFullscreen();
       case PlayerAction.theatre:
+        // The watch page's layout, which outlives leaving the page (`view_mode.dart`):
+        // `T` from the feed would flip it where nobody can see it.
+        if (ref.read(currentRouteProvider) != watchRouteName) return false;
         view.toggleTheatre();
       case PlayerAction.escape:
+        // Nothing here is open off the watch page, and a theatre that persists must not
+        // be dropped by an Esc that was closing a tile menu or a dialog on the feed. The
+        // exception is fullscreen entered from the miniplayer, which Esc has to leave.
+        if (ref.read(currentRouteProvider) != watchRouteName && !ref.read(playerViewProvider).fullscreen) return false;
         // **The menu first, and all of it at once.** `Esc` on an open subpage
         // closes the whole thing rather than stepping back a page — the back
         // arrow is what walks the stack, and a key that took two presses to

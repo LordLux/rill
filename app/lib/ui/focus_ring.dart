@@ -201,11 +201,15 @@ ShapeBorder _inkShape(InkResponse ink) {
 /// slivers and smooth-scroll view left focus thousands of pixels off screen with
 /// the page not following, and where it does follow it stops at the very edge.
 ///
-/// **A click does not move keyboard focus.** It used to (to the control under the
-/// pointer, or the nearest one), so the next Tab continued from where the pointer
-/// had been; removed 2026-10-23, because Tab and a screen reader then started from
-/// somewhere the user had not asked for. A click on a surface that takes no focus
-/// leaves focus where it was; a control that takes focus on a click still does.
+/// **A click moves keyboard focus to the control under the pointer, and to nothing
+/// else.** So after clicking a button or a slider the next Tab continues from it, with
+/// no ring, since a pointer did it. A click on the background (a surface that takes no
+/// focus, or the gap between controls) takes focus off the control that had it, as a
+/// browser does, so Space then pauses rather than pressing a button the user last
+/// touched. It used to pick the *nearest* control when nothing was under the pointer,
+/// which put Tab and a screen reader somewhere the user had not asked for; removed
+/// 2026-10-23. Only a click (a drag does nothing) that left focus alone itself: a
+/// dialog or a menu that took focus keeps it, and so does a text field.
 class FocusRing extends StatefulWidget {
   const FocusRing({super.key, required this.child});
 
@@ -226,6 +230,9 @@ class _FocusRingState extends State<FocusRing> {
     shape: _defaultShape,
     inflate: _defaultInflate,
   );
+
+  FocusNode? _downFocus;
+  FocusScopeNode? _downScope;
 
   @override
   void initState() {
@@ -354,13 +361,99 @@ class _FocusRingState extends State<FocusRing> {
     });
   }
 
+  // ---- A click moves keyboard focus to the control under it --------------------
+
+  FocusScopeNode _deepestScope() {
+    var scope = FocusManager.instance.rootScope;
+    while (scope.focusedChild is FocusScopeNode) {
+      scope = scope.focusedChild! as FocusScopeNode;
+    }
+    return scope;
+  }
+
+  /// How far a pointer may move between down and up and still be a click.
+  static const double _clickSlop = 12;
+
+  Offset? _downPosition;
+
+  void _onPointerDown(PointerDownEvent event) {
+    _downFocus = FocusManager.instance.primaryFocus;
+    _downScope = _deepestScope();
+    _downPosition = event.position;
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    // A drag (a scrubber, a volume bar, a text selection, a reorder) is not a click, and
+    // released over another control it must not hand that control the keyboard.
+    final down = _downPosition;
+    if (down == null || (event.position - down).distance > _clickSlop) return;
+    final position = event.position;
+    final viewId = event.viewId;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focusControlUnder(position, viewId));
+  }
+
+  void _focusControlUnder(Offset point, int viewId) {
+    if (!mounted) return;
+    final now = FocusManager.instance.primaryFocus;
+    // The click moved focus itself — a dialog or a menu took it — or opened another
+    // route: leave it be.
+    if (!identical(now, _downFocus) || !identical(_deepestScope(), _downScope)) return;
+    if (now != null && now is! FocusScopeNode) {
+      if (now.context?.findAncestorWidgetOfExactType<EditableText>() != null) return;
+      if (now.rect.inflate(2).contains(point)) return;
+    }
+
+    // What the pointer actually reached, not what is merely drawn under it: a control
+    // beneath a menu panel or clipped away is in a rect and not in the hit path.
+    final hit = HitTestResult();
+    WidgetsBinding.instance.hitTestInView(hit, point, viewId);
+    bool reached(FocusNode node) {
+      final object = node.context?.findRenderObject();
+      return object != null && hit.path.any((entry) => identical(entry.target, object));
+    }
+
+    // Under the pointer, the smallest one: the most specific control.
+    FocusNode? best;
+    var bestArea = double.infinity;
+    for (final candidate in _deepestScope().traversalDescendants) {
+      final context = candidate.context;
+      if (context == null || !context.mounted) continue;
+      final rect = candidate.rect;
+      if (rect.isEmpty || !rect.contains(point) || !reached(candidate)) continue;
+      final area = rect.width * rect.height;
+      if (area < bestArea) {
+        best = candidate;
+        bestArea = area;
+      }
+    }
+
+    if (best != null) {
+      // `requestFocus` after a pointer event leaves the highlight mode on "touch", so
+      // no ring is drawn — which is the point: the pointer did this.
+      best.requestFocus();
+      return;
+    }
+    // The background, or the gap between controls: as in a browser, the click takes
+    // focus off the control that had it and gives it to nothing. Nearer is not
+    // better (that was the removed feature), and a control left holding focus would
+    // be pressed by the next Space, which the player would also have used to pause.
+    if (now != null && now is! FocusScopeNode) now.unfocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final rect = _rect;
     return Stack(
       textDirection: TextDirection.ltr,
       children: [
-        Positioned.fill(child: widget.child),
+        Positioned.fill(
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            onPointerUp: _onPointerUp,
+            child: widget.child,
+          ),
+        ),
         if (rect != null && !rect.isEmpty)
           Positioned.fill(
             child: IgnorePointer(

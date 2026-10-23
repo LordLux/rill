@@ -454,17 +454,18 @@ void main() {
     });
   });
 
-  group('a click does not move keyboard focus', () {
-    // Removed 2026-10-23: a click used to move focus to the closest control (the video
-    // surface focused the play button), so Tab and a screen reader started from somewhere
-    // the user had not asked for.
+  group('a click moves keyboard focus to the control under it, and to nothing else', () {
+    // 2026-10-23: a click used to move focus to the *nearest* control when nothing was
+    // under the pointer (the video surface focused the play button), so Tab and a screen
+    // reader started from somewhere the user had not asked for. Only the control under the
+    // pointer takes it now.
     Widget app(Widget body) => MaterialApp(
       theme: buildRillTheme(kDefaultAccent),
       builder: (context, child) => FocusRing(child: child!),
       home: Scaffold(body: body),
     );
 
-    testWidgets('clicking a surface that takes no focus leaves focus where it was', (tester) async {
+    testWidgets('clicking a surface that takes no focus takes focus off the control, and picks none', (tester) async {
       bigWindow(tester);
       // A tile-like surface (not focusable) with two buttons below it.
       await tester.pumpWidget(app(Column(
@@ -484,27 +485,102 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(focused(), 'top', reason: 'the click did not carry focus to "near"');
+      expect(FocusManager.instance.primaryFocus, isA<FocusScopeNode>(), reason: 'no control holds the keyboard, and the nearest one, "near", was not given it');
 
-      // The next Tab carries on from where the keyboard was, not from the click.
-      expect(await tabThrough(tester, 1), ['near']);
+      // Tab starts over from the top of the page, not from the click.
+      expect(await tabThrough(tester, 1), ['top']);
     });
 
-    testWidgets('clicking a button presses it and leaves focus where the keyboard had it', (tester) async {
+    testWidgets('clicking the background does not pick the first control either', (tester) async {
+      // The other half of the rule: with focus on the *last* control, a background click
+      // must not move it to the first, or to the biggest or smallest, or to anything.
+      bigWindow(tester);
+      await tester.pumpWidget(app(Column(
+        children: [
+          TextButton(key: const ValueKey('top'), onPressed: () {}, child: const Text('top')),
+          Expanded(child: GestureDetector(key: const ValueKey('surface'), behavior: HitTestBehavior.opaque, onTap: () {}, child: const SizedBox.expand())),
+          TextButton(key: const ValueKey('near'), onPressed: () {}, child: const Text('near')),
+          TextButton(key: const ValueKey('far'), onPressed: () {}, child: const Text('far')),
+        ],
+      )));
+
+      expect(await tabThrough(tester, 3), ['top', 'near', 'far']);
+      final surface = tester.getRect(find.byKey(const ValueKey('surface')));
+      await tester.tapAt(surface.center);
+      await tester.pump();
+      await tester.pump();
+
+      expect(FocusManager.instance.primaryFocus, isA<FocusScopeNode>(), reason: 'nothing was under the pointer, so nothing took focus, "top" included');
+    });
+
+    testWidgets('clicking a button presses it and focuses it', (tester) async {
       bigWindow(tester);
       var pressed = 0;
       await tester.pumpWidget(app(Column(
         children: [
           TextButton(key: const ValueKey('a'), onPressed: () {}, child: const Text('a')),
           TextButton(key: const ValueKey('b'), onPressed: () => pressed++, child: const Text('b')),
+          TextButton(key: const ValueKey('c'), onPressed: () {}, child: const Text('c')),
         ],
       )));
       await tabThrough(tester, 1);
       await tester.tap(find.byKey(const ValueKey('b')));
       await tester.pump();
       await tester.pump();
+
       expect(pressed, 1, reason: 'the click still works');
-      expect(focused(), 'a', reason: 'a click is not a focus change; the keyboard is where it was');
+      expect(focused(), 'b', reason: 'the control that was clicked has the keyboard now');
+      expect(await tabThrough(tester, 1), ['c'], reason: 'and the next Tab goes on from it');
+    });
+
+    testWidgets('a drag that ends over another control does not give it focus', (tester) async {
+      bigWindow(tester);
+      await tester.pumpWidget(app(Column(
+        children: [
+          TextButton(key: const ValueKey('a'), onPressed: () {}, child: const Text('a')),
+          TextButton(key: const ValueKey('b'), onPressed: () {}, child: const Text('b')),
+        ],
+      )));
+
+      final gesture = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('a'))));
+      await gesture.moveTo(tester.getCenter(find.byKey(const ValueKey('b'))));
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+
+      expect(focused(), isNot('b'), reason: 'a scrubber or a selection released over "b" is not a click on it');
+    });
+
+    testWidgets('a control covered by something opaque is not focused by a click on the cover', (tester) async {
+      bigWindow(tester);
+      await tester.pumpWidget(app(Stack(
+        children: [
+          Center(child: TextButton(key: const ValueKey('under'), onPressed: () {}, child: const Text('under'))),
+          Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () {}, child: const ColoredBox(color: Colors.black))),
+        ],
+      )));
+
+      await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('under'), skipOffstage: false)));
+      await tester.pump();
+      await tester.pump();
+
+      expect(FocusManager.instance.primaryFocus, isA<FocusScopeNode>(), reason: 'it is drawn there, but the pointer reached the cover');
+    });
+
+    testWidgets('clicking a slider focuses it', (tester) async {
+      bigWindow(tester);
+      await tester.pumpWidget(app(Column(
+        children: [
+          TextButton(key: const ValueKey('a'), onPressed: () {}, child: const Text('a')),
+          Slider(key: const ValueKey('s'), value: 0.5, onChanged: (_) {}),
+        ],
+      )));
+      await tabThrough(tester, 1);
+      await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('s'))));
+      await tester.pump();
+      await tester.pump();
+
+      expect(focused(), 's', reason: 'focus left the button for the slider that was clicked');
     });
   });
 
