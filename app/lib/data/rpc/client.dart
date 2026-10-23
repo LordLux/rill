@@ -55,10 +55,11 @@ class RpcClient {
   @visibleForTesting
   int? get processId => _process?.pid;
 
-  /// Calls sent and not yet answered. A widget test waits on this instead of a
-  /// fixed delay for the fake sidecar (`test/sidecar_idle.dart`).
+  /// Calls made and not yet answered, including ones still waiting for the sidecar to
+  /// start. A widget test waits on this instead of a fixed delay for the fake sidecar
+  /// (`test/sidecar_idle.dart`).
   @visibleForTesting
-  int get pendingCallCount => _pending.length;
+  int get pendingCallCount => _pending.length + _unsent;
   
   Map<String, dynamic>? capabilities;
   Completer<void>? _readyCompleter;
@@ -345,8 +346,11 @@ class RpcClient {
       await _readyCompleter!.future;
       _restartBackoffMs = 1000;
 
-      // Supervision: Re-run auth.verify after restart if capabilities already exist
-      if (capabilities != null) {
+      // Supervision: Re-run auth.verify after restart if capabilities already exist. Not
+      // when [onRestarted] is about to sign the new process in: that is the answer
+      // `auth.verify` would be asked for, and this one fetches home anonymously first,
+      // so the cookie would wait behind it.
+      if (capabilities != null && !(_restartedStart && onRestarted != null)) {
         try {
           await call('auth.verify', {});
         } catch (e) {
@@ -488,9 +492,12 @@ class RpcClient {
 
     if (_isFatalError) return;
 
+    // Set here, not when the timer fires: a call that arrives during the backoff starts the
+    // process itself (`_send`), and that start is the restart the hook is for. A start that
+    // merely failed (`source == null`) was not a process dying, so it sets nothing.
+    if (source != null) _restartedStart = true;
     Timer(Duration(milliseconds: _restartBackoffMs), () {
       _restartBackoffMs = (_restartBackoffMs * 2).clamp(1000, 30000);
-      _restartedStart = true;
       start();
     });
   }
@@ -516,15 +523,23 @@ class RpcClient {
     return (id: id, response: _send(id, method, params));
   }
 
+  /// Calls that are waiting for the sidecar to start, so not yet in [_pending].
+  int _unsent = 0;
+
   Future<dynamic> _send(int id, String method, Map<String, dynamic> params) async {
-    if (_process == null) {
-      await start();
-    }
-    if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
-      await _readyCompleter!.future;
-    }
-    if (_process == null) {
-      throw RpcException('START_FAILED', 'Failed to start sidecar process', RpcRetryMode.auto);
+    _unsent++;
+    try {
+      if (_process == null) {
+        await start();
+      }
+      if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
+        await _readyCompleter!.future;
+      }
+      if (_process == null) {
+        throw RpcException('START_FAILED', 'Failed to start sidecar process', RpcRetryMode.auto);
+      }
+    } finally {
+      _unsent--;
     }
 
     final completer = Completer<dynamic>();

@@ -200,6 +200,10 @@ rl.on('line', (line) => {
         process.stdout.write(JSON.stringify({ id: req.id, result: req.params.msg }) + '\n');
       }, delay);
       pending.set(req.id, timer);
+    } else if (req.method === 'test.crash') {
+      // The sidecar dying under the client, with no answer: what the supervised restart is for.
+      process.stderr.write('fake_sidecar: test.crash\n');
+      process.exit(1);
     } else if (req.method === 'test.error') {
       process.stdout.write(JSON.stringify({
         id: req.id,
