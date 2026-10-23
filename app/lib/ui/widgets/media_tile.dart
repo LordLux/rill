@@ -269,6 +269,10 @@ class MediaTile extends StatefulWidget {
   /// then takes its height from whichever of the thumbnail and the text is taller.
   final double? thumbnailWidth;
 
+  /// The 1-based place in a numbered list (a playlist's rows), said first by the tile so the
+  /// number the row draws beside it is not a separate, unnamed thing to a screen reader.
+  final int? position;
+
   const MediaTile({
     super.key,
     required this.spec,
@@ -279,7 +283,8 @@ class MediaTile extends StatefulWidget {
     this.menu = const [],
   }) : layout = MediaTileLayout.standard,
        size = MediaTileSize.standard,
-       thumbnailWidth = null;
+       thumbnailWidth = null,
+       position = null;
 
   const MediaTile.wide({
     super.key,
@@ -291,6 +296,7 @@ class MediaTile extends StatefulWidget {
     this.menu = const [],
     this.size = MediaTileSize.standard,
     this.thumbnailWidth,
+    this.position,
   }) : layout = MediaTileLayout.wide;
 
   const MediaTile.shorts({
@@ -303,7 +309,8 @@ class MediaTile extends StatefulWidget {
     this.menu = const [],
   }) : layout = MediaTileLayout.shorts,
        size = MediaTileSize.standard,
-       thumbnailWidth = null;
+       thumbnailWidth = null,
+       position = null;
 
   @override
   State<MediaTile> createState() => _MediaTileState();
@@ -548,8 +555,11 @@ class _MediaTileState extends State<MediaTile> {
       DurationBadgeTone.normal => spec.isStackedCards ? 'Playlist' : (spec.isShort ? 'Short' : 'Video'),
     };
     // Views and age ("1M views • 3y ago"): after who made it, before the badges and the length.
-    final secondary = spec.secondaryLine;
+    // Spelled out, since a reader says "M" and "y" as letters.
+    final secondary = spec.secondaryLine == null ? null : spokenStats(spec.secondaryLine!);
+    final position = widget.position;
     return [
+      if (position != null) spokenOrdinal(position),
       // A tile whose thumbnail plays it says what the tile itself does, since
       // "Play …" is the thumbnail's name. From the kind, not a fixed word: a
       // playlist is the only tile with a second action today, not by definition.
@@ -577,7 +587,9 @@ class _MediaTileState extends State<MediaTile> {
     return Semantics(
       container: true,
       child: KeyboardTap(
-        label: 'Play ${widget.spec.title}',
+        // Only a playlist has this target today, and it plays the first video; the tile
+        // before it in the Tab order has already said which playlist.
+        label: 'Play first video',
         borderRadius: 12,
         onTap: widget.onThumbnailTap,
         child: region,
@@ -608,11 +620,11 @@ class _MediaTileState extends State<MediaTile> {
         widget.spec.canAddToQueue;
     if (!showsAnything) return const SizedBox.shrink();
 
-    return AnimatedOpacity(
+    // Out of the semantics tree for good, not only while faded: the 3-dot menu offers the same
+    // actions, and a pair of unnamed-role "group" nodes read after the tile's own label is noise.
+    // Constant, so nothing is added or removed from the tree as the pointer comes and goes.
+    return ExcludeSemantics(child: AnimatedOpacity(
       opacity: isHovering ? 1 : 0,
-      // These buttons carry tooltips, which are showing as the pointer leaves: skipped
-      // semantics over a live overlay is the F51 orphan.
-      alwaysIncludeSemantics: true,
       duration: const Duration(milliseconds: 100),
       child: IgnorePointer(
         // Faded-out buttons must not swallow clicks meant for the tile underneath.
@@ -674,7 +686,7 @@ class _MediaTileState extends State<MediaTile> {
                 ],
         )),
       ),
-    );
+    ));
   }
 
   @override
@@ -1180,6 +1192,8 @@ class _MediaTileState extends State<MediaTile> {
             // separate nodes of their own.
             child: Semantics(
               label: _narration(),
+              // It opens something: said as a button, not as an anonymous "group".
+              button: true,
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [

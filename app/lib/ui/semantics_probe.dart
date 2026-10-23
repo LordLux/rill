@@ -53,9 +53,15 @@ bool _dumpWanted() {
   return const String.fromEnvironment('RILL_VERSION').isEmpty;
 }
 
-/// `RILL_SEMANTICS_DUMP=1`: turns semantics on and writes the whole semantics tree, with its
-/// node ids, to `%TEMP%\rill-semantics-ring-<n>.txt` once a second, oldest overwritten. It keeps
+/// `RILL_SEMANTICS_DUMP`: writes the whole semantics tree, with its node ids, to
+/// `%TEMP%\rill-semantics-ring-<n>.txt` once a second, oldest overwritten. It keeps
 /// the last 300 seconds (`RILL_SEMANTICS_DUMP_KEEP=<seconds>` to change it; about 10 KB a file).
+///
+/// **It follows the platform's semantics and does not turn them on**, except for an explicit
+/// `=1`. Holding a handle from the first frame made a screen reader started after the app see
+/// only an empty window and reject every update (measured 2026-10-23): the bridge was never sent
+/// the nodes that existed before it asked. A dump that is on by default must not change what it
+/// measures, so it waits for Narrator the way the app does.
 ///
 /// The accessibility bridge's errors name a node id and nothing else; the id is only
 /// meaningful against a tree from the same run. Reproduce the error, then read the files
@@ -63,17 +69,29 @@ bool _dumpWanted() {
 /// dump: a line a second would fill the 10 MB log and push the error's start out of it.
 void runSemanticsDump() {
   if (!_dumpWanted()) return;
-  SemanticsBinding.instance.ensureSemantics();
+  final binding = SemanticsBinding.instance;
+  if (Platform.environment['RILL_SEMANTICS_DUMP'] == '1') binding.ensureSemantics();
   final keep = int.tryParse(Platform.environment['RILL_SEMANTICS_DUMP_KEEP'] ?? '') ?? 300;
   _watchNodeChanges();
   var n = 0;
-  Timer.periodic(const Duration(seconds: 1), (_) {
-    try {
-      _dumpTree('ring-${n++ % keep}', quiet: true);
-    } on Object catch (error) {
-      stderr.writeln('semantics dump failed: $error');
+  Timer? ticker;
+  void follow() {
+    if (!binding.semanticsEnabled) {
+      ticker?.cancel();
+      ticker = null;
+      return;
     }
-  });
+    ticker ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      try {
+        _dumpTree('ring-${n++ % keep}', quiet: true);
+      } on Object catch (error) {
+        stderr.writeln('semantics dump failed: $error');
+      }
+    });
+  }
+
+  binding.addSemanticsEnabledListener(follow);
+  follow();
 }
 
 /// Every semantics node that appears or disappears, frame by frame, to

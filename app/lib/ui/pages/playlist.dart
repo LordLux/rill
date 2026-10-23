@@ -919,10 +919,13 @@ class _PlaylistSliverList extends ConsumerWidget {
                     SizedBox(
                       width: 40,
                       child: Center(
-                        child: Text(
-                          '${index + 1}',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        // Said by the tile, as its place in the list.
+                        child: ExcludeSemantics(
+                          child: Text(
+                            '${index + 1}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ),
                       ),
@@ -930,6 +933,7 @@ class _PlaylistSliverList extends ConsumerWidget {
                     Expanded(
                       child: MediaTile.wide(
                         spec: spec,
+                        position: index + 1,
                         size: MediaTileSize.large,
                         thumbnailWidth: _thumbnailHeight * (spec.isShort ? ScreenValues.shortAspectRatioSecondary : ScreenValues.normalAspectRatio),
                         onAddToQueue: () => queueFromTile(ref, item),
