@@ -143,6 +143,7 @@ class FakeEngine implements PlaybackEngine {
   Future<void> open(
     PlaybackVariant variant, {
     bool play = true,
+    bool Function()? shouldPlay,
     bool retainSubtitle = false,
     bool isLive = false,
   }) async {
@@ -177,7 +178,8 @@ class FakeEngine implements PlaybackEngine {
     // what is playing" without pretending to model a mid-stream downgrade.
     setWidth(variant.height * 16 ~/ 9); // Best guess for fake
     setHeight(variant.height);
-    setPlaying(play);
+    // Asked after the gate, as `MediaKitEngine` asks it after its own waits.
+    setPlaying(play && (shouldPlay?.call() ?? true));
     if (retained != null) await setSubtitle(retained);
   }
 

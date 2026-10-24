@@ -162,7 +162,17 @@ abstract class PlaybackEngine {
   /// A quality switch reopens the media (F19) and mpv drops external subtitle
   /// tracks with it. Opening a *different video* must not carry the previous
   /// one's captions, so this is opt-in and only `switchQuality` passes it.
-  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false, bool isLive = false});
+  ///
+  /// [shouldPlay] is asked at the moment the open would start playing, and a false
+  /// answer leaves it paused: [play] is what was wanted when the call was made, and
+  /// a pause pressed during the load must win over it.
+  Future<void> open(
+    PlaybackVariant variant, {
+    bool play = true,
+    bool Function()? shouldPlay,
+    bool retainSubtitle = false,
+    bool isLive = false,
+  });
   Future<void> play();
   Future<void> pause();
   Future<void> playOrPause();
@@ -487,7 +497,14 @@ class MediaKitEngine implements PlaybackEngine {
       });
 
   @override
-  Future<void> open(PlaybackVariant variant, {bool play = true, bool retainSubtitle = false, bool isLive = false}) async {
+  Future<void> open(
+    PlaybackVariant variant, {
+    bool play = true,
+    bool Function()? shouldPlay,
+    bool retainSubtitle = false,
+    bool isLive = false,
+  }) async {
+    bool wantPlay() => play && (shouldPlay?.call() ?? true);
     lastOpened = variant;
     trace?.call('open ${variant.height}p play=$play live=$isLive audio=${variant.audioUrl != null}');
     // Read before the open, applied after it. A reopen drops mpv's external
@@ -533,12 +550,12 @@ class MediaKitEngine implements PlaybackEngine {
     if (audioAtLoad) await native.command(['change-list', 'audio-files', 'append', audioUrl]);
     await native.setProperty('vid', audioAtLoad ? 'no' : 'auto');
 
-    // **The video is opened paused when its audio is still to come** (todo 99): the
+    // **The video is opened paused when its audio is still to come** (issue #22, todo 102): the
     // audio is a second URL, attached once the duration is known, and starting the
     // video first played it silent until the sound joined. The first frame still
     // shows; play starts when the audio decodes, or after a bound (below).
     final attachAudioAfter = audioUrl != null && !audioAtLoad;
-    await _player.open(Media(variant.videoUrl), play: play && !attachAudioAfter);
+    await _player.open(Media(variant.videoUrl), play: wantPlay() && !attachAudioAfter);
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -582,7 +599,7 @@ class MediaKitEngine implements PlaybackEngine {
       } finally {
         decoded.cancel();
       }
-      if (play) await _player.play();
+      if (wantPlay()) await _player.play();
     }
 
     // Back to what was asked for. Only a muxed variant — no separate audio to

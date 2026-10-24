@@ -676,11 +676,12 @@ class _PlayerSurface extends ConsumerWidget {
             isAudioOnly || playback.isRestoringVideo ? ref.watch(nowPlayingBackdropProvider) : null,
           ),
 
-          if (playback.isLoading) Center(child: CircularProgressIndicator(color: scheme.onPrimary)),
           Builder(
             builder: (context) {
               // `page`: not in the frame the fullscreen layer is leaving (`PlayerLayerGate`).
-              if (!playback.isLoading && !fullscreen && isTopWatchPage && ref.watch(playerLayerGateProvider.select((g) => g.page))) {
+              // Mounted through a load too, so the controls are there from the first
+              // frame (todo 98); their own busy spinner covers the wait.
+              if (!fullscreen && isTopWatchPage && ref.watch(playerLayerGateProvider.select((g) => g.page))) {
                 return PlayerControls(
                   engine: engine,
                   actualAspectRatio: ratio,
@@ -688,7 +689,8 @@ class _PlayerSurface extends ConsumerWidget {
                 );
               }
 
-              if (playback.isLoading) return const SizedBox.shrink();
+              // Not the controls' page, so nothing else is showing the wait.
+              if (playback.isLoading) return Center(child: CircularProgressIndicator(color: scheme.onPrimary));
               return const PlayerSlates(showQueue: false);
             },
           ),
