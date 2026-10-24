@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 101.** A new item takes it, and the same edit bumps this line.
+**Next number: 103.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1083,74 +1083,53 @@ polls a condition, the rest in `player_controls_test` and
 
 ### 98. The watch page shows no player controls while a video loads
 
-Reported 2026-10-23. From the moment a video opens until it has loaded the player area
-is a spinner and nothing else, so nothing can be done during the wait, which on a slow
-open is several seconds. `pages/watch.dart` (the `Stack` that ends the player area)
-mounts `PlayerControls` only when `!playback.isLoading && !fullscreen && isTopWatchPage`,
-and draws `SizedBox.shrink()` in its place while loading.
+Reported 2026-10-23 (issue #21). The controls used to be unmounted until a video had
+loaded. **Landed (partly):** `pages/watch.dart` now mounts `PlayerControls` through the
+load (the fullscreen layer already did), and:
+- **Pause / play** records `PlaybackState.wantPlaying` while `isLoading`; the open ends paused
+  if it is false (`MediaKitEngine.open`'s `shouldPlay`), and the button shows the wanted state.
+- **Next / previous** supersede the open in flight (the generation counter, as before).
+- **The scrubber** is disabled while loading, and `seek` / `stepFrame` do nothing until it ends.
+- **Mute / volume** were engine-level already and work.
+Tests: `loading_controls_test.dart`.
 
-**Wanted:** the controls are there from the first frame and every one of them does
-something sensible before the media exists:
-- **Pause / play:** records what the viewer wants. Paused while loading means it opens
-  paused, shows its first frame and waits; it does not start itself. The button shows the
-  wanted state, not the engine's.
-- **Mute / volume:** applied at once (the engine exists; nothing has to load first).
-- **Quality and captions:** choosing one while loading changes what is being loaded,
-  replacing the request in flight (a new `playback.open` for that height, the old one
-  cancelled) rather than waiting for the first to finish and then switching; captions are a
-  preference the open applies when it gets there.
-- **Next / previous / a row of the queue:** cancel the open in flight and load the wanted
-  video at once. `RpcClient.callCancelable` and `$cancel` exist for the request; the
-  engine's own `open` has to be abandoned too.
-- **The scrubber** has no duration yet: drawn, disabled, no seeking.
+**Left:**
+- **Quality and captions during the load.** The quality menu lists the ladder, which does not
+  exist until `playback.open` answers, so it stays disabled; choosing a height up front would
+  need the preference offered without a ladder. Captions are a preference the open applies
+  when it gets there, and have not been checked.
+- **The request in flight is not cancelled.** `open` uses `call`, not `callCancelable`, and the
+  sidecar's `playback.open` ignores the abort signal anyway, so a skipped video still resolves
+  and costs a session that is never reported. Both ends need it.
+- **Not tried in the live app,** and the semantics probe has not been re-run (`RILL_SEMANTICS_PROBE=1`
+  and `RILL_FOCUS_PROBE=watch`, as two runs): the bar now mounts on a page that is still
+  swapping its surface, which is the shape that has frozen the accessibility bridge before.
+- **A wanted-state object** for muted / quality / captions, if those ever need to survive an open;
+  today only `wantPlaying` does.
 
-**Care:** one wanted-state object (`PlaybackIntent`-like: playing, muted, quality, captions)
-that survives an open and is applied when the media is ready, rather than each control
-growing its own "pending" flag. The bar has `GlobalKey`s and a semantics history
-(CLAUDE.md, Accessibility): mounting it from the start is the *safer* order, but the
-fullscreen layer and `PlayerLayerGate` must still never mount it in two places in a frame,
-and `autoHideDelay` hides it only while playing, so it stays up through a load. This
-shares its mechanism with item 99 (opening paused and playing when ready).
-
-**Done when:** each of the above is a test that opens a video through the fake sidecar
-with its answer held back, presses the control, and checks what the engine and the queue
-end up doing; and the semantics probe still reports 0 `AXTree` errors.
+**Done when:** the semantics probes are clean with the bar mounted through a load, and the
+items above are done or dropped with a reason.
 
 ---
 
-### 99. A video can play without sound while its audio is still attaching
+### 102. Check the audio-before-play fix against the real player
 
-Reported 2026-10-23. After a video has loaded, the picture sometimes starts while the audio
-has not arrived: it plays silent while the spinner is still turning, then the sound joins.
-Wanted: show the first frame as soon as it exists, but do not play until everything,
-audio included, is ready.
+Issue #22 (the old todo 99) is fixed in `MediaKitEngine.open` by the "open paused" option: a video
+with a separate audio URL opens paused, the audio is attached, and play starts once mpv
+reports `audio-params` for it (bounded at 5 s, then it plays without and says so on stderr).
+The wait is `audio_ready.dart`, tested on its own; **the engine path itself has no test**, as
+`MediaKitEngine` is native, and it has not been run against real mpv.
 
-**Where, from the code:** `data/playback/engine.dart` `open` calls
-`_player.open(Media(videoUrl), play: play)`, which starts playing the video-only URL as
-soon as it opens, and only then waits for the duration and calls
-`setAudioTrack(AudioTrack.uri(audioUrl))`. The audio is a second URL that has to be
-fetched and demuxed after the video is already running. An audio-only open does it the
-other way (`audio-files` at load, F42), so mpv has both streams before it starts.
+- **Measure:** with a throttled audio URL, the first frame shows and nothing plays until
+  the sound is there; a quality switch mid-video (a reopen) still resumes without a long
+  stall; `retainSubtitle` still puts the captions back; a live stream still seeks to the edge.
+- **Assumption to confirm:** mpv fires `audio-params` again after a reopen of the same
+  audio. If it does not, every quality switch would wait out the full 5 s.
+- **Option 2** (`audio-files` at load, as audio-only does) was never tried; it would remove
+  the pause but F15 says `audio-add … select` is the reason video mode attaches afterwards.
 
-**Two ways, to be measured before choosing:**
-1. Open paused (`play: false`), attach the audio, wait until the audio track is selected
-   and the demuxer is no longer buffering, then play if the caller wanted play. The first
-   frame is shown paused. Needs a ready signal from the event streams (hard invariant 9:
-   no `getProperty` polling): `player.stream.tracks`, `.audioParams`, `.buffering`.
-2. Load the audio at open through `audio-files`, as audio-only does, so mpv starts with both.
-   `architecture.md` F15 says `audio-add … select` is ignored until a file is loaded and has a
-   duration, which is why video mode attaches afterwards; find out whether `audio-files` at
-   load has a cost in video mode (start time, seeking, the quality switch, `retainSubtitle`) before
-   taking it.
-
-**Care:** `open`'s `play` argument already means something (a restore opens paused), and a
-quality switch reopens mid-video, where a pause would be a visible stall; the wait for audio
-needs a bound so a broken audio URL cannot hold the picture forever (then play without it,
-and say so on stderr).
-
-**Done when:** with the audio URL's response delayed, the engine does not report playing until
-the audio is ready, the first frame is shown in the meantime, and a test with the fake engine
-covers the order (open paused → audio attached → play).
+**Done when:** the four measurements are written down in `architecture.md` §2.4 and the
+5 s bound is either confirmed or replaced by what was measured.
 
 ---
 
@@ -1274,6 +1253,46 @@ Windows 11's taskbar button has a progress bar for exactly this (`ITaskbarList3`
 
 **Done when:** a download shows its fraction on the taskbar button, an error shows
 red, and every end state (done, failed, cancelled, app closed) leaves no bar behind.
+
+### 101. Pick up where you left off after a restart
+
+Keep a copy of the app's state and put it back on the next start, so closing the app (or
+updating it) does not cost the viewer their place. Two triggers with different rules:
+- **After an update: always.** The updater restarts the app itself, so it is the one restart
+  the viewer did not choose, and losing the video they were watching is the worst moment to
+  lose it. Needs a marker the updater leaves for the next start (the installer's arguments
+  come from the old version, see `rill.iss`), so a restart that follows an update is told
+  apart from a launch.
+- **After a manual close: only with a setting turned on,** off by default. Opening a fresh
+  app is what most people expect from a launch.
+
+**What to keep, as a start:** the page stack's top (which watch page, playlist, channel or
+search), the queue (item ids, the current one, the mix and its playlist id), the current
+position and whether it was playing, audio-only, volume and the preferred quality. Ids and
+numbers only: no cookie, no URL (`playback.open` resolves again), and nothing that was
+fetched. Scroll positions and open menus are not worth it.
+
+**Care:**
+- **The app ends with `TerminateProcess`** (CLAUDE.md, "The app ends itself"), so there is no
+  exit hook to write from. The snapshot is written as things change (debounced), and a
+  crash then leaves the last one, which is a feature.
+- **A snapshot that crashes the app on restore must not loop.** Delete or mark it before
+  applying, and apply it once.
+- **Order on start:** the account is restored first (`restoreAuthWhenSidecarRestarts`), then
+  the queue and page, then `resumeAt` for the position (`playback_controller.dart`), the same
+  one the queue-replacement undo uses. The restored video should open **paused**: sound
+  starting by itself on launch is a surprise.
+- **A video that is gone** (private, removed, a premiere) lands on the ordinary error slate;
+  restoring must not turn that into a retry loop.
+- **Settings:** a toggle on the settings page, which needs the keyboard and screen reader
+  rules in CLAUDE.md, "Accessibility".
+- **Other platforms:** where the file lives and how an update is told apart are the only
+  platform parts, so keep them behind one small interface.
+
+**Done when:** after an update the same video is open at the same place, paused; with the
+setting on a manual restart does the same, and with it off a launch is a fresh start; a
+corrupt or stale snapshot is ignored, never retried; tests cover write, read, the once-only
+apply, and the update marker.
 
 ---
 
