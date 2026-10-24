@@ -300,12 +300,17 @@ that do not exist yet.
   /test/README.md the Task 19 measurement probes, and why they are not tests
 /docs             architecture.md, protocol.md, todo.md, tasks/
 /third_party      vendored packages carrying a local fix — media_kit_video (F28)
+/tools/todo       `rill todo` and the rill-todo MCP server (.mcp.json) — a read-only view of docs/todo.md; `bun install` there for the MCP server only
 ```
 
 **`docs/todo.md` is the live backlog** — work that is agreed but not done, each
 entry carrying enough context to be picked up cold. `docs/tasks/` is the
 archive: what was asked for at a moment in time. An item leaves `todo.md` when
 the work lands; a task file is never rewritten to match today's code.
+It is 1,500+ lines: **do not read it whole.** Use the `rill-todo` MCP tools
+(`list_todos`, `get_todo`, `search_todos`) or `rill todo` — same parser
+(`tools/todo/`), read-only. Edit the file by hand: numbers are permanent and the
+"Next number" line is bumped in the same edit.
 
 ## Reports
 
@@ -329,7 +334,8 @@ cd app && fvm flutter run -d windows   # debug build with hot reload
 rill build                      # compile sidecar and app, bundle, and stop (needs `nuget` on PATH: winget install Microsoft.NuGet)
 rill run                        # build, bundle, then launch the exe in this terminal
 rill open                       # launch the last release build as-is, no build
-rill check                      # flutter test guard + lint gate
+rill check                      # todo file check + flutter test guard + lint gate
+rill todo [n...] [-s soon] [-q text]   # read docs/todo.md: index, items by number, search
 # run `rill --help` for the full surface; `rill` works from any directory
 ```
 

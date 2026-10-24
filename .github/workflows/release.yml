@@ -96,6 +96,8 @@ jobs:
       - name: Sidecar - check (typecheck, lint, tests)
         working-directory: sidecar
         run: bun run check
+      - name: Todo file - unique item numbers, all below "Next number" (needs no install)
+        run: bun test tools/todo/parse.test.ts
       - name: Sidecar - build (the app's tests run the compiled one)
         working-directory: sidecar
         run: bun run build
