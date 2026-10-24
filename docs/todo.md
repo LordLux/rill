@@ -1457,6 +1457,8 @@ only for `=1`. It writes a ring of tree dumps once a second to
   CLAUDE.md "Accessibility".
 - **Before removing:** if the error was seen in that time, check that it is explained
   (`axtree-error-diagnosis` memory, `architecture.md` F51); if not, extend the date.
+  AXTree errors from dev-build sessions between 2026-10-06 and 2026-10-23 with Narrator started after
+  the app are explained by this and do not count toward extending the date.
 - Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.
 
 ### 89. Distinct playlist tile
