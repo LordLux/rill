@@ -834,21 +834,29 @@ pinned Bun moves (and the sidecar is re-measured: the ~6.3 s `bun run` cold star
 the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
 1.1.42 reads — and the workflow's two-step Bun install collapses into one.
 
-### 51. Two Windows plugins do not build on Visual Studio 2026
+### 51. Two Windows plugins still use a feature Microsoft will remove
 
-**Measured 2026-09-26, first release-workflow build on `windows-latest`.** MSVC
-14.51 (Visual Studio 2026, `Microsoft Visual Studio\18`) fails `flutter build windows`
-with `C2338 … STL1011`: its STL now rejects `<experimental/coroutine>` and the
-`/await` option unless `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` is
-defined. Two plugins compile with `/await`: `flutter_inappwebview_windows` (23
-errors) and `flutter_media_session` (2). Visual Studio 2022 still accepts it, which is
-what this machine builds with (`Visual Studio 17 2022`), so nothing is broken today.
+**Where it stands (2026-10-23).** The app builds on Visual Studio 2026 (MSVC 14.51)
+since `ec202a7`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
+in `app/windows/CMakeLists.txt`. This machine builds with it, and so does the
+release workflow: a trial run on a throwaway branch with both Windows jobs on
+`windows-latest` (image `windows-2025-vs2026`) passed end to end (gate, build,
+installer smoke test, publish up to the release step). What is left is that the
+define is a silence, not a fix.
 
-The release workflow is pinned to `windows-2022` for that reason. It is a stay of
-execution, not a fix: a machine that only has Visual Studio 2026 cannot build the
-app, and so will the runners once `windows-2022` is retired. `CL=/D_SILENCE_…` in
-the environment would let it compile as an interim, but the plugins still depend on
-a feature Microsoft has announced it will remove.
+- **The plugins.** `flutter_inappwebview_windows` (23 errors without the define) and
+  `flutter_media_session` (2) compile against `<experimental/coroutine>` / `/await`,
+  which the STL now flags as deprecated for removal. When it is removed the define
+  stops helping and the app does not build.
+- **The workflow pin.** `.github/workflows/release.yml` still says `windows-2022`
+  on its two Windows jobs, with a comment above `jobs:` giving the old reason. The
+  trial says it can move to `windows-latest`; that is a two-line change plus
+  deleting the comment, and has not been made. The runners drop `windows-2022`
+  eventually, so it is worth doing before then rather than at the deadline.
+
+**Measured 2026-09-26, first release-workflow build on `windows-latest`** (before the
+define): MSVC 14.51 failed `flutter build windows` with `C2338 … STL1011`. Visual
+Studio 2022 accepts `/await` without it.
 
 **Checked 2026-10-01 (task 30).** Neither plugin has a fix to take.
 
@@ -857,17 +865,17 @@ a feature Microsoft has announced it will remove.
   0.7.0-beta.3, and neither version's `windows/` tree mentions `coroutine`, so the
   23 errors above most likely come in through C++/WinRT's headers under Flutter's
   C++17 mode rather than from the plugin asking for it — an inference, not
-  verified. Visual Studio 2026 is not installed here (`Microsoft Visual
-  Studio\18` holds no toolchain), so no build was tried.
+  verified. (Visual Studio 2026 was not installed on this machine when this was
+  checked, so no build was tried; it is now, see above.)
 - **`flutter_media_session`.** Not ours: published by `wyrin.dev`, repository
   `wyrindev/flutter-media-session`. 3.0.8 (the app is on 3.0.5) still has
   `target_compile_options(... "/await")` at `windows/CMakeLists.txt:45`, so a
   version bump does not help. Needs a patch upstream, a vendored fix, or a
   replacement.
 
-**Done when:** the app builds on a Visual Studio 2026 toolchain without a
+**Done when:** the app builds on a Visual Studio 2026 toolchain without the
 suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
-replacing them.
+replacing them — and the release workflow runs on `windows-latest`.
 
 ### 55. Controls overlay visibility transitions when dialogs open/close
 
