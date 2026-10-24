@@ -6,7 +6,7 @@
 # `bun` leaves $LASTEXITCODE unset, so `exit $LASTEXITCODE` reports success.
 $ErrorActionPreference = 'Stop'
 
-$Subcommands = @('build', 'run', 'open', 'flutter', 'zip', 'check')
+$Subcommands = @('build', 'run', 'open', 'flutter', 'zip', 'check', 'todo')
 $ReleaseDir = 'app\build\windows\x64\runner\Release'
 $ArchiveFile = 'app\build\windows\x64\runner\NativeYouTube.zip'
 
@@ -22,6 +22,8 @@ function Show-Help {
     Write-Host '  flutter  Run ''fvm flutter run --release -d windows'' (lets the Flutter tool drive).'
     Write-Host '  zip      Build, bundle, and Compress-Archive into a zip, then open explorer.'
     Write-Host '  check    Run the test suite guard and the lint gate using the pinned SDK.'
+    Write-Host '  todo     List docs/todo.md, or print items: rill todo [number...] [-s section] [-q text].'
+    Write-Host '           Takes its own arguments; ''rill todo --help'' has them.'
     Write-Host ''
     Write-Host 'Options:'
     Write-Host '  --target <dart file>  Build or run another entrypoint (build, run, flutter, zip).'
@@ -81,6 +83,18 @@ function Start-ReleaseApp([bool]$Detached) {
     # its parent's); -Wait holds the terminal until it exits.
     $proc = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru
     return $proc.ExitCode
+}
+
+# `todo` owns its arguments (-s, -q, item numbers), so it is handed everything
+# after it before the strict parsing below, and needs neither fvm nor the build.
+if ($args.Count -gt 0 -and "$($args[0])" -eq 'todo') {
+    if (-not (Get-Command 'bun' -ErrorAction SilentlyContinue)) {
+        [Console]::Error.WriteLine('rill: bun is not installed or not on PATH; rill todo runs on it.')
+        exit 1
+    }
+    $todoArgs = @($args | Select-Object -Skip 1 | ForEach-Object { "$_" })
+    & bun run (Join-Path $PSScriptRoot 'tools\todo\cli.ts') @todoArgs
+    exit $LASTEXITCODE
 }
 
 # ---------------------------------------------------------------------------
