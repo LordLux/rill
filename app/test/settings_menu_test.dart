@@ -44,7 +44,17 @@ class FakePlayback extends PlaybackController {
   );
 }
 
-const rootPlaceholders = ['Sleep timer', 'Audio track', 'Playback speed'];
+/// A switch to `ladder[2]` that has not finished.
+class SwitchingPlayback extends PlaybackController {
+  @override
+  PlaybackState build() => PlaybackState(
+    source: PlaybackSource(sessionId: 's', durationMs: 100000, variants: ladder),
+    variant: ladder[2],
+    isSwitchingQuality: true,
+  );
+}
+
+const rootPlaceholders =['Sleep timer', 'Audio track', 'Playback speed'];
 const morePlaceholders = ['Audio channel', 'Sticky player', 'Annotations', 'Ambient mode'];
 
 late ProviderContainer container;
@@ -546,6 +556,31 @@ void main() {
           reason: 'nothing above it to go back to');
       expect(find.byIcon(Icons.chevron_left), findsNothing);
       expect(find.byKey(playerQualityHeaderKey), findsOneWidget);
+    });
+
+    testWidgets('shows a spinner, not a tick, on the picked row while the switch is loading', (tester) async {
+      container.read(playerMenuProvider.notifier).go(SettingsPage.quality);
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+      expect(find.byKey(playerQualityLoadingKey), findsNothing, reason: 'nothing is switching');
+
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          playbackProvider.overrideWith(SwitchingPlayback.new),
+          playbackEngineProvider.overrideWithValue(FakeEngine()),
+        ],
+      );
+      container.read(playerMenuProvider.notifier).go(SettingsPage.quality);
+      await tester.pumpWidget(host());
+      // Frames, not `pumpAndSettle`: a spinner animates for as long as it is up.
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byKey(playerQualityLoadingKey), findsOneWidget, reason: 'one row, the picked one');
+      expect(
+        find.descendant(of: find.byKey(playerQualityLoadingKey), matching: find.byType(CircularProgressIndicator)),
+        findsOneWidget,
+      );
     });
 
     testWidgets('stays under the cap, keeps its header, and picks', (tester) async {
