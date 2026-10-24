@@ -7,6 +7,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../domain/playback_source.dart';
 import '../../ui/debug_constants.dart';
+import 'audio_ready.dart';
 
 /// The player, as everything above it is allowed to see it.
 ///
@@ -532,7 +533,12 @@ class MediaKitEngine implements PlaybackEngine {
     if (audioAtLoad) await native.command(['change-list', 'audio-files', 'append', audioUrl]);
     await native.setProperty('vid', audioAtLoad ? 'no' : 'auto');
 
-    await _player.open(Media(variant.videoUrl), play: play);
+    // **The video is opened paused when its audio is still to come** (todo 99): the
+    // audio is a second URL, attached once the duration is known, and starting the
+    // video first played it silent until the sound joined. The first frame still
+    // shows; play starts when the audio decodes, or after a bound (below).
+    final attachAudioAfter = audioUrl != null && !audioAtLoad;
+    await _player.open(Media(variant.videoUrl), play: play && !attachAudioAfter);
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -561,8 +567,22 @@ class MediaKitEngine implements PlaybackEngine {
       await _player.seek(_player.state.duration);
     }
 
-    if (audioUrl != null && !audioAtLoad) {
-      await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+    if (attachAudioAfter) {
+      // Listening starts before the attach, so a fast decode cannot be missed.
+      final decoded = listenForAudio(
+        _player.stream.audioParams.map((params) => (params.sampleRate ?? 0) > 0),
+        _audioReadyTimeout,
+      );
+      try {
+        await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+        if (!await decoded.ready) {
+          // Plays without it rather than holding the picture for a dead URL.
+          stderr.writeln('rill: audio did not decode within ${_audioReadyTimeout.inSeconds}s, playing without waiting');
+        }
+      } finally {
+        decoded.cancel();
+      }
+      if (play) await _player.play();
     }
 
     // Back to what was asked for. Only a muxed variant — no separate audio to
@@ -600,6 +620,9 @@ class MediaKitEngine implements PlaybackEngine {
   /// this is also the value mpv would use anyway. Tracked here because [open]
   /// has to *choose* how to load around it, not just inherit it.
   bool _videoTrackEnabled = true;
+
+  /// How long [open] holds a paused first frame for the audio to decode.
+  static const _audioReadyTimeout = Duration(seconds: 5);
 
   @override
   Future<void> play() {
