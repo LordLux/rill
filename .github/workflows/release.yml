@@ -5,7 +5,9 @@
 #            (release/version holds the setting; each merged PR adds 1 to the minor, any other
 #            commit adds 1 to the patch), so a commit has exactly one version and "is there
 #            anything new" is "does the release for this version exist yet". If it does, the
-#            run stops here. It fails if the version would be below the latest release.
+#            run stops here. It fails if the version would be below the latest release. It also
+#            stops when nothing the app ships has changed since the latest release
+#            (release/release-needed.ts), so a docs commit is not released, nightly or not.
 #   gate     the same checks as a local `rill check` plus the sidecar's `bun run check`.
 #   build    sidecar + Flutter release build + Inno Setup installer, with smoke tests of the
 #            staged sidecar, the installer, and the uninstaller.
@@ -20,13 +22,8 @@ name: release
 on:
   push:
     branches: [main]
-    # An edit to a doc, or to the throwaway folders, rides along with the next code release
-    # instead of cutting an identical installer.
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'scratch/**'
-      - 'spiking/**'
+    # No `paths-ignore`: a schedule run would not honour it, so what does not count as a release
+    # (docs, tools, scratch) is one list, in release/release-needed.ts, asked by the plan job.
   schedule:
     - cron: '0 2 * * *' # daily, 02:00 UTC: retries a release that failed; does nothing if there is none to make
   workflow_dispatch:
@@ -67,12 +64,21 @@ jobs:
       - id: v
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           latest=$(gh release list --limit 1 --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
           version=$(bun release/next-version.ts ${latest:+--latest "$latest"})
           tag="v$version"
           if gh release view "$tag" >/dev/null 2>&1; then exists=true; else exists=false; fi
+          # Nothing shipped has changed since the latest release (a docs or tools commit):
+          # nothing to release, for a push and a schedule alike. A person's dispatch still builds.
+          if [ "$exists" = false ] && [ "$EVENT" != workflow_dispatch ] && [ -n "$latest" ]; then
+            if [ "$(bun release/release-needed.ts --since "$latest")" = false ]; then
+              echo "Nothing shipped has changed since $latest: not releasing $tag"
+              exists=true
+            fi
+          fi
           {
             echo "version=$version"
             echo "tag=$tag"
