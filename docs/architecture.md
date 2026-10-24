@@ -1953,9 +1953,13 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
 `.github/workflows/release.yml`; the pieces it drives are in `release/`.
 
 - **One channel.** There is no nightly/stable split, so a release is just "an
-  update". Every push to `main` that touches more than docs (`docs/`, `*.md`) and the
-  throwaway folders (`scratch/`, `spiking/`) is built and released,
-  about 12 minutes later, and a daily cron retries any release that failed. A
+  update". Every push to `main` that changes something the app ships is built and
+  released, about 12 minutes later, and a daily cron retries any release that failed.
+  "Something the app ships" is decided in one place, `release/release-needed.ts`
+  (not docs, `*.md`, `scratch/`, `spiking/`, `tools/`, the dev shell wrappers and
+  `.mcp.json`), asked by `plan` for a push and a schedule alike (2026-10-24: a
+  `paths-ignore` on the push trigger was not honoured by the nightly run, so a docs
+  commit became v0.12.1); `workflow_dispatch` still builds. A
   release exists only if that commit has no release yet *and* the gate and the
   build both pass. Runs are serialised and GitHub keeps a single waiting run, so two
   merges inside one build's length collapse into one release: that run builds the
