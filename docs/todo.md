@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 100.** A new item takes it, and the same edit bumps this line.
+**Next number: 101.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1233,6 +1233,39 @@ the other sanitised entries, and have the tests read that.
 
 **Done when:** a committed real card is what `music.test.ts` asserts against, on any
 machine.
+
+### 100. Show an update download on the taskbar button's progress bar
+
+The installer is ~100 MB, and while it downloads the only sign is the Updates page,
+so a user who has switched away cannot tell it is happening or when it is done.
+Windows 11's taskbar button has a progress bar for exactly this (`ITaskbarList3`).
+
+- **What exists.** `UpdatePhase.downloading(manifest, received, total)`
+  (`domain/update/update_state.dart`) is already updated as bytes arrive
+  (`update_controller.dart`). The vendored `third_party/windows_taskbar` already
+  exposes `setProgress(completed, total)` and `setProgressMode`, and
+  `ui/taskbar_controller.dart` already drives the thumbnail toolbar, so no new FFI
+  is needed on Windows.
+- **States.** Normal progress while `downloading`; indeterminate for any step after
+  the last byte that has no byte count (a verify, if there is one); the error
+  colour on `UpdatePhase.error`; cleared at `ready`, `installing` and `idle`. Clear
+  it on every path out, or a failed or cancelled download leaves a stuck bar. The yt-dlp download
+  (`data/ytdlp/ytdlp_downloader.dart`) is the same shape and could report through
+  the same thing.
+- **Seam.** The question is whether to hide this behind an interface for a future
+  macOS port (the dock tile has a progress bar too) or to hard-code the taskbar.
+  The repo's idiom for a platform seam is `WindowChrome` with `Win32WindowChrome`
+  and `NoWindowChrome`, chosen by `Platform.isWindows` (`windowChromeProvider`,
+  `ui/player/view_mode.dart`). Recommended: a small `TaskbarProgress` interface
+  (`set(done, total)`, `indeterminate()`, `error()`, `clear()`) with a Windows
+  implementation and a no-op default, which is also what the tests fake. No macOS
+  implementation until there is a macOS build; the interface is a few lines and
+  the controller has to be testable without a taskbar anyway.
+- **Accessibility.** The bar is painted by the shell, not by Flutter, so it adds
+  no semantics node. The Updates page still has to say the progress in words.
+
+**Done when:** a download shows its fraction on the taskbar button, an error shows
+red, and every end state (done, failed, cancelled, app closed) leaves no bar behind.
 
 ---
 
