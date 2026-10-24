@@ -1125,8 +1125,12 @@ The wait is `audio_ready.dart`, tested on its own; **the engine path itself has 
 - **Measure:** with a throttled audio URL, the first frame shows and nothing plays until
   the sound is there; a quality switch mid-video (a reopen) still resumes without a long
   stall; `retainSubtitle` still puts the captions back; a live stream still seeks to the edge.
-- **Assumption to confirm:** mpv fires `audio-params` again after a reopen of the same
-  audio. If it does not, every quality switch would wait out the full 5 s.
+- **The assumption failed, measured by hand 2026-10-23:** mpv does not report `audio-params`
+  again for a reopen of the same audio, so a held quality switch sat out the whole 5 s (and the
+  play button read "Play" meanwhile). Reopens (`switchQuality`, the stalled-stream retry) now
+  pass `holdForAudio: false` and attach the audio as before. Still unknown *why* it does not
+  fire (the property not changing across `loadfile`, or the old audio track being reused), and
+  so whether a quality switch can ever play without a silent moment.
 - **Option 2** (`audio-files` at load, as audio-only does) was never tried; it would remove
   the pause but F15 says `audio-add … select` is the reason video mode attaches afterwards.
 

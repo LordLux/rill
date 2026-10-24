@@ -530,6 +530,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       await _engine.open(
         variant,
         play: true,
+        holdForAudio: false,
         retainSubtitle: true,
         isLive: state.source?.durationMs == null,
       );
@@ -865,7 +866,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // (F19 reopens the media; §2.9). Reattaching inside `engine.open` rather
       // than here puts it after the audio attach, on the same freshly-loaded
       // file, instead of racing the load from out here.
-      await engine.open(variant, play: wasPlaying, retainSubtitle: true, isLive: state.source?.durationMs == null);
+      await engine.open(variant, play: wasPlaying, holdForAudio: false, retainSubtitle: true, isLive: state.source?.durationMs == null);
       if (generation != _generation || _disposed) return;
 
       // **Subscribed before the seek is issued**: `positionStream` is a

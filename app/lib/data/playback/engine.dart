@@ -166,10 +166,17 @@ abstract class PlaybackEngine {
   /// [shouldPlay] is asked at the moment the open would start playing, and a false
   /// answer leaves it paused: [play] is what was wanted when the call was made, and
   /// a pause pressed during the load must win over it.
+  ///
+  /// [holdForAudio] opens a video with separate audio paused until the audio has
+  /// decoded, so it never plays silent (issue #22). **Off for a reopen mid-video**
+  /// (a quality switch, a stalled-stream retry): measured 2026-10-23, mpv did not
+  /// report audio params again for the same audio, so every switch sat out the
+  /// whole bound and the play button showed "Play" meanwhile.
   Future<void> open(
     PlaybackVariant variant, {
     bool play = true,
     bool Function()? shouldPlay,
+    bool holdForAudio = true,
     bool retainSubtitle = false,
     bool isLive = false,
   });
@@ -501,6 +508,7 @@ class MediaKitEngine implements PlaybackEngine {
     PlaybackVariant variant, {
     bool play = true,
     bool Function()? shouldPlay,
+    bool holdForAudio = true,
     bool retainSubtitle = false,
     bool isLive = false,
   }) async {
@@ -555,7 +563,8 @@ class MediaKitEngine implements PlaybackEngine {
     // video first played it silent until the sound joined. The first frame still
     // shows; play starts when the audio decodes, or after a bound (below).
     final attachAudioAfter = audioUrl != null && !audioAtLoad;
-    await _player.open(Media(variant.videoUrl), play: wantPlay() && !attachAudioAfter);
+    final holdPaused = attachAudioAfter && holdForAudio;
+    await _player.open(Media(variant.videoUrl), play: wantPlay() && !holdPaused);
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -584,7 +593,10 @@ class MediaKitEngine implements PlaybackEngine {
       await _player.seek(_player.state.duration);
     }
 
-    if (attachAudioAfter) {
+    if (attachAudioAfter && !holdPaused) {
+      // A reopen mid-video: already playing, so the sound joins when it joins.
+      await _player.setAudioTrack(AudioTrack.uri(audioUrl, title: 'YouTube audio'));
+    } else if (holdPaused) {
       // Listening starts before the attach, so a fast decode cannot be missed.
       final decoded = listenForAudio(
         _player.stream.audioParams.map((params) => (params.sampleRate ?? 0) > 0),

@@ -24,6 +24,9 @@ class FakeEngine implements PlaybackEngine {
 
   /// Every variant handed to [open], in order.
   final List<PlaybackVariant> opened = [];
+
+  /// The `holdForAudio` each [open] was given, parallel to [opened].
+  final List<bool> heldForAudio = [];
   int stopCount = 0;
   int disposeCount = 0;
   final List<Duration> seeks = [];
@@ -144,10 +147,12 @@ class FakeEngine implements PlaybackEngine {
     PlaybackVariant variant, {
     bool play = true,
     bool Function()? shouldPlay,
+    bool holdForAudio = true,
     bool retainSubtitle = false,
     bool isLive = false,
   }) async {
     opened.add(variant);
+    heldForAudio.add(holdForAudio);
     // Exactly `MediaKitEngine`'s behaviour: the reopen drops mpv's external
     // subtitle track, and only `retainSubtitle` puts it back. Modelled here
     // rather than assumed away, because "captions survive a quality switch" is
