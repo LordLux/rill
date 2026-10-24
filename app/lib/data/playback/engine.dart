@@ -553,10 +553,15 @@ class MediaKitEngine implements PlaybackEngine {
     // second audio stream.
     final audioUrl = variant.audioUrl;
     final native = _player.platform as NativePlayer;
-    final audioAtLoad = !_videoTrackEnabled && audioUrl != null;
+    // **Attached at load in video mode too (todo 103).** The timings of an open showed
+    // `audio-add` after the duration costing 2.4 to 3.3 s of every open and every quality
+    // switch, in series with the video, and the same audio at load is read alongside it.
+    // It also means mpv has both streams before it starts, so nothing plays silent.
+    final audioAtLoad = audioUrl != null;
+    final videoOffAtLoad = !_videoTrackEnabled && audioAtLoad;
     await native.command(['change-list', 'audio-files', 'clr', '']);
     if (audioAtLoad) await native.command(['change-list', 'audio-files', 'append', audioUrl]);
-    await native.setProperty('vid', audioAtLoad ? 'no' : 'auto');
+    await native.setProperty('vid', videoOffAtLoad ? 'no' : 'auto');
 
     // **The video is opened paused when its audio is still to come** (issue #22, todo 102): the
     // audio is a second URL, attached once the duration is known, and starting the
