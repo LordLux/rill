@@ -839,20 +839,15 @@ the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
 **Where it stands (2026-10-23).** The app builds on Visual Studio 2026 (MSVC 14.51)
 since `ec202a7`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
 in `app/windows/CMakeLists.txt`. This machine builds with it, and so does the
-release workflow: a trial run on a throwaway branch with both Windows jobs on
-`windows-latest` (image `windows-2025-vs2026`) passed end to end (gate, build,
-installer smoke test, publish up to the release step). What is left is that the
-define is a silence, not a fix.
+release workflow, whose two Windows jobs moved from `windows-2022` to
+`windows-latest` (image `windows-2025-vs2026`) after a trial run passed end to end
+(gate, build, installer smoke test, publish up to the release step). What is left
+is that the define is a silence, not a fix.
 
 - **The plugins.** `flutter_inappwebview_windows` (23 errors without the define) and
   `flutter_media_session` (2) compile against `<experimental/coroutine>` / `/await`,
   which the STL now flags as deprecated for removal. When it is removed the define
   stops helping and the app does not build.
-- **The workflow pin.** `.github/workflows/release.yml` still says `windows-2022`
-  on its two Windows jobs, with a comment above `jobs:` giving the old reason. The
-  trial says it can move to `windows-latest`; that is a two-line change plus
-  deleting the comment, and has not been made. The runners drop `windows-2022`
-  eventually, so it is worth doing before then rather than at the deadline.
 
 **Measured 2026-09-26, first release-workflow build on `windows-latest`** (before the
 define): MSVC 14.51 failed `flutter build windows` with `C2338 … STL1011`. Visual
@@ -875,7 +870,7 @@ Studio 2022 accepts `/await` without it.
 
 **Done when:** the app builds on a Visual Studio 2026 toolchain without the
 suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
-replacing them — and the release workflow runs on `windows-latest`.
+replacing them.
 
 ### 55. Controls overlay visibility transitions when dialogs open/close
 
