@@ -1115,31 +1115,6 @@ items above are done or dropped with a reason.
 
 ---
 
-### 102. Check the audio-before-play fix against the real player
-
-Issue #22 (the old todo 99) is fixed in `MediaKitEngine.open` by the "open paused" option: a video
-with a separate audio URL opens paused, the audio is attached, and play starts once mpv
-reports `audio-params` for it (bounded at 5 s, then it plays without and says so on stderr).
-The wait is `audio_ready.dart`, tested on its own; **the engine path itself has no test**, as
-`MediaKitEngine` is native, and it has not been run against real mpv.
-
-- **Measure:** with a throttled audio URL, the first frame shows and nothing plays until
-  the sound is there; a quality switch mid-video (a reopen) still resumes without a long
-  stall; `retainSubtitle` still puts the captions back; a live stream still seeks to the edge.
-- **The assumption failed, measured by hand 2026-10-23:** mpv does not report `audio-params`
-  again for a reopen of the same audio, so a held quality switch sat out the whole 5 s (and the
-  play button read "Play" meanwhile). Reopens (`switchQuality`, the stalled-stream retry) now
-  pass `holdForAudio: false` and attach the audio as before. Still unknown *why* it does not
-  fire (the property not changing across `loadfile`, or the old audio track being reused), and
-  so whether a quality switch can ever play without a silent moment.
-- **Option 2** (`audio-files` at load, as audio-only does) was never tried; it would remove
-  the pause but F15 says `audio-add … select` is the reason video mode attaches afterwards.
-
-**Done when:** the four measurements are written down in `architecture.md` §2.4 and the
-5 s bound is either confirmed or replaced by what was measured.
-
----
-
 ### 97. `flutter_inappwebview_windows` hangs the process's exit on an Intel GPU
 
 Found 2026-10-21 (`architecture.md` §2.14). After the window is gone the 0.10.x
@@ -1301,26 +1276,29 @@ setting on a manual restart does the same, and with it off a launch is a fresh s
 corrupt or stale snapshot is ignored, never retried; tests cover write, read, the once-only
 apply, and the update marker.
 
-### 103. After a quality switch the audio can still be loading when the picture is back
+### 103. A quality switch takes 4 to 18 s, and most of it is waiting for the network
 
-Reported 2026-10-24, on the controls-while-loading branch: after changing quality the new video has
-loaded, but the spinner keeps turning and playback has not resumed yet, and sometimes the audio is
-the thing still loading (the reporter's reading, not measured). It does resume; it is a wait, not a
-hang. The switch takes 3 to 15 s or more, and **how much of that is the audio is not known**.
+Reported 2026-10-24: after changing quality the new video loads, the spinner keeps turning, and the
+audio is sometimes the thing still loading. It resumes; it is a wait, not a hang.
 
-Likely from the code: a reopen attaches the audio after the video has loaded (`setAudioTrack` in
-`MediaKitEngine.open`, F15: it cannot be earlier), `open` does not return until that is done, and
-`switchQuality` keeps `isSwitchingQuality` (the cover and the spinner) up until `open` has returned
-and the picture is back. So the picture waits on the audio's fetch even though, for a reopen, it
-need not (`holdForAudio: false` already stopped the *hold*, not this).
+**Measured the same day** (`rill: open … timings` and `rill: quality ->` in the log, about twenty switches over three sessions):
+- `engine.open` takes 2.8 to 8.3 s, and the whole of it is two network waits that run one after the
+  other: the video's first bytes (0.4 to 3.5 s) and, until 2026-10-24, `audio-add` (2.4 to 3.3 s more).
+  The audio at load (F59) removed the second step and the silent start, but **did not shorten the
+  open**: mpv now holds it until the slower of the two streams is there, so it ends in the same 3.6
+  to 8.3 s. The cost is the first byte of each googlevideo stream, not how the audio is attached.
+- After the reopen, `switchQuality` seeks back and waits for the picture: 0.3 to 3 s when resuming
+  near the start, 6 to 12 s when resuming at 20 s to 7 min (a far seek has to fetch from the middle
+  of both streams). Nothing in the log says how much of that is the audio.
 
-**To find out:** time the pieces of one switch from the log (reopen issued, duration known, audio
-attached, first frame, cover cleared), over a few dozen switches and on a throttled connection. Then
-either clear the cover when the picture is back and let the audio join (the sound is briefly
-missing, as it was before the audio-before-play change), or keep waiting and say what for.
+**What could still shorten it** (none tried): a pause the viewer can see (the spinner on the picked
+quality row, done) is the cheap part; the rest is the waits themselves. Candidates are reusing the
+connection to the same host, `video-add` on the playing file instead of a reopen (the orchestrator's
+spike: the audio keeps playing, only the video changes), or a second player that swaps when ready
+(heavy: F51's `GlobalKey` hazard, double bandwidth).
 
-**Done when:** the timings are written down in `architecture.md` and the cover no longer waits on
-anything the viewer cannot see, or waits on it deliberately.
+**Done when:** a switch either gets measurably faster by one of the above, or the wait is shown for
+what it is and left.
 
 ### 104. Adding a video to Watch Later answered HTTP 400
 
