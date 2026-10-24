@@ -1,0 +1,20 @@
+{
+  "name": "nativeyoutube-todo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only view of docs/todo.md: the `rill todo` CLI and an MCP server.",
+  "scripts": {
+    "mcp": "bun run mcp.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rill-todo": {
+      "command": "bun",
+      "args": ["run", "tools/todo/mcp.ts"]
+    }
+  }
+}
