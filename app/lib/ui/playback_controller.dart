@@ -63,6 +63,7 @@ class PlaybackState {
     this.sessionId,
     this.isLoading = false,
     this.wantPlaying = true,
+    this.preferredHeight,
     this.isSwitchingQuality = false,
     this.isRestoringVideo = false,
     this.hold,
@@ -89,6 +90,10 @@ class PlaybackState {
   /// so the video opens paused on its first frame. The play button shows this,
   /// not the engine's state, for as long as the open is in flight (todo 98).
   final bool wantPlaying;
+
+  /// The height the viewer last chose, for the quality menu to mark while a video is
+  /// still opening and has no ladder to mark (todo 98). Null until something is chosen.
+  final int? preferredHeight;
 
   /// A quality change in flight. Distinct from [isLoading] because it must not
   /// draw the "opening a video" spinner over a video that is already playing.
@@ -198,6 +203,7 @@ class PlaybackState {
     Object? sessionId = _unchanged,
     bool? isLoading,
     bool? wantPlaying,
+    Object? preferredHeight = _unchanged,
     bool? isSwitchingQuality,
     bool? isRestoringVideo,
     Object? hold = _unchanged,
@@ -216,6 +222,7 @@ class PlaybackState {
       sessionId: identical(sessionId, _unchanged) ? this.sessionId : sessionId as String?,
       isLoading: isLoading ?? this.isLoading,
       wantPlaying: wantPlaying ?? this.wantPlaying,
+      preferredHeight: identical(preferredHeight, _unchanged) ? this.preferredHeight : preferredHeight as int?,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
       isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
@@ -422,6 +429,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       isLoading: true,
       // A new video starts playing unless the viewer pauses during the load.
       wantPlaying: true,
+      // What the quality menu marks while there is no ladder yet.
+      preferredHeight: _preferredHeight,
       isSwitchingQuality: false,
       // **A restore belongs to the media it started on.** Without this, a
       // restore still waiting when a different video opens keeps the flag up
@@ -503,6 +512,13 @@ class PlaybackController extends Notifier<PlaybackState> {
       _reportTimer = Timer.periodic(reportInterval, (_) => unawaited(_report(null)));
 
       _armStallWatchdog(generation, variant);
+
+      // A quality picked while the engine was opening the one chosen before it: a normal
+      // switch to it now, since the open in flight cannot be changed (todo 98).
+      final wanted = variantFor(source.variants, _preferredHeight);
+      if (wanted != null && _preferredHeight != null && (wanted.height != variant.height || wanted.fps != variant.fps)) {
+        unawaited(switchQuality(wanted));
+      }
     } on RpcException catch (e) {
       if (generation != _generation || _disposed) return;
       await _failOpen(e.message, e.retry, code: e.code);
@@ -824,6 +840,16 @@ class PlaybackController extends Notifier<PlaybackState> {
     return _engine.setVolume(restored > 0 ? restored : 100);
   }
 
+  /// A quality chosen while the video is still opening, when there is no ladder to choose
+  /// from yet (todo 98). It is the height `open` picks the rung for when `playback.open`
+  /// answers; one chosen after that, while the engine is loading, is switched to once the
+  /// load is done.
+  void chooseHeightWhileLoading(int height) {
+    if (!state.isLoading) return;
+    _preferredHeight = height;
+    state = state.copyWith(preferredHeight: height);
+  }
+
   /// Switch quality without reopening the *video*.
   ///
   /// **No RPC** (§3.5): asking the sidecar again would mint a second session for
@@ -853,6 +879,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
     state = state.copyWith(
       variant: variant,
+      preferredHeight: variant.height,
       isSwitchingQuality: !hideCover,
       // Set *before* the reopen, not after: `engine.open` resets the position
       // **and the duration** to zero on its way in, and anything watching would

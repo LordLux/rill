@@ -273,11 +273,15 @@ class _SettingsMenuFadeState extends State<SettingsMenuFade> {
 /// [settingsMenuMaxHeight] and again at whatever the player box allows, so a
 /// 22-rung ladder in a short window scrolls instead of running off the top.
 class PlayerSettingsMenu extends ConsumerStatefulWidget {
-  const PlayerSettingsMenu({super.key, required this.onPicked});
+  const PlayerSettingsMenu({super.key, required this.onPicked, this.onPickedHeight});
 
   /// A quality was chosen. The caller closes the menu and wakes the controls —
   /// this widget does not reach for either.
   final ValueChanged<PlaybackVariant> onPicked;
+
+  /// A height was chosen while the video is still opening and there is no ladder to
+  /// pick a rung from (todo 98). Same contract as [onPicked].
+  final ValueChanged<int>? onPickedHeight;
 
   @override
   ConsumerState<PlayerSettingsMenu> createState() => _PlayerSettingsMenuState();
@@ -353,7 +357,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
       child: switch (page) {
         SettingsPage.root => const _RootPage(),
         SettingsPage.moreOptions => const _MoreOptionsPage(),
-        SettingsPage.quality => _QualityPage(onPicked: widget.onPicked),
+        SettingsPage.quality => _QualityPage(onPicked: widget.onPicked, onPickedHeight: widget.onPickedHeight),
         SettingsPage.captions => const _CaptionsPage(),
         SettingsPage.captionStyle => const CaptionStylePage(),
         SettingsPage.forceStyle => const _ForceStylePage(),
@@ -783,10 +787,15 @@ class _CaptionRow extends StatelessWidget {
   }
 }
 
+/// The heights offered while a video is still opening, before its ladder exists. Not
+/// every video has all of them: the open takes the best rung at or under the one picked.
+const List<int> openingHeights = [2160, 1440, 1080, 720, 480, 360, 240, 144];
+
 class _QualityPage extends ConsumerWidget {
-  const _QualityPage({required this.onPicked});
+  const _QualityPage({required this.onPicked, this.onPickedHeight});
 
   final ValueChanged<PlaybackVariant> onPicked;
+  final ValueChanged<int>? onPickedHeight;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -816,6 +825,25 @@ class _QualityPage extends ConsumerWidget {
         },
       ),
       children: [
+        // No ladder yet: the heights it could have, applied when the video opens.
+        if (variants.isEmpty && playback.isLoading) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            child: Text(
+              'Applies when the video opens',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          ),
+          for (final height in openingHeights)
+            _QualityRow(
+              key: ValueKey('player-quality-opening-$height'),
+              variant: null,
+              height: height,
+              label: '${height}p',
+              selected: playback.preferredHeight == height,
+              onTap: () => onPickedHeight?.call(height),
+            ),
+        ],
         for (final variant in variants)
           _QualityRow(
             variant: variant,
@@ -1071,9 +1099,20 @@ class _MenuRow extends StatelessWidget {
 /// badge field on `PlaybackVariant` would be the UI asking the protocol to hold
 /// its opinions for it.
 class _QualityRow extends StatelessWidget {
-  const _QualityRow({required this.variant, required this.selected, required this.onTap, this.label, this.loading = false});
+  const _QualityRow({
+    super.key,
+    required this.variant,
+    required this.selected,
+    required this.onTap,
+    this.label,
+    this.loading = false,
+    this.height,
+  });
 
   final PlaybackVariant? variant;
+
+  /// The height a row without a [variant] stands for, for its badge.
+  final int? height;
   final bool selected;
 
   /// A switch to this quality is still in flight: the selected row shows a spinner
@@ -1095,7 +1134,8 @@ class _QualityRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final badge = variant == null ? null : _badge(variant!.height);
+    final badgeHeight = variant?.height ?? height;
+    final badge = badgeHeight == null ? null : _badge(badgeHeight);
 
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
