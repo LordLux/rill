@@ -334,7 +334,7 @@ cd app && fvm flutter run -d windows   # debug build with hot reload
 rill build                      # compile sidecar and app, bundle, and stop (needs `nuget` on PATH: winget install Microsoft.NuGet)
 rill run                        # build, bundle, then launch the exe in this terminal
 rill open                       # launch the last release build as-is, no build
-rill check                      # flutter test guard + lint gate
+rill check                      # todo file check + flutter test guard + lint gate
 rill todo [n...] [-s soon] [-q text]   # read docs/todo.md: index, items by number, search
 # run `rill --help` for the full surface; `rill` works from any directory
 ```
