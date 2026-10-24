@@ -30,6 +30,9 @@ const Key playerSettingsBackKey = ValueKey('player-settings-back');
 /// The decoded height, on the quality page's header.
 const Key playerQualityHeaderKey = ValueKey('player-quality-header');
 
+/// The spinner on the selected quality row while a switch to it is in flight.
+const Key playerQualityLoadingKey = ValueKey('player-quality-loading');
+
 /// The caption page and its Off row — `player_captions_test.dart` finds them by
 /// these rather than by label, so wording changes do not break the suite.
 const Key playerCaptionsMenuKey = ValueKey('player-captions-menu');
@@ -821,6 +824,8 @@ class _QualityPage extends ConsumerWidget {
             // the menu is showing the first would be a menu with no current
             // entry at all.
             selected: current != null && variant.height == current.height && variant.fps == current.fps,
+            // The tick moves to the picked row at once, before that quality has loaded.
+            loading: playback.isSwitchingQuality,
             onTap: () => onPicked(variant),
           ),
         // **Last, and deliberately dead** (task §3): automatic stepping needs a
@@ -1066,10 +1071,14 @@ class _MenuRow extends StatelessWidget {
 /// badge field on `PlaybackVariant` would be the UI asking the protocol to hold
 /// its opinions for it.
 class _QualityRow extends StatelessWidget {
-  const _QualityRow({required this.variant, required this.selected, required this.onTap, this.label});
+  const _QualityRow({required this.variant, required this.selected, required this.onTap, this.label, this.loading = false});
 
   final PlaybackVariant? variant;
   final bool selected;
+
+  /// A switch to this quality is still in flight: the selected row shows a spinner
+  /// where its tick is, so it does not claim a quality that is not playing yet.
+  final bool loading;
   final VoidCallback? onTap;
 
   /// For the rows that are not a variant at all — currently only *Auto*.
@@ -1092,14 +1101,27 @@ class _QualityRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
         children: [
-          Icon(
-            Icons.check,
-            size: 16,
-            // Transparent rather than absent: a tick that appears and
-            // disappears shifts every label sideways, so the marked row is the
-            // one that does not move.
-            color: selected ? scheme.primary : Colors.transparent,
-          ),
+          if (selected && loading)
+            // The same 16 px slot as the tick, so the label does not move.
+            ExcludeSemantics(
+              child: SizedBox.square(
+                key: playerQualityLoadingKey,
+                dimension: 16,
+                child: Padding(
+                  padding: const EdgeInsets.all(1),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: scheme.primary),
+                ),
+              ),
+            )
+          else
+            Icon(
+              Icons.check,
+              size: 16,
+              // Transparent rather than absent: a tick that appears and
+              // disappears shifts every label sideways, so the marked row is the
+              // one that does not move.
+              color: selected ? scheme.primary : Colors.transparent,
+            ),
           const SizedBox(width: 8),
           Text(
             label ?? describeVariant(variant!),
