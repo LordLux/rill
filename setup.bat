@@ -58,6 +58,19 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 
+where bun >nul 2>nul
+if errorlevel 1 (
+  echo Bun is not installed, so the todo MCP server has no dependencies. Skipping; rill todo still needs bun.
+) else (
+  echo Installing todo tool dependencies ^(only the MCP server needs them^)...
+  cd /d "%~dp0tools\todo"
+  call bun install
+  if errorlevel 1 (
+    echo Failed to install todo tool dependencies.
+    exit /b %errorlevel%
+  )
+)
+
 echo.
 echo Setup complete. The repo is ready to open in VS Code / run the app.
 endlocal
