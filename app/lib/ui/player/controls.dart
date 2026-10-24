@@ -667,7 +667,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             hold: playback.hold,
             source: playback.source,
             audioOnly: isAudioOnly,
-            enabled: !playback.isUnplayable,
+            enabled: !playback.isUnplayable && !playback.isLoading,
             onDrag: (value) {
               setState(() => _dragging = value);
               _wake();
@@ -804,7 +804,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             hold: playback.hold,
             source: playback.source,
             audioOnly: true,
-            enabled: !playback.isUnplayable,
+            enabled: !playback.isUnplayable && !playback.isLoading,
             onDrag: (value) {
               setState(() => _dragging = value);
               _wake();
@@ -895,7 +895,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
               hold: playback.hold,
               source: playback.source,
               audioOnly: isAudioOnly,
-              enabled: !playback.isUnplayable,
+              enabled: !playback.isUnplayable && !playback.isLoading,
               onDrag: (value) {
                 setState(() => _dragging = value);
                 _wake();
@@ -2022,7 +2022,11 @@ class _TransportControls extends ConsumerWidget {
           stream: engine.playingStream,
           initialData: engine.playing,
           builder: (context, snapshot) {
-            final playing = snapshot.data ?? false;
+            // While a video opens the engine has nothing to report, so the button
+            // shows what the viewer asked for (todo 98).
+            final loading = ref.watch(playbackProvider.select((p) => p.isLoading));
+            final wantPlaying = ref.watch(playbackProvider.select((p) => p.wantPlaying));
+            final playing = loading ? wantPlaying : (snapshot.data ?? false);
             return buildHoverable(
               _ControlIcon(
                 iconKey: playerPlayPauseKey,

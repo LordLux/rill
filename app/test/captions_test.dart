@@ -289,6 +289,18 @@ void main() {
       expect(engine.subtitle, isNull);
     });
 
+    test('does not hold the picture for the audio to decode again', () async {
+      // Measured 2026-10-23: mpv does not report audio params again for the same
+      // audio, so a held reopen sat out its whole 5 s bound on every switch.
+      await play('vid1');
+      expect(engine.heldForAudio.last, isTrue, reason: 'a fresh open does hold (issue #22)');
+
+      final variants = container.read(playbackProvider).variants;
+      await container.read(playbackProvider.notifier).switchQuality(variants[2]);
+      await settle();
+      expect(engine.heldForAudio.last, isFalse);
+    });
+
     test('no captions attached means nothing to restore, and no error', () async {
       await play('vid1');
       final variants = container.read(playbackProvider).variants;
