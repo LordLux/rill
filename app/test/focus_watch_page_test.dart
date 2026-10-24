@@ -479,22 +479,84 @@ void main() {
       finish();
     });
 
-    testWidgets('Space after a click on a control presses that control, once, and does not pause', (tester) async {
-      await openWatch(tester);
+    // Space presses a focused control only while its ring shows (the keyboard put focus there);
+    // after a click, which draws no ring, it is the pause key. Exactly one of the two acts on a
+    // press. A handled key still reaches the focus tree, so with both acting, click Like and
+    // press Space paused the video and took the like off.
+    Future<void> clickAndSettle(WidgetTester tester, Finder target) async {
+      await tester.tap(target);
+      await tester.pump();
+      await settleReal(tester);
+    }
+
+    testWidgets('click Next, then Space: paused, and no second skip', (tester) async {
+      // Weak as a rule test: the control bar unmounts while the next video loads (`todo.md` 98),
+      // so Next has already lost focus by the time Space arrives, and the two rules cannot be
+      // told apart here. The Like test below is the one that can; this one will start to
+      // mean something once the controls stay up through a load.
+      await openWatch(tester, alsoQueue: ['vid-2', 'vid-3']);
       engine.setPlaying(true);
 
-      // The click focuses Mute (`FocusRing`). Space is then the key that presses it, as
-      // anywhere; the player used to take it for pause as well, because a handled key
-      // still reaches the focus tree: click Like, press Space, and the like came off.
-      await tester.tap(find.byKey(playerMuteKey));
-      await tester.pump();
-      await tester.pump();
-      final volumesAfterClick = engine.volumes.length;
+      await clickAndSettle(tester, find.byKey(playerNextKey));
+      expect(container.read(queueProvider).current?.id, 'vid-2', reason: 'the click skipped once');
+      engine.setPlaying(true);
+
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
       await tester.pump();
 
-      expect(engine.playing, isTrue, reason: 'Space did not pause: a control had it');
-      expect(engine.volumes.length, volumesAfterClick + 1, reason: 'and pressed Mute exactly once');
+      expect(engine.playing, isFalse, reason: 'Space paused it');
+      expect(container.read(queueProvider).current?.id, 'vid-2', reason: 'and did not press Next again');
+      finish();
+    });
+
+    testWidgets('click Like, then Space: paused, and the like stays', (tester) async {
+      await openWatch(tester);
+      engine.setPlaying(true);
+
+      await clickAndSettle(tester, find.byIcon(Icons.thumb_up_outlined));
+      expect(find.byIcon(Icons.thumb_up), findsOneWidget, reason: 'the click liked it');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      await settleReal(tester);
+
+      expect(engine.playing, isFalse, reason: 'Space paused it');
+      expect(find.byIcon(Icons.thumb_up), findsOneWidget, reason: 'and did not take the like off');
+      finish();
+    });
+
+    testWidgets('Tab to Like, then Space: Like is pressed, and nothing pauses', (tester) async {
+      await openWatch(tester);
+      engine.setPlaying(true);
+
+      var seen = <String>[];
+      while (seen.length < 40 && (seen.isEmpty || seen.last != 'Like')) {
+        seen += await tabThrough(tester, 1);
+      }
+      expect(seen.last, 'Like');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      await settleReal(tester);
+
+      expect(find.byIcon(Icons.thumb_up), findsOneWidget, reason: 'Space pressed Like');
+      expect(engine.playing, isTrue, reason: 'and did not pause');
+      finish();
+    });
+
+    testWidgets('click Like, Tab on, then Space: the control Tab reached is pressed', (tester) async {
+      await openWatch(tester);
+      engine.setPlaying(true);
+
+      await clickAndSettle(tester, find.byIcon(Icons.thumb_up_outlined));
+      expect(await tabThrough(tester, 1), ['Dislike'], reason: 'Tab goes on from the clicked control');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      await settleReal(tester);
+
+      expect(find.byIcon(Icons.thumb_down), findsOneWidget, reason: 'Space pressed Dislike');
+      expect(engine.playing, isTrue, reason: 'and did not pause');
       finish();
     });
 
