@@ -1101,9 +1101,11 @@ Tests: `loading_controls_test.dart`.
 - **The request in flight is not cancelled.** `open` uses `call`, not `callCancelable`, and the
   sidecar's `playback.open` ignores the abort signal anyway, so a skipped video still resolves
   and costs a session that is never reported. Both ends need it.
-- **Not tried in the live app,** and the semantics probe has not been re-run (`RILL_SEMANTICS_PROBE=1`
-  and `RILL_FOCUS_PROBE=watch`, as two runs): the bar now mounts on a page that is still
-  swapping its surface, which is the shape that has frozen the accessibility bridge before.
+- **Probes clean, a person has not tried it.** `RILL_SEMANTICS_PROBE=1` and `RILL_FOCUS_PROBE=watch`
+  (two runs, release build, 2026-10-23): 0 `AXTree` errors and 0 `Nodes left pending` in both,
+  all 25 semantics steps ran including 7g–7k, no `OFFSCREEN` or `NAMELESS` stops. The probes open
+  videos, so the bar mounts through a load in them, but they never press anything *during* one,
+  and cannot see a Narrator started after the app. Both need a person.
 - **A wanted-state object** for muted / quality / captions, if those ever need to survive an open;
   today only `wantPlaying` does.
 
