@@ -1089,11 +1089,14 @@ load (the fullscreen layer already did), and:
 Tests: `loading_controls_test.dart`.
 
 **Left:**
-- **Quality and captions during the load** (wanted again 2026-10-24: a quality can't be changed
-  until the first one has loaded). The quality menu lists the ladder, which does not
-  exist until `playback.open` answers, so it stays disabled; choosing a height up front would
-  need the preference offered without a ladder. Captions are a preference the open applies
-  when it gets there, and have not been checked.
+- **Quality during the load: done 2026-10-24, in a plain form.** The quality button is enabled while
+  a video opens and its menu offers the standard heights ("Applies when the video opens"); the one
+  picked is the height `open` takes the rung for when `playback.open` answers
+  (`chooseHeightWhileLoading`), and one picked while the engine is already opening another is
+  switched to once that has opened, since the open in flight cannot be changed. So a pick made late
+  costs a load and a switch. The menu offers heights this video may not have (the open takes the
+  best rung at or under it). **Captions during the load are not checked:** a preference the open
+  applies when it gets there, if it does.
 - **The request in flight is not cancelled.** `open` uses `call`, not `callCancelable`, and the
   sidecar's `playback.open` ignores the abort signal anyway, so a skipped video still resolves
   and costs a session that is never reported. Both ends need it.
