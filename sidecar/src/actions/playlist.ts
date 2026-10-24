@@ -46,6 +46,10 @@ export async function addToPlaylist(
       actions: [{ action: 'ACTION_ADD_VIDEO', addedVideoId: videoId }],
     });
   } catch (error) {
+    // youtubei.js keeps the response body on `info`; the message alone says only
+    // "status code 400", which cannot be told apart from an expired cookie.
+    const info = (error as { info?: unknown } | null)?.info;
+    if (typeof info === 'string' && info !== '') log.warn(`add ${videoId} to ${playlistId}: ${info.slice(0, 400)}`);
     throw new RpcError(
       'UPSTREAM_ERROR',
       `could not add ${videoId} to ${playlistId}: ${messageOf(error)}`,

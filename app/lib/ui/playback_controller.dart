@@ -62,6 +62,7 @@ class PlaybackState {
     this.variant,
     this.sessionId,
     this.isLoading = false,
+    this.wantPlaying = true,
     this.isSwitchingQuality = false,
     this.isRestoringVideo = false,
     this.hold,
@@ -83,6 +84,11 @@ class PlaybackState {
 
   final String? sessionId;
   final bool isLoading;
+
+  /// What the viewer wants while [isLoading]: false once they pressed pause,
+  /// so the video opens paused on its first frame. The play button shows this,
+  /// not the engine's state, for as long as the open is in flight (todo 98).
+  final bool wantPlaying;
 
   /// A quality change in flight. Distinct from [isLoading] because it must not
   /// draw the "opening a video" spinner over a video that is already playing.
@@ -191,6 +197,7 @@ class PlaybackState {
     Object? variant = _unchanged,
     Object? sessionId = _unchanged,
     bool? isLoading,
+    bool? wantPlaying,
     bool? isSwitchingQuality,
     bool? isRestoringVideo,
     Object? hold = _unchanged,
@@ -208,6 +215,7 @@ class PlaybackState {
       variant: identical(variant, _unchanged) ? this.variant : variant as PlaybackVariant?,
       sessionId: identical(sessionId, _unchanged) ? this.sessionId : sessionId as String?,
       isLoading: isLoading ?? this.isLoading,
+      wantPlaying: wantPlaying ?? this.wantPlaying,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
       isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
@@ -412,6 +420,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       variant: null,
       sessionId: null,
       isLoading: true,
+      // A new video starts playing unless the viewer pauses during the load.
+      wantPlaying: true,
       isSwitchingQuality: false,
       // **A restore belongs to the media it started on.** Without this, a
       // restore still waiting when a different video opens keeps the flag up
@@ -456,7 +466,9 @@ class PlaybackController extends Notifier<PlaybackState> {
       // and dropping it afterwards (see `MediaKitEngine.open`).
       final audioOnlyAtOpen = ref.read(audioModeProvider);
       await _engine.setVideoTrack(!audioOnlyAtOpen);
-      await _engine.open(variant, isLive: source.durationMs == null);
+      // `shouldPlay`, not a snapshot: a pause pressed while the engine is still
+      // loading has to win over the `play` the engine would otherwise end with.
+      await _engine.open(variant, isLive: source.durationMs == null, play: state.wantPlaying, shouldPlay: () => state.wantPlaying);
       if (generation != _generation || _disposed) return;
 
       // Re-read after the await: the user may have toggled audio-only while the
@@ -475,7 +487,8 @@ class PlaybackController extends Notifier<PlaybackState> {
         sessionId: source.sessionId,
         isLoading: false,
       );
-      _lastReportedPlaying = true;
+      final startedPlaying = state.wantPlaying;
+      _lastReportedPlaying = startedPlaying;
 
       // The undo's restored position, if one is pending. After the engine has
       // the media open, so the seek has something to seek in.
@@ -485,7 +498,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
       // Immediately, not on the first tick: this is the report that registers
       // the view at all, and a 15 s wait would lose every short watch.
-      unawaited(_report('playing'));
+      unawaited(_report(startedPlaying ? 'playing' : 'paused'));
       _reportTimer?.cancel();
       _reportTimer = Timer.periodic(reportInterval, (_) => unawaited(_report(null)));
 
@@ -517,6 +530,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       await _engine.open(
         variant,
         play: true,
+        holdForAudio: false,
         retainSubtitle: true,
         isLive: state.source?.durationMs == null,
       );
@@ -706,7 +720,19 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// on no media. The controls are disabled to match; this is what keeps the
   /// keyboard, the taskbar and the media keys — which have no disabled look to
   /// show — from acting on a video that is not there.
-  Future<void> togglePlayPause() => state.isUnplayable ? Future<void>.value() : _engine.playOrPause();
+  Future<void> togglePlayPause() {
+    if (state.isUnplayable) return Future<void>.value();
+    if (state.isLoading) return setPlaying(!state.wantPlaying);
+    return _engine.playOrPause();
+  }
+
+  /// While a video is still opening there is no media to play or pause, so a press
+  /// records what the viewer wants and the open applies it (todo 98). A pause also
+  /// stops whatever the engine is still holding from the previous video.
+  Future<void> _wantWhileLoading(bool value) {
+    state = state.copyWith(wantPlaying: value);
+    return value ? Future<void>.value() : _engine.pause();
+  }
 
   /// Seek, and move the hold with it if one is up.
   ///
@@ -716,7 +742,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// it the scrubber would spring back to the held value the instant the user
   /// let go, which is worse than the snap-to-zero the hold exists to prevent.
   Future<void> seek(Duration to) {
-    if (state.isUnplayable) return Future<void>.value();
+    // Nothing to seek in until the open has finished.
+    if (state.isUnplayable || state.isLoading) return Future<void>.value();
     final held = state.hold;
     if (held != null) state = state.copyWith(hold: held.at(to));
     return _engine.seek(to);
@@ -732,6 +759,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// already paused. Restoring a recorded value has no such race.
   Future<void> setPlaying(bool value) {
     if (state.isUnplayable) return Future<void>.value();
+    if (state.isLoading) return _wantWhileLoading(value);
     return value ? _engine.play() : _engine.pause();
   }
 
@@ -760,7 +788,8 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// The `,` and `.` keys. One frame, from the decoder rather than from
   /// arithmetic — see [PlaybackEngine.stepFrame].
-  Future<void> stepFrame(int direction) => state.isUnplayable ? Future<void>.value() : _engine.stepFrame(direction);
+  Future<void> stepFrame(int direction) =>
+      state.isUnplayable || state.isLoading ? Future<void>.value() : _engine.stepFrame(direction);
 
   /// The 0–9 keys: jump to that decile of the video.
   Future<void> seekToFraction(double fraction) {
@@ -837,7 +866,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // (F19 reopens the media; §2.9). Reattaching inside `engine.open` rather
       // than here puts it after the audio attach, on the same freshly-loaded
       // file, instead of racing the load from out here.
-      await engine.open(variant, play: wasPlaying, retainSubtitle: true, isLive: state.source?.durationMs == null);
+      await engine.open(variant, play: wasPlaying, holdForAudio: false, retainSubtitle: true, isLive: state.source?.durationMs == null);
       if (generation != _generation || _disposed) return;
 
       // **Subscribed before the seek is issued**: `positionStream` is a
