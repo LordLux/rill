@@ -564,7 +564,11 @@ class MediaKitEngine implements PlaybackEngine {
     // shows; play starts when the audio decodes, or after a bound (below).
     final attachAudioAfter = audioUrl != null && !audioAtLoad;
     final holdPaused = attachAudioAfter && holdForAudio;
+    // Where an open spends its time, one line at the end (todo 103). Timed from
+    // here, so the property writes above are not in it.
+    final clock = Stopwatch()..start();
     await _player.open(Media(variant.videoUrl), play: wantPlay() && !holdPaused);
+    final loadfileMs = clock.elapsedMilliseconds;
 
     if (_player.state.duration <= Duration.zero) {
       // **Whichever comes first: a duration, or mpv saying the stream is dead.**
@@ -588,6 +592,8 @@ class MediaKitEngine implements PlaybackEngine {
         }),
       ]).timeout(const Duration(seconds: 20));
     }
+
+    final durationMs = clock.elapsedMilliseconds;
 
     if (isLive && _player.state.duration > Duration.zero) {
       await _player.seek(_player.state.duration);
@@ -623,7 +629,14 @@ class MediaKitEngine implements PlaybackEngine {
     // After the audio, not before: both go through `sub-add`/`audio-add` against
     // a freshly loaded file, and attaching a subtitle to a file whose duration is
     // not known yet is the same race the audio wait above exists for.
+    final audioMs = clock.elapsedMilliseconds;
     if (retained != null) await setSubtitle(retained);
+    // Cumulative, in the order they happen: the gap between two is the step.
+    stderr.writeln(
+      'rill: open ${variant.height}p timings (cumulative): loadfile ${loadfileMs}ms, '
+      'duration ${durationMs}ms, audio ${audioMs}ms, done ${clock.elapsedMilliseconds}ms '
+      '(hold=$holdPaused, audio=${audioUrl != null ? (audioAtLoad ? 'at load' : 'after') : 'none'})',
+    );
   }
 
   /// Toggle mpv's video track on or off — see [PlaybackEngine.setVideoTrack].
