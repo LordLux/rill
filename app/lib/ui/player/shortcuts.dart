@@ -101,22 +101,38 @@ bool textEntryHasFocus() {
   return context.findAncestorWidgetOfExactType<EditableText>() != null;
 }
 
-/// Whether a control that handles Space has focus.
-///
-/// The player's handler is global and runs before the focus tree, so without
-/// this a focused button never sees Space — it would pause the video instead,
-/// and a control reached by Tab could not be pressed with the key that presses
-/// it. **However it got focus, by Tab or by a click** (changed 2026-10-23): a
-/// handled key still reaches the focus tree, so a control left to the player's
-/// Space was pressed *and* the video paused — click Like, press Space, and the
-/// like came off. A click on the picture or the background focuses nothing (and
-/// drops a control's focus, `FocusRing`), so Space after one still pauses. `k`
-/// pauses either way, and no other key is touched.
-bool keyboardFocusHandlesActivate() {
+/// Whether a focused control has an enabled `Activate` action: the thing Space presses.
+bool _focusedControlActivates() {
   final context = FocusManager.instance.primaryFocus?.context;
   if (context == null) return false;
   final action = Actions.maybeFind<ActivateIntent>(context);
   return action != null && action.isEnabled(const ActivateIntent());
+}
+
+/// Whether the keyboard user has Tabbed onto a control that handles Space.
+///
+/// The player's handler is global and runs before the focus tree, so without
+/// this a focused button never sees Space — it would pause the video instead,
+/// and a control reached by Tab could not be pressed with the key that presses
+/// it. **Only for focus the ring shows** (`highlightMode` is `traditional`, which
+/// is what the keyboard sets and any pointer press ends): Space presses the
+/// control, and pauses nothing. After a click there is no ring, and Space is the
+/// pause key (below). `k` pauses either way, and no other key is touched.
+bool keyboardFocusHandlesActivate() {
+  if (FocusManager.instance.highlightMode != FocusHighlightMode.traditional) return false;
+  return _focusedControlActivates();
+}
+
+/// A click focuses the control under it (`FocusRing`) and shows no ring, so Space after one is
+/// the pause key. **Exactly one of the two acts on a press:** a key the player handles still
+/// reaches the focus tree, so the clicked control would be pressed as well, and clicking Like
+/// and pressing Space paused the video *and* took the like off. Focus is taken off the control
+/// and the change applied now, before the tree sees this key, rather than in the microtask
+/// Flutter defers it to.
+void _releaseClickFocusForSpace() {
+  if (!_focusedControlActivates()) return;
+  FocusManager.instance.primaryFocus?.unfocus();
+  FocusManager.instance.applyFocusChangesIfNeeded();
 }
 
 bool _isArrow(LogicalKeyboardKey key) =>
@@ -310,6 +326,9 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
     // Nothing to control. Returning false leaves the key to the rest of the app
     // rather than swallowing every space bar on a page with no video on it.
     if (ref.read(playbackProvider).item == null) return false;
+
+    // Space is about to pause, and no control the keyboard walked onto has it: see above.
+    if (event.logicalKey == LogicalKeyboardKey.space) _releaseClickFocusForSpace();
 
     return _dispatch(shortcut);
   }

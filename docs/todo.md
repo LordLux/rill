@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 100.** A new item takes it, and the same edit bumps this line.
+**Next number: 101.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -834,21 +834,29 @@ pinned Bun moves (and the sidecar is re-measured: the ~6.3 s `bun run` cold star
 the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
 1.1.42 reads — and the workflow's two-step Bun install collapses into one.
 
-### 51. Two Windows plugins do not build on Visual Studio 2026
+### 51. Two Windows plugins still use a feature Microsoft will remove
 
-**Measured 2026-09-26, first release-workflow build on `windows-latest`.** MSVC
-14.51 (Visual Studio 2026, `Microsoft Visual Studio\18`) fails `flutter build windows`
-with `C2338 … STL1011`: its STL now rejects `<experimental/coroutine>` and the
-`/await` option unless `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` is
-defined. Two plugins compile with `/await`: `flutter_inappwebview_windows` (23
-errors) and `flutter_media_session` (2). Visual Studio 2022 still accepts it, which is
-what this machine builds with (`Visual Studio 17 2022`), so nothing is broken today.
+**Where it stands (2026-10-23).** The app builds on Visual Studio 2026 (MSVC 14.51)
+since `ec202a7`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
+in `app/windows/CMakeLists.txt`. This machine builds with it, and so does the
+release workflow: a trial run on a throwaway branch with both Windows jobs on
+`windows-latest` (image `windows-2025-vs2026`) passed end to end (gate, build,
+installer smoke test, publish up to the release step). What is left is that the
+define is a silence, not a fix.
 
-The release workflow is pinned to `windows-2022` for that reason. It is a stay of
-execution, not a fix: a machine that only has Visual Studio 2026 cannot build the
-app, and so will the runners once `windows-2022` is retired. `CL=/D_SILENCE_…` in
-the environment would let it compile as an interim, but the plugins still depend on
-a feature Microsoft has announced it will remove.
+- **The plugins.** `flutter_inappwebview_windows` (23 errors without the define) and
+  `flutter_media_session` (2) compile against `<experimental/coroutine>` / `/await`,
+  which the STL now flags as deprecated for removal. When it is removed the define
+  stops helping and the app does not build.
+- **The workflow pin.** `.github/workflows/release.yml` still says `windows-2022`
+  on its two Windows jobs, with a comment above `jobs:` giving the old reason. The
+  trial says it can move to `windows-latest`; that is a two-line change plus
+  deleting the comment, and has not been made. The runners drop `windows-2022`
+  eventually, so it is worth doing before then rather than at the deadline.
+
+**Measured 2026-09-26, first release-workflow build on `windows-latest`** (before the
+define): MSVC 14.51 failed `flutter build windows` with `C2338 … STL1011`. Visual
+Studio 2022 accepts `/await` without it.
 
 **Checked 2026-10-01 (task 30).** Neither plugin has a fix to take.
 
@@ -857,17 +865,17 @@ a feature Microsoft has announced it will remove.
   0.7.0-beta.3, and neither version's `windows/` tree mentions `coroutine`, so the
   23 errors above most likely come in through C++/WinRT's headers under Flutter's
   C++17 mode rather than from the plugin asking for it — an inference, not
-  verified. Visual Studio 2026 is not installed here (`Microsoft Visual
-  Studio\18` holds no toolchain), so no build was tried.
+  verified. (Visual Studio 2026 was not installed on this machine when this was
+  checked, so no build was tried; it is now, see above.)
 - **`flutter_media_session`.** Not ours: published by `wyrin.dev`, repository
   `wyrindev/flutter-media-session`. 3.0.8 (the app is on 3.0.5) still has
   `target_compile_options(... "/await")` at `windows/CMakeLists.txt:45`, so a
   version bump does not help. Needs a patch upstream, a vendored fix, or a
   replacement.
 
-**Done when:** the app builds on a Visual Studio 2026 toolchain without a
+**Done when:** the app builds on a Visual Studio 2026 toolchain without the
 suppression — by moving the two plugins to versions on C++20 `<coroutine>`, or
-replacing them.
+replacing them — and the release workflow runs on `windows-latest`.
 
 ### 55. Controls overlay visibility transitions when dialogs open/close
 
@@ -1196,9 +1204,25 @@ again for the video that is playing, without reloading the stream. Check what
 second `playback.open` re-resolves the ladder, which is the expensive part, so
 a report-only way back in may be needed.
 
+**A gap in the cookie fix, recorded 2026-10-23 (read from `client.dart`, not
+reproduced).** `_send` releases calls that were waiting on `_readyCompleter` the moment the
+new sidecar reports ready, and `onRestarted` runs only after `start()` returns, in a
+microtask. So a call queued during the restart (a like, a feed page) is written to the new,
+still anonymous sidecar *before* `auth.setCookie`: the like answers `AUTH_REQUIRED` ("Sign in
+to rate videos") and the feed comes back anonymous. The restart-hook tests do not see it,
+because they make their calls after the hook has run.
+
+**The fix belongs with the playback-session restore above:** after a restart, every other
+call waits until the restore has finished, bounded (a restore that hangs must not hold the app
+for ever, so a timeout of a few seconds, then carry on and say so on stderr), and the hook's
+own calls (`auth.setCookie`, `auth.status`, the session reopen) do not wait, or it would wait for
+itself. One gate, two uses: the account and the playback sessions are both state the new
+process must be given before anything else asks it a question.
+
 **Done when:** after a sidecar restart mid-video, `playback.report` carries on
-against a session the new sidecar knows, with no reopen of the stream, and a test
-restarts the fake sidecar under a playing video and sees the reports land.
+against a session the new sidecar knows, with no reopen of the stream; a call issued while the
+restart is in progress is answered as the signed-in account, not anonymously; and a test
+restarts the fake sidecar under a playing video, issues a call in that window, and sees both.
 
 ---
 
@@ -1217,6 +1241,39 @@ the other sanitised entries, and have the tests read that.
 
 **Done when:** a committed real card is what `music.test.ts` asserts against, on any
 machine.
+
+### 100. Show an update download on the taskbar button's progress bar
+
+The installer is ~100 MB, and while it downloads the only sign is the Updates page,
+so a user who has switched away cannot tell it is happening or when it is done.
+Windows 11's taskbar button has a progress bar for exactly this (`ITaskbarList3`).
+
+- **What exists.** `UpdatePhase.downloading(manifest, received, total)`
+  (`domain/update/update_state.dart`) is already updated as bytes arrive
+  (`update_controller.dart`). The vendored `third_party/windows_taskbar` already
+  exposes `setProgress(completed, total)` and `setProgressMode`, and
+  `ui/taskbar_controller.dart` already drives the thumbnail toolbar, so no new FFI
+  is needed on Windows.
+- **States.** Normal progress while `downloading`; indeterminate for any step after
+  the last byte that has no byte count (a verify, if there is one); the error
+  colour on `UpdatePhase.error`; cleared at `ready`, `installing` and `idle`. Clear
+  it on every path out, or a failed or cancelled download leaves a stuck bar. The yt-dlp download
+  (`data/ytdlp/ytdlp_downloader.dart`) is the same shape and could report through
+  the same thing.
+- **Seam.** The question is whether to hide this behind an interface for a future
+  macOS port (the dock tile has a progress bar too) or to hard-code the taskbar.
+  The repo's idiom for a platform seam is `WindowChrome` with `Win32WindowChrome`
+  and `NoWindowChrome`, chosen by `Platform.isWindows` (`windowChromeProvider`,
+  `ui/player/view_mode.dart`). Recommended: a small `TaskbarProgress` interface
+  (`set(done, total)`, `indeterminate()`, `error()`, `clear()`) with a Windows
+  implementation and a no-op default, which is also what the tests fake. No macOS
+  implementation until there is a macOS build; the interface is a few lines and
+  the controller has to be testable without a taskbar anyway.
+- **Accessibility.** The bar is painted by the shell, not by Flutter, so it adds
+  no semantics node. The Updates page still has to say the progress in words.
+
+**Done when:** a download shows its fraction on the taskbar button, an error shows
+red, and every end state (done, failed, cancelled, app closed) leaves no bar behind.
 
 ---
 
@@ -1441,6 +1498,8 @@ only for `=1`. It writes a ring of tree dumps once a second to
   CLAUDE.md "Accessibility".
 - **Before removing:** if the error was seen in that time, check that it is explained
   (`axtree-error-diagnosis` memory, `architecture.md` F51); if not, extend the date.
+  AXTree errors from dev-build sessions between 2026-10-06 and 2026-10-23 with Narrator started after
+  the app are explained by this and do not count toward extending the date.
 - Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.
 
 ### 89. Distinct playlist tile

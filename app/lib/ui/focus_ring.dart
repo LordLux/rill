@@ -203,10 +203,12 @@ ShapeBorder _inkShape(InkResponse ink) {
 ///
 /// **A click moves keyboard focus to the control under the pointer, and to nothing
 /// else.** So after clicking a button or a slider the next Tab continues from it, with
-/// no ring, since a pointer did it. A click on the background (a surface that takes no
-/// focus, or the gap between controls) takes focus off the control that had it, as a
-/// browser does, so Space then pauses rather than pressing a button the user last
-/// touched. It used to pick the *nearest* control when nothing was under the pointer,
+/// no ring, since a pointer did it. **Space after a click is the pause key**, not that
+/// control's: Space presses a focused control only while its ring shows (focus from the
+/// keyboard), and for the click case `shortcuts.dart` takes focus off the control as it
+/// pauses, so exactly one of the two acts. A click on the background (a surface that takes
+/// no focus, or the gap between controls) also takes focus off the control that had it, as
+/// a browser does. It used to pick the *nearest* control when nothing was under the pointer,
 /// which put Tab and a screen reader somewhere the user had not asked for; removed
 /// 2026-10-23. Only a click (a drag does nothing) that left focus alone itself: a
 /// dialog or a menu that took focus keeps it, and so does a text field.
