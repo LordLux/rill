@@ -1301,24 +1301,26 @@ setting on a manual restart does the same, and with it off a launch is a fresh s
 corrupt or stale snapshot is ignored, never retried; tests cover write, read, the once-only
 apply, and the update marker.
 
-### 103. A quality switch sometimes loads and then never resumes
+### 103. After a quality switch the audio can still be loading when the picture is back
 
-Reported 2026-10-24, on the controls-while-loading branch after the audio wait stopped applying to
-reopens (`holdForAudio: false`): changing quality mid-video usually works, but now and then the new
-stream loads, the picture does not resume and the spinner keeps turning. Seen after the hold was
-removed and without the `audio did not decode` line, so it is not the 5 s bound; whether it also
-happens on `main` is **not known**, and that is the first thing to find out (the same switch on a
-`main` build, a few dozen times).
+Reported 2026-10-24, on the controls-while-loading branch: after changing quality the new video has
+loaded, but the spinner keeps turning and playback has not resumed yet, and sometimes the audio is
+the thing still loading (the reporter's reading, not measured). It does resume; it is a wait, not a
+hang. The switch takes 3 to 15 s or more, and **how much of that is the audio is not known**.
 
-Where to look: `switchQuality` keeps `isSwitchingQuality` (the cover and the spinner) up until the
-picture is back, waiting on the engine's first frame / position, so a reopen that never reports one
-leaves it up for good. The stall watchdog is cancelled for a switch. Candidates: the audio attached
-after the play (`setAudioTrack` on a file that is already running), a `play` that landed before the
-file had a duration, F18's resume stall. The playback log has no line for it today; start by logging
-what the engine reported (`playing`, `duration`, `position`) when the cover has been up for 10 s.
+Likely from the code: a reopen attaches the audio after the video has loaded (`setAudioTrack` in
+`MediaKitEngine.open`, F15: it cannot be earlier), `open` does not return until that is done, and
+`switchQuality` keeps `isSwitchingQuality` (the cover and the spinner) up until `open` has returned
+and the picture is back. So the picture waits on the audio's fetch even though, for a reopen, it
+need not (`holdForAudio: false` already stopped the *hold*, not this).
 
-**Done when:** a switch that does not resume within a bound either recovers (plays, or reopens once as
-the stall watchdog does) or says so, and the cause is written down in `architecture.md`.
+**To find out:** time the pieces of one switch from the log (reopen issued, duration known, audio
+attached, first frame, cover cleared), over a few dozen switches and on a throttled connection. Then
+either clear the cover when the picture is back and let the audio join (the sound is briefly
+missing, as it was before the audio-before-play change), or keep waiting and say what for.
+
+**Done when:** the timings are written down in `architecture.md` and the cover no longer waits on
+anything the viewer cannot see, or waits on it deliberately.
 
 ### 104. Adding a video to Watch Later answered HTTP 400
 
