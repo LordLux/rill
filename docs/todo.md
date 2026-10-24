@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 103.** A new item takes it, and the same edit bumps this line.
+**Next number: 105.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1094,7 +1094,8 @@ load (the fullscreen layer already did), and:
 Tests: `loading_controls_test.dart`.
 
 **Left:**
-- **Quality and captions during the load.** The quality menu lists the ladder, which does not
+- **Quality and captions during the load** (wanted again 2026-10-24: a quality can't be changed
+  until the first one has loaded). The quality menu lists the ladder, which does not
   exist until `playback.open` answers, so it stays disabled; choosing a height up front would
   need the preference offered without a ladder. Captions are a preference the open applies
   when it gets there, and have not been checked.
@@ -1299,6 +1300,42 @@ fetched. Scroll positions and open menus are not worth it.
 setting on a manual restart does the same, and with it off a launch is a fresh start; a
 corrupt or stale snapshot is ignored, never retried; tests cover write, read, the once-only
 apply, and the update marker.
+
+### 103. A quality switch sometimes loads and then never resumes
+
+Reported 2026-10-24, on the controls-while-loading branch after the audio wait stopped applying to
+reopens (`holdForAudio: false`): changing quality mid-video usually works, but now and then the new
+stream loads, the picture does not resume and the spinner keeps turning. Seen after the hold was
+removed and without the `audio did not decode` line, so it is not the 5 s bound; whether it also
+happens on `main` is **not known**, and that is the first thing to find out (the same switch on a
+`main` build, a few dozen times).
+
+Where to look: `switchQuality` keeps `isSwitchingQuality` (the cover and the spinner) up until the
+picture is back, waiting on the engine's first frame / position, so a reopen that never reports one
+leaves it up for good. The stall watchdog is cancelled for a switch. Candidates: the audio attached
+after the play (`setAudioTrack` on a file that is already running), a `play` that landed before the
+file had a duration, F18's resume stall. The playback log has no line for it today; start by logging
+what the engine reported (`playing`, `duration`, `position`) when the cover has been up for 10 s.
+
+**Done when:** a switch that does not resume within a bound either recovers (plays, or reopens once as
+the stall watchdog does) or says so, and the cause is written down in `architecture.md`.
+
+### 104. Adding a video to Watch Later answered HTTP 400
+
+Reported 2026-10-24: adding `-jknl-GNjDw` to Watch Later showed "could not add … to WL: Request to
+…/browse/edit_playlist … failed with status code 400". The video is ordinary (public, 70 s, not live,
+no age limit, per yt-dlp) and the session was authenticated, so it is not the video's availability and
+not the anonymous-sidecar fault (CLAUDE.md, "A restarted sidecar"). Not reproduced; one video id.
+
+The sidecar now logs the response body (`addToPlaylist` in `actions/playlist.ts`) when this happens,
+which is the missing piece: the `400` says nothing on its own. Next time, read the newest
+`%LOCALAPPDATA%\rill\logs` line starting `add <id> to WL:`. Things it could be: Watch Later at its
+size limit, a cookie YouTube rejects for this call only, or an id that starts with `-` being mangled
+somewhere between the tile and the request (the id begins with a hyphen; check the Dart side and
+`requireString` before blaming YouTube).
+
+**Done when:** the cause is known and either fixed or turned into an error message that says what to
+do.
 
 ---
 
