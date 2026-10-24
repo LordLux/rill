@@ -1196,9 +1196,25 @@ again for the video that is playing, without reloading the stream. Check what
 second `playback.open` re-resolves the ladder, which is the expensive part, so
 a report-only way back in may be needed.
 
+**A gap in the cookie fix, recorded 2026-10-23 (read from `client.dart`, not
+reproduced).** `_send` releases calls that were waiting on `_readyCompleter` the moment the
+new sidecar reports ready, and `onRestarted` runs only after `start()` returns, in a
+microtask. So a call queued during the restart (a like, a feed page) is written to the new,
+still anonymous sidecar *before* `auth.setCookie`: the like answers `AUTH_REQUIRED` ("Sign in
+to rate videos") and the feed comes back anonymous. The restart-hook tests do not see it,
+because they make their calls after the hook has run.
+
+**The fix belongs with the playback-session restore above:** after a restart, every other
+call waits until the restore has finished, bounded (a restore that hangs must not hold the app
+for ever, so a timeout of a few seconds, then carry on and say so on stderr), and the hook's
+own calls (`auth.setCookie`, `auth.status`, the session reopen) do not wait, or it would wait for
+itself. One gate, two uses: the account and the playback sessions are both state the new
+process must be given before anything else asks it a question.
+
 **Done when:** after a sidecar restart mid-video, `playback.report` carries on
-against a session the new sidecar knows, with no reopen of the stream, and a test
-restarts the fake sidecar under a playing video and sees the reports land.
+against a session the new sidecar knows, with no reopen of the stream; a call issued while the
+restart is in progress is answered as the signed-in account, not anonymously; and a test
+restarts the fake sidecar under a playing video, issues a call in that window, and sees both.
 
 ---
 
