@@ -461,6 +461,11 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                           _restartHideTimer();
                           unawaited(ref.read(playbackProvider.notifier).switchQuality(variant));
                         },
+                        onPickedHeight: (height) {
+                          ref.read(playerMenuProvider.notifier).close();
+                          _restartHideTimer();
+                          ref.read(playbackProvider.notifier).chooseHeightWhileLoading(height);
+                        },
                       ),
                     ),
                   ),
@@ -555,7 +560,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                               (menu) => menu.open && menu.page == SettingsPage.quality,
                                             ),
                                           ),
-                                          onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty)) ? null : _toggleQuality,
+                                          onPressed: ref.watch(playbackProvider.select((p) => p.variants.isEmpty && !p.isLoading)) ? null : _toggleQuality,
                                         ),
                                       ),
                                     ),
@@ -758,7 +763,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                               (menu) => menu.open && menu.page == SettingsPage.quality,
                             ),
                           ),
-                          onPressed: playback.variants.isEmpty ? null : _toggleQuality,
+                          onPressed: playback.variants.isEmpty && !playback.isLoading ? null : _toggleQuality,
                         ),
                       ),
                     ),
