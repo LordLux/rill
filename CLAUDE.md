@@ -493,8 +493,10 @@ the answer.
   skipped — F42, measured 2026-09-24.** A variant's video URL is video-only, so
   opening it under a leftover `vid=no` with the audio not yet attached gives
   mpv nothing to play: it moves past the file, no duration arrives, and the open
-  waits out its 20 s timeout at 0:00. An audio-only open attaches the audio
-  *at load* through `audio-files` instead. Change that list with `change-list`
+  waits out its 20 s timeout at 0:00. Every open with a separate audio URL
+  attaches the audio *at load* through `audio-files` instead (video mode too since
+  2026-10-24, F59: mpv then holds the open until the audio is there, so nothing
+  plays silent). Change that list with `change-list`
   (`clr`, `append`), **never** `setProperty('audio-files', '')` — that sets a
   list holding one empty path, and every later open fails with
   `Cannot open file ''`.
