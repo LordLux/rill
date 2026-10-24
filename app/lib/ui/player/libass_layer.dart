@@ -106,6 +106,14 @@ class _SubtitleImage {
   });
 }
 
+/// Seconds to draw captions for: the engine's position, except while a quality switch has
+/// the engine at zero, when it is where the switch's [hold] says the viewer was.
+@visibleForTesting
+double captionTime(PlaybackHold? hold, Duration enginePosition) {
+  final shown = hold != null && enginePosition == Duration.zero ? hold.position : enginePosition;
+  return shown.inMicroseconds / 1000000.0;
+}
+
 class LibassLayer extends ConsumerStatefulWidget {
   final double aspectRatio;
   const LibassLayer({super.key, required this.aspectRatio});
@@ -222,9 +230,14 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     malloc.free(defaultFamily);
 
     _posSub = ref.read(playbackEngineProvider).positionStream.listen((dur) {
-      _scheduleRender(dur.inMicroseconds / 1000000.0);
+      _scheduleRender(_captionTime(dur));
     });
   }
+
+  /// The time to draw captions for. A quality switch reopens the media and the engine
+  /// reports zero until it has loaded, which drew no caption at all; the switch's hold
+  /// has where the viewer was, so the caption they were reading stays up meanwhile.
+  double _captionTime(Duration enginePosition) => captionTime(ref.read(playbackProvider).hold, enginePosition);
 
   void _installScriptToC(String? raw) {
     if (raw == null) {
@@ -684,7 +697,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
     }
 
     final engine = ref.read(playbackEngineProvider);
-    _scheduleRender(engine.position.inMicroseconds / 1000000.0);
+    _scheduleRender(_captionTime(engine.position));
   }
 
   @override
@@ -759,7 +772,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
       _nudges = const [];
       _groupBoxes = const [];
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _scheduleRender(engine.position.inMicroseconds / 1000000.0);
+        if (mounted) _scheduleRender(_captionTime(engine.position));
       });
     }
 
@@ -780,7 +793,7 @@ class _LibassLayerState extends ConsumerState<LibassLayer> {
           _lastWidth = videoRect.width;
           _lastHeight = videoRect.height;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _scheduleRender(engine.position.inMicroseconds / 1000000.0);
+            if (mounted) _scheduleRender(_captionTime(engine.position));
           });
         }
 

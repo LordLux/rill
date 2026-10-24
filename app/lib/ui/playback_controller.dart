@@ -296,6 +296,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// has done until now.
   int? _preferredHeight;
 
+  /// Whether the video was playing when the switch now in flight began, for a second
+  /// pick made before it lands: the engine says nothing useful until its open ends.
+  bool _playingBeforeSwitch = false;
+
   /// The volume to come back to when unmuting. Null until something is muted.
   double? _volumeBeforeMute;
 
@@ -873,8 +877,15 @@ class PlaybackController extends Notifier<PlaybackState> {
 
     _preferredHeight = variant.height;
 
-    final position = engine.position;
-    final wasPlaying = engine.playing;
+    // **From the hold when another switch is still in flight.** That one's reopen has
+    // already reset the engine's position and duration to zero, so a pick made
+    // meanwhile read zero here and the video restarted from 0:00 when it landed
+    // (measured 2026-10-24), and `engine.playing` is false until that open ends.
+    final inFlight = state.hold;
+    final position = inFlight?.position ?? engine.position;
+    final duration = inFlight?.duration ?? engine.duration;
+    final wasPlaying = inFlight != null ? _playingBeforeSwitch : engine.playing;
+    _playingBeforeSwitch = wasPlaying;
     final started = DateTime.now();
 
     state = state.copyWith(
@@ -884,7 +895,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // Set *before* the reopen, not after: `engine.open` resets the position
       // **and the duration** to zero on its way in, and anything watching would
       // paint both.
-      hold: PlaybackHold(position: position, duration: engine.duration),
+      hold: PlaybackHold(position: position, duration: duration),
     );
 
     try {

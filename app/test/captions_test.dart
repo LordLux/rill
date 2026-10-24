@@ -10,6 +10,8 @@
 /// the list, everything else has English and German.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +21,7 @@ import 'package:rill/domain/caption_track.dart';
 import 'package:rill/data/playback/engine.dart';
 import 'package:rill/ui/captions_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
+import 'package:rill/ui/player/libass_layer.dart' show captionTime;
 import 'package:rill/ui/player/shortcuts.dart';
 import 'package:rill/ui/queue_controller.dart';
 
@@ -287,6 +290,46 @@ void main() {
       // point: the test above would otherwise be unfailable.
       await engine.open(container.read(playbackProvider).variants[2]);
       expect(engine.subtitle, isNull);
+    });
+
+    test('a second pick while the first is still loading resumes from where the viewer was, not from zero', () async {
+      // Measured 2026-10-24: the first switch's reopen has already reset the engine's position,
+      // so the second read zero and the video restarted from 0:00 when it landed.
+      await play('vid1');
+      engine.emitPosition(const Duration(seconds: 30));
+      final variants = container.read(playbackProvider).variants;
+      final notifier = container.read(playbackProvider.notifier);
+
+      final gate = Completer<void>();
+      engine.openGate = gate.future;
+      unawaited(notifier.switchQuality(variants[1]));
+      await settle();
+      expect(engine.position, Duration.zero, reason: 'the first reopen has reset it, as the real engine does');
+      expect(container.read(playbackProvider).hold?.position, const Duration(seconds: 30));
+
+      unawaited(notifier.switchQuality(variants[2]));
+      await settle();
+      expect(
+        container.read(playbackProvider).hold?.position,
+        const Duration(seconds: 30),
+        reason: 'the second pick keeps where the viewer was',
+      );
+
+      gate.complete();
+      await settle(400);
+      expect(engine.seeks.last, const Duration(seconds: 30));
+      expect(container.read(playbackProvider).variant?.height, variants[2].height);
+      // The picture is back once the position has moved past where it resumed.
+      engine.emitPosition(const Duration(seconds: 31));
+      await settle(400);
+      expect(container.read(playbackProvider).isSwitchingQuality, isFalse);
+    });
+
+    test('the caption on screen is drawn for where the viewer was, while the engine reports zero', () {
+      const hold = PlaybackHold(position: Duration(seconds: 30), duration: Duration(minutes: 5));
+      expect(captionTime(hold, Duration.zero), 30.0, reason: 'a reopen reports zero until it has loaded');
+      expect(captionTime(hold, const Duration(seconds: 31)), 31.0, reason: 'once it reports a time, that is the time');
+      expect(captionTime(null, Duration.zero), 0.0, reason: 'no switch: zero is zero');
     });
 
     test('no captions attached means nothing to restore, and no error', () async {
