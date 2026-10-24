@@ -1286,11 +1286,26 @@ audio is sometimes the thing still loading. It resumes; it is a wait, not a hang
   near the start, 6 to 12 s when resuming at 20 s to 7 min (a far seek has to fetch from the middle
   of both streams). Nothing in the log says how much of that is the audio.
 
-**What could still shorten it** (none tried): a pause the viewer can see (the spinner on the picked
-quality row, done) is the cheap part; the rest is the waits themselves. Candidates are reusing the
-connection to the same host, `video-add` on the playing file instead of a reopen (the orchestrator's
-spike: the audio keeps playing, only the video changes), or a second player that swaps when ready
-(heavy: F51's `GlobalKey` hazard, double bandwidth).
+**The spike, 2026-10-24: a quality switch can be a track switch, and it looks good** (`scratch/measure-video-add.ts`,
+bundled libmpv, a 60 s video-only file playing with its audio in `audio-files`, a second quality served
+with its first byte held 3 s). `video-add <new video URL> select` on the playing file:
+- the command waits for the new stream (3.04 s here) and **playback does not stop**: the clock ran
+  3.00 s in those 3.04 s, 76 frames were written at 25 fps, the audio kept going. The picture swaps at
+  the moment the new stream is ready (`video-params/w` 320 -> 336 on return), `time-pos` never stepped
+  backwards, frames carried on at the same rate, and a `seek` right after it landed correctly;
+- the external caption track stayed selected (`sid`), and the audio stayed (`aid`);
+- `video-remove` on the track the last switch added works (the file's own first track cannot be removed,
+  it just stays unselected and unread); a second switch took 39 ms when the stream was quick;
+- the audio-only toggle (`vid=no`, then `vid=auto`) brings back the *added* track, not the file's own.
+So the cost of a switch would be the new stream's own first bytes, with no cover, no reopen, no seek back
+to the position (the 6 to 12 s far-seek stall above) and no audio to fetch again.
+**Not measured:** real YouTube DASH URLs (is the new track's position right when its timeline starts at 0
+like this one's? the harness's streams both do), Narrator's reaction, and `NativePlayer.command` from
+Dart: media_kit's default is the async command API (`PlayerConfiguration.async`), so `await` would not
+block the UI isolate, which is the thing to confirm. Risks to design around: `MediaKitEngine` tracks
+`vid` and the track ids itself, `isSwitchingQuality`/the cover/the hold in the controller exist for the
+reopen and would go, and a switch that fails (the URL refused) now leaves the old quality playing, which
+is better than today but needs saying.
 
 **Done when:** a switch either gets measurably faster by one of the above, or the wait is shown for
 what it is and left.
