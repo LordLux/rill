@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 105.** A new item takes it, and the same edit bumps this line.
+**Next number: 106.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -555,6 +555,39 @@ the original ranked first even when a dub has a higher bitrate. Mutation: rank b
 bitrate alone, and the test fails.
 
 (Added 2026-10-01 as item 83; that edit was lost when Task 32 rewrote this file, and the number went to its follow-ups, so this is 84.)
+
+### 105. The previous video's last frame stays on the player when another video replaces it
+
+Reported 2026-10-24: click another video while one is playing (or paused), and as soon as the
+watch page opens the player still shows the **last frame of the previous video**. After roughly half a
+second or less it turns black and the spinner arrives, and from there everything is right. The old
+frame belongs to a video the viewer has already left, and for that moment it reads as the new video
+being the old one.
+
+**Where to look (a guess, not measured):** the half second is about the time `playback.open` takes to
+answer, and `MediaKitEngine.open` only runs after that. Until then the shared video texture still holds
+the old frame: `PlaybackController.open` resets the state (`isLoading`, `source: null`) but nothing
+tells the engine, whose `open` clears `width`/`height` (what the quality menu reads) and not the
+picture, and the only call that blanks it, `stop()`, is made on a failed open. The old audio probably
+carries on over that window too, which is worth checking, since stopping it is part of the same fix.
+
+**Two ways, to be tried:**
+- Stop the engine when a *different* video starts opening (`_engine.stop()` beside `_endSession` in
+  `open`): the picture and the old sound go at once. Care: `open` is also the retry path for the same
+  video, where stopping is wrong, and `playback.report` must still get its last position first (it
+  reads `currentPosition` in `_endSession`, so it goes before the stop).
+- Cover the surface instead: draw the scrim over `engine.videoSurface()` while `isLoading` and no source
+  is open yet, as the quality-switch cover does (`playerSwitchCoverKey`, architecture §2.7). Nothing
+  about the engine changes, but the old audio would still play, so this one alone is not enough.
+
+**Care:** the watch page, the fullscreen layer and the miniplayer all show the same surface; whichever
+is chosen has to work in all three, and the cover must not be an overlay above something that mounts
+or fades (CLAUDE.md, Accessibility).
+
+**Done when:** opening another video from the feed, a tile on the watch page, a playlist row and the
+queue never shows the previous video's frame, and a test with the fake engine shows the engine being
+stopped (or the cover being up) before `playback.open` has answered, and not for a retry of the same
+video.
 
 ---
 
