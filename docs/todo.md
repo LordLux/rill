@@ -584,6 +584,13 @@ carries on over that window too, which is worth checking, since stopping it is p
 is chosen has to work in all three, and the cover must not be an overlay above something that mounts
 or fades (CLAUDE.md, Accessibility).
 
+**Status 2026-10-25:** the stop is in (`open` stops the engine when the id differs, after `_endSession`
+has taken the position; tests in `new_video_stops_engine_test.dart`, mutation-checked). **Not yet seen
+with eyes:** whether the surface goes black on that stop. The black the viewer reported arriving after
+the half second is when `MediaKitEngine.open` runs `Player.open`, which stops first, so a stop probably
+blanks it; if the last frame still shows, cover it with the new video's thumbnail (not black) while
+`isLoading` and no source is open.
+
 **Done when:** opening another video from the feed, a tile on the watch page, a playlist row and the
 queue never shows the previous video's frame, and a test with the fake engine shows the engine being
 stopped (or the cover being up) before `playback.open` has answered, and not for a retry of the same
@@ -1315,9 +1322,11 @@ audio is sometimes the thing still loading. It resumes; it is a wait, not a hang
 **Measured the same day** (`rill: open … timings` and `rill: quality ->` in the log, about twenty switches over three sessions):
 - `engine.open` takes 2.8 to 8.3 s, and the whole of it is two network waits that run one after the
   other: the video's first bytes (0.4 to 3.5 s) and, until 2026-10-24, `audio-add` (2.4 to 3.3 s more).
-  The audio at load (F59) removed the second step and the silent start, but **did not shorten the
-  open**: mpv now holds it until the slower of the two streams is there, so it ends in the same 3.6
-  to 8.3 s. The cost is the first byte of each googlevideo stream, not how the audio is attached.
+  The audio at load (F59) removed the silent start, but **did not shorten the open**, because mpv
+  opens the two streams one after the other (measured 2026-10-25: video held 2 s and audio 3 s
+  gives 5.04 s, not 3), so the open is still the sum of both first bytes, 3.6 to 8.3 s. The cost is
+  the first byte of each googlevideo stream, and the audio's can only be hidden by starting it
+  before mpv does.
 - After the reopen, `switchQuality` seeks back and waits for the picture: 0.3 to 3 s when resuming
   near the start, 6 to 12 s when resuming at 20 s to 7 min (a far seek has to fetch from the middle
   of both streams). Nothing in the log says how much of that is the audio.
