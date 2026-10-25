@@ -186,9 +186,37 @@ abstract class PlaybackEngine {
   Future<void> stepFrame(int direction);
 
   /// Stop playback and release the current media. The engine stays usable.
+  ///
+  /// An [open] still waiting when this is called ends with [OpenSuperseded]. A stop is not an
+  /// ending: it reports no completion, so nothing above it advances a queue.
   Future<void> stop();
 
+  /// The last [open] was given a separate audio stream and none loaded: the video plays
+  /// without sound and nothing else says so. Always false for a muxed variant, and for an
+  /// audio-only open, which fails with [AudioUnavailable] instead.
+  bool get audioMissing;
+
   Future<void> dispose();
+}
+
+/// An [PlaybackEngine.open] that a newer open or a stop overtook before it finished.
+///
+/// Not a failure of the stream: the caller that started it has moved on, and says so by its
+/// own generation check before it reads this.
+class OpenSuperseded implements Exception {
+  const OpenSuperseded();
+
+  @override
+  String toString() => 'the open was superseded';
+}
+
+/// An audio-only open whose audio did not load: nothing is left to play, since the video-only
+/// stream is not selected. Its text reaches the screen, so it names no URL.
+class AudioUnavailable implements Exception {
+  const AudioUnavailable();
+
+  @override
+  String toString() => 'The audio for this video would not load.';
 }
 
 /// Why captions need two settings, and what happens with neither.
@@ -504,6 +532,12 @@ class MediaKitEngine implements PlaybackEngine {
     bool isLive = false,
   }) async {
     bool wantPlay() => play && (shouldPlay?.call() ?? true);
+    // A newer open, or a stop, ends this one: its wait for a duration would otherwise run out
+    // 20 s later and retry the load over whatever the engine has been given since.
+    _supersedeOpen();
+    final superseded = Completer<void>();
+    _openSuperseded = superseded;
+    _audioMissing = false;
     lastOpened = variant;
     trace?.call('open ${variant.height}p play=$play live=$isLive audio=${variant.audioUrl != null}');
     // Read before the open, applied after it. A reopen drops mpv's external
@@ -569,6 +603,7 @@ class MediaKitEngine implements PlaybackEngine {
       await native.setProperty('vid', !_videoTrackEnabled && audioAtLoad ? 'no' : 'auto');
 
       await _player.open(Media(variant.videoUrl), play: wantPlay());
+      if (superseded.isCompleted) throw const OpenSuperseded();
       loadfileMs = clock.elapsedMilliseconds;
       if (_player.state.duration > Duration.zero) break;
 
@@ -592,6 +627,7 @@ class MediaKitEngine implements PlaybackEngine {
           _player.stream.error.first.then((error) {
             throw StateError('mpv could not open the stream: $error');
           }),
+          superseded.future.then((_) => throw const OpenSuperseded()),
         ]).timeout(const Duration(seconds: 20));
         break;
       } on TimeoutException {
@@ -604,6 +640,26 @@ class MediaKitEngine implements PlaybackEngine {
     }
 
     final durationMs = clock.elapsedMilliseconds;
+
+    // **Did the audio actually load?** mpv does not say: a dead audio URL is not fatal, so the
+    // video opens and plays in silence, and the 20 s fallback above ends the same way. The
+    // external audio is the file's only audio, so a real track in the list (an observed event,
+    // never a property read) is the proof.
+    var audioStatus = audioUrl == null ? 'none' : (audioAtLoad ? 'at load' : 'dropped');
+    if (audioUrl != null) {
+      final loaded = audioAtLoad && await _audioTrackListed();
+      if (superseded.isCompleted) throw const OpenSuperseded();
+      if (!loaded) {
+        audioStatus = audioAtLoad ? 'missing' : 'dropped';
+        stderr.writeln('rill: the audio did not load ($audioStatus)');
+        if (!_videoTrackEnabled) {
+          // Audio-only has nothing else to play, and the video-only stream is not selected.
+          await stop();
+          throw const AudioUnavailable();
+        }
+        _audioMissing = true;
+      }
+    }
 
     if (isLive && _player.state.duration > Duration.zero) {
       await _player.seek(_player.state.duration);
@@ -622,8 +678,39 @@ class MediaKitEngine implements PlaybackEngine {
     stderr.writeln(
       'rill: open ${variant.height}p timings (cumulative): loadfile ${loadfileMs}ms, '
       'duration ${durationMs}ms, done ${clock.elapsedMilliseconds}ms '
-      '(audio=${audioUrl == null ? 'none' : (audioAtLoad ? 'at load' : 'dropped')})',
+      '(audio=$audioStatus)',
     );
+  }
+
+  /// Completed by whatever overtakes the open in flight — see [OpenSuperseded].
+  Completer<void>? _openSuperseded;
+
+  void _supersedeOpen() {
+    final pending = _openSuperseded;
+    if (pending != null && !pending.isCompleted) pending.complete();
+  }
+
+  bool _audioMissing = false;
+
+  @override
+  bool get audioMissing => _audioMissing;
+
+  /// How long the track list may trail the duration before the audio counts as missing.
+  static const Duration _trackListGrace = Duration(seconds: 2);
+
+  bool _hasAudioTrack(Tracks tracks) => tracks.audio.any((track) => track.id != 'auto' && track.id != 'no');
+
+  /// Whether the external audio is in the track list, waiting a moment for the list itself:
+  /// it is its own event and may land just after the duration. Costs the full grace only when
+  /// the audio is really missing.
+  Future<bool> _audioTrackListed() async {
+    if (_hasAudioTrack(_player.state.tracks)) return true;
+    try {
+      await _player.stream.tracks.firstWhere(_hasAudioTrack).timeout(_trackListGrace);
+      return true;
+    } on TimeoutException {
+      return false;
+    }
   }
 
   /// Toggle mpv's video track on or off — see [PlaybackEngine.setVideoTrack].
@@ -705,6 +792,8 @@ class MediaKitEngine implements PlaybackEngine {
   @override
   Future<void> stop() {
     trace?.call('stop');
+    _supersedeOpen();
+    _audioMissing = false;
     return _player.stop();
   }
 
