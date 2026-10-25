@@ -508,8 +508,13 @@ class MediaKitEngine implements PlaybackEngine {
     trace?.call('open ${variant.height}p play=$play live=$isLive audio=${variant.audioUrl != null}');
     // Read before the open, applied after it. A reopen drops mpv's external
     // subtitle tracks, and this is the only place that knows one was attached.
+    //
+    // **The document itself stays through a retained reopen.** `LibassLayer` draws from
+    // [subtitle], not from mpv's track, and clearing it here took the caption off the
+    // screen for the whole switch (measured 2026-10-24); mpv's track is what the reopen
+    // drops, and [setSubtitle] below puts that back.
     final retained = retainSubtitle ? _subtitle : null;
-    _subtitle = null;
+    if (!retainSubtitle) _subtitle = null;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffer = Duration.zero;
