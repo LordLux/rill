@@ -15,6 +15,7 @@ import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/controls.dart';
+import 'package:rill/ui/player/settings_menu.dart' show playerQualityButtonKey;
 import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
@@ -91,7 +92,13 @@ void main() {
   tearDown(finish);
 
   /// A video opening, held at the engine: the load a viewer waits through.
-  Future<void> openLoading(WidgetTester tester, {List<String> alsoQueue = const []}) async {
+  Future<void> openLoading(
+    WidgetTester tester, {
+    List<String> alsoQueue = const [],
+
+    /// Run straight after the open starts, before the sidecar can have answered.
+    void Function()? beforeAnswer,
+  }) async {
     tester.view.physicalSize = const Size(1400, 1000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -102,6 +109,7 @@ void main() {
     for (final id in alsoQueue) {
       container.read(queueProvider.notifier).addToQueue(video(id));
     }
+    beforeAnswer?.call();
     await tester.pump();
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
     // Frames, not `pumpAndSettle`: the load spinner animates for as long as it is up.
@@ -173,6 +181,60 @@ void main() {
     await container.read(playbackProvider.notifier).seek(const Duration(seconds: 30));
     expect(engine.seeks, [const Duration(seconds: 30)]);
     finish();
+  });
+
+  group('a quality chosen while loading', () {
+    List<int> openedHeights() => engine.opened.map((variant) => variant.height).toList();
+
+    testWidgets('before the sidecar has answered is the one the video opens at', (tester) async {
+      await openLoading(
+        tester,
+        beforeAnswer: () => container.read(playbackProvider.notifier).chooseHeightWhileLoading(720),
+      );
+      expect(container.read(playbackProvider).preferredHeight, 720);
+
+      await release(tester);
+      expect(openedHeights(), [720], reason: 'one open, at the height asked for, not the best one first');
+      expect(container.read(playbackProvider).variant?.height, 720);
+      finish();
+    });
+
+    testWidgets('while the engine is already opening another is switched to once it has opened', (tester) async {
+      await openLoading(tester);
+      expect(openedHeights(), [2160], reason: 'the open in flight is the best rung, nothing was chosen');
+
+      container.read(playbackProvider.notifier).chooseHeightWhileLoading(360);
+      await release(tester);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(openedHeights(), [2160, 360]);
+      expect(container.read(playbackProvider).variant?.height, 360);
+      finish();
+    });
+
+    testWidgets('can be picked from the quality menu, which has the heights to pick from', (tester) async {
+      await openLoading(tester);
+
+      await press(tester, playerQualityButtonKey);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Applies when the video opens'), findsOneWidget);
+      expect(find.text('720p'), findsOneWidget);
+
+      await tester.tap(find.text('720p'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(container.read(playbackProvider).preferredHeight, 720);
+      finish();
+    });
+
+    testWidgets('does nothing once the video has opened: that is a switch, not a choice', (tester) async {
+      await openLoading(tester);
+      await release(tester);
+
+      container.read(playbackProvider.notifier).chooseHeightWhileLoading(360);
+      expect(container.read(playbackProvider).preferredHeight, isNull);
+      finish();
+    });
   });
 
   testWidgets('next while loading moves on to the next video at once', (tester) async {
