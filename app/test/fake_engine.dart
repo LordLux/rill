@@ -99,6 +99,14 @@ class FakeEngine implements PlaybackEngine {
         child: SizedBox.expand(key: surfaceKey, child: videoWidget(fit: fit)),
       );
 
+  /// False makes every open with a separate audio stream behave as a dead audio URL does.
+  bool audioLoads = true;
+
+  bool _audioMissing = false;
+
+  @override
+  bool get audioMissing => _audioMissing;
+
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
   /// take ~20 s here, waiting on a duration before it attaches the audio track.
   Future<void>? openGate;
@@ -169,9 +177,23 @@ class FakeEngine implements PlaybackEngine {
     _duration.add(_durationValue);
     setWidth(null);
     setHeight(null);
+    _audioMissing = false;
 
+    // As `MediaKitEngine`: a stop (or a newer open) while this one waits ends it.
+    final stopsAtStart = stopCount;
     final gate = openGate;
     if (gate != null) await gate;
+    if (stopCount != stopsAtStart) throw const OpenSuperseded();
+
+    // The audio did not load. Video mode plays on without it and says so; audio-only has
+    // nothing left to play and fails, with the engine stopped.
+    if (variant.audioUrl != null && !audioLoads) {
+      if (!videoTrackEnabled) {
+        await stop();
+        throw const AudioUnavailable();
+      }
+      _audioMissing = true;
+    }
 
     _durationValue = const Duration(minutes: 10);
     _duration.add(_durationValue);
@@ -269,7 +291,13 @@ class FakeEngine implements PlaybackEngine {
   @override
   Future<void> stop() async {
     stopCount++;
+    _audioMissing = false;
     setPlaying(false);
+    // As media_kit's `stop`: the clock goes back to zero, so anything reading the position
+    // after one is reading a media that is gone.
+    emitPosition(Duration.zero);
+    _durationValue = Duration.zero;
+    _duration.add(_durationValue);
   }
 
   @override
