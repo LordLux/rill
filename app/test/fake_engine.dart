@@ -152,8 +152,10 @@ class FakeEngine implements PlaybackEngine {
     // subtitle track, and only `retainSubtitle` puts it back. Modelled here
     // rather than assumed away, because "captions survive a quality switch" is
     // otherwise a test that passes against an engine that never dropped them.
+    // The document stays through a retained reopen, as in `MediaKitEngine`: the caption layer
+    // draws from it, and it is mpv's own track that the reopen drops.
     final retained = retainSubtitle ? _subtitle : null;
-    _subtitle = null;
+    if (!retainSubtitle) _subtitle = null;
 
     // **Cleared on the way in, before anything is awaited — as `MediaKitEngine`
     // does.** A reopened media reports nothing valid until it loads, and that is

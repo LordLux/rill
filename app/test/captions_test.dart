@@ -292,6 +292,27 @@ void main() {
       expect(engine.subtitle, isNull);
     });
 
+    test('the caption document stays on the engine while the reopen is loading', () async {
+      // `LibassLayer` draws from `engine.subtitle`, so clearing it for the reopen took the caption off
+      // the screen until the switch landed (measured 2026-10-24).
+      await play('vid1');
+      await controller.select('.en');
+      await settle();
+      final before = engine.subtitle;
+      expect(before, isNotNull);
+
+      final gate = Completer<void>();
+      engine.openGate = gate.future;
+      final variants = container.read(playbackProvider).variants;
+      unawaited(container.read(playbackProvider.notifier).switchQuality(variants[2]));
+      await settle();
+      expect(engine.subtitle, before, reason: 'the reopen is parked at the gate: this is what the layer draws now');
+
+      gate.complete();
+      await settle(400);
+      expect(engine.subtitle, before);
+    });
+
     test('a second pick while the first is still loading resumes from where the viewer was, not from zero', () async {
       // Measured 2026-10-24: the first switch's reopen has already reset the engine's position,
       // so the second read zero and the video restarted from 0:00 when it landed.
