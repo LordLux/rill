@@ -38,6 +38,7 @@ import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 import 'ui/semantics_probe.dart';
+import 'ui/video_add_probe.dart';
 import 'ui/update_controller.dart';
 import 'ui/ytdlp_controller.dart';
 
@@ -77,6 +78,12 @@ Future<void> main() async {
   final probePlan = Platform.environment['RILL_AUDIO_PROBE']?.trim();
   if (probePlan != null && probePlan.isNotEmpty) {
     _runAudioProbe(probePlan);
+    return;
+  }
+
+  // `RILL_VIDEO_ADD_PROBE=1` measures a quality switch done as `video-add` and exits.
+  if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1') {
+    runVideoAddProbe(runApp, hardExit);
     return;
   }
 

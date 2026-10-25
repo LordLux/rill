@@ -1344,13 +1344,31 @@ with its first byte held 3 s). `video-add <new video URL> select` on the playing
 - the audio-only toggle (`vid=no`, then `vid=auto`) brings back the *added* track, not the file's own.
 So the cost of a switch would be the new stream's own first bytes, with no cover, no reopen, no seek back
 to the position (the 6 to 12 s far-seek stall above) and no audio to fetch again.
-**Not measured:** real YouTube DASH URLs (is the new track's position right when its timeline starts at 0
-like this one's? the harness's streams both do), Narrator's reaction, and `NativePlayer.command` from
-Dart: media_kit's default is the async command API (`PlayerConfiguration.async`), so `await` would not
-block the UI isolate, which is the thing to confirm. Risks to design around: `MediaKitEngine` tracks
-`vid` and the track ids itself, `isSwitchingQuality`/the cover/the hold in the controller exist for the
-reopen and would go, and a switch that fails (the URL refused) now leaves the old quality playing, which
-is better than today but needs saying.
+**Measured 2026-10-25 in the app, on real DASH URLs (`RILL_VIDEO_ADD_PROBE=1`, `ui/video_add_probe.dart`; this
+corrects the spike above, which switched about 3 s in and so could not see the next point).**
+- **`video-add … select` alone freezes playback at a non-zero position.** The new track is read from its own start
+  (the mpv log shows its cached range at 0 to 8 s) while the clock waits at the old position, so `time-pos` *and*
+  the audio stood still until a seek, for 12 s and more (control: 20 s of plain playback moved normally). Pause and
+  resume, a track added without `select` and then `vid` set by hand, did not revive it; a seek did. The fix is a
+  `seek` to the current position straight after the command.
+- **With that seek the switch is 1.9 to 3.4 s** (command 0.3 to 0.5 s, then 1.5 to 2.8 s for the seek to put the
+  clock moving), against 4 to 18 s now. Across height (360 to 480), fps (30 to 60, 480p to 720p60) and codec (vp9
+  to av01, same size), starting at 120 to 300 s into a 10 minute video: the clock never went backwards, its
+  biggest step was 0.02 to 0.03 s, `avsync` stayed within 1 ms, `video-remove` of the old track kept the clock
+  moving at 1.0 s per second, a seek in the added track worked. So the position of the new track is right once
+  it has been seeked. Not tried: avc1, and a muxed rung (this ladder has none).
+- **The Dart command path does not block the UI isolate:** the longest gap between 10 ms timer ticks while
+  `await NativePlayer.command(['video-add', …])` was out was 11 to 15 ms.
+- **A refused URL is not an error in Dart.** The same command on an unreachable URL returned normally after
+  5.0 s, threw nothing (media_kit's async command only logs `error running command`), the track count and `vid`
+  did not change and the old quality kept playing. Failure is "the track list did not grow and `vid` did not move
+  when the command returned", read from the observed properties.
+- **The URLs' age is the same as today's:** both video and audio carry `expire=` six hours out, and `switchQuality`
+  reuses the URLs from the original `playback.open` (no RPC, §3.5), so a switch after six hours fails now as well;
+  `video-add` adds no new exposure. Re-resolving on expiry is a separate thing (see `retryAudio`).
+Risks to design around: `MediaKitEngine` tracks `vid` and the track ids itself, `isSwitchingQuality`/the cover/the
+hold in the controller exist for the reopen and would go (the picture holds the old frame for the 2 to 3 s of the
+seek, and the audio stops for them too), and the Narrator reaction is untried.
 
 **Done when:** a switch either gets measurably faster by one of the above, or the wait is shown for
 what it is and left.

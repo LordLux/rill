@@ -47,13 +47,16 @@ This document lists all the environment variables read across the Rill project (
 | `RILL_AUDIO_PROBE_VIDEO` | `main.dart` | Video id for audio probe |
 | `RILL_AUDIO_PROBE_OUT` | `main.dart` | Output path for audio probe |
 | `RILL_AUDIO_PROBE_NO_AWAKE` | `ui/audio_delay_probe.dart` | Skip awake step in audio probe |
+| `RILL_VIDEO_ADD_PROBE` | `main.dart` | Measure a quality switch done as `video-add` on the playing file (`ui/video_add_probe.dart`, `todo.md` 103): silent, real ladder, writes a JSON file and exits |
+| `RILL_VIDEO_ADD_PROBE_VIDEO` | `ui/video_add_probe.dart` | Video id for the `video-add` probe (default a 4K60 one with vp9, av01 and avc1 rungs) |
+| `RILL_VIDEO_ADD_PROBE_OUT` | `ui/video_add_probe.dart` | Output path for the `video-add` probe |
 | `RILL_LAUNCH_PROBE` | `main.dart`, `ui/player/launch_probe.dart` | Launch the launch probe |
 | `RILL_LAUNCH_PROBE_OUT` | `ui/player/launch_probe.dart` | Output path for launch probe |
 | `RILL_FEXP_PROBE` | `ui/player/launch_probe.dart` | Feature experiment probe |
 | `RILL_CAPTIONS_PROBE` | `ui/player/captions_probe.dart` | Launch the captions probe |
 | `RILL_CAPTIONS_MEDIA` | `ui/player/captions_probe.dart` | Media file for captions probe |
 | `RILL_CONTROLS_PROBE` | `ui/player/controls_probe.dart` | Launch the controls probe |
-| `RILL_SEMANTICS_PROBE` | `ui/semantics_probe.dart` | Scripted run with semantics on; count `Failed to update ui::AXTree` per step in the release log (`architecture.md` F51). `RILL_SEMANTICS_PROBE_VIDEO=<id>` picks the video, `RILL_SEMANTICS_PROBE_PLAYLIST=<id>` the playlist whose page it walks |
+| `RILL_SEMANTICS_PROBE` | `ui/semantics_probe.dart` | Scripted run with semantics on; count `Failed to update ui::AXTree` per step in the release log (`architecture.md` F51). `RILL_SEMANTICS_PROBE_VIDEO=<id>` picks the video, `RILL_SEMANTICS_PROBE_PLAYLIST=<id>` the playlist whose page it walks. Step `2-open-video` also opens the quality menu while the video loads and logs `loading-menu CAUGHT the load` or `loading-menu RACED PAST the load` (a run that raced past proved nothing about that menu) |
 | `RILL_FOCUS_PROBE` | `ui/focus_probe.dart` | `feed` or `watch`: walk Tab through the real app and log each stop, with `OFFSCREEN` and `NAMELESS` markers. `RILL_FOCUS_PROBE_STOPS`, `RILL_FOCUS_PROBE_REVERSE=1`, `RILL_FOCUS_PROBE_VIDEO=<id>`, `RILL_FOCUS_PROBE_DWELL=<ms>` (wait at each stop and log whether the player bar is still up). `hover` sweeps a mouse pointer over the feed, watch page and miniplayer; `openclick` rests the pointer on a tile (`RILL_FOCUS_PROBE_AT=<x>,<y>` as window fractions), clicks it and waits. `RILL_FOCUS_PROBE_SIZE=1700x950` resizes first. Semantics are on in every mode (`architecture.md` F52) |
 | `RILL_KEY_DIAG` | `ui/key_diag.dart` | `1`: log every key press with what has focus (`keydiag:` lines), plus app-lifecycle and window-focus changes. For "the keyboard stopped working": presses that keep appearing mean the app is receiving keys; presses that stop mean the window lost keyboard focus |
 | `RILL_FOCUS_PROBE=monkey` | `ui/focus_probe.dart` | A screen reader's hands, at random: presses allow-listed nodes from the semantics tree (never like/subscribe/vote/delete), scrolls, Tabs, opens videos, and logs every step (`MONKEY n: …`) so an `AXTree` error's preceding steps are in the same log. `RILL_MONKEY_SEED=<n>`, `RILL_MONKEY_STEPS=<n>`. About 1 run in 20 reproduced an error (`architecture.md` F51) |
