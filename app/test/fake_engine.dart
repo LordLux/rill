@@ -118,6 +118,50 @@ class FakeEngine implements PlaybackEngine {
     _audioMissingChanges.add(false);
   }
 
+  /// Whether [switchVideo] works in place. Off by default so the tests written for the reopen
+  /// keep testing it; the in-place ones turn it on.
+  bool inPlaceSwitch = false;
+
+  /// Every variant handed to [switchVideo] that was accepted, in order.
+  final List<PlaybackVariant> switched = [];
+
+  /// What the next [switchVideo] answers, once.
+  VideoSwitch? nextSwitchResult;
+
+  /// Held by a test that needs a switch to still be in flight.
+  Future<void>? switchGate;
+
+  /// Switches begun and not yet ended: more than one means the caller did not serialise.
+  int switchesInFlight = 0;
+  int maxSwitchesInFlight = 0;
+
+  PlaybackVariant? _current;
+
+  @override
+  bool canSwitchVideo(PlaybackVariant variant) => inPlaceSwitch && variant.audioUrl != null && variant.audioUrl == _current?.audioUrl;
+
+  @override
+  Future<VideoSwitch> switchVideo(PlaybackVariant variant) async {
+    if (!canSwitchVideo(variant)) return VideoSwitch.unsupported;
+    switchesInFlight++;
+    if (switchesInFlight > maxSwitchesInFlight) maxSwitchesInFlight = switchesInFlight;
+    try {
+      final gate = switchGate;
+      if (gate != null) await gate;
+      final result = nextSwitchResult ?? VideoSwitch.done;
+      nextSwitchResult = null;
+      if (result == VideoSwitch.done) {
+        switched.add(variant);
+        _current = variant;
+        setWidth(variant.height * 16 ~/ 9);
+        setHeight(variant.height);
+      }
+      return result;
+    } finally {
+      switchesInFlight--;
+    }
+  }
+
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
   /// take ~20 s here, waiting on a duration before it attaches the audio track.
   Future<void>? openGate;
@@ -167,6 +211,7 @@ class FakeEngine implements PlaybackEngine {
     bool isLive = false,
   }) async {
     opened.add(variant);
+    _current = variant;
     // Exactly `MediaKitEngine`'s behaviour: the reopen drops mpv's external
     // subtitle track, and only `retainSubtitle` puts it back. Modelled here
     // rather than assumed away, because "captions survive a quality switch" is
@@ -302,6 +347,7 @@ class FakeEngine implements PlaybackEngine {
   @override
   Future<void> stop() async {
     stopCount++;
+    _current = null;
     _audioMissing = false;
     setPlaying(false);
     // As media_kit's `stop`: the clock goes back to zero, so anything reading the position

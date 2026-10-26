@@ -853,7 +853,7 @@ class _QualityPage extends ConsumerWidget {
             // entry at all.
             selected: current != null && variant.height == current.height && variant.fps == current.fps,
             // The tick moves to the picked row at once, before that quality has loaded.
-            loading: playback.isSwitchingQuality,
+            loading: playback.isChangingQuality,
             onTap: () => onPicked(variant),
           ),
         // **Last, and deliberately dead** (task §3): automatic stepping needs a
