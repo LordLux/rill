@@ -196,6 +196,11 @@ abstract class PlaybackEngine {
   /// audio-only open, which fails with [AudioUnavailable] instead.
   bool get audioMissing;
 
+  /// Changes of [audioMissing]. The one that matters after an open is `false`: the track list
+  /// can trail the grace [open] allows it on a loaded machine, so a notice raised for missing
+  /// audio has to come down if the audio turns up after all.
+  Stream<bool> get audioMissingStream;
+
   Future<void> dispose();
 }
 
@@ -537,7 +542,7 @@ class MediaKitEngine implements PlaybackEngine {
     _supersedeOpen();
     final superseded = Completer<void>();
     _openSuperseded = superseded;
-    _audioMissing = false;
+    _setAudioMissing(false);
     lastOpened = variant;
     trace?.call('open ${variant.height}p play=$play live=$isLive audio=${variant.audioUrl != null}');
     // Read before the open, applied after it. A reopen drops mpv's external
@@ -657,7 +662,9 @@ class MediaKitEngine implements PlaybackEngine {
           await stop();
           throw const AudioUnavailable();
         }
-        _audioMissing = true;
+        _setAudioMissing(true);
+        // The list may only be late: if the audio appears after all, say so.
+        _lateAudio = _player.stream.tracks.where(_hasAudioTrack).listen((_) => _setAudioMissing(false));
       }
     }
 
@@ -691,9 +698,25 @@ class MediaKitEngine implements PlaybackEngine {
   }
 
   bool _audioMissing = false;
+  final StreamController<bool> _audioMissingChanges = StreamController<bool>.broadcast();
+  StreamSubscription<Tracks>? _lateAudio;
 
   @override
   bool get audioMissing => _audioMissing;
+
+  @override
+  Stream<bool> get audioMissingStream => _audioMissingChanges.stream;
+
+  /// Every change goes through here, and clearing it also stops the wait for a late track.
+  void _setAudioMissing(bool value) {
+    if (!value) {
+      unawaited(_lateAudio?.cancel());
+      _lateAudio = null;
+    }
+    if (_audioMissing == value) return;
+    _audioMissing = value;
+    if (!_audioMissingChanges.isClosed) _audioMissingChanges.add(value);
+  }
 
   /// How long the track list may trail the duration before the audio counts as missing.
   static const Duration _trackListGrace = Duration(seconds: 2);
@@ -793,7 +816,7 @@ class MediaKitEngine implements PlaybackEngine {
   Future<void> stop() {
     trace?.call('stop');
     _supersedeOpen();
-    _audioMissing = false;
+    _setAudioMissing(false);
     return _player.stop();
   }
 
@@ -802,6 +825,8 @@ class MediaKitEngine implements PlaybackEngine {
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
+    await _lateAudio?.cancel();
+    await _audioMissingChanges.close();
     await _videoOutput.close();
     await _player.dispose();
   }

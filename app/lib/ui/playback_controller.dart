@@ -354,6 +354,11 @@ class PlaybackController extends Notifier<PlaybackState> {
       engine.completedStream.listen((completed) {
         if (completed) unawaited(_onCompleted());
       }),
+      // A "No sound" notice raised because the track list trailed its grace comes down when
+      // the audio turns up. Only clears: raising it is `open`'s job, once the open has ended.
+      engine.audioMissingStream.listen((missing) {
+        if (!missing && state.audioMissing) state = state.copyWith(audioMissing: false);
+      }),
       engine.positionStream.listen((position) {
         if (position > Duration.zero) {
           _stallWatchdogTimer?.cancel();

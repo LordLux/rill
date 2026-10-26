@@ -103,9 +103,20 @@ class FakeEngine implements PlaybackEngine {
   bool audioLoads = true;
 
   bool _audioMissing = false;
+  final _audioMissingChanges = StreamController<bool>.broadcast();
 
   @override
   bool get audioMissing => _audioMissing;
+
+  @override
+  Stream<bool> get audioMissingStream => _audioMissingChanges.stream;
+
+  /// The audio track turning up after the open had decided it was missing: the track list
+  /// trailing its grace on a loaded machine.
+  void audioArrivesLate() {
+    _audioMissing = false;
+    _audioMissingChanges.add(false);
+  }
 
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
   /// take ~20 s here, waiting on a duration before it attaches the audio track.

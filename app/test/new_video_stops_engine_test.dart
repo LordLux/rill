@@ -186,6 +186,30 @@ void main() {
       expect(engine.playing, isTrue);
     });
 
+    test('the notice comes down if the audio turns up after all', () async {
+      engine.audioLoads = false;
+      container.read(queueProvider.notifier).play(video('aaa'));
+      await settle();
+      expect(playback.audioMissing, isTrue);
+
+      // MUTATION: drop the `audioMissingStream` listener in the controller and this fails: the
+      // notice would stay up over a video that has sound.
+      engine.audioArrivesLate();
+      await settle(50);
+
+      expect(playback.audioMissing, isFalse);
+      expect(playback.error, isNull);
+      expect(engine.playing, isTrue);
+    });
+
+    test('a late audio track while nothing is missing changes nothing', () async {
+      container.read(queueProvider.notifier).play(video('aaa'));
+      await settle();
+      engine.audioArrivesLate();
+      await settle(50);
+      expect(playback.audioMissing, isFalse);
+    });
+
     test('a video whose audio loads says nothing', () async {
       container.read(queueProvider.notifier).play(video('aaa'));
       await settle();
