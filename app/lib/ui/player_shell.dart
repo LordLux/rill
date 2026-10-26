@@ -11,6 +11,7 @@ import 'playback_controller.dart';
 import 'player/audio_art_surface.dart';
 import 'now_playing_art.dart';
 import 'player/audio_backdrop.dart';
+import 'player/video_load_cover.dart';
 import 'player/player_slates.dart';
 import 'player/controls.dart';
 import 'player/libass_layer.dart';
@@ -606,6 +607,7 @@ class _FullscreenPlayerState extends ConsumerState<_FullscreenPlayer> {
                 // overlay this is a black screen. It stays mounted underneath
                 // so the artwork can crossfade over it rather than replace it.
                 engine.videoSurface(),
+                const VideoLoadCover(),
                 AudioArtOverlay(
                   show: ref.watch(audioModeProvider) || ref.watch(playbackProvider).isRestoringVideo,
                   imageUrl: ref.watch(nowPlayingBackdropProvider),
@@ -658,7 +660,7 @@ class MiniPlayer extends ConsumerWidget {
                       color: theme.tokens.scrim,
                       child: ref.watch(audioModeProvider)
                           ? AudioArtSurface(thumbnailUrl: item.thumbnailUrl, scrim: false, iconSize: 24)
-                          : engine.videoSurface(),
+                          : Stack(fit: StackFit.expand, children: [engine.videoSurface(), const VideoLoadCover()]),
                     ),
                   ),
                   const SizedBox(width: 12),

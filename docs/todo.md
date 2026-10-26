@@ -584,6 +584,11 @@ carries on over that window too, which is worth checking, since stopping it is p
 is chosen has to work in all three, and the cover must not be an overlay above something that mounts
 or fades (CLAUDE.md, Accessibility).
 
+**Status 2026-10-26:** the user saw the old frame go instantly on some clicks and linger for a couple of
+frames on others, so the thumbnail cover is in (`VideoLoadCover`, on the watch page, the fullscreen layer
+and the miniplayer; it comes off on `videoOutputReady` once the open has ended, with a 10 s safety net).
+To be looked at by eye again before this item leaves.
+
 **Status 2026-10-25:** the stop is in (`open` stops the engine when the id differs, after `_endSession`
 has taken the position; tests in `new_video_stops_engine_test.dart`, mutation-checked). **Not yet seen
 with eyes:** whether the surface goes black on that stop. The black the viewer reported arriving after

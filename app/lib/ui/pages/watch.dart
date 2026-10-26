@@ -23,6 +23,7 @@ import '../focus_surface.dart';
 import '../playback_controller.dart';
 import '../now_playing_art.dart';
 import '../player/audio_backdrop.dart';
+import '../player/video_load_cover.dart';
 import '../player/player_slates.dart';
 import '../player/controls.dart';
 import '../player/view_mode.dart';
@@ -610,6 +611,9 @@ class _PlayerSurface extends ConsumerWidget {
       fit: StackFit.expand,
       children: [
         isTopWatchPage ? engine.videoSurface() : engine.videoWidget(),
+        // The new video's thumbnail until its first frame: the texture still holds the last
+        // frame of the previous video (todo 105).
+        const VideoLoadCover(),
         // Held through the restore as well — see [AudioArtOverlay]
         AudioArtOverlay(
           show: isAudioOnly || playback.isRestoringVideo,
