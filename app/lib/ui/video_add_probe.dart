@@ -54,11 +54,81 @@ class VideoAddProbe {
 
   double? _number(String property) => double.tryParse(_latest[property] ?? '');
 
+  /// The furthest the clock got since the last reset. A switch that ends behind it has sent the
+  /// clock back, which is what the first version of this probe printed and did not flag.
+  double _maxPos = 0;
+
   void _say(String line) => stderr.writeln('probe: $line');
 
   String _name(PlaybackVariant v) => '${v.height}p${v.fps} ${v.videoCodec.split('.').first} itag=${v.itag}';
 
+  Future<void> _observe() async {
+    engine.logStream.listen((entry) {
+      if (_logs.length < 800 && Platform.environment['RILL_VIDEO_ADD_PROBE_VERBOSE'] == '1') {
+        _logs.add('${_nowMs}ms [${entry.prefix}] ${entry.text}'.trim());
+      }
+    });
+    for (final property in _properties) {
+      await engine.diagnostics.observeProperty(property, (value) async {
+        _latest[property] = value;
+        if (property == 'time-pos') {
+          final seconds = double.tryParse(value);
+          if (seconds != null && seconds > _maxPos) _maxPos = seconds;
+        }
+      });
+    }
+  }
+
+  /// `RILL_VIDEO_ADD_PROBE_LOCAL=<dir>` with `v1.webm`, `v2.webm` and `a.webm` (the files
+  /// `sidecar/scratch/measure-video-add.ts` describes): a switch whose new quality's first byte
+  /// is held 3 s, the slow add a real network gives, on demand. On YouTube the add is quick
+  /// enough that the old quality's clock barely runs ahead of it, which let a seek back to the
+  /// start of the switch go unnoticed; here it runs 3 s ahead and the seek has to land there.
+  Future<void> _runLocal(String dir) async {
+    await engine.setVolume(0);
+    final server = await Process.start(
+      'bun',
+      ['run', '${Directory.current.path}/sidecar/scratch/measure-video-add-server.ts'],
+      environment: {'MEDIA': dir, 'DELAY_V2_MS': '3000'},
+    );
+    final port = Completer<int>();
+    server.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      if (line.startsWith('PORT ') && !port.isCompleted) port.complete(int.parse(line.substring(5)));
+    });
+    server.stderr.drain<void>();
+    final base = 'http://127.0.0.1:${await port.future}';
+    PlaybackVariant variant(String name, int height) => PlaybackVariant(
+          videoUrl: '$base/$name.webm',
+          audioUrl: '$base/a.webm',
+          itag: height,
+          height: height,
+          fps: 25,
+          videoCodec: 'vp9',
+          audioCodec: 'opus',
+        );
+    final v1 = variant('v1', 240);
+    final v2 = variant('v2', 252);
+    try {
+      await _observe();
+      await engine.open(v1);
+      await engine.seek(const Duration(seconds: 15));
+      await _advancing();
+      await _switch('slow add (new quality held 3 s)', v1, v2);
+      final record = _results.last;
+      final back = record['clockWentBackBy'] as double;
+      _say(back > 0.5 ? 'LOCAL: the clock went back by ${back.toStringAsFixed(1)} s' : 'LOCAL: the clock did not go back');
+    } finally {
+      server.kill();
+      _write();
+    }
+  }
+
   Future<void> run() async {
+    final local = Platform.environment['RILL_VIDEO_ADD_PROBE_LOCAL']?.trim();
+    if (local != null && local.isNotEmpty) {
+      await _runLocal(local);
+      return;
+    }
     await engine.setVolume(0);
     final response = await RpcClient.instance.call('playback.open', {'videoId': videoId});
     final ladder = PlaybackSource.fromJson(response as Map<String, dynamic>).variants;
@@ -67,14 +137,7 @@ class VideoAddProbe {
     _say('ladder: ${ladder.map(_name).join('; ')}');
     _say('muxed rungs: ${ladder.where((v) => v.audioUrl == null).map(_name).join(', ').isEmpty ? 'none in this ladder' : 'some'}');
 
-    engine.logStream.listen((entry) {
-      if (_logs.length < 800 && Platform.environment['RILL_VIDEO_ADD_PROBE_VERBOSE'] == '1') {
-        _logs.add('${_nowMs}ms [${entry.prefix}] ${entry.text}'.trim());
-      }
-    });
-    for (final property in _properties) {
-      await engine.diagnostics.observeProperty(property, (value) async => _latest[property] = value);
-    }
+    await _observe();
 
     PlaybackVariant? pick(bool Function(PlaybackVariant) test) {
       for (final v in adaptive) {
@@ -240,10 +303,14 @@ class VideoAddProbe {
     await Future<void>.delayed(const Duration(seconds: 3));
     _say('--- $label: ${_name(from)} -> ${_name(to)}');
     final before = _number('time-pos');
+    _maxPos = before ?? 0;
     final watch = Stopwatch()..start();
     final result = await engine.switchVideo(to);
     final ms = watch.elapsedMilliseconds;
     final at = _number('time-pos');
+    // The clock ran on with the old quality while the new one was fetched; the seek must land
+    // there and not back at `before`.
+    final wentBack = _maxPos - (at ?? _maxPos);
     // Three seconds on: did the clock keep going, and is the picture the new one?
     await Future<void>.delayed(const Duration(seconds: 3));
     final later = _number('time-pos');
@@ -255,6 +322,8 @@ class VideoAddProbe {
       'ms': ms,
       'posBefore': before,
       'posAtReturn': at,
+      'furthestClockDuringSwitch': _maxPos,
+      'clockWentBackBy': wentBack,
       'posThreeSecondsOn': later,
       'clockAdvancedAfter': (later ?? 0) - (at ?? 0),
       'video': '${_latest['video-params/w']}x${_latest['video-params/h']} ${_latest['video-format']}',
@@ -263,7 +332,8 @@ class VideoAddProbe {
       'avsync': _number('avsync'),
     };
     _results.add(record);
-    _say('    ${result.name} in $ms ms, clock $before -> $at -> $later (${((later ?? 0) - (at ?? 0)).toStringAsFixed(1)} s in 3 s), '
+    if (wentBack > 0.5) _say('    !!! JUMPED BACK by ${wentBack.toStringAsFixed(1)} s (furthest $_maxPos, landed $at)');
+    _say('    ${result.name} in $ms ms, furthest $_maxPos, clock $before -> $at -> $later (${((later ?? 0) - (at ?? 0)).toStringAsFixed(1)} s in 3 s), '
         '${record['video']}, vid=${engine.diagnosticVid} added=${engine.diagnosticAddedVideoIds}, avsync=${record['avsync']}');
   }
 

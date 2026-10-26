@@ -611,7 +611,12 @@ class MediaKitEngine implements PlaybackEngine {
     // Cleared on every open, never left: it is an option, not per-file state, so
     // a previous audio-only open's track would otherwise load into this one as a
     // second audio stream.
-    final audioUrl = variant.audioUrl;
+    // `RILL_DEBUG_DEAD_AUDIO=1` swaps the audio URL for one that cannot connect, to see the
+    // "No sound" notice and the video-only fallback without waiting for YouTube to refuse one.
+    // Measurement only; unset in ordinary use.
+    final audioUrl = variant.audioUrl != null && Platform.environment['RILL_DEBUG_DEAD_AUDIO'] == '1'
+        ? 'https://127.0.0.1:9/dead.webm'
+        : variant.audioUrl;
     final native = _player.platform as NativePlayer;
     // **Attached at load in video mode too (todo 103, 102).** The audio used to be added
     // after the duration was known, and starting the video first played it silent until
@@ -889,14 +894,17 @@ class MediaKitEngine implements PlaybackEngine {
   Future<void> _addVideo(String url) async {
     final native = _player.platform as NativePlayer;
     final before = _selectedVideoId();
-    final target = _position;
     await native.command(['video-add', url, 'select']);
     // The command returns normally for a URL that would not open (media_kit only logs it), so
     // a new numeric `vid` is the proof the track exists.
     final id = await _newVideoId(before);
     if (id == null) throw StateError('the video stream would not open');
     _addedVideoIds.add(id);
-    await _seekAndWait(target);
+    // Read now, not before the command: the old track plays on while the new one is fetched
+    // (up to several seconds), and a target taken at the start sent the clock back by that
+    // much when the seek landed (reported 2026-10-25; the probe printed it and was misread).
+    // The clock stands still from the moment the add ends, so this is where it is.
+    await _seekAndWait(_position);
   }
 
   /// The id of the video track that is selected now and was not [before], waiting a moment for
@@ -993,7 +1001,6 @@ class MediaKitEngine implements PlaybackEngine {
     }
     final native = _player.platform as NativePlayer;
     final before = _selectedVideoId();
-    final target = _position;
     await native.command(['video-add', variant.videoUrl, 'select']);
     final id = await _newVideoId(before);
     if (id == null) {
@@ -1003,7 +1010,8 @@ class MediaKitEngine implements PlaybackEngine {
     _addedVideoIds.add(id);
     lastOpened = variant;
     try {
-      await _seekAndWait(target);
+      // Where the clock is now, not where it was when the switch began — see [_addVideo].
+      await _seekAndWait(_position);
     } on TimeoutException {
       return VideoSwitch.refused;
     }
