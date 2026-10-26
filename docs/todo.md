@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 106.** A new item takes it, and the same edit bumps this line.
+**Next number: 108.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -589,7 +589,8 @@ has taken the position; tests in `new_video_stops_engine_test.dart`, mutation-ch
 with eyes:** whether the surface goes black on that stop. The black the viewer reported arriving after
 the half second is when `MediaKitEngine.open` runs `Player.open`, which stops first, so a stop probably
 blanks it; if the last frame still shows, cover it with the new video's thumbnail (not black) while
-`isLoading` and no source is open.
+`isLoading` and no source is open. The cover comes off on the engine's existing first-frame signal (the
+one behind `vo-configured`, `videoOutputReady`), not on a timer.
 
 **Done when:** opening another video from the feed, a tile on the watch page, a playlist row and the
 queue never shows the previous video's frame, and a test with the fake engine shows the engine being
@@ -1114,6 +1115,27 @@ whether the change makes ten full runs pass is **not yet measured**.
 polls a condition, the rest in `player_controls_test` and
 `scrubber_chapters_widget_test` poll the engine); none was in a failure.
 
+**2026-10-25, a full `rill check` while the machine was busy (a release build had just
+finished): 5 tests failed, each passed alone and the next full run passed (1324 tests, 0 failing).**
+What the guard printed:
+- `playback_queue_test` "jumping to a queue entry plays it": expected `contains 'bbb'`, actual
+  `https://fake.invalid/aaa/video/2160` (the jump had not reached the engine after `settle()`'s fixed
+  200 ms).
+- `rpc_client_test` "decoding a large payload does not block the main isolate": expected less than
+  5000, actual 6408.
+- `rpc_client_test` "a large payload and the small ones behind it arrive in order, off the frame
+  loop": expected less than 150, actual 2000 ("the main isolate stalled for 2000ms — the decode ran
+  inline").
+- `search_suggest_test` "arrow-down walks 0, 1, 2 and stops at the last suggestion — no wrap":
+  expected length 3, actual 0.
+- `stall_watchdog_test` "a stalled stream is reopened once": expected 2, actual 0.
+Three of them (`playback_queue`, `search_suggest`, `stall_watchdog`) wait a fixed real time for the fake
+sidecar, as the earlier ones did; the two `rpc_client` ones are timing assertions, so a busy machine fails
+them by construction. Not fixed.
+A second occurrence the next day, a full `rill check` right after editing: `rpc_client_test` "a large payload
+and the small ones behind it arrive in order, off the frame loop" again, expected less than 150, actual 250
+("the main isolate stalled for 250ms — the decode ran inline"); the rerun passed.
+
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
 
 ### 98. The watch page shows no player controls while a video loads
@@ -1370,6 +1392,10 @@ Risks to design around: `MediaKitEngine` tracks `vid` and the track ids itself, 
 hold in the controller exist for the reopen and would go (the picture holds the old frame for the 2 to 3 s of the
 seek, and the audio stops for them too), and the Narrator reaction is untried.
 
+**Also, not work yet:** the open is the sum of the video's and the audio's first bytes because mpv opens the
+audio after the video (F59). The audio's wait could be hidden by starting it before mpv does, for example a
+request for its first bytes issued as soon as `playback.open` answers.
+
 **Done when:** a switch either gets measurably faster by one of the above, or the wait is shown for
 what it is and left.
 
@@ -1389,6 +1415,61 @@ somewhere between the tile and the request (the id begins with a hyphen; check t
 
 **Done when:** the cause is known and either fixed or turned into an error message that says what to
 do.
+
+### 106. The "No sound" notice has no miniplayer form
+
+Added 2026-10-25 with the notice (`NoSoundNotice` in `player_slates.dart`, shown by `PlayerSlates` on the
+watch page and the fullscreen layer). The miniplayer does not mount `PlayerSlates`, so a video whose audio did
+not load plays in silence there with nothing said, which is issue #22's symptom again in the one surface the
+fix does not reach. `PlaybackState.audioMissing` is already what to read; the form is the open question (an
+icon on the miniplayer, a line under the title) and has to follow the Accessibility rules (no overlay under
+something that mounts, one name said once).
+
+**Done when:** a miniplayer playing a video with no audio shows it, and the retry (`retryAudio`) is reachable.
+
+### 107. A stream URL that has expired, or a connection that has gone, fails silently
+
+Raised 2026-10-25 while designing the `video-add` quality switch, then measured. Every `videoplayback` URL
+carries `expire=`, six hours out (seen on both the video and the audio URL of a fresh `playback.open`), and
+nothing in the app refreshes them: `switchQuality` reuses the ladder from the original `playback.open` (no RPC,
+§3.5), `_reopenStalled` reopens the same `PlaybackVariant`, `retryAudio` is the only path that resolves again
+and it only runs from the "No sound" notice. After the expiry any *new* request for the URL is refused (403),
+which affects every new read: a seek to a place not yet buffered, a resume after a long pause if the connection
+went, a quality switch, a reopen.
+
+**What happens today, measured with the bundled libmpv against a local server that answers 403 once told to
+expire, with the read-ahead kept small (`sidecar/scratch/measure-expiry.ts`, `seek` / `pause` / `pausecut`):**
+- **A seek into a region not yet read hangs.** mpv logs `http: HTTP error 403 Forbidden` (warning) and
+  `Seek failed (to …)` (error), then `seeking` stays `yes` and `core-idle` stays `yes` for as long as it was left
+  (24 s here). Nothing ends and nothing errors: `idle-active` stays `no`, no `eof-reached`. media_kit turns only
+  `tcp:`-prefixed ffmpeg errors into its `error` stream, and `Seek failed` is not one, so the app is told nothing.
+  The stall watchdog (`_armStallWatchdog`) is armed for 5 s after an open and only looks at position 0, so it
+  does not see this. The viewer sees a seek that never lands.
+- **A connection that is gone ends the video early, as a normal ending.** With the connections cut while paused
+  and resumed 12 s later, playback ran 13 s from the cache and then the file ended (`idle-active=yes`) at 16 s of
+  a 60 s video, with **no new request made**. The control, where new requests are still answered (`pausecut`),
+  behaves the same: this build of mpv does not reconnect (no `reconnect` option is set), so a dropped connection
+  is an EOF whether or not the URL has expired. In the app that EOF is `completed`, so `_onCompleted` reports the
+  watch as `ended`, advances the queue and plays the next video. Not measured: whether YouTube drops a paused
+  connection after any particular time, so how often this happens in life is unknown; the expiry only adds that
+  the retry would be refused.
+- **A read that is already in flight carries on** after the expiry (the 'play' arm played to the end): the
+  URL is checked when a request is made.
+
+**Directions, none chosen:**
+- A refresh in the sidecar that returns a fresh ladder for the open session without minting a second one (the
+  reason `switchQuality` does no RPC), called when the variants are older than about 5.5 h, on resume after a
+  long pause, and by the recovery below. Needs the sidecar to keep what `playback.open` resolved with.
+- Treat "the file ended well short of its duration" as a failed read, not an ending: refresh, reopen at the
+  position and resume, instead of reporting `ended`.
+- Treat a seek that stays `seeking` for more than a few seconds the same way.
+- `reconnect` options for ffmpeg's http (`stream-lavf-o`): invariant 8 applies, the bundled FFmpeg may not
+  have them, and the option has to be proved against the binary's string table before it is believed.
+
+**Done when:** a seek, a resume after a long pause and a quality switch on a video whose URLs have expired
+each end with the video playing at the right place (or a message that says what to do), and a dropped
+connection is not reported as the end of the video. A test with the fake engine for the recovery, and the
+scratch harness run against the change.
 
 ---
 
