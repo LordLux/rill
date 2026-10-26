@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 108.** A new item takes it, and the same edit bumps this line.
+**Next number: 109.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1336,69 +1336,6 @@ setting on a manual restart does the same, and with it off a launch is a fresh s
 corrupt or stale snapshot is ignored, never retried; tests cover write, read, the once-only
 apply, and the update marker.
 
-### 103. A quality switch takes 4 to 18 s, and most of it is waiting for the network
-
-Reported 2026-10-24: after changing quality the new video loads, the spinner keeps turning, and the
-audio is sometimes the thing still loading. It resumes; it is a wait, not a hang.
-
-**Measured the same day** (`rill: open … timings` and `rill: quality ->` in the log, about twenty switches over three sessions):
-- `engine.open` takes 2.8 to 8.3 s, and the whole of it is two network waits that run one after the
-  other: the video's first bytes (0.4 to 3.5 s) and, until 2026-10-24, `audio-add` (2.4 to 3.3 s more).
-  The audio at load (F59) removed the silent start, but **did not shorten the open**, because mpv
-  opens the two streams one after the other (measured 2026-10-25: video held 2 s and audio 3 s
-  gives 5.04 s, not 3), so the open is still the sum of both first bytes, 3.6 to 8.3 s. The cost is
-  the first byte of each googlevideo stream, and the audio's can only be hidden by starting it
-  before mpv does.
-- After the reopen, `switchQuality` seeks back and waits for the picture: 0.3 to 3 s when resuming
-  near the start, 6 to 12 s when resuming at 20 s to 7 min (a far seek has to fetch from the middle
-  of both streams). Nothing in the log says how much of that is the audio.
-
-**The spike, 2026-10-24: a quality switch can be a track switch, and it looks good** (`scratch/measure-video-add.ts`,
-bundled libmpv, a 60 s video-only file playing with its audio in `audio-files`, a second quality served
-with its first byte held 3 s). `video-add <new video URL> select` on the playing file:
-- the command waits for the new stream (3.04 s here) and **playback does not stop**: the clock ran
-  3.00 s in those 3.04 s, 76 frames were written at 25 fps, the audio kept going. The picture swaps at
-  the moment the new stream is ready (`video-params/w` 320 -> 336 on return), `time-pos` never stepped
-  backwards, frames carried on at the same rate, and a `seek` right after it landed correctly;
-- the external caption track stayed selected (`sid`), and the audio stayed (`aid`);
-- `video-remove` on the track the last switch added works (the file's own first track cannot be removed,
-  it just stays unselected and unread); a second switch took 39 ms when the stream was quick;
-- the audio-only toggle (`vid=no`, then `vid=auto`) brings back the *added* track, not the file's own.
-So the cost of a switch would be the new stream's own first bytes, with no cover, no reopen, no seek back
-to the position (the 6 to 12 s far-seek stall above) and no audio to fetch again.
-**Measured 2026-10-25 in the app, on real DASH URLs (`RILL_VIDEO_ADD_PROBE=1`, `ui/video_add_probe.dart`; this
-corrects the spike above, which switched about 3 s in and so could not see the next point).**
-- **`video-add … select` alone freezes playback at a non-zero position.** The new track is read from its own start
-  (the mpv log shows its cached range at 0 to 8 s) while the clock waits at the old position, so `time-pos` *and*
-  the audio stood still until a seek, for 12 s and more (control: 20 s of plain playback moved normally). Pause and
-  resume, a track added without `select` and then `vid` set by hand, did not revive it; a seek did. The fix is a
-  `seek` to the current position straight after the command.
-- **With that seek the switch is 1.9 to 3.4 s** (command 0.3 to 0.5 s, then 1.5 to 2.8 s for the seek to put the
-  clock moving), against 4 to 18 s now. Across height (360 to 480), fps (30 to 60, 480p to 720p60) and codec (vp9
-  to av01, same size), starting at 120 to 300 s into a 10 minute video: the clock never went backwards, its
-  biggest step was 0.02 to 0.03 s, `avsync` stayed within 1 ms, `video-remove` of the old track kept the clock
-  moving at 1.0 s per second, a seek in the added track worked. So the position of the new track is right once
-  it has been seeked. Not tried: avc1, and a muxed rung (this ladder has none).
-- **The Dart command path does not block the UI isolate:** the longest gap between 10 ms timer ticks while
-  `await NativePlayer.command(['video-add', …])` was out was 11 to 15 ms.
-- **A refused URL is not an error in Dart.** The same command on an unreachable URL returned normally after
-  5.0 s, threw nothing (media_kit's async command only logs `error running command`), the track count and `vid`
-  did not change and the old quality kept playing. Failure is "the track list did not grow and `vid` did not move
-  when the command returned", read from the observed properties.
-- **The URLs' age is the same as today's:** both video and audio carry `expire=` six hours out, and `switchQuality`
-  reuses the URLs from the original `playback.open` (no RPC, §3.5), so a switch after six hours fails now as well;
-  `video-add` adds no new exposure. Re-resolving on expiry is a separate thing (see `retryAudio`).
-Risks to design around: `MediaKitEngine` tracks `vid` and the track ids itself, `isSwitchingQuality`/the cover/the
-hold in the controller exist for the reopen and would go (the picture holds the old frame for the 2 to 3 s of the
-seek, and the audio stops for them too), and the Narrator reaction is untried.
-
-**Also, not work yet:** the open is the sum of the video's and the audio's first bytes because mpv opens the
-audio after the video (F59). The audio's wait could be hidden by starting it before mpv does, for example a
-request for its first bytes issued as soon as `playback.open` answers.
-
-**Done when:** a switch either gets measurably faster by one of the above, or the wait is shown for
-what it is and left.
-
 ### 104. Adding a video to Watch Later answered HTTP 400
 
 Reported 2026-10-24: adding `-jknl-GNjDw` to Watch Later showed "could not add … to WL: Request to
@@ -1466,10 +1403,28 @@ expire, with the read-ahead kept small (`sidecar/scratch/measure-expiry.ts`, `se
 - `reconnect` options for ffmpeg's http (`stream-lavf-o`): invariant 8 applies, the bundled FFmpeg may not
   have them, and the option has to be proved against the binary's string table before it is believed.
 
-**Done when:** a seek, a resume after a long pause and a quality switch on a video whose URLs have expired
+**Done when (107):** a seek, a resume after a long pause and a quality switch on a video whose URLs have expired
 each end with the video playing at the right place (or a message that says what to do), and a dropped
 connection is not reported as the end of the video. A test with the fake engine for the recovery, and the
 scratch harness run against the change.
+
+### 108. Start the audio's first bytes before mpv does
+
+Not started; a line, not a plan (2026-10-25, from the F59 and F60 numbers). An open is the sum of the audio's
+first byte and the video's, because mpv opens the second stream only after the first (F59), and since F60 the
+audio is the file and the video is added, so that order is fixed: audio, then `video-add`. Measured on a live
+ladder the open is 1.5 to 2.0 s (audio 0.3 to 0.7 s) and a switch 1.3 to 4.4 s, most of which is the new
+stream's first bytes. Either wait could be hidden by asking for the bytes before mpv does, for example a
+request for the video's first bytes made as soon as `playback.open` answers, so the connection and the CDN
+are warm when `video-add` asks. Whether googlevideo serves the second request from anything warmer is not
+measured, and the URL must not be used in a way that changes what `playback.report` sees.
+
+**Not measured for the in-place switch (F60):** a muxed rung (this ladder had none), a live stream with a
+separate audio (kept on the old layout), Narrator's reaction to a switch, and captions across one in the app
+(the external track survived in the harness; the app's `LibassLayer` draws from `engine.subtitle`, which a switch
+does not touch).
+
+**Done when:** the open or a switch is measurably shorter from it, or the measurement shows it is not worth it.
 
 ---
 

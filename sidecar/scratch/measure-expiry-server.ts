@@ -15,6 +15,10 @@ const files: Record<string, Buffer> = {
   '/v.webm': fs.readFileSync(process.env['VIDEO']!),
   '/a.webm': fs.readFileSync(process.env['AUDIO']!),
 };
+// `VIDEO2`: a second quality, for `measure-deselected.ts`. `/__bytes` answers how many bytes each
+// path has put on the wire so far, as JSON.
+if (process.env['VIDEO2']) files['/v2.webm'] = fs.readFileSync(process.env['VIDEO2']);
+const sent: Record<string, number> = {};
 const rate = Number(process.env['RATE'] ?? 60000);
 const t0 = Date.now();
 let expired = false;
@@ -24,7 +28,7 @@ let refuseNew = true;
 let refused = 0;
 const log: string[] = [];
 
-function trickle(body: Buffer): ReadableStream<Uint8Array> {
+function trickle(body: Buffer, pathname: string): ReadableStream<Uint8Array> {
   let offset = 0;
   const chunk = 4096;
   const opened = cuts;
@@ -40,20 +44,22 @@ function trickle(body: Buffer): ReadableStream<Uint8Array> {
         return;
       }
       await Bun.sleep((chunk / rate) * 1000);
-      controller.enqueue(body.subarray(offset, offset + chunk));
+      const piece = body.subarray(offset, offset + chunk);
+      controller.enqueue(piece);
+      sent[pathname] = (sent[pathname] ?? 0) + piece.length;
       offset += chunk;
     },
   });
 }
 
-function serve(request: Request, body: Buffer): Response {
+function serve(request: Request, body: Buffer, pathname: string): Response {
   const range = /bytes=(\d+)-(\d*)/.exec(request.headers.get('range') ?? '');
   const headers = { 'Content-Type': 'video/webm', 'Accept-Ranges': 'bytes' };
-  if (!range) return new Response(trickle(body), { headers: { ...headers, 'Content-Length': String(body.length) } });
+  if (!range) return new Response(trickle(body, pathname), { headers: { ...headers, 'Content-Length': String(body.length) } });
   const start = Number(range[1]);
   const end = range[2] === '' ? body.length - 1 : Math.min(Number(range[2]), body.length - 1);
   const part = body.subarray(start, end + 1);
-  return new Response(trickle(part), {
+  return new Response(trickle(part, pathname), {
     status: 206,
     headers: { ...headers, 'Content-Range': `bytes ${start}-${end}/${body.length}`, 'Content-Length': String(part.length) },
   });
@@ -74,6 +80,7 @@ const server = Bun.serve({
       console.log(`EXPIRED ${Date.now() - t0} cut=${cutInFlight} refuse=${refuseNew}`);
       return new Response('ok');
     }
+    if (url.pathname === '/__bytes') return new Response(JSON.stringify(sent));
     if (url.pathname === '/__count') return new Response(`${refused} refused: ${log.join(', ')}`);
     if (expired && refuseNew) {
       refused++;
@@ -82,7 +89,7 @@ const server = Bun.serve({
     }
     const body = files[url.pathname];
     if (!body) return new Response('not found', { status: 404 });
-    return serve(request, body);
+    return serve(request, body, url.pathname);
   },
 });
 console.log(`PORT ${server.port}`);
