@@ -499,10 +499,12 @@ the answer.
   skipped — F42, measured 2026-09-24.** A variant's video URL is video-only, so
   opening it under a leftover `vid=no` with the audio not yet attached gives
   mpv nothing to play: it moves past the file, no duration arrives, and the open
-  waits out its 20 s timeout at 0:00. Every open with a separate audio URL
-  attaches the audio *at load* through `audio-files` instead (video mode too since
-  2026-10-24, F59: mpv then holds the open until the audio is there, so nothing
-  plays silent). Change that list with `change-list`
+  waits out its 20 s timeout at 0:00. Since 2026-10-25 (F60) an open with a separate
+  audio URL opens **the audio as the file and adds the video** (`video-add`), so there
+  is always a stream selected, and a quality switch is a track switch; a live stream
+  and a muxed variant, and an audio URL that would not open, keep the older layout,
+  where the audio is attached *at load* through `audio-files` (F59: mpv then holds the
+  open until the audio is there, so nothing plays silent). Change that list with `change-list`
   (`clr`, `append`), **never** `setProperty('audio-files', '')` — that sets a
   list holding one empty path, and every later open fails with
   `Cannot open file ''`.
@@ -608,8 +610,8 @@ the answer.
   and no way to draw captions twice. `architecture.md` §2.9 and `protocol.md`
   §3.8. Hover previews are the exception: they run on a separate
   `MediaKitEngine` with no `LibassLayer` mounted, so previews use mpv's
-  `sub-add` directly. A quality switch drops the track, and
-  `MediaKitEngine.open(retainSubtitle: true)` is what puts it back.
+  `sub-add` directly. A quality switch that reopens the media (the fallback) drops the track, and
+  `MediaKitEngine.open(retainSubtitle: true)` is what puts it back; an in-place one (F60) leaves it.
 - **`fmt=ytt` answers HTTP 404, and a `WEB` caption URL answers 200 with no
   body.** Two things that look like bugs and are not. YTT is not a fetchable
   format: its styling model *is* the `pens` / `wsWinStyles` / `wpWinPositions`
