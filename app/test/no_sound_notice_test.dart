@@ -110,6 +110,19 @@ void main() {
     finish();
   });
 
+  testWidgets('the notice leaves the page when the audio arrives late', (tester) async {
+    engine.audioLoads = false;
+    await openVideo(tester);
+    expect(find.byKey(noSoundNoticeKey), findsOneWidget);
+
+    engine.audioArrivesLate();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(noSoundNoticeKey), findsNothing);
+    finish();
+  });
+
   testWidgets('Try again opens it again and the notice goes away once the audio is there', (tester) async {
     engine.audioLoads = false;
     await openVideo(tester);
