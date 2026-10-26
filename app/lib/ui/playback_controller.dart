@@ -65,6 +65,7 @@ class PlaybackState {
     this.wantPlaying = true,
     this.preferredHeight,
     this.isSwitchingQuality = false,
+    this.isSwitchingTrack = false,
     this.isRestoringVideo = false,
     this.audioMissing = false,
     this.hold,
@@ -99,6 +100,14 @@ class PlaybackState {
   /// A quality change in flight. Distinct from [isLoading] because it must not
   /// draw the "opening a video" spinner over a video that is already playing.
   final bool isSwitchingQuality;
+
+  /// A quality change done in place, as an added video track (todo 103). The old picture keeps
+  /// showing and the sound holds for the second or two it takes, so there is no cover: this is
+  /// only what the quality button and menu show as busy. See [isChangingQuality].
+  final bool isSwitchingTrack;
+
+  /// Either way of changing quality is under way: what shows busy, as opposed to what covers.
+  bool get isChangingQuality => isSwitchingQuality || isSwitchingTrack;
 
   /// Leaving audio-only, with no picture yet.
   ///
@@ -210,6 +219,7 @@ class PlaybackState {
     bool? wantPlaying,
     Object? preferredHeight = _unchanged,
     bool? isSwitchingQuality,
+    bool? isSwitchingTrack,
     bool? isRestoringVideo,
     bool? audioMissing,
     Object? hold = _unchanged,
@@ -230,6 +240,7 @@ class PlaybackState {
       wantPlaying: wantPlaying ?? this.wantPlaying,
       preferredHeight: identical(preferredHeight, _unchanged) ? this.preferredHeight : preferredHeight as int?,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
+      isSwitchingTrack: isSwitchingTrack ?? this.isSwitchingTrack,
       isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       audioMissing: audioMissing ?? this.audioMissing,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
@@ -458,6 +469,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // What the quality menu marks while there is no ladder yet.
       preferredHeight: _preferredHeight,
       isSwitchingQuality: false,
+      isSwitchingTrack: false,
       // **A restore belongs to the media it started on.** Without this, a
       // restore still waiting when a different video opens keeps the flag up
       // until its own 30 s timeout — and its `finally` will not clear it,
@@ -900,8 +912,16 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// **`isSwitchingQuality` stays true until the picture is back**, not until
   /// the calls are issued: F19 measured those at 306–743 ms against a median
   /// 4.1 s. It is what holds the black cover over the surface.
-  Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false}) async {
+  Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false, bool reopen = false}) async {
     if (!force && state.variant == variant) return;
+    // In place when the engine can: no cover, no reopen. [force] and [reopen] are the callers
+    // that want the media opened again (a stuck restore, the fallback below).
+    if (!force && !reopen && !state.isLoading && !state.isSwitchingQuality && state.hold == null) {
+      if (_inPlaceBusy || _engine.canSwitchVideo(variant)) {
+        await _switchInPlace(variant);
+        return;
+      }
+    }
     // **Incremented, not merely read.** Two picks in quick succession — 1080 then
     // 720 — otherwise captured the *same* generation, so neither guard fired and
     // both ran `engine.open` against the same player, racing over which stream
@@ -980,6 +1000,67 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (!_disposed && generation == _generation) {
         state = state.copyWith(isSwitchingQuality: false, hold: null);
       }
+    }
+  }
+
+  /// A switch in place is under way. Only one runs at a time: a pick made meanwhile is kept
+  /// in [_queuedPick], and a later one replaces it, so the latest wins and those in between
+  /// are dropped. (PR 27's mid-switch clock reset was the other way round: a second reopen
+  /// started from the first one's zeroed clock.)
+  bool _inPlaceBusy = false;
+  PlaybackVariant? _queuedPick;
+
+  /// `switchQuality` without a reopen: the engine adds the new video, seeks to where the clock
+  /// is, and removes the old one. If the engine says no, or the stream would not open, the
+  /// media is reopened the old way with the cover, which is the smaller fallback.
+  Future<void> _switchInPlace(PlaybackVariant variant) async {
+    _preferredHeight = variant.height;
+    if (_inPlaceBusy) {
+      // The menu moves to the latest pick at once; the engine gets it when the switch ends.
+      _queuedPick = variant;
+      state = state.copyWith(variant: variant, preferredHeight: variant.height);
+      return;
+    }
+    _inPlaceBusy = true;
+    final generation = _generation;
+    final restore = state.variant;
+    var next = variant;
+    try {
+      while (true) {
+        state = state.copyWith(variant: next, preferredHeight: next.height, isSwitchingTrack: true);
+        final started = DateTime.now();
+        VideoSwitch result;
+        try {
+          result = await _engine.switchVideo(next);
+        } on Object catch (e) {
+          if (generation != _generation || _disposed) return;
+          stderr.writeln('rill: in-place switch threw: $e');
+          result = VideoSwitch.refused;
+        }
+        if (generation != _generation || _disposed) return;
+        stderr.writeln(
+          'rill: quality -> ${next.height}p${next.fps} itag=${next.itag} in place: ${result.name} in '
+          '${DateTime.now().difference(started).inMilliseconds} ms',
+        );
+        if (result != VideoSwitch.done) {
+          // Back to the old way for this pick; whatever was queued behind it is the newer wish,
+          // so that is what the reopen goes to.
+          final target = _queuedPick ?? next;
+          _queuedPick = null;
+          _inPlaceBusy = false;
+          state = state.copyWith(isSwitchingTrack: false, variant: restore);
+          await switchQuality(target, reopen: true);
+          return;
+        }
+        final queued = _queuedPick;
+        _queuedPick = null;
+        if (queued == null || queued == next) break;
+        next = queued;
+      }
+    } finally {
+      _inPlaceBusy = false;
+      _queuedPick = null;
+      if (!_disposed && generation == _generation) state = state.copyWith(isSwitchingTrack: false);
     }
   }
 

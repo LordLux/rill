@@ -554,7 +554,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                                           key: playerQualityButtonKey,
                                           icon: Icons.hd_outlined,
                                           label: 'Quality',
-                                          busy: ref.watch(playbackProvider.select((p) => p.isSwitchingQuality)),
+                                          busy: ref.watch(playbackProvider.select((p) => p.isChangingQuality)),
                                           open: ref.watch(
                                             playerMenuProvider.select(
                                               (menu) => menu.open && menu.page == SettingsPage.quality,
@@ -757,7 +757,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                           key: playerQualityButtonKey,
                           icon: Icons.hd_outlined,
                           label: 'Quality',
-                          busy: playback.isSwitchingQuality,
+                          busy: playback.isChangingQuality,
                           open: ref.watch(
                             playerMenuProvider.select(
                               (menu) => menu.open && menu.page == SettingsPage.quality,
@@ -1122,7 +1122,7 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
   bool _busy() {
     final playback = ref.read(playbackProvider);
     return _buffering ||
-        playback.isSwitchingQuality ||
+        playback.isChangingQuality ||
         playback.isLoading ||
         playback.isRestoringVideo;
   }
@@ -1132,7 +1132,7 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     // Watched as well as read, so a switch starting or ending drives this even
     // though it arrives through Riverpod rather than through the stream above.
     ref.listen(
-      playbackProvider.select((p) => p.isSwitchingQuality || p.isLoading || p.isRestoringVideo),
+      playbackProvider.select((p) => p.isChangingQuality || p.isLoading || p.isRestoringVideo),
       (_, _) => _update(),
     );
 
