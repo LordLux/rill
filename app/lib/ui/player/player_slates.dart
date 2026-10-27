@@ -19,6 +19,8 @@ const Key membersOnlySlateKey = ValueKey('members-only-slate');
 const Key membersOnlyJoinKey = ValueKey('members-only-join');
 const Key ageVerificationSlateKey = ValueKey('age-verification-slate');
 const Key ageVerificationSignInKey = ValueKey('age-verification-sign-in');
+const Key noSoundNoticeKey = ValueKey('no-sound-notice');
+const Key noSoundRetryKey = ValueKey('no-sound-retry');
 
 /// How far up from the player's bottom edge a slate's content has to start to
 /// stay clear of the control bar, which is drawn over every slate.
@@ -465,6 +467,61 @@ class UnavailableSlate extends ConsumerWidget {
   }
 }
 
+/// The video plays and its audio did not load. Not a slate: nothing is wrong with the picture,
+/// so it is a strip above the control bar that leaves the video running.
+///
+/// mpv calls a dead audio URL non-fatal, so without this the viewer gets a silent video and
+/// no word on why — issue #22's symptom, for the whole video.
+class NoSoundNotice extends ConsumerWidget {
+  const NoSoundNotice({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final tokens = theme.tokens;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 16, right: 16, bottom: playerControlsClearance + 8),
+        child: Semantics(
+          container: true,
+          liveRegion: true,
+          child: DecoratedBox(
+            key: noSoundNoticeKey,
+            decoration: BoxDecoration(
+              color: tokens.scrim.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.volume_off, size: 18, color: tokens.onScrim, semanticLabel: 'No sound'),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      "No sound: the audio didn't load",
+                      style: TextStyle(color: tokens.onScrim, fontSize: 13),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    key: noSoundRetryKey,
+                    onPressed: () => unawaited(ref.read(playbackProvider.notifier).retryAudio()),
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class PlayerSlates extends ConsumerWidget {
   const PlayerSlates({super.key, this.showQueue = false, this.injectMaterial = false});
 
@@ -492,7 +549,9 @@ class PlayerSlates extends ConsumerWidget {
         else if (playback.isAgeVerificationRequired)
           AgeVerificationRequiredSlate(playback: playback)
         else if (playback.error != null)
-          UnavailableSlate(playback: playback),
+          UnavailableSlate(playback: playback)
+        else if (playback.audioMissing && !playback.isLoading)
+          const NoSoundNotice(),
       ],
     );
 

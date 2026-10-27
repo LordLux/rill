@@ -29,7 +29,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'player/settings_menu.dart' show SettingsPage, playerMenuProvider;
+import 'playback_controller.dart' show playbackProvider;
+import 'player/settings_menu.dart' show SettingsPage, playerMenuProvider, playerQualityButtonKey;
 import 'player/view_mode.dart';
 import 'pages/playlist.dart' show openPlaylistPage;
 import 'player_shell.dart';
@@ -157,6 +158,41 @@ Future<void> _step(String name, FutureOr<void> Function() body) async {
   await _wait();
 }
 
+/// Step `2-open-video`'s second half: the quality menu opened while the video is still loading,
+/// where it lists the heights to open at instead of a ladder (`docs/todo.md` 98).
+///
+/// **It says whether it actually caught the load.** Opening a video from a probe races the
+/// network, and a step that ran after the video had loaded would look like a pass while
+/// exercising nothing. The line is `probe: loading-menu CAUGHT …` or `… RACED PAST …`; a run whose
+/// line says the second proved nothing about this menu. Driven through `playerMenuProvider`
+/// like steps `3e`–`3h`, a quarter of a second after the page is pushed (the controls are
+/// mounted through a load, so they are there well before the video is).
+Future<void> _menuWhileLoading(ProviderContainer container) async {
+  final menu = container.read(playerMenuProvider.notifier);
+  // No waiting for the button: it is hidden whenever the controls have auto-hidden, and a
+  // load is only a few seconds long. The menu opens through the provider, which needs only
+  // the controls mounted, and they are mounted from the first frame of the page.
+  await _wait(250);
+  final buttonOnPage = _find((widget) => widget.key == playerQualityButtonKey) != null;
+  final loadingAtOpen = container.read(playbackProvider).isLoading;
+  menu.go(SettingsPage.quality);
+  await _wait(500);
+  final menuState = container.read(playerMenuProvider);
+  final loadingAfter = container.read(playbackProvider).isLoading;
+  final heightRows = _find((widget) {
+    final key = widget.key;
+    return key is ValueKey && '${key.value}'.startsWith('player-quality-opening-');
+  }) != null;
+  final caught = loadingAtOpen && heightRows;
+  _say(
+    'loading-menu ${caught ? 'CAUGHT' : 'RACED PAST'} the load: quality button on the page=$buttonOnPage, '
+    'isLoading at open=$loadingAtOpen, 500 ms later=$loadingAfter, menu open=${menuState.open} '
+    'page=${menuState.page.name}, opening-height rows on screen=$heightRows',
+  );
+  if (!caught) _say('loading-menu: this run did not exercise the menu during a load; run it again');
+  menu.close();
+}
+
 int _pointer = 900;
 
 void _tapAt(Offset position) {
@@ -255,7 +291,10 @@ Future<void> _probe(ProviderContainer container) async {
     await _wait(6000);
     await _step('1-feed', () {});
 
-    await _step('2-open-video', () => openWatchIn(container, placeholderVideoItem(videoId)));
+    await _step('2-open-video', () async {
+      openWatchIn(container, placeholderVideoItem(videoId));
+      await _menuWhileLoading(container);
+    });
     // Give the video and its metadata longer than a settle: the log shows the
     // worst bursts follow the page filling in.
     await _wait(6000);

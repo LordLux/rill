@@ -334,7 +334,7 @@ cd app && fvm flutter run -d windows   # debug build with hot reload
 rill build                      # compile sidecar and app, bundle, and stop (needs `nuget` on PATH: winget install Microsoft.NuGet)
 rill run                        # build, bundle, then launch the exe in this terminal
 rill open                       # launch the last release build as-is, no build
-rill check                      # todo file check + flutter test guard + lint gate
+rill check                      # todo file check + text file (control character) check + flutter test guard + lint gate
 rill todo [n...] [-s soon] [-q text]   # read docs/todo.md: index, items by number, search
 # run `rill --help` for the full surface; `rill` works from any directory
 ```
@@ -646,6 +646,14 @@ the answer.
   tool eats one level, so `\an1` reaches the file as a BEL byte and libass
   silently ignores the override — a probe that then "measures" the default style
   and looks like a real result. Write such files with the Write tool.
+  **A check now catches the damage, so `sed` and a heredoc are fine for an edit whose diff has
+  been read** (2026-10-25; this used to be "editor tools only"). `tools/check-text-files.ts` fails
+  `rill check` and the release gate on any tracked text file holding a C0 control character
+  other than tab and line feed (BEL, backspace, form feed, ESC) or DEL, a carriage return
+  that is not part of a CRLF, or CR line endings in what git would commit (`.bat` and `.cmd`
+  keep their CRLF); the licences file's form feeds are the one allowlisted exception, in the
+  script. It reads the working tree, so an edit is caught before it is staged. The diff still has
+  to be read: the check sees bytes that cannot belong, not an edit that is simply wrong.
 - **The docs restate the contract in five places, and one test checks they
   agree.** `CLAUDE.md`, `architecture.md`, `protocol.md`, `parser.test.ts`'s
   `SHAPES` and `corpus.test.ts`'s auditor each hold part of it independently.
