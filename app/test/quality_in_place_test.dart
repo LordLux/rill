@@ -147,6 +147,62 @@ void main() {
     });
   });
 
+  group('play and pause during a switch', () {
+    test('a pause pressed while it runs is the state it ends in, even when the switch restarts playback', () async {
+      await open();
+      engine.playingAfterSwitch = true; // the real engine restarts playback when the seek lands
+      final gate = Completer<void>();
+      engine.switchGate = gate.future;
+      final done = controller.switchQuality(rung(3));
+      await settle(50);
+      expect(engine.playing, isTrue);
+
+      await controller.togglePlayPause();
+      expect(engine.playing, isFalse, reason: 'the press took at once');
+
+      gate.complete();
+      await done;
+
+      // MUTATION: drop `_applyPlayIntent()` after the switch and this fails: the restart wins and
+      // the video plays on after the viewer paused it.
+      expect(engine.playing, isFalse, reason: 'and the switch did not undo it');
+      expect(playback.variant?.height, 360);
+    });
+
+    test('a play pressed while a paused video switches is the state it ends in', () async {
+      await open();
+      await engine.pause();
+      engine.playingAfterSwitch = false;
+      final gate = Completer<void>();
+      engine.switchGate = gate.future;
+      final done = controller.switchQuality(rung(3));
+      await settle(50);
+
+      await controller.togglePlayPause();
+      expect(engine.playing, isTrue);
+
+      gate.complete();
+      await done;
+      expect(engine.playing, isTrue);
+    });
+
+    test('with no press the switch leaves playback as the engine ended it', () async {
+      await open();
+      engine.playingAfterSwitch = false;
+      await controller.switchQuality(rung(3));
+      expect(engine.playing, isFalse, reason: 'nothing to apply, nothing second-guessed');
+    });
+
+    test('a press made before the switch is not carried into the next one', () async {
+      await open();
+      await controller.togglePlayPause(); // pause, no switch running
+      await controller.togglePlayPause(); // play
+      engine.playingAfterSwitch = false;
+      await controller.switchQuality(rung(3));
+      expect(engine.playing, isFalse);
+    });
+  });
+
   group('the reopen is the fallback', () {
     test('a refused switch reopens the media, with the cover, at the picked quality', () async {
       await open();

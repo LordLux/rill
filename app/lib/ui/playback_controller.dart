@@ -825,6 +825,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   Future<void> togglePlayPause() {
     if (state.isUnplayable) return Future<void>.value();
     if (state.isLoading) return setPlaying(!state.wantPlaying);
+    // Against what the viewer sees, not a toggle the switch could run into.
+    if (state.isSwitchingTrack) return setPlaying(!_engine.playing);
     return _engine.playOrPause();
   }
 
@@ -862,6 +864,9 @@ class PlaybackController extends Notifier<PlaybackState> {
   Future<void> setPlaying(bool value) {
     if (state.isUnplayable) return Future<void>.value();
     if (state.isLoading) return _wantWhileLoading(value);
+    // A switch in place ends by restarting playback, and a press made meanwhile has to be the
+    // state it ends in: noted here, applied when it ends (see [_switchInPlace]).
+    if (state.isSwitchingTrack) _playIntentDuringSwitch = value;
     return value ? _engine.play() : _engine.pause();
   }
 
@@ -1044,6 +1049,17 @@ class PlaybackController extends Notifier<PlaybackState> {
   bool _inPlaceBusy = false;
   PlaybackVariant? _queuedPick;
 
+  /// Play or pause pressed while a switch is in flight: the state the switch must end in, the
+  /// way [PlaybackState.wantPlaying] works during a load. Null when nothing was pressed.
+  bool? _playIntentDuringSwitch;
+
+  Future<void> _applyPlayIntent() async {
+    final intent = _playIntentDuringSwitch;
+    _playIntentDuringSwitch = null;
+    if (intent == null || _disposed || _engine.playing == intent) return;
+    await (intent ? _engine.play() : _engine.pause());
+  }
+
   /// `switchQuality` without a reopen: the engine adds the new video, seeks to where the clock
   /// is, and removes the old one. If the engine says no, or the stream would not open, the
   /// media is reopened the old way with the cover, which is the smaller fallback.
@@ -1056,6 +1072,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
     _inPlaceBusy = true;
+    _playIntentDuringSwitch = null;
     final generation = _generation;
     final restore = state.variant;
     var next = variant;
@@ -1083,9 +1100,13 @@ class PlaybackController extends Notifier<PlaybackState> {
           _queuedPick = null;
           _inPlaceBusy = false;
           state = state.copyWith(isSwitchingTrack: false, variant: restore);
+          await _applyPlayIntent();
           await switchQuality(target, reopen: true);
           return;
         }
+        // The switch ends by restarting playback; what the viewer pressed meanwhile wins.
+        // The switch ends by restarting playback; what the viewer pressed meanwhile wins.
+        await _applyPlayIntent();
         final queued = _queuedPick;
         _queuedPick = null;
         if (queued == null || queued == next) break;
