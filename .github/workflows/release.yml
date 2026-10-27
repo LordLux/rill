@@ -105,6 +105,10 @@ jobs:
         run: bun run check
       - name: Todo file - unique item numbers, all below "Next number" (needs no install)
         run: bun test tools/todo/parse.test.ts
+      - name: Text files - no control characters in any tracked text file (needs no install)
+        run: |
+          bun test tools/check-text-files.test.ts
+          bun tools/check-text-files.ts
       - name: Sidecar - build (the app's tests run the compiled one)
         working-directory: sidecar
         run: bun run build

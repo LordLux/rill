@@ -66,6 +66,7 @@ class PlaybackState {
     this.preferredHeight,
     this.isSwitchingQuality = false,
     this.isRestoringVideo = false,
+    this.audioMissing = false,
     this.hold,
     this.error,
     this.errorCode,
@@ -114,6 +115,10 @@ class PlaybackState {
   /// once the spinner's own grace delay has passed, so the fast case shows
   /// nothing at all.
   final bool isRestoringVideo;
+
+  /// The video is playing in silence: its audio stream did not load, and mpv does not call
+  /// that a failure. The player says so and offers [PlaybackController.retryAudio].
+  final bool audioMissing;
 
   /// Where the video is while the engine cannot say — see [PlaybackHold].
   ///
@@ -206,6 +211,7 @@ class PlaybackState {
     Object? preferredHeight = _unchanged,
     bool? isSwitchingQuality,
     bool? isRestoringVideo,
+    bool? audioMissing,
     Object? hold = _unchanged,
     Object? error = _unchanged,
     Object? errorCode = _unchanged,
@@ -225,6 +231,7 @@ class PlaybackState {
       preferredHeight: identical(preferredHeight, _unchanged) ? this.preferredHeight : preferredHeight as int?,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
       isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
+      audioMissing: audioMissing ?? this.audioMissing,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
       // *cleared* when the switch finishes, and `??` cannot clear anything.
       hold: identical(hold, _unchanged) ? this.hold : hold as PlaybackHold?,
@@ -347,6 +354,11 @@ class PlaybackController extends Notifier<PlaybackState> {
       engine.completedStream.listen((completed) {
         if (completed) unawaited(_onCompleted());
       }),
+      // A "No sound" notice raised because the track list trailed its grace comes down when
+      // the audio turns up. Only clears: raising it is `open`'s job, once the open has ended.
+      engine.audioMissingStream.listen((missing) {
+        if (!missing && state.audioMissing) state = state.copyWith(audioMissing: false);
+      }),
       engine.positionStream.listen((position) {
         if (position > Duration.zero) {
           _stallWatchdogTimer?.cancel();
@@ -413,7 +425,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// Guarded by a generation counter for the same reason the feed is: two taps
   /// in quick succession put two `playback.open` calls on the wire, and the
   /// slower one must not open its video over the newer one's.
-  Future<void> open(VideoItem item) async {
+  Future<void> open(VideoItem item, {bool wantPlaying = true}) async {
     final generation = ++_generation;
     _stallWatchdogTimer?.cancel();
     _stallWatchdogTimer = null;
@@ -423,7 +435,16 @@ class PlaybackController extends Notifier<PlaybackState> {
     // consuming it, and the *next* video seeks to that position.
     if (_resumeAt?.videoId != item.id) _resumeAt = null;
 
+    // The final report reads the position here, before anything below can reset it.
     _endSession(reportState: 'paused');
+
+    // **A different video stops the one before it at once** (todo 105). The engine used to
+    // keep playing it, and showing its last frame, until `playback.open` answered, about half
+    // a second later. A retry or a replay of the same video keeps what it has. The session was
+    // closed above, so this is not an ending: nothing reports, nothing advances, and the queue
+    // does not hear of it.
+    final previous = state.item;
+    if (previous != null && previous.id != item.id) unawaited(_engine.stop());
 
     state = state.copyWith(
       item: item,
@@ -432,7 +453,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       sessionId: null,
       isLoading: true,
       // A new video starts playing unless the viewer pauses during the load.
-      wantPlaying: true,
+      wantPlaying: wantPlaying,
+      audioMissing: false,
       // What the quality menu marks while there is no ladder yet.
       preferredHeight: _preferredHeight,
       isSwitchingQuality: false,
@@ -499,6 +521,7 @@ class PlaybackController extends Notifier<PlaybackState> {
         variant: variant,
         sessionId: source.sessionId,
         isLoading: false,
+        audioMissing: _engine.audioMissing,
       );
       final startedPlaying = state.wantPlaying;
       _lastReportedPlaying = startedPlaying;
@@ -554,6 +577,7 @@ class PlaybackController extends Notifier<PlaybackState> {
         isLive: state.source?.durationMs == null,
       );
       if (_disposed || generation != _generation) return;
+      state = state.copyWith(audioMissing: _engine.audioMissing);
 
       _stallWatchdogTimer = Timer(stallGrace, () {
         if (_disposed || generation != _generation) return;
@@ -648,6 +672,19 @@ class PlaybackController extends Notifier<PlaybackState> {
     final item = state.item;
     if (item == null) return;
     await open(item);
+  }
+
+  /// The "no sound" notice's retry: resolve the video again, since the audio URL may have
+  /// expired or been refused, and carry on from where the viewer is, paused if they are.
+  ///
+  /// Not a quality switch: that reuses the URLs it already holds, and a dead one stays dead.
+  Future<void> retryAudio() async {
+    final item = state.item;
+    if (item == null || !state.audioMissing || state.isLoading) return;
+    final position = currentPosition;
+    final playing = _engine.playing;
+    if (position > Duration.zero) _resumeAt = (videoId: item.id, position: position);
+    await open(item, wantPlaying: playing);
   }
 
   Future<void> _preload(String videoId) async {
@@ -905,6 +942,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // file, instead of racing the load from out here.
       await engine.open(variant, play: wasPlaying, retainSubtitle: true, isLive: state.source?.durationMs == null);
       if (generation != _generation || _disposed) return;
+      state = state.copyWith(audioMissing: engine.audioMissing);
 
       // **Subscribed before the seek is issued**: `positionStream` is a
       // broadcast stream, so attaching afterwards misses the seek's own event

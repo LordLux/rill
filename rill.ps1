@@ -21,7 +21,7 @@ function Show-Help {
     Write-Host '           Warns if the bundled sidecar is older than sidecar/dist.'
     Write-Host '  flutter  Run ''fvm flutter run --release -d windows'' (lets the Flutter tool drive).'
     Write-Host '  zip      Build, bundle, and Compress-Archive into a zip, then open explorer.'
-    Write-Host '  check    Run the todo file check, the test suite guard and the lint gate using the pinned SDK.'
+    Write-Host '  check    Run the todo file and text file (control character) checks, the test suite guard and the lint gate using the pinned SDK.'
     Write-Host '  todo     List docs/todo.md, or print items: rill todo [number...] [-s section] [-q text].'
     Write-Host '           Takes its own arguments; ''rill todo --help'' has them.'
     Write-Host ''
@@ -182,6 +182,9 @@ try {
             throw 'bun is not installed or not on PATH; the todo file check runs on it.'
         }
         Invoke-Step 'todo file check' { bun test tools/todo/parse.test.ts }
+        # No tracked text file may hold a control character (a "\a" a shell turned into a BEL).
+        Invoke-Step 'text files check' { bun test tools/check-text-files.test.ts }
+        Invoke-Step 'text files' { bun tools/check-text-files.ts }
         Set-Location 'app'
         Invoke-Step 'test_suite_guard.dart' { fvm dart run tool/test_suite_guard.dart }
         Invoke-Step 'lint_gate.dart' { fvm dart run tool/lint_gate.dart }

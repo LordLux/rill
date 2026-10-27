@@ -14,6 +14,12 @@
  * the audio is there. Run through the *bundled* libmpv (hard invariant 8), `vo=null`
  * and `ao=null`: the clock still runs, nothing is drawn or heard.
  *
+ * `AUDIO_STATUS=404` makes the audio URL dead, and `VIDEO_DELAY_MS` holds the video's first
+ * byte too (F59: which of the two streams the open waits for, and whether in parallel).
+ * Each line also carries `audioTracks`, the count of audio entries in `track-list`: the
+ * engine's check for audio that never loaded reads it, because mpv calls a dead audio URL
+ * non-fatal and plays the video in silence.
+ *
  * Media: any video-only and any audio-only file. The installed standalone mpv can make
  * them with its encoder, no ffmpeg needed:
  *
@@ -41,6 +47,7 @@ const server = Bun.spawn(['bun', path.join(import.meta.dir, 'measure-audio-hold-
 
 let t0 = Date.now();
 let audioFirstByteAt = -1;
+let videoFirstByteAt = -1;
 let resolvePort: (port: number) => void = () => {};
 const portReady = new Promise<number>((resolve) => (resolvePort = resolve));
 void (async () => {
@@ -51,6 +58,7 @@ void (async () => {
     for (const line of buffered.split('\n').slice(0, -1)) {
       if (line.startsWith('PORT ')) resolvePort(Number(line.slice(5)));
       if (line.startsWith('AUDIO-FIRST-BYTE')) audioFirstByteAt = Date.now() - t0;
+      if (line.startsWith('VIDEO-FIRST-BYTE')) videoFirstByteAt = Date.now() - t0;
     }
     buffered = buffered.slice(buffered.lastIndexOf('\n') + 1);
   }
@@ -85,6 +93,13 @@ const prop = (name: string): string | null => {
   return value;
 };
 const cmd = (line: string) => lib.symbols.mpv_command_string(h, cstr(line));
+/** Audio entries in mpv's `track-list` — what the engine's "did the audio load?" check reads. */
+const audioTracks = (): number => {
+  const count = Number(prop('track-list/count') ?? 0);
+  let audio = 0;
+  for (let i = 0; i < count; i++) if (prop(`track-list/${i}/type`) === 'audio') audio++;
+  return audio;
+};
 const stamp = () => String(Date.now() - t0).padStart(5) + ' ms';
 
 opt('terminal', 'no');
@@ -118,7 +133,8 @@ while (Date.now() - t0 < SECONDS * 1000) {
   const pos = prop('time-pos');
   const line =
     `time-pos=${pos === null ? '-' : Math.floor(Number(pos) * 10) / 10} ` +
-    `audio=${prop('audio-params/samplerate') ?? 'none'} aid=${prop('aid') ?? '-'} idle=${prop('core-idle') ?? '-'}`;
+    `audio=${prop('audio-params/samplerate') ?? 'none'} aid=${prop('aid') ?? '-'} audioTracks=${audioTracks()} ` +
+    `idle=${prop('core-idle') ?? '-'}`;
   if (line !== last) {
     console.log(`${stamp()}  ${line}`);
     last = line;
@@ -126,5 +142,6 @@ while (Date.now() - t0 < SECONDS * 1000) {
   await Bun.sleep(20);
 }
 console.log(`audio first byte left the server at about ${audioFirstByteAt} ms`);
+if (videoFirstByteAt >= 0) console.log(`video first byte left the server at about ${videoFirstByteAt} ms`);
 lib.symbols.mpv_terminate_destroy(h);
 server.kill();
