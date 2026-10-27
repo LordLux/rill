@@ -50,6 +50,7 @@ This document lists all the environment variables read across the Rill project (
 | `RILL_DEBUG_DEAD_AUDIO` | `data/playback/engine.dart` | `1` swaps every audio URL for one that cannot connect: the video opens without sound and the "No sound" notice shows (issue #22). Measurement only |
 | `RILL_VIDEO_ADD_PROBE` | `main.dart` | Measure a quality switch done as `video-add` on the playing file (`ui/video_add_probe.dart`, `todo.md` 103): silent, real ladder, writes a JSON file and exits |
 | `RILL_VIDEO_ADD_PROBE_LOCAL` | `ui/video_add_probe.dart` | A folder with `v1.webm`, `v2.webm`, `a.webm`: runs the probe on local files with the new quality's first byte held 3 s, which is the slow switch that exposes a clock sent backwards |
+| `RILL_VIDEO_ADD_PROBE_DUAL` | `ui/video_add_probe.dart` | With `RILL_VIDEO_ADD_PROBE=1`: two real engines on one 2160p60 video, one alone, both playing, then the second on standby; prints dropped frames, CPU, GPU decode and the standby's swap seeks (`todo.md` 109) |
 | `RILL_VIDEO_ADD_PROBE_EXPIRY` | `ui/video_add_probe.dart` | A folder with `v1.webm` and `a.webm`: runs the real engine against a server that cuts the connections and refuses new requests, and prints how far short a cut-off file ends and whether a seek after the expiry ever finishes (`todo.md` 107) |
 | `RILL_VIDEO_ADD_PROBE_VIDEO` | `ui/video_add_probe.dart` | Video id for the `video-add` probe (default a 4K60 one with vp9, av01 and avc1 rungs) |
 | `RILL_VIDEO_ADD_PROBE_OUT` | `ui/video_add_probe.dart` | Output path for the `video-add` probe |

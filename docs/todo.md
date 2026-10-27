@@ -1457,9 +1457,26 @@ move to it in one frame and the first is stopped. The cost, so that the decision
 It is a rewrite of the engine's core rather than a change to it, and wants its own task and its own review;
 the in-place switch stays as the fallback when the second player cannot be made ready.
 
-**A cheaper step to consider first:** show the freeze as what it is: the old frame stays (it does), the busy
-spinner is on the quality button, and a small note on the picture. That makes it look deliberate rather than
-broken, and costs nothing, but it does not meet "no pause".
+**The cheaper step is done** (PR 29): the old frame stays, the quality button shows busy, and a note on the
+picture says `Switching to 1080p…` while the switch runs. It makes the pause look deliberate; it does not meet
+"no pause".
+
+**Measured 2026-10-27 for the design (`RILL_VIDEO_ADD_PROBE_DUAL=1`, two real engines, a 2160p60 vp9 video, a debug
+build of the app on this machine's Intel GPU, three runs):**
+- one player: 0 frames dropped in 12 s, 14.5 to 14.9 CPU seconds per 12 s (1.2 cores), 16 to 17% of the GPU's
+  video-decode engine, `d3d11va-copy`;
+- **two playing at once: the one on screen drops 122, 365 and 423 of its ~720 frames in 12 s (17 to 59%)**, the
+  other 272 to 364, 23 to 29 CPU seconds, 28 to 32% decode. A second player that *plays* is out;
+- **a second player paused at a frame with a 20 s read-ahead costs nothing:** the one on screen dropped 1 to 5
+  frames, CPU and decode as for one player;
+- **ready in 2.5 to 3.1 s** (open plus seek to the clock) for the standby at 2160p60, before its read-ahead fills;
+- **the standby's own seek to the clock: 49, 830, 843, 614 and 602 ms inside its read-ahead, 2984 ms beyond it.**
+  That is a stall of the standby, not of the viewer, if it is done while the first player plays on (below);
+- bandwidth: this rung is 17.2 Mbit/s (`clen` over `dur`), so a 20 s read-ahead is 43 MB and the overlap doubles the
+  stream for the seconds it runs (`cache-speed` reads 0 for a network stream here, so the rate is computed).
+
+**Design:** a one-page design went to the orchestrator and the user as a report on 2026-10-27, for review before any
+code; its decisions are recorded here once approved.
 
 **Done when:** a switch at 1080p60 and at 2160p60, started mid-video on a normal connection, never stops the
 sound for more than a few hundred milliseconds and never moves the clock, measured from mpv's log or from
