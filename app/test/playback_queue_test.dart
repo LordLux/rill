@@ -154,7 +154,7 @@ void main() {
     await settle();
     expect(engine.opened, hasLength(1));
 
-    engine.complete();
+    engine.completeAtEnd();
     await settle();
 
     expect(engine.opened, hasLength(2));
@@ -166,7 +166,7 @@ void main() {
     container.read(queueProvider.notifier).addToQueue(video('aaa'));
     await settle();
 
-    engine.complete();
+    engine.completeAtEnd();
     await settle();
 
     // Nothing else opened, and the cursor did not move or wrap.
@@ -197,7 +197,7 @@ void main() {
     container.read(queueProvider.notifier).addToQueue(video('aaa'));
     await settle();
     engine.emitPosition(const Duration(minutes: 9));
-    engine.complete();
+    engine.completeAtEnd();
     await settle();
 
     final seen = await log();

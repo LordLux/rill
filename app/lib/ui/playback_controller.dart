@@ -365,6 +365,18 @@ class PlaybackController extends Notifier<PlaybackState> {
       engine.completedStream.listen((completed) {
         if (completed) unawaited(_onCompleted());
       }),
+      // A seek that never finishes is a read that is not coming (an expired URL answers 403 and
+      // mpv waits for ever, with no error). Recovered like a cut-off file.
+      engine.seekingStream.listen((seeking) {
+        _seekStuckTimer?.cancel();
+        if (!seeking) return;
+        _seekStuckTimer = Timer(seekStuckAfter, () {
+          if (_disposed || !_engine.seeking) return;
+          // A switch has its own seek and its own deadline, and a load is not a seek.
+          if (state.isLoading || state.isSwitchingQuality || state.isSwitchingTrack || state.isUnplayable) return;
+          unawaited(_recoverRead('a seek never finished', playing: _engine.playing));
+        });
+      }),
       // A "No sound" notice raised because the track list trailed its grace comes down when
       // the audio turns up. Only clears: raising it is `open`'s job, once the open has ended.
       engine.audioMissingStream.listen((missing) {
@@ -423,6 +435,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       _reportTimer?.cancel();
       _stallWatchdogTimer?.cancel();
       _restoreWatchdog?.cancel();
+      _seekStuckTimer?.cancel();
+      _recoveryResetTimer?.cancel();
       for (final subscription in _subscriptions) {
         unawaited(subscription.cancel());
       }
@@ -467,7 +481,11 @@ class PlaybackController extends Notifier<PlaybackState> {
     // closed above, so this is not an ending: nothing reports, nothing advances, and the queue
     // does not hear of it.
     final previous = state.item;
-    if (previous != null && previous.id != item.id) unawaited(_engine.stop());
+    if (previous != null && previous.id != item.id) {
+      unawaited(_engine.stop());
+      _recoveries = 0;
+      _lastRecovery = null;
+    }
 
     state = state.copyWith(
       item: item,
@@ -745,7 +763,75 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
   }
 
+  /// How far short of its duration a file may end before the end is taken for a failed read.
+  /// Mutable only for tests.
+  @visibleForTesting
+  static Duration shortEndBy = const Duration(seconds: 5);
+
+  /// How long a seek may stay in progress before it is taken for dead. A far seek is a network
+  /// fetch of 6 to 12 s in ordinary life (F19), so this is well above that. Mutable for tests.
+  @visibleForTesting
+  static Duration seekStuckAfter = const Duration(seconds: 20);
+
+  int _recoveries = 0;
+  Timer? _recoveryResetTimer;
+  Timer? _seekStuckTimer;
+  bool _recovering = false;
+
+  /// Where the last recovery was made from, to tell a file that really ends early from one that
+  /// is cut off: the same place twice is its end.
+  ({String videoId, Duration position})? _lastRecovery;
+
+  /// The file ended well short of its duration. Not an ending: a dropped connection is an end of
+  /// file to mpv, whether or not the URL has expired (`todo.md` 107), and reporting it as the
+  /// video finishing plays the next one over a video the viewer was in the middle of.
+  bool _endedShort() {
+    final item = state.item;
+    if (item == null || state.isLoading || state.isUnplayable) return false;
+    if (state.source?.durationMs == null) return false; // a live stream has no end to fall short of
+    final duration = _engine.duration > Duration.zero ? _engine.duration : (state.source?.duration ?? Duration.zero);
+    if (duration <= Duration.zero) return false;
+    final position = state.hold?.position ?? _engine.position;
+    if (duration - position <= shortEndBy) return false;
+    final last = _lastRecovery;
+    if (last != null && last.videoId == item.id && (position - last.position).abs() < const Duration(seconds: 3)) {
+      // It ended here after being reopened here: this is where the file ends, whatever it said.
+      return false;
+    }
+    return true;
+  }
+
+  /// Resolve the video again and reopen it where the viewer was, paused if they were paused: the
+  /// same recovery as the "No sound" retry. At most three in a minute, then it is an error with a
+  /// retry button rather than a loop.
+  Future<void> _recoverRead(String why, {required bool playing}) async {
+    final item = state.item;
+    if (item == null || _recovering || state.isLoading) return;
+    if (_recoveries >= 3) {
+      stderr.writeln('rill: $why, and reopening has not helped three times — giving up');
+      await _failOpen('The stream was cut off and would not come back.', RpcRetryMode.user);
+      return;
+    }
+    _recovering = true;
+    try {
+      _recoveries++;
+      _recoveryResetTimer?.cancel();
+      _recoveryResetTimer = Timer(const Duration(minutes: 1), () => _recoveries = 0);
+      final position = currentPosition;
+      _lastRecovery = (videoId: item.id, position: position);
+      stderr.writeln('rill: $why at ${position.inSeconds}s — resolving again and reopening there');
+      if (position > Duration.zero) _resumeAt = (videoId: item.id, position: position);
+      await open(item, wantPlaying: playing, keepClock: true);
+    } finally {
+      _recovering = false;
+    }
+  }
+
   Future<void> _onCompleted() async {
+    if (_endedShort()) {
+      unawaited(_recoverRead('the file ended ${(_engine.duration - _engine.position).inSeconds}s short', playing: true));
+      return;
+    }
     _endSession(reportState: 'ended');
     // Autoplay, or stop. `advance` answers false at the end of the queue — and
     // at the end of a mix with a top-up still out, the queue remembers and

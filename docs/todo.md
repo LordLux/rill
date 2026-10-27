@@ -1140,6 +1140,11 @@ them by construction. Not fixed.
 A second occurrence the next day, a full `rill check` right after editing: `rpc_client_test` "a large payload
 and the small ones behind it arrive in order, off the frame loop" again, expected less than 150, actual 250
 ("the main isolate stalled for 250ms — the decode ran inline"); the rerun passed.
+Two more on 2026-10-27, after four release and debug builds in a row: one full run died with
+"Resource temporarily unavailable" (fork failures) taking `queue_panel_test`, `rpc_client_test` (a 30 s
+timeout) and `save_dialog_test` (no tests produced) with it; the next failed one test,
+`loading_controls_test` "does nothing once the video has opened", expected `preferredHeight` null and got 360
+(its `release` waits a fixed 100 ms, and under load `isLoading` was still true); alone it passed three of three.
 
 **Done when:** ten consecutive full `rill check` runs pass on this machine.
 
@@ -1398,13 +1403,20 @@ expire, with the read-ahead kept small (`sidecar/scratch/measure-expiry.ts`, `se
 - **A read that is already in flight carries on** after the expiry (the 'play' arm played to the end): the
   URL is checked when a request is made.
 
-**Directions, none chosen:**
+**Done 2026-10-27 (the app-side half):** a file that ends more than 5 s short of its duration is a failed read, and so
+is a seek that stays `seeking` for 20 s. Neither reports the watch as ended or advances the queue; both resolve the
+video again (`playback.open`, as `retryAudio` does) and reopen at the position, paused if it was paused, with the
+clock held through the reload. At most three in a minute, then an error with a retry; a second end in the same place
+(within 3 s) is taken as the file's real end, so a stream shorter than its stated duration does not loop. A live stream
+has no end to fall short of. Tests in `read_recovery_test.dart`, each half with a mutation. Against the real engine
+(`RILL_VIDEO_ADD_PROBE_EXPIRY`, a server that cuts the connections and refuses new requests): `completed` fires 18 s
+after the cut with the position 41 s short of the duration, and a seek after the expiry is still seeking after 25 s.
+
+**Still open, directions none chosen:**
 - A refresh in the sidecar that returns a fresh ladder for the open session without minting a second one (the
-  reason `switchQuality` does no RPC), called when the variants are older than about 5.5 h, on resume after a
-  long pause, and by the recovery below. Needs the sidecar to keep what `playback.open` resolved with.
-- Treat "the file ended well short of its duration" as a failed read, not an ending: refresh, reopen at the
-  position and resume, instead of reporting `ended`.
-- Treat a seek that stays `seeking` for more than a few seconds the same way.
+  reason `switchQuality` does no RPC), called when the variants are older than about 5.5 h and on resume after a
+  long pause, so the recovery above resolves once instead of reopening on URLs that may be as old as before.
+  Needs the sidecar to keep what `playback.open` resolved with.
 - `reconnect` options for ffmpeg's http (`stream-lavf-o`): invariant 8 applies, the bundled FFmpeg may not
   have them, and the option has to be proved against the binary's string table before it is believed.
 

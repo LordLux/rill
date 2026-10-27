@@ -126,7 +126,124 @@ class VideoAddProbe {
     }
   }
 
+  /// `RILL_VIDEO_ADD_PROBE_EXPIRY=<dir>` (the same `v1.webm`, `a.webm`): the real engine against
+  /// `sidecar/scratch/measure-expiry-server.ts`, which trickles the media and can cut the
+  /// connections and answer 403 to new requests, as an expired URL does (`docs/todo.md` 107). It
+  /// prints the two signals the controller's recovery acts on, as the real engine gives them:
+  /// how far short of its duration a cut-off file ends, and whether a seek into an unread region
+  /// after the expiry ever stops seeking.
+  Future<void> _runExpiry(String dir) async {
+    await engine.setVolume(0);
+    final servers = <Process>[];
+    // One server per scenario: a server that has been told to expire stays expired.
+    Future<String> start() async {
+      final server = await Process.start(
+        'bun',
+        ['run', '${Directory.current.path}/sidecar/scratch/measure-expiry-server.ts'],
+        environment: {'VIDEO': '$dir/v1.webm', 'AUDIO': '$dir/a.webm', 'RATE': '60000'},
+      );
+      servers.add(server);
+      final port = Completer<int>();
+      server.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+        if (line.startsWith('PORT ') && !port.isCompleted) port.complete(int.parse(line.substring(5)));
+      });
+      server.stderr.drain<void>();
+      return 'http://127.0.0.1:${await port.future}';
+    }
+
+    PlaybackVariant variantAt(String base) => PlaybackVariant(
+          videoUrl: '$base/v.webm',
+          audioUrl: '$base/a.webm',
+          itag: 240,
+          height: 240,
+          fps: 25,
+          videoCodec: 'vp9',
+          audioCodec: 'opus',
+        );
+
+    Future<void> expire(String base, String query) async {
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse('$base/__expire$query'));
+      await (await request.close()).drain<void>();
+      client.close();
+    }
+
+    try {
+      await _observe();
+
+      // A. The connections are cut and new requests refused, as when a paused video's connection
+      // goes and its URL has expired too; then it is played on from its cache until that runs out.
+      _say('--- A: connections cut, new requests refused');
+      final baseA = await start();
+      await engine.open(variantAt(baseA));
+      await _advancing();
+      var completedAt = -1;
+      Duration? positionAtEnd;
+      Duration? durationAtEnd;
+      final sub = engine.completedStream.listen((done) {
+        if (done && completedAt < 0) {
+          completedAt = _nowMs;
+          positionAtEnd = engine.position;
+          durationAtEnd = engine.duration;
+        }
+      });
+      final cutAt = _nowMs;
+      final clockAtCut = _number('time-pos');
+      await expire(baseA, '?cut=1');
+      await _waitFor(() => completedAt >= 0, 45000);
+      await sub.cancel();
+      final short = completedAt < 0 ? null : durationAtEnd! - positionAtEnd!;
+      _results.add({
+        'step': 'A cut-off file',
+        'completedEmitted': completedAt >= 0,
+        'msFromCutToCompleted': completedAt < 0 ? null : completedAt - cutAt,
+        'clockAtCut': clockAtCut,
+        'positionAtCompleted': positionAtEnd?.inMilliseconds,
+        'durationAtCompleted': durationAtEnd?.inMilliseconds,
+        'shortBySeconds': short?.inMilliseconds == null ? null : short!.inMilliseconds / 1000,
+      });
+      _say('    completed ${completedAt >= 0 ? 'emitted' : 'NOT EMITTED'} ${completedAt < 0 ? '' : '${completedAt - cutAt} ms after the cut'}; '
+          'position ${positionAtEnd?.inSeconds}s of ${durationAtEnd?.inSeconds}s, short by ${short?.inSeconds}s '
+          '-> ${short != null && short > const Duration(seconds: 5) ? 'taken as a failed read' : 'taken as an ending'}');
+
+      // B. A fresh open, the URL expires, and a seek goes to a place nothing has read.
+      _say('--- B: a seek after the expiry');
+      final baseB = await start();
+      await engine.open(variantAt(baseB));
+      await _advancing();
+      await expire(baseB, '');
+      final seekWatch = Stopwatch()..start();
+      await engine.seek(const Duration(seconds: 45));
+      var everSeeking = false;
+      while (seekWatch.elapsedMilliseconds < 25000) {
+        if (engine.seeking) everSeeking = true;
+        if (everSeeking && !engine.seeking) break;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      final stuck = engine.seeking;
+      _results.add({
+        'step': 'B stuck seek',
+        'seekingSeen': everSeeking,
+        'stillSeekingAfterMs': seekWatch.elapsedMilliseconds,
+        'stuck': stuck,
+        'position': _number('time-pos'),
+      });
+      _say('    seeking ${everSeeking ? 'went true' : 'NEVER went true'}; after ${seekWatch.elapsedMilliseconds} ms it is '
+          '${stuck ? 'STILL seeking (the controller recovers it after 20 s)' : 'over'}');
+    } finally {
+      for (final server in servers) {
+        server.kill();
+      }
+      _write();
+    }
+  }
+
   Future<void> run() async {
+    final expiry = Platform.environment['RILL_VIDEO_ADD_PROBE_EXPIRY']?.trim();
+    if (expiry != null && expiry.isNotEmpty) {
+      await _runExpiry(expiry);
+      return;
+    }
     final local = Platform.environment['RILL_VIDEO_ADD_PROBE_LOCAL']?.trim();
     if (local != null && local.isNotEmpty) {
       await _runLocal(local);
