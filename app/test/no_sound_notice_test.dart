@@ -3,6 +3,8 @@
 /// shell, a fake sidecar and a fake engine.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,7 +12,9 @@ import 'package:rill/data/rpc/client.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/playback_controller.dart';
+import 'package:rill/data/playback/engine.dart' show VideoSwitch;
 import 'package:rill/ui/player/player_slates.dart';
+import 'package:rill/ui/player/video_load_cover.dart';
 import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
@@ -120,6 +124,49 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.byKey(noSoundNoticeKey), findsNothing);
+    finish();
+  });
+
+  testWidgets('a switch in place says so on the picture, and takes it down when it ends', (tester) async {
+    engine.inPlaceSwitch = true;
+    await openVideo(tester);
+    final gate = Completer<void>();
+    engine.switchGate = gate.future;
+
+    final done = container.read(playbackProvider.notifier).switchQuality(container.read(playbackProvider).source!.variants.last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // MUTATION: drop the `SwitchingNote` line in `PlayerSlates` and this fails: the picture
+    // would just stop with nothing said.
+    expect(find.byKey(switchingNoteKey), findsOneWidget);
+    expect(find.text('Switching to 360p…'), findsOneWidget);
+    expect(find.byKey(videoLoadCoverKey), findsNothing, reason: 'the old frame stays, nothing covers it');
+
+    gate.complete();
+    await tester.runAsync(() => done);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(switchingNoteKey), findsNothing);
+    finish();
+  });
+
+  testWidgets('and when the switch falls back to the reopen the note goes (the reopen has its own cover)', (tester) async {
+    engine.inPlaceSwitch = true;
+    await openVideo(tester);
+    engine.nextSwitchResult = VideoSwitch.refused;
+    final gate = Completer<void>();
+    engine.switchGate = gate.future;
+
+    final done = container.read(playbackProvider.notifier).switchQuality(container.read(playbackProvider).source!.variants.last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(switchingNoteKey), findsOneWidget);
+
+    gate.complete();
+    await tester.runAsync(() => done);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(switchingNoteKey), findsNothing);
+    expect(engine.opened, hasLength(2), reason: 'reopened');
     finish();
   });
 

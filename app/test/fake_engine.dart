@@ -131,6 +131,10 @@ class FakeEngine implements PlaybackEngine {
   /// Held by a test that needs a switch to still be in flight.
   Future<void>? switchGate;
 
+  /// What a switch leaves the playing state as when it ends, whatever it was: a switch ends by
+  /// restarting playback, so on the real engine it can undo a pause pressed meanwhile.
+  bool? playingAfterSwitch;
+
   /// Switches begun and not yet ended: more than one means the caller did not serialise.
   int switchesInFlight = 0;
   int maxSwitchesInFlight = 0;
@@ -155,6 +159,7 @@ class FakeEngine implements PlaybackEngine {
         _current = variant;
         setWidth(variant.height * 16 ~/ 9);
         setHeight(variant.height);
+        if (playingAfterSwitch != null) setPlaying(playingAfterSwitch!);
       }
       return result;
     } finally {
