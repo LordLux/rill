@@ -436,10 +436,22 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// Guarded by a generation counter for the same reason the feed is: two taps
   /// in quick succession put two `playback.open` calls on the wire, and the
   /// slower one must not open its video over the newer one's.
-  Future<void> open(VideoItem item, {bool wantPlaying = true}) async {
+  ///
+  /// [keepClock] is for reloading the video that is on screen (the "No sound" retry): the clock
+  /// keeps showing where it was, as a [PlaybackHold], through the load and the seek back, instead
+  /// of going to 0:00 of 0:00 for as long as the engine takes. A first load has no clock to keep.
+  Future<void> open(VideoItem item, {bool wantPlaying = true, bool keepClock = false}) async {
     final generation = ++_generation;
     _stallWatchdogTimer?.cancel();
     _stallWatchdogTimer = null;
+    // Taken first: the engine's own position is the one thing the load is about to zero.
+    PlaybackHold? clock;
+    if (keepClock && state.item?.id == item.id && state.error == null) {
+      final position = currentPosition;
+      final known = state.hold?.duration ?? _engine.duration;
+      final duration = known > Duration.zero ? known : (state.source?.duration ?? Duration.zero);
+      if (position > Duration.zero && duration > Duration.zero) clock = PlaybackHold(position: position, duration: duration);
+    }
     // A pending resume belongs to one video. Dropped the moment a different one
     // opens — otherwise an open superseded before it resolved (a quick tap on
     // something else during an undo) returns at its generation check without
@@ -477,7 +489,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // the new media's state. The artwork then sits over a video whose
       // audio-only switch is off, which is what it looked like from outside.
       isRestoringVideo: false,
-      hold: null,
+      hold: clock,
       error: null,
       errorCode: null,
       errorRetry: null,
@@ -528,21 +540,25 @@ class PlaybackController extends Notifier<PlaybackState> {
         await _engine.setVideoTrack(!audioOnlyNow);
       }
 
+      // The undo's restored position, if one is pending. After the engine has
+      // the media open, so the seek has something to seek in.
+      final resume = _resumeAt;
+      _resumeAt = null;
+      final resuming = resume != null && resume.videoId == item.id;
+
       state = state.copyWith(
         source: source,
         variant: variant,
         sessionId: source.sessionId,
         isLoading: false,
         audioMissing: _engine.audioMissing,
+        // The clock held through a reload stays until the seek back has landed.
+        hold: resuming ? state.hold : null,
       );
       final startedPlaying = state.wantPlaying;
       _lastReportedPlaying = startedPlaying;
 
-      // The undo's restored position, if one is pending. After the engine has
-      // the media open, so the seek has something to seek in.
-      final resume = _resumeAt;
-      _resumeAt = null;
-      if (resume != null && resume.videoId == item.id) unawaited(seek(resume.position));
+      if (resuming) unawaited(_seekThenRelease(resume.position, generation));
 
       // Immediately, not on the first tick: this is the report that registers
       // the view at all, and a 15 s wait would lose every short watch.
@@ -567,6 +583,23 @@ class PlaybackController extends Notifier<PlaybackState> {
       // nothing will fix itself, but letting the user try again costs nothing.
       await _failOpen(e.toString(), RpcRetryMode.user);
     }
+  }
+
+  /// The seek back after an undo or a reload, and the end of the held clock when it has landed.
+  /// A cap, because a clock held forever over a seek that never finishes is worse than a jump.
+  Future<void> _seekThenRelease(Duration position, int generation) async {
+    await seek(position);
+    final landed = position - const Duration(seconds: 1);
+    try {
+      // The position may already be there: the event for it is gone by the time this listens.
+      if (_engine.position < landed) {
+        await _engine.positionStream.firstWhere((p) => p >= landed).timeout(const Duration(seconds: 20));
+      }
+    } on Object {
+      // Released below all the same.
+    }
+    if (_disposed || generation != _generation) return;
+    if (state.hold != null) state = state.copyWith(hold: null);
   }
 
   void _armStallWatchdog(int generation, PlaybackVariant variant) {
@@ -615,6 +648,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       isLoading: false,
       source: null,
       sessionId: null,
+      hold: null,
       error: message,
       errorCode: code,
       errorRetry: retry,
@@ -696,7 +730,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     final position = currentPosition;
     final playing = _engine.playing;
     if (position > Duration.zero) _resumeAt = (videoId: item.id, position: position);
-    await open(item, wantPlaying: playing);
+    await open(item, wantPlaying: playing, keepClock: true);
   }
 
   Future<void> _preload(String videoId) async {

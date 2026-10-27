@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 109.** A new item takes it, and the same edit bumps this line.
+**Next number: 110.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1412,6 +1412,47 @@ expire, with the read-ahead kept small (`sidecar/scratch/measure-expiry.ts`, `se
 each end with the video playing at the right place (or a message that says what to do), and a dropped
 connection is not reported as the end of the video. A test with the fake engine for the recovery, and the
 scratch harness run against the change.
+
+### 109. A quality switch still stops the picture and the sound for 1 to 3 s
+
+Reported 2026-10-27 after the in-place switch (F60) landed: the old quality plays for about a second, then
+the picture and the sound stop until the new quality is in, and then it carries on. What was wanted: keep
+playing in the old quality while the new one loads, then swap so that the clock does not change (a stutter
+is fine, going back or pausing is not). The clock no longer goes back (fixed, F60 item 9); the pause is what is
+left.
+
+**Measured (F60 item 10):** 0.8 to 2.6 s of everything stopped per switch, from mpv's log: the new video
+has to be sought to where the clock is, a seek restarts audio and video together, and the restart waits for
+the new video's first frame, a network fetch. Inside one mpv nothing avoids it: an unselected track is not
+repositioned by a seek (the pre-seek made it worse), `video-add` refuses an EDL source, and a keyframe
+seek lands up to a GOP behind the clock.
+
+**The way that is left: a second player as the buffer.** The engine opens the new quality in a second
+`Player` (audio as the file, the video added, muted), paused at the clock and then playing in step with
+the first, until it has a decoded frame and a few seconds of read-ahead; then the picture and the sound
+move to it in one frame and the first is stopped. The cost, so that the decision is an informed one:
+- every stream the engine exposes (`positionStream`, `durationStream`, `playingStream`, `bufferingStream`,
+  `bufferStream`, `widthStream`, `heightStream`, `volumeStream`, `completedStream`, `videoOutputStream`,
+  `audioMissingStream`, the subtitle text) comes from `_player.stream` now and would have to be re-emitted
+  from whichever player is active, or every listener goes stale at the swap;
+- the surface (`videoSurface`, `videoWidget`, the `LayerLink` the fullscreen move uses, the miniplayer's)
+  is built on one `VideoController`, so the controller has to be swappable under a `Video` widget that is
+  already mounted, with the texture handed over without a black frame;
+- captions (`setSubtitle`, `LibassLayer` draws from `engine.subtitle` and the position), volume, mute and
+  the audio-only mode (`vid` and the added tracks) all act on one player today;
+- double the bandwidth while it runs (the audio too), only for the seconds it takes;
+- the hover preview already runs a second `Player`, so two decoders in one process is known to work.
+It is a rewrite of the engine's core rather than a change to it, and wants its own task and its own review;
+the in-place switch stays as the fallback when the second player cannot be made ready.
+
+**A cheaper step to consider first:** show the freeze as what it is: the old frame stays (it does), the busy
+spinner is on the quality button, and a small note on the picture. That makes it look deliberate rather than
+broken, and costs nothing, but it does not meet "no pause".
+
+**Done when:** a switch at 1080p60 and at 2160p60, started mid-video on a normal connection, never stops the
+sound for more than a few hundred milliseconds and never moves the clock, measured from mpv's log or from
+the audio clock, not from the property stream (the probe's own "stall" figure under-reported it by a factor
+of three).
 
 ### 108. Start the audio's first bytes before mpv does
 
