@@ -82,6 +82,10 @@ Future<void> main() async {
   }
 
   // `RILL_VIDEO_ADD_PROBE=1` measures a quality switch done as `video-add` and exits.
+  if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1' && Platform.environment['RILL_VIDEO_ADD_PROBE_DUAL'] == '1') {
+    runDualProbe(runApp, hardExit);
+    return;
+  }
   if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1') {
     runVideoAddProbe(runApp, hardExit);
     return;
