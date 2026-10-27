@@ -34,7 +34,10 @@ void (async () => {
   let buffered = '';
   for await (const chunk of server.stdout) {
     buffered += decoder.decode(chunk);
-    for (const line of buffered.split('\n').slice(0, -1)) if (line.startsWith('PORT ')) resolvePort(Number(line.slice(5)));
+    for (const line of buffered.split('\n').slice(0, -1)) {
+      if (line.startsWith('PORT ')) resolvePort(Number(line.slice(5)));
+      if (line.startsWith('REQ ') && !line.includes('/a.webm')) console.log(`          server: ${line.trim()}`);
+    }
     buffered = buffered.slice(buffered.lastIndexOf('\n') + 1);
   }
 })();
@@ -75,7 +78,7 @@ opt('hwdec', 'no');
 opt('keep-open', 'yes');
 // `audiomain`: the audio is the file mpv opens and every video is added to it, so none of them is
 // the file's own, undeselectable track.
-if (arm !== 'audiomain') opt('audio-files', `${base}/a.webm`);
+if (!['audiomain', 'preseek', 'now', 'edl'].includes(arm)) opt('audio-files', `${base}/a.webm`);
 if (lib.symbols.mpv_initialize(h) < 0) throw new Error('mpv_initialize failed');
 
 const t0 = Date.now();
@@ -91,9 +94,16 @@ const tracks = () => {
 };
 
 console.log(`arm=${arm}`);
-cmd(`loadfile "${base}/${arm === 'audiomain' ? 'a' : 'v'}.webm"`);
+const audioMainArm = arm === 'audiomain' || arm === 'preseek' || arm === 'now' || arm === 'edl';
+cmd(`loadfile "${base}/${audioMainArm ? 'a' : 'v'}.webm"`);
 
 let firstAdded = false;
+let preseekPos = 0;
+let edlAt: number | null = null;
+let edlSelected = false;
+let selectAt: number | null = null;
+let watching = false;
+let lastShown = -1;
 let switched = false;
 let removed = false;
 let last = '';
@@ -103,7 +113,7 @@ const switchAt = arm === 'paused' ? 4500 : 6000;
 while (Date.now() - t0 < SECONDS * 1000) {
   lib.symbols.mpv_wait_event(h, 0);
   const elapsed = Date.now() - t0;
-  if (arm === 'audiomain' && !firstAdded && elapsed > 600) {
+  if (audioMainArm && !firstAdded && elapsed > 600) {
     firstAdded = true;
     const rc = cmd(`video-add "${base}/v.webm" select`);
     console.log(`${stamp()}  video-add v1 (the first quality) rc=${rc}, tracks: ${tracks()}`);
@@ -112,7 +122,47 @@ while (Date.now() - t0 < SECONDS * 1000) {
     cmd('set pause yes');
     console.log(`${stamp()}  PAUSED at ${prop('time-pos')}`);
   }
-  if (!switched && elapsed > switchAt) {
+  if (!switched && elapsed > switchAt && arm === 'edl') {
+    // The new quality as an EDL timeline: a gap of EDL_AT seconds, then v2 from EDL_AT on. If the
+    // timeline demuxer has v2 positioned at EDL_AT when it is added, selecting the track as the
+    // clock reaches EDL_AT needs no seek at all. `EDL_FORM` tries spellings of the gap.
+    switched = true;
+    const at = Number(process.env['EDL_AT'] ?? 14);
+    const url = `${base}/v2.webm`;
+    const form = process.env['EDL_FORM'] ?? 'a';
+    const gap = form === 'a' ? `length=${at}` : form === 'b' ? `,0,${at}` : `!no_clip;length=${at}`;
+    const edl = `edl://${gap};%${url.length}%${url},${at},${60 - at}`;
+    console.log(`${stamp()}  video-add EDL (form ${form}) ${edl.replace(base, '<base>')}  (clock at ${prop('time-pos')})`);
+    const rc = cmd(`video-add "${edl}" auto`);
+    console.log(`${stamp()}  video-add returned rc=${rc}, tracks: ${tracks()}, duration of the new track?`);
+    edlAt = at;
+  }
+  if (arm === 'edl' && edlAt !== null && !edlSelected && Number(prop('time-pos') ?? 0) >= edlAt - 0.05) {
+    edlSelected = true;
+    console.log(`${stamp()}  set vid 2 as the clock reaches ${edlAt} (clock ${prop('time-pos')})`);
+    cmd('set vid 2');
+    watching = true;
+  }
+  if (arm === 'edl' && watching) {
+    const shown = Math.floor(Number(prop('time-pos') ?? 0) * 10);
+    if (shown !== lastShown) {
+      lastShown = shown;
+      console.log(`${stamp()}  clock ${shown / 10} w=${prop('video-params/w')} vid=${prop('vid')}`);
+    }
+  }
+  if (!switched && elapsed > switchAt && arm === 'preseek') {
+    // The new track added but NOT selected, then a seek to where the clock is, then the select
+    // three seconds later: does the unselected track get positioned by the seek, so that the
+    // select itself costs nothing?
+    switched = true;
+    preseekPos = Number(prop('time-pos') ?? 0);
+    console.log(`${stamp()}  video-add v2 (not selected; clock at ${preseekPos}), tracks: ${tracks()}`);
+    const rc = cmd(`video-add "${base}/v2.webm" auto`);
+    console.log(`${stamp()}  video-add returned rc=${rc}, tracks: ${tracks()}`);
+    cmd(`seek ${preseekPos} absolute`);
+    console.log(`${stamp()}  seek ${preseekPos} issued (v2 still not selected)`);
+    selectAt = elapsed + 3000;
+  } else if (!switched && elapsed > switchAt) {
     switched = true;
     const pos = Number(prop('time-pos') ?? 0);
     console.log(`${stamp()}  video-add v2 select (clock at ${pos}), tracks: ${tracks()}`);
@@ -120,6 +170,13 @@ while (Date.now() - t0 < SECONDS * 1000) {
     console.log(`${stamp()}  video-add returned rc=${rc}, tracks: ${tracks()}`);
     cmd(`seek ${pos} absolute`);
     console.log(`${stamp()}  seek ${pos} issued`);
+  }
+  if (arm === 'preseek' && selectAt !== null && elapsed > selectAt) {
+    selectAt = null;
+    console.log(`${stamp()}  set vid 2 (clock at ${prop('time-pos')}), tracks: ${tracks()}`);
+    cmd('set vid 2');
+    console.log(`${stamp()}  vid is now ${prop('vid')}`);
+    watching = true;
   }
   if (arm === 'audiomain' && switched && !removed && elapsed > switchAt + 4000) {
     removed = true;
@@ -137,6 +194,15 @@ while (Date.now() - t0 < SECONDS * 1000) {
   const line =
     `time-pos=${prop('time-pos') === null ? '-' : Math.floor(Number(prop('time-pos')) * 10) / 10} seeking=${prop('seeking')} pause=${prop('pause')} ` +
     `core-idle=${prop('core-idle')} vid=${prop('vid')} w=${prop('video-params/w') ?? '-'} frame=${prop('estimated-frame-number')}`;
+  // The clock after the switch, one line per tenth of a second it advances (a gap in the lines is
+  // a freeze): the `now` arm is today's method, the `preseek` arm the one being tried.
+  if ((arm === 'now' && switched) || (arm === 'preseek' && (watching || (switched && selectAt !== null)))) {
+    const shown = Math.floor(Number(prop('time-pos') ?? 0) * 10);
+    if (shown !== lastShown) {
+      lastShown = shown;
+      console.log(`${stamp()}  clock ${shown / 10}`);
+    }
+  }
   if (arm === 'paused' && switched && line !== last) {
     console.log(`${stamp()}  ${line}`);
     last = line;

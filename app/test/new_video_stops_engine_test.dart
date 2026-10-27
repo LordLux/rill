@@ -5,6 +5,8 @@
 /// the app put on the wire is read back from `test.playbackLog`.
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/rpc/client.dart';
@@ -249,6 +251,54 @@ void main() {
           reason: 're-resolved through playback.open, not a reopen of the URLs it already had');
       expect(engine.seeks, contains(const Duration(seconds: 90)));
       expect(engine.stopCount, 0, reason: 'the same video keeps playing until the new audio is there');
+    });
+
+    test('Try again keeps the real clock showing while it reloads, and lets go once it is back', () async {
+      engine.audioLoads = false;
+      container.read(queueProvider.notifier).play(video('aaa'));
+      await settle();
+      engine.emitPosition(const Duration(seconds: 90));
+
+      final gate = Completer<void>();
+      engine.openGate = gate.future;
+      engine.audioLoads = true;
+      unawaited(controller.retryAudio());
+      await settle(150);
+
+      // MUTATION: drop `keepClock: true` in `retryAudio` and this fails: the clock would read the
+      // engine's 0:00 of 0:00 for as long as the open takes.
+      expect(playback.isLoading, isTrue);
+      expect(playback.hold?.position, const Duration(seconds: 90));
+      expect(playback.hold?.duration, const Duration(minutes: 10));
+
+      gate.complete();
+      await settle(300);
+      expect(playback.isLoading, isFalse);
+      expect(engine.seeks, contains(const Duration(seconds: 90)));
+      expect(playback.hold, isNull, reason: 'the engine is back at 90 s, so the held value goes');
+    });
+
+    test('a first load has no clock to hold', () async {
+      final gate = Completer<void>();
+      engine.openGate = gate.future;
+      container.read(queueProvider.notifier).play(video('aaa'));
+      await settle(150);
+      expect(playback.isLoading, isTrue);
+      expect(playback.hold, isNull);
+      gate.complete();
+      await settle();
+    });
+
+    test('a retry after an error has nothing to hold either', () async {
+      container.read(queueProvider.notifier).play(video('broken1'));
+      await settle();
+      expect(playback.isUnplayable, isTrue);
+      final gate = Completer<void>();
+      engine.openGate = gate.future;
+      unawaited(controller.retry());
+      await settle(100);
+      expect(playback.hold, isNull);
+      gate.complete();
     });
 
     test('Try again keeps a paused video paused', () async {

@@ -57,6 +57,8 @@ class VideoAddProbe {
   /// The furthest the clock got since the last reset. A switch that ends behind it has sent the
   /// clock back, which is what the first version of this probe printed and did not flag.
   double _maxPos = 0;
+  /// True inside a switch; the verbose mpv lines are kept only then (the open alone is hundreds).
+  bool _gapWindow = false;
 
   void _say(String line) => stderr.writeln('probe: $line');
 
@@ -64,7 +66,8 @@ class VideoAddProbe {
 
   Future<void> _observe() async {
     engine.logStream.listen((entry) {
-      if (_logs.length < 800 && Platform.environment['RILL_VIDEO_ADD_PROBE_VERBOSE'] == '1') {
+      // Only inside a switch: the open alone is hundreds of lines at this level.
+      if (_gapWindow && _logs.length < 800 && Platform.environment['RILL_VIDEO_ADD_PROBE_VERBOSE'] == '1') {
         _logs.add('${_nowMs}ms [${entry.prefix}] ${entry.text}'.trim());
       }
     });
@@ -304,13 +307,17 @@ class VideoAddProbe {
     _say('--- $label: ${_name(from)} -> ${_name(to)}');
     final before = _number('time-pos');
     _maxPos = before ?? 0;
+    _gapWindow = true;
     final watch = Stopwatch()..start();
     final result = await engine.switchVideo(to);
     final ms = watch.elapsedMilliseconds;
     final at = _number('time-pos');
     // The clock ran on with the old quality while the new one was fetched; the seek must land
-    // there and not back at `before`.
+    // there and not back at `before`. Taken now, before the window below runs on.
     final wentBack = _maxPos - (at ?? _maxPos);
+    // A little longer, so a stall that begins as the call returns is counted too.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    _gapWindow = false;
     // Three seconds on: did the clock keep going, and is the picture the new one?
     await Future<void>.delayed(const Duration(seconds: 3));
     final later = _number('time-pos');

@@ -89,6 +89,12 @@ const server = Bun.serve({
     }
     const body = files[url.pathname];
     if (!body) return new Response('not found', { status: 404 });
+    if (process.env['LOG_REQUESTS'] === '1') console.log(`REQ ${Date.now() - t0} ${url.pathname} ${request.headers.get('range') ?? ''}`);
+    // `LATENCY_MS` on `/v2.webm`: the round trip a ranged request to googlevideo costs, which is
+    // what a seek in a track that has not been read there has to wait for.
+    if (url.pathname === '/v2.webm' && Number(process.env['LATENCY_MS'] ?? 0) > 0) {
+      await Bun.sleep(Number(process.env['LATENCY_MS']));
+    }
     return serve(request, body, url.pathname);
   },
 });
