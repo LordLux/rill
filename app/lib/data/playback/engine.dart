@@ -201,6 +201,11 @@ abstract class PlaybackEngine {
   /// audio has to come down if the audio turns up after all.
   Stream<bool> get audioMissingStream;
 
+  /// mpv's `seeking`: true from a seek's start until playback has restarted. A seek into a region
+  /// whose URL has expired never ends (`todo.md` 107), which is why the controller watches it.
+  Stream<bool> get seekingStream;
+  bool get seeking;
+
   /// Whether [switchVideo] can change to [variant] on the media that is open, without
   /// reopening it: the video is an added track, the audio is the one the media was opened
   /// with, and this is not a live stream or a muxed variant. False sends the caller to
@@ -879,6 +884,12 @@ class MediaKitEngine implements PlaybackEngine {
   /// The observed `vid` and the video tracks this engine has added, **for diagnostics only**.
   String get diagnosticVid => _vid;
   List<int> get diagnosticAddedVideoIds => List<int>.unmodifiable(_addedVideoIds);
+
+  @override
+  Stream<bool> get seekingStream => _seekingChanges.stream;
+
+  @override
+  bool get seeking => _seeking;
 
   /// A numeric `vid`: a selected track, as opposed to `no` or `auto`.
   int? _selectedVideoId() => int.tryParse(_vid);

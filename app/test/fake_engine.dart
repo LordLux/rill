@@ -111,6 +111,21 @@ class FakeEngine implements PlaybackEngine {
   @override
   Stream<bool> get audioMissingStream => _audioMissingChanges.stream;
 
+  bool _seeking = false;
+  final _seekingChanges = StreamController<bool>.broadcast();
+
+  @override
+  bool get seeking => _seeking;
+
+  @override
+  Stream<bool> get seekingStream => _seekingChanges.stream;
+
+  /// mpv reporting a seek in progress, or over.
+  void setSeeking(bool value) {
+    _seeking = value;
+    _seekingChanges.add(value);
+  }
+
   /// The audio track turning up after the open had decided it was missing: the track list
   /// trailing its grace on a loaded machine.
   void audioArrivesLate() {
@@ -404,6 +419,18 @@ class FakeEngine implements PlaybackEngine {
     _playing.add(value);
   }
 
-  /// The media reached its end — what drives queue autoplay.
+  /// The media reached its end — what drives queue autoplay — wherever the position happens to be.
   void complete() => _completed.add(true);
+
+  /// The media reached its end as a real file does: the position goes to the duration first. What
+  /// the playback controller's tests mean by "the video ended", since it now tells that from
+  /// [cutOff].
+  void completeAtEnd() {
+    emitPosition(_durationValue);
+    _completed.add(true);
+  }
+
+  /// The file ended where it was, short of its duration: a dropped connection is an end of file
+  /// to mpv (`todo.md` 107).
+  void cutOff() => _completed.add(true);
 }
