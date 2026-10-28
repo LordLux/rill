@@ -1,0 +1,64 @@
+# The release gate's checks, on every pull request.
+#
+# The release workflow runs them after a merge, so a red test used to show up on main, with a
+# release held up behind it. This runs them first. The steps are the release workflow's `gate`
+# job, copied: `tools/workflow-gate-sync.test.ts` fails if the two ever differ, and runs as one
+# of the steps, so a change to one has to be made to both.
+#
+# Actions minutes are free on a public repository. The Windows runner is the same
+# (windows-latest, Visual Studio 2026) as the release gate and the dev machine. A new push to
+# a pull request cancels the run before it: only the latest commit's result is of any use.
+
+name: pull request
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: '1.1.42' # what the sidecar is developed and measured against
+  FVM_VERSION: '3.2.1'
+
+jobs:
+  gate:
+    runs-on: windows-latest # see the note above `jobs:` in release.yml
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/toolchain
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          fvm-version: ${{ env.FVM_VERSION }}
+      - name: Sidecar - check (typecheck, lint, tests)
+        working-directory: sidecar
+        run: bun run check
+      - name: Todo file - unique item numbers, all below "Next number" (needs no install)
+        run: bun test tools/todo/parse.test.ts
+      - name: Text files - no control characters in any tracked text file (needs no install)
+        run: |
+          bun test tools/check-text-files.test.ts
+          bun tools/check-text-files.ts
+      - name: Workflows - the pull request gate is the release gate (needs no install)
+        run: bun test tools/workflow-gate-sync.test.ts
+      - name: Sidecar - build (the app's tests run the compiled one)
+        working-directory: sidecar
+        run: bun run build
+      - name: App - lint plugin dependencies
+        working-directory: app/tool/rill_lints
+        run: fvm dart pub get
+      - name: App - tests (guarded; concurrency 2 as on the dev machine, see CLAUDE.md)
+        working-directory: app
+        run: fvm dart run tool/test_suite_guard.dart --concurrency=2
+      - name: App - lint gate
+        working-directory: app
+        run: fvm dart run tool/lint_gate.dart

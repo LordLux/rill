@@ -1968,6 +1968,12 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
   merges inside one build's length collapse into one release: that run builds the
   newer commit, and its notes cover everything since the previous release, so
   nothing is lost, but the version number skips.
+- **The gate also runs on every pull request** (`.github/workflows/pull-request.yml`,
+  2026-10-27), so a red test shows up on the PR and not on `main` with a release held
+  behind it. It is the release gate's steps copied, and `tools/workflow-gate-sync.test.ts`
+  (a step of both, and of `rill check`) fails when the two differ. Actions minutes are free
+  on a public repository. It also takes load off the local runs, whose timing-sensitive tests
+  fail on a busy machine (`todo.md` 94).
 - **The version is a function of the commit, and `release/version` is where you
   set it.** That file is one strict line, `MAJOR.MINOR.PATCH`, and the commit that
   last changed it *is* that version. From there, along `main`'s first-parent

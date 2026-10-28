@@ -185,6 +185,8 @@ try {
         # No tracked text file may hold a control character (a "\a" a shell turned into a BEL).
         Invoke-Step 'text files check' { bun test tools/check-text-files.test.ts }
         Invoke-Step 'text files' { bun tools/check-text-files.ts }
+        # The pull request workflow runs the release gate's steps, copied; they must stay the same.
+        Invoke-Step 'workflow gate sync' { bun test tools/workflow-gate-sync.test.ts }
         Set-Location 'app'
         Invoke-Step 'test_suite_guard.dart' { fvm dart run tool/test_suite_guard.dart }
         Invoke-Step 'lint_gate.dart' { fvm dart run tool/lint_gate.dart }
