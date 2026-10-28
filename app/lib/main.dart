@@ -38,6 +38,7 @@ import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 import 'ui/semantics_probe.dart';
+import 'ui/swap_spike.dart';
 import 'ui/video_add_probe.dart';
 import 'ui/update_controller.dart';
 import 'ui/ytdlp_controller.dart';
@@ -82,6 +83,10 @@ Future<void> main() async {
   }
 
   // `RILL_VIDEO_ADD_PROBE=1` measures a quality switch done as `video-add` and exits.
+  if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1' && Platform.environment['RILL_VIDEO_ADD_PROBE_SWAP'] == '1') {
+    runSwapSpike(runApp, hardExit);
+    return;
+  }
   if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1' && Platform.environment['RILL_VIDEO_ADD_PROBE_DUAL'] == '1') {
     runDualProbe(runApp, hardExit);
     return;
