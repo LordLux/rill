@@ -71,6 +71,12 @@ if errorlevel 1 (
   )
 )
 
+where git >nul 2>nul
+if not errorlevel 1 (
+  git config core.hooksPath tools/hooks
+  echo Pre-commit hook enabled ^(tools/hooks: control characters and raw YouTube responses are refused at the commit^).
+)
+
 echo.
 echo Setup complete. The repo is ready to open in VS Code / run the app.
 endlocal

@@ -109,6 +109,8 @@ jobs:
         run: |
           bun test tools/check-text-files.test.ts
           bun tools/check-text-files.ts
+      - name: Workflows - the pull request gate is the release gate (needs no install)
+        run: bun test tools/workflow-gate-sync.test.ts
       - name: Sidecar - build (the app's tests run the compiled one)
         working-directory: sidecar
         run: bun run build
