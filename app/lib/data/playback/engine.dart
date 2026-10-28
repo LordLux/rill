@@ -598,9 +598,9 @@ class MediaKitEngine implements PlaybackEngine {
     // video URL is video-only, so with `vid=no` and the audio not yet attached
     // nothing is selected: mpv skips the file, no duration ever arrives, and the
     // wait below runs out its 20 s — which is what the "stuck at 0:00" audio-only
-    // stall was (`architecture.md` §2.4, `9299ed3`).
+    // stall was (`architecture.md` §2.4, `377c173`).
     //
-    // `9299ed3` fixed that by forcing video on for every open, which works but
+    // `377c173` fixed that by forcing video on for every open, which works but
     // means every audio-only track fetched and decoded video only to drop it a
     // moment later. Instead, when video is off and there is a separate audio
     // stream, the audio is attached **at load** through `audio-files`, so the

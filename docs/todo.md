@@ -883,7 +883,7 @@ the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
 ### 51. Two Windows plugins still use a feature Microsoft will remove
 
 **Where it stands (2026-10-23).** The app builds on Visual Studio 2026 (MSVC 14.51)
-since `ec202a7`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
+since `79af88c`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
 in `app/windows/CMakeLists.txt`. This machine builds with it, and so does the
 release workflow, whose two Windows jobs moved from `windows-2022` to
 `windows-latest` (image `windows-2025-vs2026`) after a trial run passed end to end
