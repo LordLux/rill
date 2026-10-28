@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs the repository's file checks on what is staged, so a problem stops at the commit and not
+# after a push has made it public: control characters (a "\a" a shell turned into a BEL) and raw
+# YouTube responses, which carry the capturing machine's address and, signed in, the account's
+# subscriptions (tools/check-text-files.ts says what and why).
+#
+# Enabled by setup.bat, or by hand:  git config core.hooksPath tools/hooks
+# Skipped with `git commit --no-verify`; CI runs the same check on every pull request.
+
+dir=$(cd "$(dirname "$0")" && pwd)
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-commit: bun is not installed, so the staged-file check did not run (CI will run it)." >&2
+  exit 0
+fi
+
+exec bun "$dir/../check-text-files.ts" --staged
