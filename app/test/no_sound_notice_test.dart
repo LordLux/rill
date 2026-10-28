@@ -13,6 +13,7 @@ import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/data/playback/engine.dart' show VideoSwitch;
+import 'package:rill/ui/player/controls.dart' show PlayerControls, playerScrubberKey;
 import 'package:rill/ui/player/player_slates.dart';
 import 'package:rill/ui/player/video_load_cover.dart';
 import 'package:rill/ui/player/view_mode.dart';
@@ -141,6 +142,17 @@ void main() {
     // would just stop with nothing said.
     expect(find.byKey(switchingNoteKey), findsOneWidget);
     expect(find.text('Switching to 360p…'), findsOneWidget);
+    // Under the progress bar, in the control bar's row, and not over the picture where the
+    // captions are: the bar is 64 px with the 12 px scrubber at its top.
+    final note = tester.getRect(find.byKey(switchingNoteKey));
+    final player = tester.getRect(find.byType(PlayerControls));
+    expect(note.top, greaterThanOrEqualTo(player.bottom - 52), reason: 'below the scrubber');
+    expect(note.bottom, lessThanOrEqualTo(player.bottom), reason: 'inside the player');
+    // And painted over the bar's gradient, not under it: later in the tree is later in paint order.
+    final elements = tester.allElements.toList();
+    final barAt = elements.indexOf(find.byKey(playerScrubberKey).evaluate().first);
+    final noteAt = elements.indexOf(find.byKey(switchingNoteKey).evaluate().first);
+    expect(noteAt, greaterThan(barAt), reason: 'the note paints after the bar');
     expect(find.byKey(videoLoadCoverKey), findsNothing, reason: 'the old frame stays, nothing covers it');
 
     gate.complete();

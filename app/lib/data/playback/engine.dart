@@ -221,6 +221,28 @@ abstract class PlaybackEngine {
   Future<void> dispose();
 }
 
+/// An engine that [SwappingEngine] can use as one of its two players: the interface plus what a
+/// standby needs that nothing else does (`architecture.md` §2.16).
+abstract class SwapSlot implements PlaybackEngine {
+  /// The variant the last [open] or in-place switch put on screen.
+  PlaybackVariant? get lastOpened;
+
+  /// False in audio-only mode, where no picture shows and there is nothing to swap.
+  bool get videoEnabled;
+
+  /// Settings for a player that will wait paused with its media open: a read-ahead long enough
+  /// to hold the seconds between "ready" and "the clock gets there".
+  Future<void> prepareStandby();
+
+  /// A seek that returns when it has finished, which is also the signal when paused. Throws a
+  /// [TimeoutException] when it never does.
+  Future<void> seekAndWait(Duration to);
+
+  /// Frames this player has dropped since it opened its media, in the decoder and at the output
+  /// together: what a switch costs the viewer who is still watching it.
+  int get droppedFrames;
+}
+
 /// How [PlaybackEngine.switchVideo] ended.
 enum VideoSwitch {
   /// The new quality is showing, at the old position.
@@ -298,7 +320,7 @@ const kLibassEnabled = true;
 ///
 /// Owned by the shell above the `Navigator` (task §1), so a route pop cannot
 /// take it — and with it the audio and the position — down.
-class MediaKitEngine implements PlaybackEngine {
+class MediaKitEngine implements SwapSlot {
   /// [logLevel] is for measurement harnesses only. mpv at `v` is the level that
   /// shows stream opens and cache events — the per-track evidence no property
   /// exposes, because `demuxer-cache-state` describes one demuxer and an
@@ -322,6 +344,7 @@ class MediaKitEngine implements PlaybackEngine {
     unawaited(_setStreamOptions());
     unawaited(_observeVideoOutput());
     unawaited(_observeTrackState());
+    unawaited(_observeDrops());
 
     _subscriptions.addAll([
       _player.stream.position.listen((value) => _position = value),
@@ -363,6 +386,7 @@ class MediaKitEngine implements PlaybackEngine {
   /// the case that matters — nothing above the engine ever learns which URL was
   /// being played. That is precisely the failure worth investigating, and it was
   /// unobservable from outside. Nothing that renders reads this.
+  @override
   PlaybackVariant? lastOpened;
 
   /// mpv itself, **for diagnostics only** — hard invariant 9's own carve-out.
@@ -881,6 +905,24 @@ class MediaKitEngine implements PlaybackEngine {
     }
   }
 
+  int _decoderDrops = 0;
+  int _outputDrops = 0;
+
+  @override
+  int get droppedFrames => _decoderDrops + _outputDrops;
+
+  /// `frame-drop-count` (decoder) and `vo-drop-frame-count` (output), as observed events: nothing is
+  /// polled (hard invariant 9). A failure costs the numbers, not the player.
+  Future<void> _observeDrops() async {
+    try {
+      final native = _player.platform as NativePlayer;
+      await native.observeProperty('frame-drop-count', (value) async => _decoderDrops = int.tryParse(value) ?? _decoderDrops);
+      await native.observeProperty('vo-drop-frame-count', (value) async => _outputDrops = int.tryParse(value) ?? _outputDrops);
+    } on Object catch (e) {
+      stderr.writeln('rill: could not observe the dropped-frame counters ($e)');
+    }
+  }
+
   /// The observed `vid` and the video tracks this engine has added, **for diagnostics only**.
   String get diagnosticVid => _vid;
   List<int> get diagnosticAddedVideoIds => List<int>.unmodifiable(_addedVideoIds);
@@ -988,6 +1030,19 @@ class MediaKitEngine implements PlaybackEngine {
       _addedVideoIds.remove(id);
     }
   }
+
+  @override
+  bool get videoEnabled => _videoTrackEnabled;
+
+  @override
+  Future<void> prepareStandby() async {
+    final native = _player.platform as NativePlayer;
+    await native.setProperty('demuxer-readahead-secs', '6');
+    await native.setProperty('cache-secs', '10');
+  }
+
+  @override
+  Future<void> seekAndWait(Duration to) => _seekAndWait(to);
 
   @override
   bool canSwitchVideo(PlaybackVariant variant) {

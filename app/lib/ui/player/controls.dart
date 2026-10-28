@@ -44,6 +44,7 @@ import '../video_info.dart';
 import '../focus_ring.dart' show KeyboardNavigation;
 import '../focus_surface.dart';
 import '../widgets/shortcut_tooltip.dart';
+import 'player_slates.dart' show SwitchingNote;
 import 'scrubber_bar.dart';
 import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
@@ -646,6 +647,10 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
+                  // Above the bar, whose gradient made it hard to read: it is last, so it paints
+                  // over it. Mounted always (it draws nothing when no switch is running) so the
+                  // child list does not change shape for it.
+                  const SwitchingNote(),
                 ],
               ),
             ),
