@@ -654,6 +654,14 @@ the answer.
   keep their CRLF); the licences file's form feeds are the one allowlisted exception, in the
   script. It reads the working tree, so an edit is caught before it is staged. The diff still has
   to be read: the check sees bytes that cannot belong, not an edit that is simply wrong.
+  **It also refuses a raw YouTube response anywhere but `corpus/`** (2026-10-27): a tracked file
+  holding the response-context key, or a stream URL whose `ip=` is a public address. This is a
+  public repository, a capture carries the capturing machine's address and a visitor id, and a
+  signed-in one the account's subscriptions and avatar; two sat in `main` for months and 55
+  untracked ones were pushed by a `git add -f`. Captures go in an ignored folder
+  (`sidecar/scratch/`), and never `git add -f` a folder. The same check runs on what is staged as
+  a pre-commit hook (`tools/hooks/pre-commit`, enabled by `setup.bat` with `git config
+  core.hooksPath tools/hooks`), so it stops at the commit and not after the push.
 - **The docs restate the contract in five places, and one test checks they
   agree.** `CLAUDE.md`, `architecture.md`, `protocol.md`, `parser.test.ts`'s
   `SHAPES` and `corpus.test.ts`'s auditor each hold part of it independently.
