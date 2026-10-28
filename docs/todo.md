@@ -1508,7 +1508,8 @@ where it will be ready, and is swapped in by starting it, pausing the first play
 **Built (2026-10-28, `feat/second-player`):** `SwappingEngine` over two `SwapSlot`s, `architecture.md` §2.16;
 the shell's engine in `main.dart`, `PlaybackController` untouched (its `switchVideo` is the second player's now, with the
 in-place switch as the fallback). Tested with fakes (`swapping_engine_test.dart`); mutation-checked on the re-pointing.
-Hand-tested 2026-10-28: it works, and lags a little under load while the standby is made. A switch now logs
+Hand-tested 2026-10-28, on the final build (picture on stage, the switching note under the progress bar and above the
+control bar's gradient): it works, and lags a little under load while the standby is made. A switch now logs
 `second player: the viewed player dropped N frames while the standby was made` (mpv's decoder and output drop counters,
 observed, not polled), so the cost is a number per switch; no CPU or GPU figures from the real app yet.
 **Not done:** a switch through the real app measured from mpv's log (silence, clock, black frames) at 1080p60 and 2160p60;
