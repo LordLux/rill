@@ -17,12 +17,23 @@
  *    A working-tree file that is CRLF throughout is not a failure: `* text=auto eol=lf` turns it
  *    into LF when it is added, and a few files from before that rule still sit that way.
  *
+ * It also refuses a raw YouTube response in the repository (2026-10-27): any tracked file
+ * outside `corpus/` that holds the response-context key, or a stream URL's `ip=` with a public
+ * address. This is a public repository, and a captured response carries the capturing machine's
+ * address, a visitor id, and for a signed-in capture the account's subscriptions and avatar. Two
+ * such files sat in `main` for months, and 55 untracked captures were pushed by a `git add -f`
+ * before anyone looked. `corpus/` is the sanitised copy and is exempt; so is one test that builds
+ * a response by hand. The problem line names the file, the line and the kind, never the value.
+ * The pre-commit hook (`tools/hooks/pre-commit`) runs this on what is staged, so it stops at the
+ * commit, before a push makes anything public.
+ *
  * "Text" is decided by what is declared and by content, not by git's own guess: a file whose
  * attributes say `-text` or `binary` is skipped, as is one with a NUL in its first 8000 bytes or
  * a known binary extension. A lone CR makes git itself call a file binary, so git's guess is
  * exactly what would let this class of damage through.
  *
  *   bun tools/check-text-files.ts [path ...]   (no paths: every tracked file)
+ *   bun tools/check-text-files.ts --staged     (what is staged, from the index; the pre-commit hook)
  */
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -49,6 +60,82 @@ export interface Problem {
   line: number;
   column: number;
   what: string;
+}
+
+/**
+ * The key every raw InnerTube response opens with. Written in two pieces so that this file does
+ * not hold it and trip its own check.
+ */
+const RESPONSE_CONTEXT = 'response' + 'Context';
+
+/** The sanitised copy of the captures; a raw response belongs nowhere else. */
+const RAW_RESPONSES_ALLOWED_UNDER = 'corpus/';
+
+/**
+ * Files that hold the key on purpose, by path, with the reason. One test builds a response by
+ * hand with a made-up visitor id; it is not a capture.
+ */
+const RESPONSE_CONTEXT_ALLOWED: Record<string, string> = {
+  'sidecar/test/parser.test.ts': 'a response built inline in a test, with an invented visitor id',
+};
+
+/** Whether an `ip=` value is an address that could be someone's: not private, loopback, unspecified or reserved for documentation. */
+export function isPublicAddress(value: string): boolean {
+  if (value.includes(':')) {
+    const v6 = value.toLowerCase();
+    return !(v6 === '::' || v6 === '::1' || /^f[cd]/.test(v6) || v6.startsWith('fe80') || v6.startsWith('2001:db8'));
+  }
+  const parts = value.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b, c] = parts as [number, number, number, number];
+  if (a === 0 || a === 10 || a === 127) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false; // shared address space
+  if ((a === 192 && b === 0 && c === 2) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)) return false;
+  return true;
+}
+
+/**
+ * A raw YouTube response in a file that should not hold one. Reports where and what kind, never
+ * the value found.
+ */
+export function scanSensitive(file: string, bytes: Uint8Array): Problem[] {
+  if (file.startsWith(RAW_RESPONSES_ALLOWED_UNDER)) return [];
+  const text = Buffer.from(bytes).toString('latin1');
+  const problems: Problem[] = [];
+  const lineOf = (index: number) => text.slice(0, index).split('\n').length;
+
+  if (!(file in RESPONSE_CONTEXT_ALLOWED)) {
+    const at = text.indexOf(RESPONSE_CONTEXT);
+    if (at >= 0) {
+      problems.push({
+        path: file,
+        line: lineOf(at),
+        column: 1,
+        what: 'a raw YouTube response (it has the response-context key): captures stay out of the repository, sanitised copies go in corpus/',
+      });
+    }
+  }
+
+  const ip = /(?:[?&]|\\u0026|&amp;)ip(?:=|%3D)((?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7})/g;
+  let first = -1;
+  let count = 0;
+  for (const match of text.matchAll(ip)) {
+    if (!isPublicAddress(match[1]!)) continue;
+    if (first < 0) first = match.index!;
+    count++;
+  }
+  if (count > 0) {
+    problems.push({
+      path: file,
+      line: lineOf(first),
+      column: 1,
+      what: `a stream URL with a public ip= address (${count} of them): it is the address of whoever captured it`,
+    });
+  }
+  return problems;
 }
 
 const NAMES: Record<number, string> = {
@@ -149,16 +236,43 @@ export function checkTracked(root: string, only: string[] = []): { problems: Pro
     if (!exempt && entry.tree === 'mixed' && !found.some((p) => p.what.startsWith('CRLF'))) {
       found.push({ path: entry.path, line: 1, column: 1, what: 'mixed CRLF and LF line endings' });
     }
+    found.push(...scanSensitive(entry.path, bytes));
     problems.push(...found);
   }
   return { problems, checked };
 }
 
+/** The same checks on what is staged, read from the index and not the working tree. */
+export function checkStaged(root: string): { problems: Problem[]; checked: number } {
+  const listed = spawnSync('git', ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (listed.status !== 0) throw new Error(`git diff --cached failed: ${listed.stderr}`);
+  const problems: Problem[] = [];
+  let checked = 0;
+  for (const name of listed.stdout.split('\0').filter(Boolean)) {
+    const extension = path.extname(name).toLowerCase();
+    if (BINARY_EXTENSIONS.has(extension)) continue;
+    const blob = spawnSync('git', ['show', `:${name}`], { cwd: root, maxBuffer: 256 * 1024 * 1024 });
+    if (blob.status !== 0) continue;
+    const bytes = blob.stdout as Buffer;
+    if (bytes.subarray(0, 8000).includes(0)) continue;
+    checked++;
+    problems.push(...scan(name, bytes, CRLF_EXEMPT.has(extension)), ...scanSensitive(name, bytes));
+  }
+  return { problems, checked };
+}
+
 function main(args: string[]): number {
-  const root = path.resolve(import.meta.dir, '..');
-  const { problems, checked } = checkTracked(root, args);
+  const staged = args.includes('--staged');
+  let root = path.resolve(import.meta.dir, '..');
+  if (staged) {
+    // The repository being committed to, which is not always the one this file sits in.
+    const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+    if (top.status !== 0) throw new Error(`git rev-parse failed: ${top.stderr}`);
+    root = top.stdout.trim();
+  }
+  const { problems, checked } = staged ? checkStaged(root) : checkTracked(root, args);
   if (problems.length === 0) {
-    console.log(`text files: ${checked} checked, no control characters.`);
+    console.log(`text files: ${checked} ${staged ? 'staged ' : ''}checked, no control characters or raw responses.`);
     return 0;
   }
   for (const problem of problems.slice(0, 60)) {
@@ -167,7 +281,7 @@ function main(args: string[]): number {
   if (problems.length > 60) console.error(`... and ${problems.length - 60} more`);
   console.error(
     `text files: ${problems.length} problem(s) in ${new Set(problems.map((p) => p.path)).size} file(s). ` +
-      'A BEL here is a "\\a" that a shell turned into a byte; read the diff of whatever edited the file.',
+      'A BEL is a "\\a" that a shell turned into a byte: read the diff of whatever edited the file. A raw response is a capture that must not be committed: unstage it (git rm --cached), and keep captures in an ignored folder such as sidecar/scratch/.',
   );
   return 1;
 }
