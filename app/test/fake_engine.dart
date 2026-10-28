@@ -111,11 +111,75 @@ class FakeEngine implements PlaybackEngine {
   @override
   Stream<bool> get audioMissingStream => _audioMissingChanges.stream;
 
+  bool _seeking = false;
+  final _seekingChanges = StreamController<bool>.broadcast();
+
+  @override
+  bool get seeking => _seeking;
+
+  @override
+  Stream<bool> get seekingStream => _seekingChanges.stream;
+
+  /// mpv reporting a seek in progress, or over.
+  void setSeeking(bool value) {
+    _seeking = value;
+    _seekingChanges.add(value);
+  }
+
   /// The audio track turning up after the open had decided it was missing: the track list
   /// trailing its grace on a loaded machine.
   void audioArrivesLate() {
     _audioMissing = false;
     _audioMissingChanges.add(false);
+  }
+
+  /// Whether [switchVideo] works in place. Off by default so the tests written for the reopen
+  /// keep testing it; the in-place ones turn it on.
+  bool inPlaceSwitch = false;
+
+  /// Every variant handed to [switchVideo] that was accepted, in order.
+  final List<PlaybackVariant> switched = [];
+
+  /// What the next [switchVideo] answers, once.
+  VideoSwitch? nextSwitchResult;
+
+  /// Held by a test that needs a switch to still be in flight.
+  Future<void>? switchGate;
+
+  /// What a switch leaves the playing state as when it ends, whatever it was: a switch ends by
+  /// restarting playback, so on the real engine it can undo a pause pressed meanwhile.
+  bool? playingAfterSwitch;
+
+  /// Switches begun and not yet ended: more than one means the caller did not serialise.
+  int switchesInFlight = 0;
+  int maxSwitchesInFlight = 0;
+
+  PlaybackVariant? _current;
+
+  @override
+  bool canSwitchVideo(PlaybackVariant variant) => inPlaceSwitch && variant.audioUrl != null && variant.audioUrl == _current?.audioUrl;
+
+  @override
+  Future<VideoSwitch> switchVideo(PlaybackVariant variant) async {
+    if (!canSwitchVideo(variant)) return VideoSwitch.unsupported;
+    switchesInFlight++;
+    if (switchesInFlight > maxSwitchesInFlight) maxSwitchesInFlight = switchesInFlight;
+    try {
+      final gate = switchGate;
+      if (gate != null) await gate;
+      final result = nextSwitchResult ?? VideoSwitch.done;
+      nextSwitchResult = null;
+      if (result == VideoSwitch.done) {
+        switched.add(variant);
+        _current = variant;
+        setWidth(variant.height * 16 ~/ 9);
+        setHeight(variant.height);
+        if (playingAfterSwitch != null) setPlaying(playingAfterSwitch!);
+      }
+      return result;
+    } finally {
+      switchesInFlight--;
+    }
   }
 
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
@@ -167,6 +231,7 @@ class FakeEngine implements PlaybackEngine {
     bool isLive = false,
   }) async {
     opened.add(variant);
+    _current = variant;
     // Exactly `MediaKitEngine`'s behaviour: the reopen drops mpv's external
     // subtitle track, and only `retainSubtitle` puts it back. Modelled here
     // rather than assumed away, because "captions survive a quality switch" is
@@ -302,6 +367,7 @@ class FakeEngine implements PlaybackEngine {
   @override
   Future<void> stop() async {
     stopCount++;
+    _current = null;
     _audioMissing = false;
     setPlaying(false);
     // As media_kit's `stop`: the clock goes back to zero, so anything reading the position
@@ -353,6 +419,18 @@ class FakeEngine implements PlaybackEngine {
     _playing.add(value);
   }
 
-  /// The media reached its end — what drives queue autoplay.
+  /// The media reached its end — what drives queue autoplay — wherever the position happens to be.
   void complete() => _completed.add(true);
+
+  /// The media reached its end as a real file does: the position goes to the duration first. What
+  /// the playback controller's tests mean by "the video ended", since it now tells that from
+  /// [cutOff].
+  void completeAtEnd() {
+    emitPosition(_durationValue);
+    _completed.add(true);
+  }
+
+  /// The file ended where it was, short of its duration: a dropped connection is an end of file
+  /// to mpv (`todo.md` 107).
+  void cutOff() => _completed.add(true);
 }

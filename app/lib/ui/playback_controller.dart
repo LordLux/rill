@@ -65,6 +65,7 @@ class PlaybackState {
     this.wantPlaying = true,
     this.preferredHeight,
     this.isSwitchingQuality = false,
+    this.isSwitchingTrack = false,
     this.isRestoringVideo = false,
     this.audioMissing = false,
     this.hold,
@@ -99,6 +100,14 @@ class PlaybackState {
   /// A quality change in flight. Distinct from [isLoading] because it must not
   /// draw the "opening a video" spinner over a video that is already playing.
   final bool isSwitchingQuality;
+
+  /// A quality change done in place, as an added video track (todo 103). The old picture keeps
+  /// showing and the sound holds for the second or two it takes, so there is no cover: this is
+  /// only what the quality button and menu show as busy. See [isChangingQuality].
+  final bool isSwitchingTrack;
+
+  /// Either way of changing quality is under way: what shows busy, as opposed to what covers.
+  bool get isChangingQuality => isSwitchingQuality || isSwitchingTrack;
 
   /// Leaving audio-only, with no picture yet.
   ///
@@ -210,6 +219,7 @@ class PlaybackState {
     bool? wantPlaying,
     Object? preferredHeight = _unchanged,
     bool? isSwitchingQuality,
+    bool? isSwitchingTrack,
     bool? isRestoringVideo,
     bool? audioMissing,
     Object? hold = _unchanged,
@@ -230,6 +240,7 @@ class PlaybackState {
       wantPlaying: wantPlaying ?? this.wantPlaying,
       preferredHeight: identical(preferredHeight, _unchanged) ? this.preferredHeight : preferredHeight as int?,
       isSwitchingQuality: isSwitchingQuality ?? this.isSwitchingQuality,
+      isSwitchingTrack: isSwitchingTrack ?? this.isSwitchingTrack,
       isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       audioMissing: audioMissing ?? this.audioMissing,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
@@ -354,6 +365,18 @@ class PlaybackController extends Notifier<PlaybackState> {
       engine.completedStream.listen((completed) {
         if (completed) unawaited(_onCompleted());
       }),
+      // A seek that never finishes is a read that is not coming (an expired URL answers 403 and
+      // mpv waits for ever, with no error). Recovered like a cut-off file.
+      engine.seekingStream.listen((seeking) {
+        _seekStuckTimer?.cancel();
+        if (!seeking) return;
+        _seekStuckTimer = Timer(seekStuckAfter, () {
+          if (_disposed || !_engine.seeking) return;
+          // A switch has its own seek and its own deadline, and a load is not a seek.
+          if (state.isLoading || state.isSwitchingQuality || state.isSwitchingTrack || state.isUnplayable) return;
+          unawaited(_recoverRead('a seek never finished', playing: _engine.playing));
+        });
+      }),
       // A "No sound" notice raised because the track list trailed its grace comes down when
       // the audio turns up. Only clears: raising it is `open`'s job, once the open has ended.
       engine.audioMissingStream.listen((missing) {
@@ -412,6 +435,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       _reportTimer?.cancel();
       _stallWatchdogTimer?.cancel();
       _restoreWatchdog?.cancel();
+      _seekStuckTimer?.cancel();
+      _recoveryResetTimer?.cancel();
       for (final subscription in _subscriptions) {
         unawaited(subscription.cancel());
       }
@@ -425,10 +450,22 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// Guarded by a generation counter for the same reason the feed is: two taps
   /// in quick succession put two `playback.open` calls on the wire, and the
   /// slower one must not open its video over the newer one's.
-  Future<void> open(VideoItem item, {bool wantPlaying = true}) async {
+  ///
+  /// [keepClock] is for reloading the video that is on screen (the "No sound" retry): the clock
+  /// keeps showing where it was, as a [PlaybackHold], through the load and the seek back, instead
+  /// of going to 0:00 of 0:00 for as long as the engine takes. A first load has no clock to keep.
+  Future<void> open(VideoItem item, {bool wantPlaying = true, bool keepClock = false}) async {
     final generation = ++_generation;
     _stallWatchdogTimer?.cancel();
     _stallWatchdogTimer = null;
+    // Taken first: the engine's own position is the one thing the load is about to zero.
+    PlaybackHold? clock;
+    if (keepClock && state.item?.id == item.id && state.error == null) {
+      final position = currentPosition;
+      final known = state.hold?.duration ?? _engine.duration;
+      final duration = known > Duration.zero ? known : (state.source?.duration ?? Duration.zero);
+      if (position > Duration.zero && duration > Duration.zero) clock = PlaybackHold(position: position, duration: duration);
+    }
     // A pending resume belongs to one video. Dropped the moment a different one
     // opens — otherwise an open superseded before it resolved (a quick tap on
     // something else during an undo) returns at its generation check without
@@ -444,7 +481,11 @@ class PlaybackController extends Notifier<PlaybackState> {
     // closed above, so this is not an ending: nothing reports, nothing advances, and the queue
     // does not hear of it.
     final previous = state.item;
-    if (previous != null && previous.id != item.id) unawaited(_engine.stop());
+    if (previous != null && previous.id != item.id) {
+      unawaited(_engine.stop());
+      _recoveries = 0;
+      _lastRecovery = null;
+    }
 
     state = state.copyWith(
       item: item,
@@ -458,6 +499,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // What the quality menu marks while there is no ladder yet.
       preferredHeight: _preferredHeight,
       isSwitchingQuality: false,
+      isSwitchingTrack: false,
       // **A restore belongs to the media it started on.** Without this, a
       // restore still waiting when a different video opens keeps the flag up
       // until its own 30 s timeout — and its `finally` will not clear it,
@@ -465,7 +507,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // the new media's state. The artwork then sits over a video whose
       // audio-only switch is off, which is what it looked like from outside.
       isRestoringVideo: false,
-      hold: null,
+      hold: clock,
       error: null,
       errorCode: null,
       errorRetry: null,
@@ -516,21 +558,25 @@ class PlaybackController extends Notifier<PlaybackState> {
         await _engine.setVideoTrack(!audioOnlyNow);
       }
 
+      // The undo's restored position, if one is pending. After the engine has
+      // the media open, so the seek has something to seek in.
+      final resume = _resumeAt;
+      _resumeAt = null;
+      final resuming = resume != null && resume.videoId == item.id;
+
       state = state.copyWith(
         source: source,
         variant: variant,
         sessionId: source.sessionId,
         isLoading: false,
         audioMissing: _engine.audioMissing,
+        // The clock held through a reload stays until the seek back has landed.
+        hold: resuming ? state.hold : null,
       );
       final startedPlaying = state.wantPlaying;
       _lastReportedPlaying = startedPlaying;
 
-      // The undo's restored position, if one is pending. After the engine has
-      // the media open, so the seek has something to seek in.
-      final resume = _resumeAt;
-      _resumeAt = null;
-      if (resume != null && resume.videoId == item.id) unawaited(seek(resume.position));
+      if (resuming) unawaited(_seekThenRelease(resume.position, generation));
 
       // Immediately, not on the first tick: this is the report that registers
       // the view at all, and a 15 s wait would lose every short watch.
@@ -555,6 +601,23 @@ class PlaybackController extends Notifier<PlaybackState> {
       // nothing will fix itself, but letting the user try again costs nothing.
       await _failOpen(e.toString(), RpcRetryMode.user);
     }
+  }
+
+  /// The seek back after an undo or a reload, and the end of the held clock when it has landed.
+  /// A cap, because a clock held forever over a seek that never finishes is worse than a jump.
+  Future<void> _seekThenRelease(Duration position, int generation) async {
+    await seek(position);
+    final landed = position - const Duration(seconds: 1);
+    try {
+      // The position may already be there: the event for it is gone by the time this listens.
+      if (_engine.position < landed) {
+        await _engine.positionStream.firstWhere((p) => p >= landed).timeout(const Duration(seconds: 20));
+      }
+    } on Object {
+      // Released below all the same.
+    }
+    if (_disposed || generation != _generation) return;
+    if (state.hold != null) state = state.copyWith(hold: null);
   }
 
   void _armStallWatchdog(int generation, PlaybackVariant variant) {
@@ -603,6 +666,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       isLoading: false,
       source: null,
       sessionId: null,
+      hold: null,
       error: message,
       errorCode: code,
       errorRetry: retry,
@@ -684,7 +748,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     final position = currentPosition;
     final playing = _engine.playing;
     if (position > Duration.zero) _resumeAt = (videoId: item.id, position: position);
-    await open(item, wantPlaying: playing);
+    await open(item, wantPlaying: playing, keepClock: true);
   }
 
   Future<void> _preload(String videoId) async {
@@ -699,7 +763,75 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
   }
 
+  /// How far short of its duration a file may end before the end is taken for a failed read.
+  /// Mutable only for tests.
+  @visibleForTesting
+  static Duration shortEndBy = const Duration(seconds: 5);
+
+  /// How long a seek may stay in progress before it is taken for dead. A far seek is a network
+  /// fetch of 6 to 12 s in ordinary life (F19), so this is well above that. Mutable for tests.
+  @visibleForTesting
+  static Duration seekStuckAfter = const Duration(seconds: 20);
+
+  int _recoveries = 0;
+  Timer? _recoveryResetTimer;
+  Timer? _seekStuckTimer;
+  bool _recovering = false;
+
+  /// Where the last recovery was made from, to tell a file that really ends early from one that
+  /// is cut off: the same place twice is its end.
+  ({String videoId, Duration position})? _lastRecovery;
+
+  /// The file ended well short of its duration. Not an ending: a dropped connection is an end of
+  /// file to mpv, whether or not the URL has expired (`todo.md` 107), and reporting it as the
+  /// video finishing plays the next one over a video the viewer was in the middle of.
+  bool _endedShort() {
+    final item = state.item;
+    if (item == null || state.isLoading || state.isUnplayable) return false;
+    if (state.source?.durationMs == null) return false; // a live stream has no end to fall short of
+    final duration = _engine.duration > Duration.zero ? _engine.duration : (state.source?.duration ?? Duration.zero);
+    if (duration <= Duration.zero) return false;
+    final position = state.hold?.position ?? _engine.position;
+    if (duration - position <= shortEndBy) return false;
+    final last = _lastRecovery;
+    if (last != null && last.videoId == item.id && (position - last.position).abs() < const Duration(seconds: 3)) {
+      // It ended here after being reopened here: this is where the file ends, whatever it said.
+      return false;
+    }
+    return true;
+  }
+
+  /// Resolve the video again and reopen it where the viewer was, paused if they were paused: the
+  /// same recovery as the "No sound" retry. At most three in a minute, then it is an error with a
+  /// retry button rather than a loop.
+  Future<void> _recoverRead(String why, {required bool playing}) async {
+    final item = state.item;
+    if (item == null || _recovering || state.isLoading) return;
+    if (_recoveries >= 3) {
+      stderr.writeln('rill: $why, and reopening has not helped three times — giving up');
+      await _failOpen('The stream was cut off and would not come back.', RpcRetryMode.user);
+      return;
+    }
+    _recovering = true;
+    try {
+      _recoveries++;
+      _recoveryResetTimer?.cancel();
+      _recoveryResetTimer = Timer(const Duration(minutes: 1), () => _recoveries = 0);
+      final position = currentPosition;
+      _lastRecovery = (videoId: item.id, position: position);
+      stderr.writeln('rill: $why at ${position.inSeconds}s — resolving again and reopening there');
+      if (position > Duration.zero) _resumeAt = (videoId: item.id, position: position);
+      await open(item, wantPlaying: playing, keepClock: true);
+    } finally {
+      _recovering = false;
+    }
+  }
+
   Future<void> _onCompleted() async {
+    if (_endedShort()) {
+      unawaited(_recoverRead('the file ended ${(_engine.duration - _engine.position).inSeconds}s short', playing: true));
+      return;
+    }
     _endSession(reportState: 'ended');
     // Autoplay, or stop. `advance` answers false at the end of the queue — and
     // at the end of a mix with a top-up still out, the queue remembers and
@@ -779,6 +911,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   Future<void> togglePlayPause() {
     if (state.isUnplayable) return Future<void>.value();
     if (state.isLoading) return setPlaying(!state.wantPlaying);
+    // Against what the viewer sees, not a toggle the switch could run into.
+    if (state.isSwitchingTrack) return setPlaying(!_engine.playing);
     return _engine.playOrPause();
   }
 
@@ -816,6 +950,9 @@ class PlaybackController extends Notifier<PlaybackState> {
   Future<void> setPlaying(bool value) {
     if (state.isUnplayable) return Future<void>.value();
     if (state.isLoading) return _wantWhileLoading(value);
+    // A switch in place ends by restarting playback, and a press made meanwhile has to be the
+    // state it ends in: noted here, applied when it ends (see [_switchInPlace]).
+    if (state.isSwitchingTrack) _playIntentDuringSwitch = value;
     return value ? _engine.play() : _engine.pause();
   }
 
@@ -900,8 +1037,16 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// **`isSwitchingQuality` stays true until the picture is back**, not until
   /// the calls are issued: F19 measured those at 306–743 ms against a median
   /// 4.1 s. It is what holds the black cover over the surface.
-  Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false}) async {
+  Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false, bool reopen = false}) async {
     if (!force && state.variant == variant) return;
+    // In place when the engine can: no cover, no reopen. [force] and [reopen] are the callers
+    // that want the media opened again (a stuck restore, the fallback below).
+    if (!force && !reopen && !state.isLoading && !state.isSwitchingQuality && state.hold == null) {
+      if (_inPlaceBusy || _engine.canSwitchVideo(variant)) {
+        await _switchInPlace(variant);
+        return;
+      }
+    }
     // **Incremented, not merely read.** Two picks in quick succession — 1080 then
     // 720 — otherwise captured the *same* generation, so neither guard fired and
     // both ran `engine.open` against the same player, racing over which stream
@@ -980,6 +1125,83 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (!_disposed && generation == _generation) {
         state = state.copyWith(isSwitchingQuality: false, hold: null);
       }
+    }
+  }
+
+  /// A switch in place is under way. Only one runs at a time: a pick made meanwhile is kept
+  /// in [_queuedPick], and a later one replaces it, so the latest wins and those in between
+  /// are dropped. (PR 27's mid-switch clock reset was the other way round: a second reopen
+  /// started from the first one's zeroed clock.)
+  bool _inPlaceBusy = false;
+  PlaybackVariant? _queuedPick;
+
+  /// Play or pause pressed while a switch is in flight: the state the switch must end in, the
+  /// way [PlaybackState.wantPlaying] works during a load. Null when nothing was pressed.
+  bool? _playIntentDuringSwitch;
+
+  Future<void> _applyPlayIntent() async {
+    final intent = _playIntentDuringSwitch;
+    _playIntentDuringSwitch = null;
+    if (intent == null || _disposed || _engine.playing == intent) return;
+    await (intent ? _engine.play() : _engine.pause());
+  }
+
+  /// `switchQuality` without a reopen: the engine adds the new video, seeks to where the clock
+  /// is, and removes the old one. If the engine says no, or the stream would not open, the
+  /// media is reopened the old way with the cover, which is the smaller fallback.
+  Future<void> _switchInPlace(PlaybackVariant variant) async {
+    _preferredHeight = variant.height;
+    if (_inPlaceBusy) {
+      // The menu moves to the latest pick at once; the engine gets it when the switch ends.
+      _queuedPick = variant;
+      state = state.copyWith(variant: variant, preferredHeight: variant.height);
+      return;
+    }
+    _inPlaceBusy = true;
+    _playIntentDuringSwitch = null;
+    final generation = _generation;
+    final restore = state.variant;
+    var next = variant;
+    try {
+      while (true) {
+        state = state.copyWith(variant: next, preferredHeight: next.height, isSwitchingTrack: true);
+        final started = DateTime.now();
+        VideoSwitch result;
+        try {
+          result = await _engine.switchVideo(next);
+        } on Object catch (e) {
+          if (generation != _generation || _disposed) return;
+          stderr.writeln('rill: in-place switch threw: $e');
+          result = VideoSwitch.refused;
+        }
+        if (generation != _generation || _disposed) return;
+        stderr.writeln(
+          'rill: quality -> ${next.height}p${next.fps} itag=${next.itag} in place: ${result.name} in '
+          '${DateTime.now().difference(started).inMilliseconds} ms',
+        );
+        if (result != VideoSwitch.done) {
+          // Back to the old way for this pick; whatever was queued behind it is the newer wish,
+          // so that is what the reopen goes to.
+          final target = _queuedPick ?? next;
+          _queuedPick = null;
+          _inPlaceBusy = false;
+          state = state.copyWith(isSwitchingTrack: false, variant: restore);
+          await _applyPlayIntent();
+          await switchQuality(target, reopen: true);
+          return;
+        }
+        // The switch ends by restarting playback; what the viewer pressed meanwhile wins.
+        // The switch ends by restarting playback; what the viewer pressed meanwhile wins.
+        await _applyPlayIntent();
+        final queued = _queuedPick;
+        _queuedPick = null;
+        if (queued == null || queued == next) break;
+        next = queued;
+      }
+    } finally {
+      _inPlaceBusy = false;
+      _queuedPick = null;
+      if (!_disposed && generation == _generation) state = state.copyWith(isSwitchingTrack: false);
     }
   }
 

@@ -201,7 +201,36 @@ abstract class PlaybackEngine {
   /// audio has to come down if the audio turns up after all.
   Stream<bool> get audioMissingStream;
 
+  /// mpv's `seeking`: true from a seek's start until playback has restarted. A seek into a region
+  /// whose URL has expired never ends (`todo.md` 107), which is why the controller watches it.
+  Stream<bool> get seekingStream;
+  bool get seeking;
+
+  /// Whether [switchVideo] can change to [variant] on the media that is open, without
+  /// reopening it: the video is an added track, the audio is the one the media was opened
+  /// with, and this is not a live stream or a muxed variant. False sends the caller to
+  /// [open], whose cover is the cost of that.
+  bool canSwitchVideo(PlaybackVariant variant);
+
+  /// Change the video to [variant] in place (`video-add`, a seek to where the clock is, then
+  /// `video-remove` of the track it replaced). One at a time is the caller's to keep. The
+  /// old picture, and the old quality's sound, hold until it is done; a failure leaves the
+  /// old quality playing and is reported, never thrown, so the caller can reopen.
+  Future<VideoSwitch> switchVideo(PlaybackVariant variant);
+
   Future<void> dispose();
+}
+
+/// How [PlaybackEngine.switchVideo] ended.
+enum VideoSwitch {
+  /// The new quality is showing, at the old position.
+  done,
+
+  /// The stream would not open or the seek never finished; the old quality is still playing.
+  refused,
+
+  /// [PlaybackEngine.canSwitchVideo] said no; nothing was touched.
+  unsupported,
 }
 
 /// An [PlaybackEngine.open] that a newer open or a stop overtook before it finished.
@@ -292,6 +321,7 @@ class MediaKitEngine implements PlaybackEngine {
     // onward, so a future pin bump is a non-event instead of a silent freeze.
     unawaited(_setStreamOptions());
     unawaited(_observeVideoOutput());
+    unawaited(_observeTrackState());
 
     _subscriptions.addAll([
       _player.stream.position.listen((value) => _position = value),
@@ -586,7 +616,12 @@ class MediaKitEngine implements PlaybackEngine {
     // Cleared on every open, never left: it is an option, not per-file state, so
     // a previous audio-only open's track would otherwise load into this one as a
     // second audio stream.
-    final audioUrl = variant.audioUrl;
+    // `RILL_DEBUG_DEAD_AUDIO=1` swaps the audio URL for one that cannot connect, to see the
+    // "No sound" notice and the video-only fallback without waiting for YouTube to refuse one.
+    // Measurement only; unset in ordinary use.
+    final audioUrl = variant.audioUrl != null && Platform.environment['RILL_DEBUG_DEAD_AUDIO'] == '1'
+        ? 'https://127.0.0.1:9/dead.webm'
+        : variant.audioUrl;
     final native = _player.platform as NativePlayer;
     // **Attached at load in video mode too (todo 103, 102).** The audio used to be added
     // after the duration was known, and starting the video first played it silent until
@@ -597,7 +632,23 @@ class MediaKitEngine implements PlaybackEngine {
     // the video at 3.0 s by the time the audio joined. A dead audio URL (404) is not fatal,
     // the video plays without it; one that stalls holds the open, which the 20 s wait below
     // ends and the loop retries without the audio.
-    var audioAtLoad = audioUrl != null;
+    //
+    // **The audio is the file, and the video is added to it (todo 103).** A video track that
+    // is the file's own can be deselected but never removed, and a deselected one keeps
+    // downloading (measured 2026-10-25, `scratch/measure-deselected.ts`: at the full rate, past
+    // the size of its file), so a switch from 2160p to 360p would have gone on fetching 2160p.
+    // An added track is removed with `video-remove`, and its download stops. So a separate
+    // audio opens as the main file and `video-add` brings the picture; that also gives audio-only
+    // a stream to select at load without the `vid=no` hack above. A live stream and a muxed
+    // variant keep the old layout, and so does an audio URL that will not open: the video alone
+    // plays, and the player says there is no sound.
+    // The observers (`vid`, `seeking`) are what tells an add that worked from one that did not.
+    await _trackObserversDone.future.timeout(const Duration(seconds: 5), onTimeout: () {});
+    var audioMain = audioUrl != null && !isLive && _trackObserversReady;
+    var audioAtLoad = audioUrl != null && !audioMain;
+    _audioMainOpen = false;
+    _mediaLoaded = false;
+    _addedVideoIds.clear();
 
     // Where an open spends its time, one line at the end (todo 103).
     final clock = Stopwatch()..start();
@@ -605,9 +656,15 @@ class MediaKitEngine implements PlaybackEngine {
     while (true) {
       await native.command(['change-list', 'audio-files', 'clr', '']);
       if (audioAtLoad) await native.command(['change-list', 'audio-files', 'append', audioUrl!]);
-      await native.setProperty('vid', !_videoTrackEnabled && audioAtLoad ? 'no' : 'auto');
-
-      await _player.open(Media(variant.videoUrl), play: wantPlay());
+      if (audioMain) {
+        // Paused until the picture is on it: a clock running before the video is added would
+        // leave the new track behind it (see [_addVideo]).
+        await native.setProperty('vid', 'auto');
+        await _player.open(Media(audioUrl!), play: false);
+      } else {
+        await native.setProperty('vid', !_videoTrackEnabled && audioAtLoad ? 'no' : 'auto');
+        await _player.open(Media(variant.videoUrl), play: wantPlay());
+      }
       if (superseded.isCompleted) throw const OpenSuperseded();
       loadfileMs = clock.elapsedMilliseconds;
       if (_player.state.duration > Duration.zero) break;
@@ -636,22 +693,41 @@ class MediaKitEngine implements PlaybackEngine {
         ]).timeout(const Duration(seconds: 20));
         break;
       } on TimeoutException {
-        // Nothing ever arrived. With the audio at load, the audio is the likelier
+        // Nothing ever arrived. With the audio in the way, the audio is the likelier
         // thing to be stuck, and a video without sound beats one that does not open.
-        if (!audioAtLoad) rethrow;
-        stderr.writeln('rill: no duration after 20 s with the audio at load, opening without the audio');
+        if (!audioAtLoad && !audioMain) rethrow;
+        stderr.writeln('rill: no duration after 20 s with the audio ${audioMain ? 'as the file' : 'at load'}, opening without the audio');
         audioAtLoad = false;
+        audioMain = false;
+      } on StateError catch (e) {
+        // The audio URL itself was refused. Only that is worth another try; a refused video
+        // URL (the old layout) is the failure it always was.
+        if (!audioMain) rethrow;
+        stderr.writeln('rill: the audio would not open ($e), opening without the audio');
+        audioMain = false;
       }
     }
 
     final durationMs = clock.elapsedMilliseconds;
+    _mediaLoaded = true;
+    _audioMainOpen = audioMain;
+
+    if (audioMain) {
+      // The picture. Audio-only has none to add; the audio is what plays.
+      if (_videoTrackEnabled) {
+        await _addVideo(variant.videoUrl);
+        if (superseded.isCompleted) throw const OpenSuperseded();
+      }
+      if (wantPlay()) await _player.play();
+    }
 
     // **Did the audio actually load?** mpv does not say: a dead audio URL is not fatal, so the
     // video opens and plays in silence, and the 20 s fallback above ends the same way. The
     // external audio is the file's only audio, so a real track in the list (an observed event,
     // never a property read) is the proof.
-    var audioStatus = audioUrl == null ? 'none' : (audioAtLoad ? 'at load' : 'dropped');
-    if (audioUrl != null) {
+    var audioStatus = audioUrl == null ? 'none' : (audioMain ? 'file' : (audioAtLoad ? 'at load' : 'dropped'));
+    // As the file, the audio is there by construction: the open would not have ended without it.
+    if (audioUrl != null && !audioMain) {
       final loaded = audioAtLoad && await _audioTrackListed();
       if (superseded.isCompleted) throw const OpenSuperseded();
       if (!loaded) {
@@ -674,7 +750,7 @@ class MediaKitEngine implements PlaybackEngine {
 
     // Back to what was asked for. Only a muxed variant (no separate audio at load), or
     // one that gave its audio up above, gets here with `vid=auto` while the app wants it off.
-    if (!_videoTrackEnabled && !audioAtLoad) {
+    if (!_videoTrackEnabled && !audioAtLoad && !audioMain) {
       await native.setProperty('vid', 'no');
     }
 
@@ -749,8 +825,211 @@ class MediaKitEngine implements PlaybackEngine {
   @override
   Future<void> setVideoTrack(bool enabled) async {
     trace?.call('setVideoTrack enabled=$enabled');
+    final changed = _videoTrackEnabled != enabled;
     _videoTrackEnabled = enabled;
+    // Before anything is open this only records the wish, which [open] reads.
+    if (_mediaLoaded && _audioMainOpen) {
+      // The video is an added track here, so off is a removal (its download stops, as `vid=no`
+      // stopped the old one) and on is an add, brought to the clock's place.
+      if (!enabled) {
+        await _removeVideos(keep: null);
+      } else if (changed || _addedVideoIds.isEmpty) {
+        final variant = lastOpened;
+        if (variant != null) await _addVideo(variant.videoUrl);
+      }
+      return;
+    }
     await (_player.platform as NativePlayer).setProperty('vid', enabled ? 'auto' : 'no');
+  }
+
+  // --- The video as an added track (todo 103) ---
+
+  /// The audio is the file mpv opened and the picture is added to it — see [open].
+  bool _audioMainOpen = false;
+
+  /// A file is loaded, so there is a clock to bring a new track to.
+  bool _mediaLoaded = false;
+
+  /// The video tracks this engine added and has not removed, by mpv's id. The last is the
+  /// selected one. Kept here rather than read from the track list, which trails.
+  final List<int> _addedVideoIds = [];
+
+  /// mpv's `vid` and `seeking`, as observed events.
+  String _vid = 'auto';
+  bool _seeking = false;
+  final StreamController<String> _vidChanges = StreamController<String>.broadcast();
+  final StreamController<bool> _seekingChanges = StreamController<bool>.broadcast();
+  bool _trackObserversReady = false;
+  final Completer<void> _trackObserversDone = Completer<void>();
+
+  Future<void> _observeTrackState() async {
+    try {
+      final native = _player.platform as NativePlayer;
+      await native.observeProperty('vid', (value) async {
+        _vid = value;
+        if (!_vidChanges.isClosed) _vidChanges.add(value);
+      });
+      await native.observeProperty('seeking', (value) async {
+        _seeking = value == 'yes';
+        if (!_seekingChanges.isClosed) _seekingChanges.add(_seeking);
+      });
+      _trackObserversReady = true;
+    } on Object catch (e) {
+      stderr.writeln('rill: could not observe vid/seeking ($e) — the audio is not opened as the file');
+    } finally {
+      if (!_trackObserversDone.isCompleted) _trackObserversDone.complete();
+    }
+  }
+
+  /// The observed `vid` and the video tracks this engine has added, **for diagnostics only**.
+  String get diagnosticVid => _vid;
+  List<int> get diagnosticAddedVideoIds => List<int>.unmodifiable(_addedVideoIds);
+
+  @override
+  Stream<bool> get seekingStream => _seekingChanges.stream;
+
+  @override
+  bool get seeking => _seeking;
+
+  /// A numeric `vid`: a selected track, as opposed to `no` or `auto`.
+  int? _selectedVideoId() => int.tryParse(_vid);
+
+  /// Adds [url] as a video track, selects it, and puts it where the clock is.
+  ///
+  /// **The seek is not optional.** The added track is read from its own start while the clock
+  /// stands where it was, so without it the clock and the audio stop at the old position until
+  /// something seeks (measured in the app on real DASH streams, 2026-10-25: 12 s and more of
+  /// nothing; a pause toggle and selecting by hand did not help, a seek did). The wait is for
+  /// that seek to finish, seen as `seeking` going true and false again, which is also the
+  /// signal when paused, where the clock never moves. Throws when the track does not appear.
+  Future<void> _addVideo(String url) async {
+    final native = _player.platform as NativePlayer;
+    final before = _selectedVideoId();
+    await native.command(['video-add', url, 'select']);
+    // The command returns normally for a URL that would not open (media_kit only logs it), so
+    // a new numeric `vid` is the proof the track exists.
+    final id = await _newVideoId(before);
+    if (id == null) throw StateError('the video stream would not open');
+    _addedVideoIds.add(id);
+    // Read now, not before the command: the old track plays on while the new one is fetched
+    // (up to several seconds), and a target taken at the start sent the clock back by that
+    // much when the seek landed (reported 2026-10-25; the probe printed it and was misread).
+    // The clock stands still from the moment the add ends, so this is where it is.
+    await _seekAndWait(_position);
+  }
+
+  /// The id of the video track that is selected now and was not [before], waiting a moment for
+  /// the event that says so. The command has returned by now, so the track exists or never will:
+  /// the wait is only for the event to arrive (a refused URL cost 15 s here with a 10 s wait on
+  /// top of the command's own 5).
+  Future<int?> _newVideoId(int? before) async {
+    bool fresh(String value) {
+      final id = int.tryParse(value);
+      return id != null && id != before;
+    }
+
+    if (fresh(_vid)) return int.parse(_vid);
+    try {
+      final value = await _vidChanges.stream.firstWhere(fresh).timeout(const Duration(seconds: 2));
+      return int.parse(value);
+    } on TimeoutException {
+      return null;
+    }
+  }
+
+  /// Seeks to [target] and returns when the seek has finished, which is also the signal when
+  /// paused, where the clock never moves. Three ways to see it, because none is certain alone:
+  /// `seeking` going true and then false; the clock passing [target] by 0.4 s (playing); and
+  /// `seeking` never going true at all, for a seek that was over before an event could say so
+  /// (one inside what is already read, such as to 0 on a new file), taken as finished when the
+  /// command has returned and 0.4 s have gone by with it still false. Listening starts before
+  /// the command, and after the add, so a seek of the viewer's own that ends in between cannot
+  /// read as this one. Times out after 20 s with a [TimeoutException].
+  Future<void> _seekAndWait(Duration target) async {
+    final done = Completer<void>();
+    var sawSeeking = false;
+    Timer? settle;
+    late final StreamSubscription<bool> seeking;
+    late final StreamSubscription<Duration> position;
+    void finish() {
+      if (done.isCompleted) return;
+      settle?.cancel();
+      unawaited(seeking.cancel());
+      unawaited(position.cancel());
+      done.complete();
+    }
+
+    seeking = _seekingChanges.stream.listen((value) {
+      if (value) sawSeeking = true;
+      if (!value && sawSeeking) finish();
+    });
+    position = _player.stream.position.listen((value) {
+      if (_playing && value > target + const Duration(milliseconds: 400)) finish();
+    });
+    try {
+      await _player.seek(target);
+      settle = Timer(const Duration(milliseconds: 400), () {
+        if (!sawSeeking && !_seeking) finish();
+      });
+      await done.future.timeout(const Duration(seconds: 20));
+    } finally {
+      settle?.cancel();
+      await seeking.cancel();
+      await position.cancel();
+    }
+  }
+
+  /// `video-remove` for every added track but [keep], which is what stops their downloads.
+  Future<void> _removeVideos({required int? keep}) async {
+    final native = _player.platform as NativePlayer;
+    for (final id in List<int>.of(_addedVideoIds)) {
+      if (id == keep) continue;
+      await native.command(['video-remove', '$id']);
+      _addedVideoIds.remove(id);
+    }
+  }
+
+  @override
+  bool canSwitchVideo(PlaybackVariant variant) {
+    final current = lastOpened;
+    return _trackObserversReady &&
+        _mediaLoaded &&
+        _audioMainOpen &&
+        current != null &&
+        variant.audioUrl != null &&
+        variant.audioUrl == current.audioUrl;
+  }
+
+  @override
+  Future<VideoSwitch> switchVideo(PlaybackVariant variant) async {
+    if (!canSwitchVideo(variant)) return VideoSwitch.unsupported;
+    trace?.call('switchVideo ${variant.height}p');
+    // Audio-only: nothing is showing, so the choice is only recorded and the add that brings
+    // the video back uses it.
+    if (!_videoTrackEnabled) {
+      lastOpened = variant;
+      return VideoSwitch.done;
+    }
+    final native = _player.platform as NativePlayer;
+    final before = _selectedVideoId();
+    await native.command(['video-add', variant.videoUrl, 'select']);
+    final id = await _newVideoId(before);
+    if (id == null) {
+      // Refused: the old track is still the selected one and keeps playing.
+      return VideoSwitch.refused;
+    }
+    _addedVideoIds.add(id);
+    lastOpened = variant;
+    try {
+      // Where the clock is now, not where it was when the switch began — see [_addVideo].
+      await _seekAndWait(_position);
+    } on TimeoutException {
+      return VideoSwitch.refused;
+    }
+    // Every other track goes, not just the one this switch replaced: a switch that was cut
+    // short leaves its own behind, and each one left is a download.
+    await _removeVideos(keep: id);
+    return VideoSwitch.done;
   }
 
   /// What the app last asked for, which [open] honours rather than overriding.
@@ -817,6 +1096,9 @@ class MediaKitEngine implements PlaybackEngine {
     trace?.call('stop');
     _supersedeOpen();
     _setAudioMissing(false);
+    _mediaLoaded = false;
+    _audioMainOpen = false;
+    _addedVideoIds.clear();
     return _player.stop();
   }
 
@@ -827,6 +1109,8 @@ class MediaKitEngine implements PlaybackEngine {
     }
     await _lateAudio?.cancel();
     await _audioMissingChanges.close();
+    await _vidChanges.close();
+    await _seekingChanges.close();
     await _videoOutput.close();
     await _player.dispose();
   }

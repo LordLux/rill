@@ -16,6 +16,7 @@ import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/player/controls.dart';
 import 'package:rill/ui/player/settings_menu.dart' show playerQualityButtonKey;
+import 'package:rill/ui/player/video_load_cover.dart';
 import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
@@ -139,6 +140,33 @@ void main() {
     await release(tester);
     expect(container.read(playbackProvider).isLoading, isFalse);
     expect(find.byKey(playerPlayPauseKey), findsOneWidget, reason: 'the same bar carries on after the load');
+    finish();
+  });
+
+  testWidgets('the new video\'s cover is up for the whole load, even over a surface that reports a picture', (tester) async {
+    // The previous video's picture is exactly what a ready surface still shows during a load.
+    expect(engine.videoOutputReady, isTrue);
+    await openLoading(tester);
+
+    // MUTATION: drop `VideoLoadCover` from the watch page's surface stack, or let `videoOutputReady`
+    // take it down while the open is still in flight, and this fails: the old frame would show.
+    expect(find.byKey(videoLoadCoverKey), findsOneWidget);
+
+    await release(tester);
+    expect(find.byKey(videoLoadCoverKey), findsNothing, reason: 'down once the open has ended and there is a picture');
+    finish();
+  });
+
+  testWidgets('the cover stays until the first frame when the open ends before there is one', (tester) async {
+    await openLoading(tester);
+    engine.setVideoOutputReady(false);
+    await release(tester);
+    expect(find.byKey(videoLoadCoverKey), findsOneWidget, reason: 'no picture of the new video yet');
+
+    engine.setVideoOutputReady(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(videoLoadCoverKey), findsNothing, reason: 'and it comes off on the signal, not a timer');
     finish();
   });
 

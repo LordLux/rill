@@ -120,7 +120,7 @@ void main() {
   test('reports stop when the session closes', () async {
     container.read(queueProvider.notifier).addToQueue(video('aaa'));
     await settle();
-    engine.complete();
+    engine.completeAtEnd();
     await settle(400);
 
     final seen = await reports();

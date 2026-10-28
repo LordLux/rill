@@ -21,6 +21,7 @@ const Key ageVerificationSlateKey = ValueKey('age-verification-slate');
 const Key ageVerificationSignInKey = ValueKey('age-verification-sign-in');
 const Key noSoundNoticeKey = ValueKey('no-sound-notice');
 const Key noSoundRetryKey = ValueKey('no-sound-retry');
+const Key switchingNoteKey = ValueKey('switching-note');
 
 /// How far up from the player's bottom edge a slate's content has to start to
 /// stay clear of the control bar, which is drawn over every slate.
@@ -522,6 +523,54 @@ class NoSoundNotice extends ConsumerWidget {
   }
 }
 
+/// A quality switch in place is under way: the old frame stays, and this says why the picture and
+/// the sound are about to stop for a second or two (`architecture.md` F60 item 10). A pause that
+/// is announced reads as deliberate; the same pause unexplained reads as broken.
+///
+/// Gone when the switch ends or hands over to the reopen, which has its own cover. Plain widgets,
+/// no overlay, one live-region label so a screen reader says it once.
+class SwitchingNote extends ConsumerWidget {
+  const SwitchingNote({super.key, required this.lift});
+
+  /// Extra distance from the control bar, for when the "No sound" notice is on the same edge.
+  final double lift;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = Theme.of(context).tokens;
+    final variant = ref.watch(playbackProvider.select((p) => p.variant));
+    if (variant == null) return const SizedBox.shrink();
+    final label = 'Switching to ${variant.height}p${variant.fps > 30 ? variant.fps : ''}…';
+
+    return IgnorePointer(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: EdgeInsets.only(left: 16, right: 16, bottom: playerControlsClearance + 8 + lift),
+          child: Semantics(
+            container: true,
+            liveRegion: true,
+            label: label,
+            child: ExcludeSemantics(
+              child: DecoratedBox(
+                key: switchingNoteKey,
+                decoration: BoxDecoration(
+                  color: tokens.scrim.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text(label, style: TextStyle(color: tokens.onScrim, fontSize: 13)),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class PlayerSlates extends ConsumerWidget {
   const PlayerSlates({super.key, this.showQueue = false, this.injectMaterial = false});
 
@@ -552,6 +601,8 @@ class PlayerSlates extends ConsumerWidget {
           UnavailableSlate(playback: playback)
         else if (playback.audioMissing && !playback.isLoading)
           const NoSoundNotice(),
+        if (playback.isSwitchingTrack && playback.error == null)
+          SwitchingNote(lift: playback.audioMissing ? 56 : 0),
       ],
     );
 
