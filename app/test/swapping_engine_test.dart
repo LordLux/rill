@@ -26,6 +26,11 @@ class FakeSlot extends FakeEngine implements SwapSlot {
 
   final String name;
   PlaybackVariant? _last;
+
+  Key get pictureKey => ValueKey('picture-$name');
+
+  @override
+  Widget videoWidget({BoxFit fit = BoxFit.contain}) => SizedBox.expand(key: pictureKey);
   int prepared = 0;
   final List<Duration> aimedAt = [];
 
@@ -79,7 +84,7 @@ const tuning = SwapTuning(
   reaimLead: Duration(milliseconds: 300),
   trigger: Duration(milliseconds: 20),
   tooClose: Duration(milliseconds: 100),
-  openTimeout: Duration(seconds: 3),
+  openTimeout: Duration(seconds: 15),
   prepareTimeout: Duration(seconds: 5),
   maxReaims: 2,
   maxFailures: 2,
@@ -90,6 +95,7 @@ class Rig {
     engine = SwappingEngine(
       () {
         final slot = FakeSlot('p${slots.length}');
+        if (slots.isNotEmpty) slot.openGate = standbyGate?.future;
         slots.add(slot);
         return slot;
       },
@@ -101,6 +107,9 @@ class Rig {
 
   late final SwappingEngine engine;
   final List<FakeSlot> slots = [];
+
+  /// Holds the standby's open, so a test can look at the tree while it is still being made.
+  Completer<void>? standbyGate;
 
   FakeSlot get first => slots.first;
 
@@ -127,6 +136,34 @@ Future<void> started(Rig rig, {Duration at = const Duration(seconds: 100)}) asyn
 }
 
 void main() {
+  testWidgets('the active picture is on stage and the standby one is not, before and after a swap', (tester) async {
+    final rig = Rig();
+    await mount(tester, rig.engine);
+    await rig.engine.open(variant(1080));
+    expect(find.byKey(rig.first.pictureKey), findsOneWidget, reason: 'the picture is on stage');
+
+    await tester.runAsync(() async {
+      // Made here, in the real zone: a future from the test's own zone would not wake the engine.
+      rig.standbyGate = Completer<void>();
+      rig.first.emitPosition(const Duration(seconds: 100));
+      await rig.engine.pause();
+      final switching = rig.engine.switchVideo(variant(720));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await tester.pump();
+      final standby = rig.slots[1];
+      expect(rig.engine.hasStandby, isTrue);
+      expect(find.byKey(rig.first.pictureKey), findsOneWidget);
+      expect(find.byKey(standby.pictureKey), findsNothing, reason: 'the standby is mounted but off stage');
+      expect(find.byKey(standby.pictureKey, skipOffstage: false), findsOneWidget);
+      rig.standbyGate!.complete();
+      await switching;
+      await tester.pump();
+      expect(find.byKey(standby.pictureKey), findsOneWidget, reason: 'after the swap it is the one on stage');
+      expect(find.byKey(rig.first.pictureKey, skipOffstage: false), findsNothing, reason: 'and the old one is out of the tree');
+      await rig.engine.dispose();
+    });
+  });
+
   testWidgets('a switch swaps to a second player at the clock, and the streams follow it', (tester) async {
     await tester.runAsync(() async {
       final rig = Rig();

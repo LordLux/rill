@@ -25,7 +25,7 @@ class SwapTuning {
   final Duration firstLead;
 
   /// The lead of a re-aim, at least. A re-aim is a seek inside what is read, and it takes as long
-  /// as it takes: the lead used is the larger of this and twice the last seek plus a second.
+  /// as it takes: from the second re-aim on, the larger of this and twice the last seek plus a second.
   final Duration reaimLead;
 
   /// How long before the clock reaches the target the swap begins, which is what the commands take.
@@ -431,7 +431,9 @@ class SwappingEngine implements PlaybackEngine {
     final deadline = DateTime.now().add(tuning.prepareTimeout);
     final standby = await _startStandby(old);
     _stillWanted(epoch, old, deadline);
+    final openStarted = DateTime.now();
     await standby.open(variant, play: false).timeout(tuning.openTimeout);
+    _say('second player: standby opened in ${DateTime.now().difference(openStarted).inMilliseconds} ms');
     _stillWanted(epoch, old, deadline);
     await standby.setSubtitleVisible(_subtitleVisible);
     await standby.setSubtitle(_subtitle);
@@ -462,8 +464,10 @@ class SwappingEngine implements PlaybackEngine {
       if (ahead < tuning.tooClose) {
         reaims++;
         if (reaims > tuning.maxReaims) throw const _SwapAbandoned('the standby never got ahead of the clock');
+        // The first seek is cold (4.4 s in the app, 0.5 to 1.8 s in the spike) and says little about
+        // the next, which lands inside what is read; only a re-aim that was itself slow lengthens the lead.
         final wanted = seekTook * 2 + const Duration(seconds: 1);
-        lead = wanted > tuning.reaimLead ? wanted : tuning.reaimLead;
+        lead = reaims > 1 && wanted > tuning.reaimLead ? wanted : tuning.reaimLead;
         _say('second player: seek took ${seekTook.inMilliseconds} ms, ${ahead.inMilliseconds} ms ahead; re-aim $reaims with ${lead.inMilliseconds} ms');
         continue;
       }
@@ -617,7 +621,7 @@ class _SwapSurfaceState extends State<_SwapSurface> {
         return Stack(
           fit: StackFit.expand,
           children: [
-            Offstage(key: ObjectKey(active), child: active.videoWidget(fit: widget.fit)),
+            Offstage(key: ObjectKey(active), offstage: false, child: active.videoWidget(fit: widget.fit)),
             if (standby != null) Offstage(key: ObjectKey(standby), offstage: true, child: standby.videoWidget(fit: widget.fit)),
           ],
         );

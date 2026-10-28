@@ -2308,7 +2308,7 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
   one on screen; a paused one with a read-ahead cost nothing (todo 109). It opens the variant paused with a 6 s
   read-ahead (`prepareStandby`), is seeked to the clock plus 5 s, and is swapped in a few tens of ms before the clock
   gets there: `standby.play()` and `old.pause()` together, the picture flipped in the same frame. A seek that ends
-  less than 0.6 s ahead is a miss and is aimed again with a lead of twice that seek plus a second. Paused, the clock
+  less than 0.6 s ahead is a miss and is aimed again with a lead of 2.5 s (a second re-aim: twice its own seek plus a second; the first seek is cold and says little about the next). Paused, the clock
   stands still, so the standby goes to the exact position and the swap is a flip.
 - **Why 5 s, 30 ms.** From the spike (`RILL_VIDEO_ADD_PROBE_SWAP`, release build): the standby was ready 1.2 to 1.5 s
   after it started, and the commands land in 7 to 9 ms, so 30 ms early costs 1 to 8 ms of silence and no skipped sound,
