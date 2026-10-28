@@ -141,6 +141,12 @@ void main() {
     // would just stop with nothing said.
     expect(find.byKey(switchingNoteKey), findsOneWidget);
     expect(find.text('Switching to 360p…'), findsOneWidget);
+    // Under the progress bar, in the control bar's row, and not over the picture where the
+    // captions are: the bar is 64 px with the 12 px scrubber at its top.
+    final note = tester.getRect(find.byKey(switchingNoteKey));
+    final slates = tester.getRect(find.byType(PlayerSlates));
+    expect(note.top, greaterThanOrEqualTo(slates.bottom - 52), reason: 'below the scrubber');
+    expect(note.bottom, lessThanOrEqualTo(slates.bottom), reason: 'inside the player');
     expect(find.byKey(videoLoadCoverKey), findsNothing, reason: 'the old frame stays, nothing covers it');
 
     gate.complete();

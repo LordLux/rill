@@ -237,6 +237,10 @@ abstract class SwapSlot implements PlaybackEngine {
   /// A seek that returns when it has finished, which is also the signal when paused. Throws a
   /// [TimeoutException] when it never does.
   Future<void> seekAndWait(Duration to);
+
+  /// Frames this player has dropped since it opened its media, in the decoder and at the output
+  /// together: what a switch costs the viewer who is still watching it.
+  int get droppedFrames;
 }
 
 /// How [PlaybackEngine.switchVideo] ended.
@@ -340,6 +344,7 @@ class MediaKitEngine implements SwapSlot {
     unawaited(_setStreamOptions());
     unawaited(_observeVideoOutput());
     unawaited(_observeTrackState());
+    unawaited(_observeDrops());
 
     _subscriptions.addAll([
       _player.stream.position.listen((value) => _position = value),
@@ -897,6 +902,24 @@ class MediaKitEngine implements SwapSlot {
       stderr.writeln('rill: could not observe vid/seeking ($e) — the audio is not opened as the file');
     } finally {
       if (!_trackObserversDone.isCompleted) _trackObserversDone.complete();
+    }
+  }
+
+  int _decoderDrops = 0;
+  int _outputDrops = 0;
+
+  @override
+  int get droppedFrames => _decoderDrops + _outputDrops;
+
+  /// `frame-drop-count` (decoder) and `vo-drop-frame-count` (output), as observed events: nothing is
+  /// polled (hard invariant 9). A failure costs the numbers, not the player.
+  Future<void> _observeDrops() async {
+    try {
+      final native = _player.platform as NativePlayer;
+      await native.observeProperty('frame-drop-count', (value) async => _decoderDrops = int.tryParse(value) ?? _decoderDrops);
+      await native.observeProperty('vo-drop-frame-count', (value) async => _outputDrops = int.tryParse(value) ?? _outputDrops);
+    } on Object catch (e) {
+      stderr.writeln('rill: could not observe the dropped-frame counters ($e)');
     }
   }
 

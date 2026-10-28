@@ -429,6 +429,7 @@ class SwappingEngine implements PlaybackEngine {
     final epoch = _epoch;
     final old = _active;
     final deadline = DateTime.now().add(tuning.prepareTimeout);
+    final dropsAtStart = old.droppedFrames;
     final standby = await _startStandby(old);
     _stillWanted(epoch, old, deadline);
     final openStarted = DateTime.now();
@@ -475,6 +476,7 @@ class SwappingEngine implements PlaybackEngine {
       if (!reached) continue;
       _say('second player: standby ready after ${DateTime.now().difference(started).inMilliseconds} ms, '
           'swapping at ${old.position.inMilliseconds} ms for ${target.inMilliseconds} ms');
+      _say('second player: the viewed player dropped ${old.droppedFrames - dropsAtStart} frames while the standby was made');
       await _swap(old, standby, playing: true);
       return;
     }

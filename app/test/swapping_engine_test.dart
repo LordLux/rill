@@ -47,6 +47,9 @@ class FakeSlot extends FakeEngine implements SwapSlot {
   bool get videoEnabled => videoTrackEnabled;
 
   @override
+  int droppedFrames = 0;
+
+  @override
   Future<void> prepareStandby() async => prepared++;
 
   @override
@@ -200,6 +203,27 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(positions, contains(const Duration(seconds: 101)));
       expect(rig.engine.position, standby.position);
+
+      rig.stopClock();
+      await rig.engine.dispose();
+    });
+  });
+
+  testWidgets('the frames the viewed player dropped while the standby was made are in the log', (tester) async {
+    await tester.runAsync(() async {
+      final rig = Rig();
+      final lines = <String>[];
+      rig.engine.trace = lines.add;
+      await mount(tester, rig.engine);
+      await started(rig);
+      rig.runClock();
+
+      final switching = rig.engine.switchVideo(variant(720));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      rig.first.droppedFrames += 7;
+      await switching;
+
+      expect(lines.where((l) => l.contains('dropped 7 frames')), hasLength(1));
 
       rig.stopClock();
       await rig.engine.dispose();

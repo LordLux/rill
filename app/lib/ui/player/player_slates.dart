@@ -529,11 +529,16 @@ class NoSoundNotice extends ConsumerWidget {
 ///
 /// Gone when the switch ends or hands over to the reopen, which has its own cover. Plain widgets,
 /// no overlay, one live-region label so a screen reader says it once.
+///
+/// **It sits under the progress bar**, in the control bar's own row, because the picture above is
+/// where the captions are and the note covered them. Nothing in that row is centred, and the note
+/// does not take the pointer.
 class SwitchingNote extends ConsumerWidget {
-  const SwitchingNote({super.key, required this.lift});
+  const SwitchingNote({super.key});
 
-  /// Extra distance from the control bar, for when the "No sound" notice is on the same edge.
-  final double lift;
+  /// From the bottom edge: the bar is 64 px with a 12 px scrubber over a 48 px row, and the note
+  /// is about 28 px tall, so this puts it in the middle of that row.
+  static const double bottom = 14;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -546,7 +551,7 @@ class SwitchingNote extends ConsumerWidget {
       child: Align(
         alignment: Alignment.bottomCenter,
         child: Padding(
-          padding: EdgeInsets.only(left: 16, right: 16, bottom: playerControlsClearance + 8 + lift),
+          padding: const EdgeInsets.only(left: 16, right: 16, bottom: bottom),
           child: Semantics(
             container: true,
             liveRegion: true,
@@ -602,7 +607,7 @@ class PlayerSlates extends ConsumerWidget {
         else if (playback.audioMissing && !playback.isLoading)
           const NoSoundNotice(),
         if (playback.isSwitchingTrack && playback.error == null)
-          SwitchingNote(lift: playback.audioMissing ? 56 : 0),
+          const SwitchingNote(),
       ],
     );
 
