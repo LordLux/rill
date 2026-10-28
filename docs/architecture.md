@@ -2292,6 +2292,42 @@ the feed it reads is §2.13's.
   it" button once `choice == declined`, since offering to decline again would
   be a no-op dressed up as a button.
 
+### 2.16 A second player for the quality switch (decided 2026-10-28, `todo.md` 109)
+
+`app/lib/data/playback/swapping_engine.dart`. The in-place switch (F60) still stops the picture and the sound for
+0.8 to 2.6 s, because a seek restarts audio and video together and waits for the new video's first frame, and
+nothing inside one mpv avoids that. So a switch is made in a second player and swapped in.
+
+- **Composition, not a rewrite.** `SwappingEngine` implements `PlaybackEngine` over two `SwapSlot`s (`MediaKitEngine`
+  is one; it gained four members and no behaviour). The shell's engine is a `SwappingEngine`; the hover preview's is
+  still a plain `MediaKitEngine`. Every getter and command is the active player's. The streams are re-pointed at the
+  swap (`_Forward`), and the state a stream does not repeat is pushed once: position, duration, size, volume,
+  `vo-configured`, audio-missing, seeking. `playing` is not pushed: the engine answers `true` until the new player says
+  so, so nothing above sees a pause that was only the old player stopping.
+- **The standby is paused, never playing.** Two players playing 2160p60 at once dropped 17 to 59% of the frames on the
+  one on screen; a paused one with a read-ahead cost nothing (todo 109). It opens the variant paused with a 6 s
+  read-ahead (`prepareStandby`), is seeked to the clock plus 5 s, and is swapped in a few tens of ms before the clock
+  gets there: `standby.play()` and `old.pause()` together, the picture flipped in the same frame. A seek that ends
+  less than 0.6 s ahead is a miss and is aimed again with a lead of twice that seek plus a second. Paused, the clock
+  stands still, so the standby goes to the exact position and the swap is a flip.
+- **Why 5 s, 30 ms.** From the spike (`RILL_VIDEO_ADD_PROBE_SWAP`, release build): the standby was ready 1.2 to 1.5 s
+  after it started, and the commands land in 7 to 9 ms, so 30 ms early costs 1 to 8 ms of silence and no skipped sound,
+  and 120 ms skipped sound and stepped the clock 133 ms. The lead and the trigger are `SwapTuning`, with
+  `RILL_SWAP_FIRST_LEAD_MS`, `RILL_SWAP_REAIM_LEAD_MS` and `RILL_SWAP_TRIGGER_MS` for a measurement run.
+- **The picture.** Both players' `Video` widgets are in the tree inside `Offstage`; the active one is on stage, and a swap
+  flips the flag, so no texture is created or freed. 0 black frames in 99 to 108 captured around each swap. A standby
+  needs a mounted surface before media_kit will do anything to it (a `setVolume` awaited before one never returned), so
+  a switch with no `videoSurface` in the tree uses the in-place switch.
+- **The fallback chain**, in the order it is tried: the second player; the active player's own in-place `switchVideo`
+  (any failure to make the standby ready, a seek that never finishes, a media change, the picture turned off, 30 s);
+  the caller's reopen (`VideoSwitch.refused`). Three standbys failing in a row stop the engine trying a second player
+  for the session. `RILL_SECOND_PLAYER=0` turns it off.
+- **The old player leaves after the swap.** It drops out of the tree, one frame later it is stopped (which ends its
+  downloads) and disposed. The next switch makes a new standby: memory is the cost only while one exists (+48 MB at
+  720p60, +132 MB at 1440p60, +228 to +268 MB at 2160p60), and returns to the new quality's own level afterwards.
+- **Open.** One standby open in six failed in the spike (`video-add` produced no track); not understood. The frame-drop
+  trigger that sends weak hardware to the in-place switch is not built (`todo.md` 109).
+
 ## 3. Phasing
 
 **Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with yt-dlp

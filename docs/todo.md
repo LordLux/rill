@@ -1505,6 +1505,15 @@ where it will be ready, and is swapped in by starting it, pausing the first play
 - **Not measured:** A/V sync of the standby after the swap (`avsync`), the swap while the first player is paused or
   buffering, memory over repeated swaps, other GPUs.
 
+**Built (2026-10-28, `feat/second-player`):** `SwappingEngine` over two `SwapSlot`s, `architecture.md` §2.16;
+the shell's engine in `main.dart`, `PlaybackController` untouched (its `switchVideo` is the second player's now, with the
+in-place switch as the fallback). Tested with fakes (`swapping_engine_test.dart`); mutation-checked on the re-pointing.
+**Not done:** a switch through the real app measured from mpv's log (silence, clock, black frames) at 1080p60 and 2160p60;
+the frame-drop trigger that sends weak hardware to the in-place switch (the ruling is every rung, with that fallback);
+the one standby open that failed in six; the A/V sync of the swapped-in player (not measured; none reported); and by
+hand: fullscreen, the miniplayer, audio-only, captions and volume across a swap, and Narrator (the surface now holds
+two `Video` widgets: re-run `RILL_SEMANTICS_PROBE=1` and `RILL_FOCUS_PROBE=watch`).
+
 **Done when:** a switch at 1080p60 and at 2160p60, started mid-video on a normal connection, never stops the
 sound for more than a few hundred milliseconds and never moves the clock, measured from mpv's log or from
 the audio clock, not from the property stream (the probe's own "stall" figure under-reported it by a factor
