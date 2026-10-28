@@ -260,7 +260,7 @@ class MediaTile extends StatefulWidget {
   /// does not shift its neighbours' layout.
   ///
   /// Replaces `onMore`, a bare callback that no call site ever passed, so every
-  /// 3-dot button in the app was drawn disabled (the b2549cb review). A menu has
+  /// 3-dot button in the app was drawn disabled (the b0b81db review). A menu has
   /// to open from somewhere, and a callback has no position to give it.
   final List<TileMenuItem> menu;
 

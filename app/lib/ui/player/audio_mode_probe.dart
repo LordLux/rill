@@ -163,7 +163,7 @@ Future<void> _run(MediaKitEngine engine) async {
 /// Three opens of the same variant, each sampled every 250 ms from the moment
 /// the open is issued:
 ///
-///  - `old`   — the route `9299ed3` took: video on for the open, off once loaded.
+///  - `old`   — the route `377c173` took: video on for the open, off once loaded.
 ///    Whatever the video demuxer fetched and whether a frame decoded before the
 ///    drop is the waste the new route exists to remove.
 ///  - `new`   — video off before the open, so `MediaKitEngine.open` attaches the
