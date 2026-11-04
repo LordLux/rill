@@ -1518,9 +1518,11 @@ the one standby open that failed in six; the A/V sync of the swapped-in player (
 hand: the miniplayer playing across a swap, audio-only, captions and volume across a swap.
 
 **Narrator, 2026-11-04 (`architecture.md` F51 addendum):** the surface holds two `Video` widgets, so both probes were
-run with Narrator before and after the app. `RILL_SEMANTICS_PROBE=1` fails about half its runs on any build, with or
-without Narrator, so it cannot show a regression; use is the check, and it was clean: no probe flag, Narrator started
-after the app, three quality switches, theatre, fullscreen, Back with the miniplayer, 0 `AXTree` errors, no dump.
+run with Narrator before and after the app. `RILL_SEMANTICS_PROBE=1` logged errors in 8 of 13 runs between 12:56 and 13:55
+and in none of 33 since, on the same code (the pre-engine build was clean 19 of 19, partly interleaved), cause not found. Use
+was clean: no probe flag, Narrator started after the app, three quality switches, theatre, fullscreen, Back with the
+miniplayer, 0 `AXTree` errors, no dump. **Open:** what attached in that window; an error in real use would stop Narrator
+until a restart.
 
 **A switch made at the end of the media (2026-11-04), fixed:** the standby parked at the end by a paused swap is at mpv's
 end of file with media_kit never seeing `completed`, so play set the button to playing and mpv paused again: the clock
