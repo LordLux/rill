@@ -1970,6 +1970,17 @@ YouTube Music's own search (`todo.md` 45); third-party cover APIs were rejected
   merges inside one build's length collapse into one release: that run builds the
   newer commit, and its notes cover everything since the previous release, so
   nothing is lost, but the version number skips.
+- **A merged pull request is released only when it carries the `release` label**
+  (2026-11-04, `release/release-labelled.ts`, asked by `plan` after the shipped-files
+  check, for a push and a schedule alike; `workflow_dispatch` still builds). It reads the
+  first-parent commits since the latest release: a commit that is not a pull request merge
+  (pushed straight to `main`, a revert) still releases as it did, a pull request merge
+  releases when `gh` says that pull request has the label, and the release a labelled one
+  makes carries every unlabelled one before it, notes and all. The label can go on after the
+  merge, because the daily run asks again. **The version does not look at labels:** an
+  unlabelled merge still adds 1 to the minor, so a commit has one version whatever its
+  labels say, and a label added later cannot change a number already published; the minor can
+  therefore skip. If `gh` cannot answer, `plan` releases rather than guess.
 - **The gate also runs on every pull request** (`.github/workflows/pull-request.yml`,
   2026-10-27), so a red test shows up on the PR and not on `main` with a release held
   behind it. It is the release gate's steps copied, and `tools/workflow-gate-sync.test.ts`
