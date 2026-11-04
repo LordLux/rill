@@ -270,6 +270,48 @@ void main() {
     });
   });
 
+  testWidgets('play at the end, after a switch made there, starts the media again from its start', (tester) async {
+    await tester.runAsync(() async {
+      final rig = Rig();
+      await mount(tester, rig.engine);
+      // The standby is parked at the end while paused, so mpv says `eof-reached` but media_kit never
+      // sees `completed`; unpausing there sets the button to playing and mpv pauses again.
+      await started(rig, at: const Duration(minutes: 10));
+      await rig.engine.pause();
+      expect(await rig.engine.switchVideo(variant(720)), VideoSwitch.done);
+      final standby = rig.slots[1];
+      expect(standby.seeks.last, const Duration(minutes: 10));
+
+      await rig.engine.play();
+      expect(standby.seeks.last, Duration.zero, reason: 'it starts again, as it does for a media that played to its end');
+      expect(standby.playing, isTrue);
+
+      await rig.engine.pause();
+      standby.emitPosition(const Duration(minutes: 10));
+      await rig.engine.playOrPause();
+      expect(standby.seeks.last, Duration.zero, reason: 'the play button does the same');
+      expect(standby.playing, isTrue);
+      await rig.engine.dispose();
+    });
+  });
+
+  testWidgets('play in the middle of the media does not seek', (tester) async {
+    await tester.runAsync(() async {
+      final rig = Rig();
+      await mount(tester, rig.engine);
+      await started(rig);
+      await rig.engine.pause();
+      expect(await rig.engine.switchVideo(variant(720)), VideoSwitch.done);
+      final standby = rig.slots[1];
+      final seeksBefore = standby.seeks.length;
+
+      await rig.engine.play();
+      expect(standby.seeks, hasLength(seeksBefore), reason: 'only the end restarts');
+      expect(standby.playing, isTrue);
+      await rig.engine.dispose();
+    });
+  });
+
   testWidgets('a standby that fails to open is dropped and the active player switches in place', (tester) async {
     await tester.runAsync(() async {
       var made = 0;

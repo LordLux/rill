@@ -1515,8 +1515,18 @@ observed, not polled), so the cost is a number per switch; no CPU or GPU figures
 **Not done:** a switch through the real app measured from mpv's log (silence, clock, black frames) at 1080p60 and 2160p60;
 the frame-drop trigger that sends weak hardware to the in-place switch (the ruling is every rung, with that fallback);
 the one standby open that failed in six; the A/V sync of the swapped-in player (not measured; none reported); and by
-hand: fullscreen, the miniplayer, audio-only, captions and volume across a swap, and Narrator (the surface now holds
-two `Video` widgets: re-run `RILL_SEMANTICS_PROBE=1` and `RILL_FOCUS_PROBE=watch`).
+hand: the miniplayer playing across a swap, audio-only, captions and volume across a swap.
+
+**Narrator, 2026-11-04 (`architecture.md` F51 addendum):** the surface holds two `Video` widgets, so both probes were
+run with Narrator before and after the app. `RILL_SEMANTICS_PROBE=1` fails about half its runs on any build, with or
+without Narrator, so it cannot show a regression; use is the check, and it was clean: no probe flag, Narrator started
+after the app, three quality switches, theatre, fullscreen, Back with the miniplayer, 0 `AXTree` errors, no dump.
+
+**A switch made at the end of the media (2026-11-04), fixed:** the standby parked at the end by a paused swap is at mpv's
+end of file with media_kit never seeing `completed`, so play set the button to playing and mpv paused again: the clock
+stood still, and the next switch waited out its 30 s (35.9 s, then the in-place fallback). `SwappingEngine.play` and
+`playOrPause` now start from 0 when the clock is within 250 ms of the end (`architecture.md` §2.16). Open: the same
+state reached any other way (a paused seek to the end on an ordinary player) was not tried.
 
 **Done when:** a switch at 1080p60 and at 2160p60, started mid-video on a normal connection, never stops the
 sound for more than a few hundred milliseconds and never moves the clock, measured from mpv's log or from

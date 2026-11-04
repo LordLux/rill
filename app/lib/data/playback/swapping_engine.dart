@@ -324,9 +324,20 @@ class SwappingEngine implements PlaybackEngine {
   }
 
   @override
-  Future<void> play() {
+  Future<void> play() async {
     _assumePlaying = null;
+    await _restartIfAtEnd();
     return _active.play();
+  }
+
+  /// A player parked at the end by a paused swap is at mpv's end of file without media_kit having seen
+  /// `completed`, so unpausing there flips the button to playing and mpv pauses again (`architecture.md`
+  /// §2.16). A media that played to its end restarts on play; this makes that true of this one too.
+  Future<void> _restartIfAtEnd() async {
+    final end = _active.duration;
+    if (end <= Duration.zero || _active.position < end - const Duration(milliseconds: 250)) return;
+    _clockGeneration++;
+    await _active.seek(Duration.zero);
   }
 
   @override
@@ -336,10 +347,12 @@ class SwappingEngine implements PlaybackEngine {
   }
 
   @override
-  Future<void> playOrPause() {
+  Future<void> playOrPause() async {
     final was = playing;
     _assumePlaying = null;
-    return was ? _active.pause() : _active.play();
+    if (was) return _active.pause();
+    await _restartIfAtEnd();
+    return _active.play();
   }
 
   @override
