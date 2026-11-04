@@ -1519,7 +1519,7 @@ hand: the miniplayer playing across a swap, audio-only, captions and volume acro
 
 **Narrator, 2026-11-04 (`architecture.md` F51 addendum):** the surface holds two `Video` widgets, so both probes were
 run with Narrator before and after the app. `RILL_SEMANTICS_PROBE=1` logged errors in 8 of 13 runs between 12:56 and 13:55
-and in none of 33 since, on the same code (the pre-engine build was clean 19 of 19, partly interleaved), cause not found. Use
+(all 4 with Narrator on) and in none of 57 since (27 with Narrator on), on the same code (the pre-engine build was clean 19 of 19, partly interleaved), cause not found. Use
 was clean: no probe flag, Narrator started after the app, three quality switches, theatre, fullscreen, Back with the
 miniplayer, 0 `AXTree` errors, no dump. **Open:** what attached in that window; an error in real use would stop Narrator
 until a restart.
