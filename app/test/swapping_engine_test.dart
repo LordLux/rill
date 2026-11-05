@@ -41,6 +41,16 @@ class FakeSlot extends FakeEngine implements SwapSlot {
   /// Held by a test that needs the standby's seek still in flight.
   Future<void>? seekGate;
 
+  /// Makes `play` throw, as a player that has been disposed does.
+  Object? playFails;
+
+  @override
+  Future<void> play() {
+    final failure = playFails;
+    if (failure != null) return Future<void>.error(failure);
+    return super.play();
+  }
+
   @override
   PlaybackVariant? get lastOpened => _last;
 
@@ -95,11 +105,12 @@ const tuning = SwapTuning(
 );
 
 class Rig {
-  Rig({bool enabled = true}) {
+  Rig({bool enabled = true, bool standbyPlayFails = false}) {
     engine = SwappingEngine(
       () {
         final slot = FakeSlot('p${slots.length}');
         if (slots.isNotEmpty) slot.openGate = standbyGate?.future;
+        if (slots.isNotEmpty && standbyPlayFails) slot.playFails = StateError('[Player] has been disposed');
         slots.add(slot);
         return slot;
       },
@@ -566,6 +577,63 @@ void main() {
       expect(rig.engine.active, same(rig.first));
       expect(result, VideoSwitch.done, reason: 'audio-only records the choice, as the in-place switch does');
       expect(rig.first.switched, [variant(720)]);
+
+      rig.stopClock();
+      await rig.engine.dispose();
+    });
+  });
+
+  testWidgets('the picture turned off and on again during a switch does not let the swap use the dropped standby', (tester) async {
+    await tester.runAsync(() async {
+      // Audio-only drops the standby (it disposes it) and the picture coming back is no reason to
+      // swap to it: on 2026-11-04 that made a disposed player the active one, and the player died.
+      final rig = Rig();
+      await mount(tester, rig.engine);
+      await started(rig);
+      rig.runClock();
+      final lines = <String>[];
+      rig.engine.trace = lines.add;
+
+      rig.standbyGate = Completer<void>();
+      final switching = rig.engine.switchVideo(variant(720));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await rig.engine.setVideoTrack(false);
+      await rig.engine.setVideoTrack(true);
+      rig.standbyGate!.complete();
+      final result = await switching;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(result, VideoSwitch.done);
+      expect((rig.engine.active as FakeSlot).disposeCount, 0, reason: 'the active player is not a disposed one');
+      expect(rig.engine.active, same(rig.first));
+      expect(rig.first.switched, [variant(720)], reason: 'the switch was made in place');
+      expect(rig.slots[1].disposeCount, 1);
+      expect(lines.join('\n'), contains('the standby was dropped'));
+      expect(lines.join('\n'), isNot(contains('second player failed')), reason: 'dropping it on purpose is not a failure');
+
+      rig.stopClock();
+      await rig.engine.dispose();
+    });
+  });
+
+  testWidgets('a swap whose commands fail leaves the picture with the old player, playing', (tester) async {
+    await tester.runAsync(() async {
+      final rig = Rig(standbyPlayFails: true);
+      await mount(tester, rig.engine);
+      await started(rig);
+      rig.runClock();
+      final lines = <String>[];
+      rig.engine.trace = lines.add;
+
+      final result = await rig.engine.switchVideo(variant(720));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(result, VideoSwitch.done);
+      expect(rig.engine.active, same(rig.first), reason: 'the old player kept the picture');
+      expect(rig.first.playing, isTrue, reason: 'and kept playing');
+      expect(rig.first.switched, [variant(720)]);
+      expect(rig.slots[1].disposeCount, 1, reason: 'the standby was retired, not leaked');
+      expect(lines.join('\n'), contains('second player failed'));
 
       rig.stopClock();
       await rig.engine.dispose();

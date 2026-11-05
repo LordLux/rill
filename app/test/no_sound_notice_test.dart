@@ -13,7 +13,8 @@ import 'package:rill/domain/feed_item.dart';
 import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/data/playback/engine.dart' show VideoSwitch;
-import 'package:rill/ui/player/controls.dart' show PlayerControls, playerScrubberKey;
+import 'package:rill/ui/player/controls.dart' show PlayerControls, menuButtonPulseKey, playerBusySpinnerKey, playerScrubberKey;
+import 'package:rill/ui/player/settings_menu.dart' show playerQualityButtonKey;
 import 'package:rill/ui/player/player_slates.dart';
 import 'package:rill/ui/player/video_load_cover.dart';
 import 'package:rill/ui/player/view_mode.dart';
@@ -159,6 +160,70 @@ void main() {
     await tester.runAsync(() => done);
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.byKey(switchingNoteKey), findsNothing);
+    finish();
+  });
+
+  testWidgets('a switch in place does not put the busy spinner over the picture, but a real stall during it still does', (tester) async {
+    engine.inPlaceSwitch = true;
+    await openVideo(tester);
+    engine.setPlaying(true);
+    final gate = Completer<void>();
+    engine.switchGate = gate.future;
+
+    final done = container.read(playbackProvider.notifier).switchQuality(container.read(playbackProvider).source!.variants.last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // MUTATION: put `isChangingQuality` back into `_BusySpinner._busy` and this fails: the picture is
+    // still playing, and the spinner over it says it is not. The quality button already says it.
+    expect(container.read(playbackProvider).isSwitchingTrack, isTrue);
+    expect(find.byKey(playerBusySpinnerKey), findsNothing, reason: 'the old picture keeps playing; nothing is stuck');
+
+    // Something that is stuck is another matter, switch or no switch.
+    engine.setBuffering(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(playerBusySpinnerKey), findsOneWidget, reason: 'buffering long enough is a stall');
+    engine.setBuffering(false);
+    await tester.pump();
+    expect(find.byKey(playerBusySpinnerKey), findsNothing);
+
+    gate.complete();
+    await tester.runAsync(() => done);
+    await tester.pump(const Duration(milliseconds: 50));
+    finish();
+  });
+
+  testWidgets('the quality button keeps its icon during a switch and pulses it, instead of swapping in a spinner', (tester) async {
+    engine.inPlaceSwitch = true;
+    await openVideo(tester);
+    final button = find.byKey(playerQualityButtonKey);
+    expect(find.descendant(of: button, matching: find.byIcon(Icons.hd_outlined)), findsOneWidget);
+    expect(find.descendant(of: button, matching: find.byKey(menuButtonPulseKey)), findsNothing, reason: 'nothing pulses at rest');
+
+    final gate = Completer<void>();
+    engine.switchGate = gate.future;
+    final done = container.read(playbackProvider.notifier).switchQuality(container.read(playbackProvider).source!.variants.last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // MUTATION: put the `CircularProgressIndicator` back in `_MenuButton` and this fails: the quality
+    // icon would be gone for the length of the switch, and with it what is changing.
+    expect(find.descendant(of: button, matching: find.byIcon(Icons.hd_outlined)), findsOneWidget, reason: 'the icon stays: it says what is changing');
+    expect(find.descendant(of: button, matching: find.byType(CircularProgressIndicator)), findsNothing);
+    final pulse = find.descendant(of: button, matching: find.byKey(menuButtonPulseKey));
+    expect(pulse, findsOneWidget);
+    // Its lightness moves: two frames half a pulse apart are not the same.
+    double opacity() => tester.widget<FadeTransition>(pulse).opacity.value;
+    final first = opacity();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(opacity(), isNot(closeTo(first, 0.05)), reason: 'it pulses');
+    expect(opacity(), greaterThan(0.2), reason: 'and never goes dark enough to lose the icon');
+
+    gate.complete();
+    await tester.runAsync(() => done);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.descendant(of: button, matching: find.byKey(menuButtonPulseKey)), findsNothing, reason: 'and it stops when the switch does');
     finish();
   });
 
