@@ -430,7 +430,7 @@ async function handleRequest(request: RpcRequest) {
       // nothing left to draw and `MAX_REMINTS` is 0. `bucket.test.ts` asserts
       // this call site stays on the bare ladder.
       //
-      // It has already been revived once. `663edb1` (a captions refactor)
+      // It has already been revived once. `5805707` (a captions refactor)
       // unwired it by accident but left `remintResolveSession` in the argument
       // object; `c53fb54` retired the mechanism the next day and left the call
       // site alone, correctly. Task 22 then read that leftover argument — an

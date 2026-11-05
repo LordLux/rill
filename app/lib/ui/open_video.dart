@@ -332,7 +332,7 @@ String? tileLinkFor(FeedItem item) {
 /// The entries of a tile's 3-dot menu (`MediaTile.menu`).
 ///
 /// `MediaTile.onMore` was wired to nothing from the day it was added (the
-/// b2549cb review), so every 3-dot button in the app was drawn disabled. Each
+/// b0b81db review), so every 3-dot button in the app was drawn disabled. Each
 /// entry here is a thing the app already does — the two hover buttons, the save
 /// dialog Task 25 §5 said this menu opens, and a link — so nothing in it is a
 /// stub. The two hover buttons hide when a tile cannot offer them; here they are
