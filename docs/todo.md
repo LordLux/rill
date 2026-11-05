@@ -883,7 +883,7 @@ the `sidecar.exe` size, `rill build`) or the lockfile is regenerated in a format
 ### 51. Two Windows plugins still use a feature Microsoft will remove
 
 **Where it stands (2026-10-23).** The app builds on Visual Studio 2026 (MSVC 14.51)
-since `ec202a7`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
+since `79af88c`, which defines `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`
 in `app/windows/CMakeLists.txt`. This machine builds with it, and so does the
 release workflow, whose two Windows jobs moved from `windows-2022` to
 `windows-latest` (image `windows-2025-vs2026`) after a trial run passed end to end
@@ -1477,6 +1477,59 @@ build of the app on this machine's Intel GPU, three runs):**
 
 **Design:** a one-page design went to the orchestrator and the user as a report on 2026-10-27, for review before any
 code; its decisions are recorded here once approved.
+
+**Spike, plan step 1 (2026-10-27; `RILL_VIDEO_ADD_PROBE_SWAP=1`, `ui/swap_spike.dart`, a release build, two real engines, six
+scenarios, two layouts; branch `feat/second-player`).** The standby opens paused with a 6 s read-ahead, is aimed past
+where it will be ready, and is swapped in by starting it, pausing the first player and flipping a visibility together.
+- **The surface: both layouts work, and an offstage `Texture` is current.** The standby `Video` as `Offstage` and the
+  standby stacked *under* the active one both opened and observed normally, and **0 black frames in 99 to 108 captured
+  frames around each of the five swaps**, with the capture proven able to see a texture (mean luma 122 playing, never
+  below 124 at the swap; it reads the composited tree with `RepaintBoundary.toImage`). So `Offstage` is enough and is
+  cheaper (a hidden surface is not composited); the stacked layout is the fallback if a platform differs.
+- **The seam, from the players' own `audio-pts` and `time-pos` events:** silence at the swap **1 to 8 ms** (five swaps), sound
+  skipped **0 ms**, the clock steps **forward** 33 to 67 ms (never back; the 1 ms "worst step back" is the events' jitter).
+  That needs the trigger to fire about 30 ms before the clock reaches the target: the pause and play commands land in
+  7 to 9 ms. With the first guess of 120 ms the two swaps that ran stepped the clock 133 and 134 ms forward.
+- **Ready time, and the lead:** with the first aim at clock + 5 s the standby was ready 1.2 to 1.5 s after the start
+  (open 0.5 to 0.8 s, first seek 0.45 to 0.76 s) with 4.0 to 4.1 s of lead left, no re-aim needed (five swaps). The earlier
+  run, with a 3.5 s lead and a 1.2 s re-aim lead, took 1 to 3 re-aims in every swap and was ready after 4.3 to 8.6 s: its seeks took 0.5 to 1.8 s, so a re-aim lead must be longer
+  than the seek. Rule: first aim clock + 5 s,
+  re-aim lead = 2 x the last seek + 1 s.
+- **Memory (private bytes), standby ready against before it existed:** +48 MB for a 720p60 standby, +132 MB for 1440p60,
+  +228 to +268 MB for 2160p60. After the swap and the first player stopped and disposed it comes back to the new rung's
+  own level (310 to 324 MB for 720p/1080p, 531 to 633 MB around 1440p/2160p): no leak seen over one swap. The
+  baseline before the standby (319 to 524 MB) depends on what is playing, so read the deltas, not the levels.
+- **One failure in six standby opens (the tuned run):** `video-add` for the standby did not produce a track (`under`, 2160p60 to
+  1440p60, "the video stream would not open"); the other five opened. Not understood: the engine's 2 s wait for the
+  `vid` event, a transient refusal, or the layout. The fallback chain covers it, but it is a number to watch.
+- **Not measured:** A/V sync of the standby after the swap (`avsync`), the swap while the first player is paused or
+  buffering, memory over repeated swaps, other GPUs.
+
+**Built (2026-10-28, `feat/second-player`):** `SwappingEngine` over two `SwapSlot`s, `architecture.md` §2.16;
+the shell's engine in `main.dart`, `PlaybackController` untouched (its `switchVideo` is the second player's now, with the
+in-place switch as the fallback). Tested with fakes (`swapping_engine_test.dart`); mutation-checked on the re-pointing.
+Hand-tested 2026-10-28, on the final build (picture on stage, the switching note under the progress bar and above the
+control bar's gradient): it works, and lags a little under load while the standby is made. A switch now logs
+`second player: the viewed player dropped N frames while the standby was made` (mpv's decoder and output drop counters,
+observed, not polled), so the cost is a number per switch; no CPU or GPU figures from the real app yet.
+**Not done:** a switch through the real app measured from mpv's log (silence, clock, black frames) at 1080p60 and 2160p60;
+the frame-drop trigger that sends weak hardware to the in-place switch (the ruling is every rung, with that fallback);
+the one standby open that failed in six; the A/V sync of the swapped-in player (not measured; none reported); and by
+hand: the miniplayer playing across a swap, audio-only, captions and volume across a swap.
+
+**Narrator, 2026-11-04 (`architecture.md` F51 addendum):** the surface holds two `Video` widgets. `RILL_SEMANTICS_PROBE=1` fails nearly every time when the user starts it with `.\rill open` and Narrator on, on the pre-engine build (2 of 2) as much as on this branch (6 of 6), and almost never when started from a tool shell, so it says nothing about a change. Normal use with Narrator on was clean: 0 `AXTree` errors in the user's two sessions (the second with four quality switches) and in one of mine. **Open:** why `.\rill open` fails and a tool shell does not; an error in real use would stop Narrator until a restart.
+
+**A standby's seek that hangs (2026-11-04), bounded:** on a 4K HDR 60 fps video three of four switches went wrong (a hung
+audio range request for 20 s, a first seek of 12.9 s, one of 13.8 s with 363 frames dropped), 13 of 13 on 30 and 25 fps
+were clean. `SwapTuning.seekTimeout` (10 s) now gives the standby that long to finish one seek and then switches in place,
+not counting it as a failure (`architecture.md` §2.16). **Open:** why the second connection to the same audio URL is not
+answered; whether a lighter standby (less read-ahead, or the audio opened later) avoids it on heavy streams.
+
+**A switch made at the end of the media (2026-11-04), fixed:** the standby parked at the end by a paused swap is at mpv's
+end of file with media_kit never seeing `completed`, so play set the button to playing and mpv paused again: the clock
+stood still, and the next switch waited out its 30 s (35.9 s, then the in-place fallback). `SwappingEngine.play` and
+`playOrPause` now start from 0 when the clock is within 250 ms of the end (`architecture.md` §2.16). Open: the same
+state reached any other way (a paused seek to the end on an ordinary player) was not tried.
 
 **Done when:** a switch at 1080p60 and at 2160p60, started mid-video on a normal connection, never stops the
 sound for more than a few hundred milliseconds and never moves the clock, measured from mpv's log or from

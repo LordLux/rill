@@ -404,6 +404,17 @@ class FakeEngine implements PlaybackEngine {
     _buffer.add(value);
   }
 
+  void emitDuration(Duration value) {
+    _durationValue = value;
+    _duration.add(value);
+  }
+
+  /// The audio being reported missing (or not) as it happens, as opposed to [audioArrivesLate].
+  void emitAudioMissing(bool value) {
+    _audioMissing = value;
+    _audioMissingChanges.add(value);
+  }
+
   void setWidth(int? value) {
     _widthValue = value;
     _width.add(value);

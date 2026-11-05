@@ -10,6 +10,7 @@ import 'data/hard_exit.dart';
 import 'data/log_capture.dart';
 import 'data/playback/engine.dart';
 import 'data/playback/mpv_log.dart';
+import 'data/playback/swapping_engine.dart';
 import 'data/rpc/client.dart';
 import 'data/ytdlp/ytdlp_paths.dart';
 import 'domain/ytdlp/ytdlp_state.dart';
@@ -38,6 +39,7 @@ import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 import 'ui/semantics_probe.dart';
+import 'ui/swap_spike.dart';
 import 'ui/video_add_probe.dart';
 import 'ui/update_controller.dart';
 import 'ui/ytdlp_controller.dart';
@@ -82,6 +84,10 @@ Future<void> main() async {
   }
 
   // `RILL_VIDEO_ADD_PROBE=1` measures a quality switch done as `video-add` and exits.
+  if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1' && Platform.environment['RILL_VIDEO_ADD_PROBE_SWAP'] == '1') {
+    runSwapSpike(runApp, hardExit);
+    return;
+  }
   if (Platform.environment['RILL_VIDEO_ADD_PROBE'] == '1' && Platform.environment['RILL_VIDEO_ADD_PROBE_DUAL'] == '1') {
     runDualProbe(runApp, hardExit);
     return;
@@ -101,9 +107,16 @@ Future<void> main() async {
   // `RILL_LAUNCH_PROBE` needs mpv's own log to tell a dead URL from one mpv
   // never opened. Off otherwise: `v` is thousands of lines a run.
   // `RILL_MPV_LOG=<path>` writes both players' log to a file (`mpv_log.dart`).
-  final engine = createEngine(
-    'shell',
-    logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
+  // Two players behind one engine, so a quality switch need not stop the picture
+  // (`architecture.md` §2.16). `RILL_SECOND_PLAYER=0` turns the second one off.
+  final engine = SwappingEngine(
+    () => createEngine(
+      'shell',
+      logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
+    ),
+    enabled: Platform.environment['RILL_SECOND_PLAYER'] != '0',
+    tuning: SwapTuning.fromEnvironment(),
+    trace: (line) => stderr.writeln('rill: $line'),
   );
 
   final drawerOpen = await readDrawerOpen();

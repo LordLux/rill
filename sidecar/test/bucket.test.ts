@@ -17,7 +17,7 @@
  * the part that matters: it fails if anyone re-wires `playback.open` to the
  * re-mint wrapper. That is not hypothetical — Task 22 did exactly that on
  * 2026-09-09, reading a leftover `remintResolveSession` argument (an excess
- * property left behind when `663edb1` unwired the call site by accident) as
+ * property left behind when `5805707` unwired the call site by accident) as
  * evidence the wiring was broken, and restored a mechanism the docs record as
  * retired. Nothing failed, because nothing was watching. Now something is.
  *

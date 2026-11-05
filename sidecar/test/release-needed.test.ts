@@ -2,7 +2,7 @@
  * `release/release-needed.ts`: a release only when something the app ships has changed.
  *
  * The rule replaces `paths-ignore` on the push trigger, which a scheduled run never
- * honoured: `ef86a4a`, a todo edit, became v0.12.1 overnight. So it is tested the way
+ * honoured: `98ae598`, a todo edit, became v0.12.1 overnight. So it is tested the way
  * `next-version.ts` is, against real histories, plus the glob list as a table.
  */
 

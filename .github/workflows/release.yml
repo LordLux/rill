@@ -7,7 +7,9 @@
 #            anything new" is "does the release for this version exist yet". If it does, the
 #            run stops here. It fails if the version would be below the latest release. It also
 #            stops when nothing the app ships has changed since the latest release
-#            (release/release-needed.ts), so a docs commit is not released, nightly or not.
+#            (release/release-needed.ts), so a docs commit is not released, nightly or not. A merged
+#            pull request is released only if it carries the `release` label, or a later one does
+#            (release/release-labelled.ts); a commit pushed to main is released as before.
 #   gate     the same checks as a local `rill check` plus the sidecar's `bun run check`.
 #   build    sidecar + Flutter release build + Inno Setup installer, with smoke tests of the
 #            staged sidecar, the installer, and the uninstaller.
@@ -76,6 +78,15 @@ jobs:
           if [ "$exists" = false ] && [ "$EVENT" != workflow_dispatch ] && [ -n "$latest" ]; then
             if [ "$(bun release/release-needed.ts --since "$latest")" = false ]; then
               echo "Nothing shipped has changed since $latest: not releasing $tag"
+              exists=true
+            fi
+          fi
+          # A merged pull request is released only when it carries the `release` label (a commit
+          # pushed straight to main has none to wait for). The label can go on after the merge: the
+          # daily run asks again. See release/release-labelled.ts.
+          if [ "$exists" = false ] && [ "$EVENT" != workflow_dispatch ] && [ -n "$latest" ]; then
+            if [ "$(bun release/release-labelled.ts --since "$latest" --label release --repo "$GITHUB_REPOSITORY")" = false ]; then
+              echo "No pull request labelled release has landed since $latest: not releasing $tag"
               exists=true
             fi
           fi
