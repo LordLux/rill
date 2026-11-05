@@ -64,6 +64,12 @@ class MpvLog {
     'current-vo',
   ];
 
+  /// With `RILL_MPV_LOG_CLOCK=1`, also the clocks a swap is judged by: `audio-pts` and `time-pos`
+  /// (the seam: how long nothing played, how far the clock stepped) and `avsync` (the swapped-in
+  /// player's A/V offset). They change on every frame, and each is read with the blocking get the
+  /// note above describes, so a run with them on is a measurement of the seam and not of the load.
+  static final List<String> _clockProperties = Platform.environment['RILL_MPV_LOG_CLOCK'] == '1' ? const ['audio-pts', 'time-pos', 'avsync'] : const [];
+
   /// Written synchronously, so the lines before a crash are on disk.
   void write(String engine, String line) {
     try {
@@ -95,7 +101,7 @@ class MpvLog {
     // `observeProperty` waits for the video controller, which a lazily
     // created preview engine only has once a tile mounts its surface.
     unawaited(() async {
-      for (final property in _properties) {
+      for (final property in [..._properties, ..._clockProperties]) {
         try {
           await engine.diagnostics.observeProperty(property, (value) async {
             write(name, 'mpv $property=$value');
