@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -342,6 +343,55 @@ void main() {
     });
   });
 
+  testWidgets('a standby whose seek never finishes is given up on at the seek timeout, and is not counted as a failure', (tester) async {
+    await tester.runAsync(() async {
+      // A range request that gets no answer (`architecture.md` §2.16, 2026-11-04) leaves the standby's
+      // seek hanging; waiting out the 20 s inside the engine made one switch take 31 s.
+      var made = 0;
+      final engine = SwappingEngine(
+        () {
+          final slot = FakeSlot('p${made++}');
+          if (made > 1) slot.seekGate = Completer<void>().future;
+          return slot;
+        },
+        tuning: const SwapTuning(
+          firstLead: Duration(milliseconds: 400),
+          reaimLead: Duration(milliseconds: 300),
+          trigger: Duration(milliseconds: 20),
+          tooClose: Duration(milliseconds: 100),
+          openTimeout: Duration(seconds: 15),
+          prepareTimeout: Duration(seconds: 5),
+          seekTimeout: Duration(milliseconds: 300),
+          maxReaims: 2,
+          maxFailures: 1,
+        ),
+        settle: () async {},
+      );
+      final lines = <String>[];
+      engine.trace = lines.add;
+      await mount(tester, engine);
+      final first = engine.active as FakeSlot;
+      await engine.open(variant(1080));
+      first.emitPosition(const Duration(seconds: 100));
+
+      final started = DateTime.now();
+      expect(await engine.switchVideo(variant(720)), VideoSwitch.done);
+      expect(DateTime.now().difference(started), lessThan(const Duration(seconds: 3)), reason: 'it did not wait for the standby');
+      expect(first.switched, [variant(720)], reason: 'the active player switched in place');
+      expect(engine.active, same(first));
+      expect(engine.hasStandby, isFalse);
+      expect(lines.join('\n'), contains('did not finish its seek'));
+
+      // One stalled request is the network's, not the engine's: with maxFailures at 1 a counted
+      // failure would have ended the second player for the session, and this one would not try.
+      expect(await engine.switchVideo(variant(480)), VideoSwitch.done);
+      expect(made, 3, reason: 'a second standby was made');
+      expect(first.switched, [variant(720), variant(480)]);
+
+      await engine.dispose();
+    });
+  });
+
   testWidgets('after enough failures in a row it stops trying a second player', (tester) async {
     await tester.runAsync(() async {
       var made = 0;
@@ -522,4 +572,89 @@ void main() {
     });
   });
 
+  // The guard for the forwarding (`architecture.md` §2.16). A stream written as `_active.xStream` reads
+  // fine and works until the first swap, when every listener that attached before it is left on the
+  // retired player: nothing throws, the position just stops. Two checks, so that it cannot come back
+  // either way round: every stream arrives from the new player after a swap, and every stream on
+  // `PlaybackEngine` is one of the rows below and is routed through a `_Forward`.
+  group('every stream of PlaybackEngine follows the active player across a swap', () {
+    for (final row in _streamRows) {
+      testWidgets(row.name, (tester) async {
+        await tester.runAsync(() async {
+          final rig = Rig();
+          await mount(tester, rig.engine);
+          await started(rig);
+          await rig.engine.pause();
+
+          // Listening before the swap, as the UI does: that is the listener a stale stream strands.
+          final seen = <Object?>[];
+          final subscription = row.stream(rig.engine).listen(seen.add);
+          expect(await rig.engine.switchVideo(variant(720)), VideoSwitch.done);
+          final standby = rig.slots[1];
+          expect(rig.engine.active, same(standby));
+          // What the swap itself announces is not what is being asked.
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          seen.clear();
+
+          row.emit(standby);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          await subscription.cancel();
+          expect(seen, contains(row.value), reason: '${row.name} did not arrive from the new player');
+
+          await rig.engine.dispose();
+        });
+      });
+    }
+
+    test('every stream on PlaybackEngine is a row above and goes through a _Forward', () {
+      final iface = File('lib/data/playback/engine.dart').readAsStringSync();
+      final start = iface.indexOf('abstract class PlaybackEngine');
+      expect(start, greaterThan(-1));
+      final block = iface.substring(start, iface.indexOf('\n}\n', start));
+      final declared = RegExp(r'^\s+Stream<[^;]*?>\s+get\s+(\w+);', multiLine: true).allMatches(block).map((m) => m.group(1)!).toSet();
+      expect(declared, isNotEmpty, reason: 'the scan found no streams: did the interface move?');
+
+      final rowNames = _streamRows.map((row) => row.name).toSet();
+      expect(rowNames, declared, reason: 'a stream was added to or removed from PlaybackEngine: add or remove its row, and route it');
+
+      final source = File('lib/data/playback/swapping_engine.dart').readAsStringSync();
+      for (final name in declared) {
+        expect(
+          RegExp('_Forward<[^>]*>\\(\\(s\\) => s\\.$name\\)').hasMatch(source),
+          isTrue,
+          reason: '$name has no _Forward in SwappingEngine',
+        );
+        final getter = RegExp('Stream<[^;]*?>\\s+get\\s+$name\\s+=>\\s+(\\w+)\\.stream;').firstMatch(source);
+        expect(getter, isNotNull, reason: '$name is not returned from a _Forward\'s stream (written as _active.$name?)');
+        expect(source, contains('${getter!.group(1)}.bind(slot);'), reason: '$name\'s _Forward is never bound to the active player');
+      }
+    });
+  });
 }
+
+/// One stream of [PlaybackEngine]: how to reach it, how to make a [FakeSlot] emit on it, and what
+/// should then arrive.
+class _StreamRow {
+  const _StreamRow(this.name, this.stream, this.emit, this.value);
+
+  final String name;
+  final Stream<Object?> Function(PlaybackEngine engine) stream;
+  final void Function(FakeSlot slot) emit;
+  final Object? value;
+}
+
+final List<_StreamRow> _streamRows = [
+  _StreamRow('positionStream', (e) => e.positionStream, (s) => s.emitPosition(const Duration(milliseconds: 7777)), const Duration(milliseconds: 7777)),
+  _StreamRow('durationStream', (e) => e.durationStream, (s) => s.emitDuration(const Duration(seconds: 1234)), const Duration(seconds: 1234)),
+  _StreamRow('playingStream', (e) => e.playingStream, (s) => s.setPlaying(true), true),
+  _StreamRow('bufferingStream', (e) => e.bufferingStream, (s) => s.setBuffering(true), true),
+  _StreamRow('bufferStream', (e) => e.bufferStream, (s) => s.emitBuffer(const Duration(milliseconds: 4321)), const Duration(milliseconds: 4321)),
+  _StreamRow('widthStream', (e) => e.widthStream, (s) => s.setWidth(1234), 1234),
+  _StreamRow('heightStream', (e) => e.heightStream, (s) => s.setHeight(567), 567),
+  _StreamRow('volumeStream', (e) => e.volumeStream, (s) => unawaited(s.setVolume(33)), 33.0),
+  _StreamRow('completedStream', (e) => e.completedStream, (s) => s.complete(), true),
+  _StreamRow('videoOutputStream', (e) => e.videoOutputStream, (s) => s.setVideoOutputReady(false), false),
+  _StreamRow('subtitleTextStream', (e) => e.subtitleTextStream, (s) => s.subtitleText.add('a line from the new player'), 'a line from the new player'),
+  _StreamRow('audioMissingStream', (e) => e.audioMissingStream, (s) => s.emitAudioMissing(true), true),
+  _StreamRow('seekingStream', (e) => e.seekingStream, (s) => s.setSeeking(true), true),
+];

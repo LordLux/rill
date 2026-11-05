@@ -1517,7 +1517,13 @@ the frame-drop trigger that sends weak hardware to the in-place switch (the ruli
 the one standby open that failed in six; the A/V sync of the swapped-in player (not measured; none reported); and by
 hand: the miniplayer playing across a swap, audio-only, captions and volume across a swap.
 
-**Narrator, 2026-11-04 (`architecture.md` F51 addendum):** the surface holds two `Video` widgets. `RILL_SEMANTICS_PROBE=1` fails nearly every time when the user starts it with `.\rill open` and Narrator on, on the pre-engine build (2 of 2) as much as on this branch (6 of 6), and almost never when started from a tool shell, so it says nothing about a change. Normal use with Narrator on was clean: 0 `AXTree` errors in the user's two sessions (the second with four quality switches) and in one of mine. **Open:** why `.\rill open` fails and a tool shell does not; an error in real use would stop Narrator until a restart. A standby's first seek did not finish in 20 s once (switch 4 of the user's session, a 480p30 target, 2026-11-04 17:06): the switch fell back to the in-place path and took 25.6 s.
+**Narrator, 2026-11-04 (`architecture.md` F51 addendum):** the surface holds two `Video` widgets. `RILL_SEMANTICS_PROBE=1` fails nearly every time when the user starts it with `.\rill open` and Narrator on, on the pre-engine build (2 of 2) as much as on this branch (6 of 6), and almost never when started from a tool shell, so it says nothing about a change. Normal use with Narrator on was clean: 0 `AXTree` errors in the user's two sessions (the second with four quality switches) and in one of mine. **Open:** why `.\rill open` fails and a tool shell does not; an error in real use would stop Narrator until a restart.
+
+**A standby's seek that hangs (2026-11-04), bounded:** on a 4K HDR 60 fps video three of four switches went wrong (a hung
+audio range request for 20 s, a first seek of 12.9 s, one of 13.8 s with 363 frames dropped), 13 of 13 on 30 and 25 fps
+were clean. `SwapTuning.seekTimeout` (10 s) now gives the standby that long to finish one seek and then switches in place,
+not counting it as a failure (`architecture.md` §2.16). **Open:** why the second connection to the same audio URL is not
+answered; whether a lighter standby (less read-ahead, or the audio opened later) avoids it on heavy streams.
 
 **A switch made at the end of the media (2026-11-04), fixed:** the standby parked at the end by a paused swap is at mpv's
 end of file with media_kit never seeing `completed`, so play set the button to playing and mpv paused again: the clock

@@ -2316,7 +2316,13 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
   still a plain `MediaKitEngine`. Every getter and command is the active player's. The streams are re-pointed at the
   swap (`_Forward`), and the state a stream does not repeat is pushed once: position, duration, size, volume,
   `vo-configured`, audio-missing, seeking. `playing` is not pushed: the engine answers `true` until the new player says
-  so, so nothing above sees a pause that was only the old player stopping.
+  so, so nothing above sees a pause that was only the old player stopping. **A stream written as `_active.xStream` is the
+  trap:** it reads fine and works until the first swap, when every listener that attached before it is left on the
+  retired player and nothing throws. `test/swapping_engine_test.dart` guards it two ways (2026-11-04): a row per stream
+  of `PlaybackEngine`, each listened to before a swap and emitted on from the new player, and a scan of the interface
+  against `swapping_engine.dart` that fails when a stream has no row, no `_Forward`, a getter that is not that
+  `_Forward`'s `stream`, or a `_Forward` that `_bind` never binds. Routing one stream as `_active.positionStream`, or
+  dropping one `bind`, fails both.
 - **The standby is paused, never playing.** Two players playing 2160p60 at once dropped 17 to 59% of the frames on the
   one on screen; a paused one with a read-ahead cost nothing (todo 109). It opens the variant paused with a 6 s
   read-ahead (`prepareStandby`), is seeked to the clock plus 5 s, and is swapped in a few tens of ms before the clock
@@ -2344,6 +2350,19 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
   stood still. Pausing and playing again recovered it. `SwappingEngine.play` and `playOrPause` seek to 0 first when the
   clock is within 250 ms of the end. Found with `RILL_MPV_LOG`, which shows `call play`, `kit playing=true` and no
   `mpv pause=no` where a media that played to its end shows `kit completed=false` and `mpv pause=no`.
+- **A standby's seek can hang on a range request, and is given up at 10 s (2026-11-04).** Twice in a session of
+  the user's a switch to 480p30 (itag 244) took 25 to 31 s: the standby opened in 2 to 3 s, its seek was issued, the
+  video restarted and showed a first frame, and the **audio** never became ready, because the stream-level seek to
+  the new offset (`stream level seek from 114688 to 5378220`) got no answer from googlevideo for about 18 s, until
+  `stop` interrupted it (`Will reconnect … I/O error`). It reproduced on a 2:27 4K 60 fps video, on the rung that failed
+  for the user. On a 2:27 4K HDR 60 fps video three of four switches went wrong: one hung as above (31.1 s end to end),
+  one had its first seek take 12.9 s and its second 5.2 s and was then not ready in 30 s (32.9 s), one took 13.8 s with
+  363 frames dropped on the viewed player, and one was clean (6.9 s). On a 30 fps and a 25 fps video, 13 switches in a
+  row were clean. So it is a heavy stream, two of them at once, that makes a standby's seek slow or never answered. The
+  cost was the engine's own 20 s seek wait, or the 30 s prepare deadline, and then the in-place switch. `SwapTuning.seekTimeout` (10 s, `RILL_SWAP_SEEK_TIMEOUT_MS`)
+  now bounds the standby's seek, and an overrun is a `_SwapAbandoned`, not a failure: a request the network never answered
+  is not the engine's fault and does not count towards `maxFailures`. 10 s is above the longest seek that finished
+  (6.7 s, on a busy machine). What is **not** known is why the second connection to the same audio URL hangs.
 - **Open.** One standby open in six failed in the spike (`video-add` produced no track); not understood. The frame-drop
   trigger that sends weak hardware to the in-place switch is not built (`todo.md` 109).
 

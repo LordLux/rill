@@ -17,6 +17,7 @@ class SwapTuning {
     this.tooClose = const Duration(milliseconds: 600),
     this.openTimeout = const Duration(seconds: 25),
     this.prepareTimeout = const Duration(seconds: 30),
+    this.seekTimeout = const Duration(seconds: 10),
     this.maxReaims = 4,
     this.maxFailures = 3,
   });
@@ -37,13 +38,18 @@ class SwapTuning {
 
   final Duration openTimeout;
   final Duration prepareTimeout;
+
+  /// How long the standby gets to finish one seek. The longest that finished was 6.7 s, on a busy
+  /// machine; a seek that is still going at this is a range request that got no answer, and the
+  /// in-place switch costs about 3 s where waiting costs the engine's own 20 s and more.
+  final Duration seekTimeout;
   final int maxReaims;
 
   /// Standbys that failed in a row before the engine stops trying and uses the in-place switch.
   final int maxFailures;
 
-  /// The defaults, with `RILL_SWAP_FIRST_LEAD_MS`, `RILL_SWAP_REAIM_LEAD_MS` and
-  /// `RILL_SWAP_TRIGGER_MS` for a measurement run.
+  /// The defaults, with `RILL_SWAP_FIRST_LEAD_MS`, `RILL_SWAP_REAIM_LEAD_MS`, `RILL_SWAP_TRIGGER_MS`
+  /// and `RILL_SWAP_SEEK_TIMEOUT_MS` for a measurement run.
   factory SwapTuning.fromEnvironment() {
     Duration? read(String name) {
       final value = int.tryParse(Platform.environment[name] ?? '');
@@ -55,6 +61,7 @@ class SwapTuning {
       firstLead: read('RILL_SWAP_FIRST_LEAD_MS') ?? defaults.firstLead,
       reaimLead: read('RILL_SWAP_REAIM_LEAD_MS') ?? defaults.reaimLead,
       trigger: read('RILL_SWAP_TRIGGER_MS') ?? defaults.trigger,
+      seekTimeout: read('RILL_SWAP_SEEK_TIMEOUT_MS') ?? defaults.seekTimeout,
     );
   }
 }
@@ -462,7 +469,10 @@ class SwappingEngine implements PlaybackEngine {
       // Paused, the clock stands still, so the standby goes exactly there and the swap is a flip.
       final target = wasPlaying ? old.position + lead : old.position;
       final seekStarted = DateTime.now();
-      await standby.seekAndWait(target).timeout(tuning.openTimeout);
+      await standby.seekAndWait(target).timeout(
+            tuning.seekTimeout,
+            onTimeout: () => throw _SwapAbandoned('the standby did not finish its seek in ${(tuning.seekTimeout.inMilliseconds / 1000).toStringAsFixed(1)} s'),
+          );
       final seekTook = DateTime.now().difference(seekStarted);
       _stillWanted(epoch, old, deadline);
       if (generation != _clockGeneration || old.playing != wasPlaying) {
