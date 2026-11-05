@@ -78,7 +78,8 @@ export function hasLabel(repo: string, number: number, label: string, gh: readon
   const result = Bun.spawnSync([...gh, 'pr', 'view', String(number), '--repo', repo, '--json', 'labels'], { stdout: 'pipe', stderr: 'pipe' });
   if (!result.success) throw new Error(`gh pr view #${number} failed: ${result.stderr.toString().trim()}`);
   const parsed = JSON.parse(result.stdout.toString()) as { labels?: { name: string }[] };
-  return (parsed.labels ?? []).some((entry) => entry.name === label);
+  // GitHub treats `Release` and `release` as one label, so the comparison does too.
+  return (parsed.labels ?? []).some((entry) => entry.name.toLowerCase() === label.toLowerCase());
 }
 
 function main(): void {

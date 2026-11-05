@@ -135,14 +135,16 @@ describe('hasLabel, against a gh that is not GitHub', () => {
     [
       "import { writeFileSync } from 'node:fs';",
       `writeFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' '));`,
-      "process.stdout.write(JSON.stringify({ labels: [{ name: 'bug' }, { name: 'release' }] }));",
+      "process.stdout.write(JSON.stringify({ labels: [{ name: 'bug' }, { name: 'Release' }] }));",
     ].join('\n'),
   );
   const fails = join(dir, 'fails.ts');
   writeFileSync(fails, "process.stderr.write('boom');\nprocess.exit(1);\n");
 
   test('finds the label among the others, and asks gh for exactly that pull request', () => {
+    // The repository's label is `Release`; the workflow asks for `release`. GitHub treats them as one.
     expect(hasLabel('o/r', 7, 'release', ['bun', answers])).toBe(true);
+    expect(hasLabel('o/r', 7, 'RELEASE', ['bun', answers])).toBe(true);
     expect(hasLabel('o/r', 7, 'nope', ['bun', answers])).toBe(false);
     expect(readFileSync(log, 'utf8').trim()).toBe('pr view 7 --repo o/r --json labels');
   });
