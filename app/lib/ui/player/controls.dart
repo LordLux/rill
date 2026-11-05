@@ -76,6 +76,9 @@ const Key playerScrubberKey = ValueKey('player-scrubber');
 const Key playerSwitchCoverKey = ValueKey('player-switch-cover');
 const Key playerBusySpinnerKey = ValueKey('player-busy-spinner');
 
+/// The icon of a [_MenuButton] while what it stands for is loading: present only then.
+const Key menuButtonPulseKey = ValueKey('menu-button-pulse');
+
 /// How long the player must be busy before the spinner appears.
 ///
 /// **A grace period, not a delay for its own sake.** Most seeks resolve fast
@@ -1124,10 +1127,14 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     });
   }
 
+  /// A switch in place (`isSwitchingTrack`, which the second player makes too) is not in this list:
+  /// the old picture keeps playing under it, and the quality button pulsing already says what is
+  /// changing. A reopen is (`isSwitchingQuality`, with its cover), and so is a real stall, which
+  /// reaches here as `_buffering` whatever else is going on.
   bool _busy() {
     final playback = ref.read(playbackProvider);
     return _buffering ||
-        playback.isChangingQuality ||
+        playback.isSwitchingQuality ||
         playback.isLoading ||
         playback.isRestoringVideo;
   }
@@ -1137,7 +1144,7 @@ class _BusySpinnerState extends ConsumerState<_BusySpinner> {
     // Watched as well as read, so a switch starting or ending drives this even
     // though it arrives through Riverpod rather than through the stream above.
     ref.listen(
-      playbackProvider.select((p) => p.isChangingQuality || p.isLoading || p.isRestoringVideo),
+      playbackProvider.select((p) => p.isSwitchingQuality || p.isLoading || p.isRestoringVideo),
       (_, _) => _update(),
     );
 
@@ -1781,9 +1788,10 @@ class _VerticalVolumeState extends ConsumerState<_VerticalVolume> {
 /// and the *open* highlight has to work identically or the pair reads as two
 /// unrelated controls that happen to sit together.
 ///
-/// The spinner belongs to the quality button: a switch in flight is a fact about
-/// that control, and the only other sign of one is the black cover, which alone
-/// reads as a stall rather than as something the user asked for.
+/// What is loading shows on the button: a switch in flight is a fact about that control, and the
+/// only other sign of one is the black cover, which alone reads as a stall rather than as
+/// something the user asked for. The icon stays and its lightness pulses ([_PulsingIcon]), so
+/// the viewer can still tell *what* is loading, which a spinner in its place took away.
 class _MenuButton extends StatelessWidget {
   const _MenuButton({
     super.key,
@@ -1829,15 +1837,67 @@ class _MenuButton extends StatelessWidget {
           disabledForegroundColor: tokens.onScrim.withValues(alpha: 0.35),
           backgroundColor: open ? tokens.onScrim.withValues(alpha: 0.15) : Colors.transparent,
         ),
-        icon: busy
-            ? SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: tokens.onScrim),
-              )
-            : Icon(icon, semanticLabel: label),
+        icon: _PulsingIcon(icon: icon, label: label, pulsing: busy),
       ),
     );
+  }
+}
+
+/// An icon whose lightness breathes while [pulsing], and is a plain icon otherwise.
+///
+/// It fades between full and 35%, never to nothing: the icon is how the viewer knows which thing
+/// is loading, and `alwaysIncludeSemantics` keeps its node in the tree whatever the opacity is
+/// (`architecture.md` F51). Under reduced motion (`MediaQuery.disableAnimations`) it holds one
+/// dimmed level instead of moving. The animation runs only while it pulses.
+class _PulsingIcon extends StatefulWidget {
+  const _PulsingIcon({required this.icon, required this.label, required this.pulsing});
+
+  final IconData icon;
+  final String label;
+  final bool pulsing;
+
+  @override
+  State<_PulsingIcon> createState() => _PulsingIconState();
+}
+
+class _PulsingIconState extends State<_PulsingIcon> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+  late final Animation<double> _opacity = Tween<double>(begin: 1, end: 0.35).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  bool _reducedMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reducedMotion = MediaQuery.disableAnimationsOf(context);
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(_PulsingIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  void _sync() {
+    if (widget.pulsing && !_reducedMotion) {
+      if (!_controller.isAnimating) unawaited(_controller.repeat(reverse: true));
+    } else {
+      _controller.stop();
+      _controller.value = widget.pulsing ? 0.6 : 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = Icon(widget.icon, semanticLabel: widget.label);
+    if (!widget.pulsing) return icon;
+    return FadeTransition(key: menuButtonPulseKey, opacity: _opacity, alwaysIncludeSemantics: true, child: icon);
   }
 }
 

@@ -2368,6 +2368,17 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
   now bounds the standby's seek, and an overrun is a `_SwapAbandoned`, not a failure: a request the network never answered
   is not the engine's fault and does not count towards `maxFailures`. 10 s is above the longest seek that finished
   (6.7 s, on a busy machine). What is **not** known is why the second connection to the same audio URL hangs.
+- **Audio-only on and off during a switch killed the player (2026-11-04, a hand check).** `setVideoTrack(false)` drops the
+  standby (stops and disposes it) and the swap in flight kept its reference. With the picture back on by the next check
+  nothing said the standby was gone, and `_swap` made the disposed player the active one: `[Player] has been disposed`,
+  then `unsupported` for every switch and a failing `stop` for every open. `_stillWanted` and `_swap` now check that the
+  standby is still the engine's, whatever a dropped standby's own calls throw is an abandoned switch and not a failure, and
+  a swap whose commands fail puts the old player back (it keeps the picture and plays) and retires the standby.
+- **A switch in place draws no spinner over the picture, and the quality button pulses (2026-11-04).** The busy spinner is
+  for a reopen (`isSwitchingQuality`, with its cover), loading, restoring the video and a real stall (`buffering`); a switch
+  in place or by the second player (`isSwitchingTrack`) leaves the old picture playing and says so on the button and in the
+  note. The button keeps its icon and pulses its lightness (35% to 100% over 0.9 s, one dimmed level under reduced motion)
+  instead of swapping in a spinner, so the viewer can still see *what* is loading; the captions button does the same.
 - **Open.** One standby open in six failed in the spike (`video-add` produced no track); not understood. The frame-drop
   trigger that sends weak hardware to the in-place switch is not built (`todo.md` 109).
 

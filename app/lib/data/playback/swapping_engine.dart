@@ -437,11 +437,18 @@ class SwappingEngine implements PlaybackEngine {
   bool _wantsSecondPlayer() =>
       enabled && !_disposed && _failures < tuning.maxFailures && _mountedSurfaces > 0 && _active.videoEnabled;
 
-  /// Throws [_SwapAbandoned] when this swap is no longer the thing to do.
-  void _stillWanted(int epoch, SwapSlot old, DateTime deadline) {
+  /// The standby that was last dropped on purpose, so that what its own calls throw once it is
+  /// disposed is read as that and not as a failure of the second player.
+  SwapSlot? _dropped;
+
+  /// Throws [_SwapAbandoned] when this swap is no longer the thing to do. [standby] is checked too
+  /// when the swap has one: audio-only drops it (and disposes it), and the picture coming back
+  /// before the next check is no reason to swap to what is gone.
+  void _stillWanted(int epoch, SwapSlot old, DateTime deadline, [SwapSlot? standby]) {
     if (_disposed || epoch != _epoch) throw const _SwapAbandoned('the media changed');
     if (!identical(old, _active)) throw const _SwapAbandoned('the active player changed');
     if (!old.videoEnabled) throw const _SwapAbandoned('the picture was turned off');
+    if (standby != null && !identical(standby, _standby)) throw const _SwapAbandoned('the standby was dropped');
     if (DateTime.now().isAfter(deadline)) throw const _SwapAbandoned('the standby was not ready in time');
   }
 
@@ -451,11 +458,24 @@ class SwappingEngine implements PlaybackEngine {
     final deadline = DateTime.now().add(tuning.prepareTimeout);
     final dropsAtStart = old.droppedFrames;
     final standby = await _startStandby(old);
-    _stillWanted(epoch, old, deadline);
+    try {
+      await _prepareAndSwap(variant, old, standby, epoch, deadline, dropsAtStart);
+    } on _SwapAbandoned {
+      rethrow;
+    } on Object {
+      // The standby's own calls throw once it is disposed. It was dropped on purpose (audio-only),
+      // so that is the switch being abandoned, not the second player failing.
+      if (identical(_dropped, standby)) throw const _SwapAbandoned('the standby was dropped');
+      rethrow;
+    }
+  }
+
+  Future<void> _prepareAndSwap(PlaybackVariant variant, SwapSlot old, SwapSlot standby, int epoch, DateTime deadline, int dropsAtStart) async {
+    _stillWanted(epoch, old, deadline, standby);
     final openStarted = DateTime.now();
     await standby.open(variant, play: false).timeout(tuning.openTimeout);
     _say('second player: standby opened in ${DateTime.now().difference(openStarted).inMilliseconds} ms');
-    _stillWanted(epoch, old, deadline);
+    _stillWanted(epoch, old, deadline, standby);
     await standby.setSubtitleVisible(_subtitleVisible);
     await standby.setSubtitle(_subtitle);
 
@@ -463,7 +483,7 @@ class SwappingEngine implements PlaybackEngine {
     var reaims = 0;
     final started = DateTime.now();
     while (true) {
-      _stillWanted(epoch, old, deadline);
+      _stillWanted(epoch, old, deadline, standby);
       final generation = _clockGeneration;
       final wasPlaying = old.playing;
       // Paused, the clock stands still, so the standby goes exactly there and the swap is a flip.
@@ -474,7 +494,7 @@ class SwappingEngine implements PlaybackEngine {
             onTimeout: () => throw _SwapAbandoned('the standby did not finish its seek in ${(tuning.seekTimeout.inMilliseconds / 1000).toStringAsFixed(1)} s'),
           );
       final seekTook = DateTime.now().difference(seekStarted);
-      _stillWanted(epoch, old, deadline);
+      _stillWanted(epoch, old, deadline, standby);
       if (generation != _clockGeneration || old.playing != wasPlaying) {
         _say('second player: the viewer moved the clock or the play state; aiming again');
         continue;
@@ -495,7 +515,7 @@ class SwappingEngine implements PlaybackEngine {
         _say('second player: seek took ${seekTook.inMilliseconds} ms, ${ahead.inMilliseconds} ms ahead; re-aim $reaims with ${lead.inMilliseconds} ms');
         continue;
       }
-      final reached = await _waitForClock(old, target - tuning.trigger, generation, epoch, deadline);
+      final reached = await _waitForClock(old, standby, target - tuning.trigger, generation, epoch, deadline);
       if (!reached) continue;
       _say('second player: standby ready after ${DateTime.now().difference(started).inMilliseconds} ms, '
           'swapping at ${old.position.inMilliseconds} ms for ${target.inMilliseconds} ms');
@@ -506,7 +526,7 @@ class SwappingEngine implements PlaybackEngine {
   }
 
   /// True when [old]'s clock has reached [at]; false when the viewer moved the clock or paused first.
-  Future<bool> _waitForClock(SwapSlot old, Duration at, int generation, int epoch, DateTime deadline) async {
+  Future<bool> _waitForClock(SwapSlot old, SwapSlot standby, Duration at, int generation, int epoch, DateTime deadline) async {
     if (old.position >= at) return true;
     final done = Completer<bool>();
     late final StreamSubscription<Duration> positions;
@@ -532,11 +552,11 @@ class SwappingEngine implements PlaybackEngine {
     // The checks that need no event: a seek, a stop, the deadline.
     poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (generation != _clockGeneration) finish(false);
-      if (_disposed || epoch != _epoch || DateTime.now().isAfter(deadline)) finish(false);
+      if (_disposed || epoch != _epoch || !identical(standby, _standby) || DateTime.now().isAfter(deadline)) finish(false);
     });
     try {
       final reached = await done.future;
-      _stillWanted(epoch, old, deadline);
+      _stillWanted(epoch, old, deadline, standby);
       return reached;
     } finally {
       poll.cancel();
@@ -553,13 +573,21 @@ class SwappingEngine implements PlaybackEngine {
     final standby = _create();
     _standby = standby;
     _surface.value++;
-    await _settle();
-    await standby.setVolume(old.volume).timeout(const Duration(seconds: 10));
-    await standby.prepareStandby();
+    try {
+      await _settle();
+      await standby.setVolume(old.volume).timeout(const Duration(seconds: 10));
+      await standby.prepareStandby();
+    } on Object {
+      if (identical(_dropped, standby)) throw const _SwapAbandoned('the standby was dropped');
+      rethrow;
+    }
     return standby;
   }
 
   Future<void> _swap(SwapSlot old, SwapSlot standby, {required bool playing}) async {
+    // Nothing between the last check and here awaits, but dropping the standby is a call of its own
+    // and a swap to what is gone makes it the active player: the player is dead and nothing says so.
+    if (!identical(standby, _standby)) throw const _SwapAbandoned('the standby was dropped');
     _active = standby;
     _standby = null;
     _bind(standby);
@@ -569,7 +597,20 @@ class SwappingEngine implements PlaybackEngine {
     final commands = playing ? Future.wait<void>([standby.play(), old.pause()]) : Future.value(<void>[]);
     _surface.value++;
     _announce(standby);
-    await commands;
+    try {
+      await commands;
+    } on Object {
+      // The swap did not happen (the standby's player was gone, a command failed): the old player
+      // keeps the picture and the clock, and the caller switches in place.
+      _active = old;
+      _bind(old);
+      _assumePlaying = null;
+      _surface.value++;
+      _announce(old);
+      _retiring.add(_retire(standby));
+      if (playing) unawaited(old.play().catchError((Object _) {}));
+      rethrow;
+    }
     if (playing) {
       unawaited(
         standby.playingStream.firstWhere((value) => value, orElse: () => true).timeout(const Duration(seconds: 1), onTimeout: () => true).whenComplete(() {
@@ -595,6 +636,7 @@ class SwappingEngine implements PlaybackEngine {
     final standby = _standby;
     if (standby == null) return;
     _standby = null;
+    _dropped = standby;
     _surface.value++;
     final retired = _retire(standby);
     _retiring.add(retired);

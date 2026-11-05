@@ -1525,6 +1525,11 @@ were clean. `SwapTuning.seekTimeout` (10 s) now gives the standby that long to f
 not counting it as a failure (`architecture.md` §2.16). **Open:** why the second connection to the same audio URL is not
 answered; whether a lighter standby (less read-ahead, or the audio opened later) avoids it on heavy streams.
 
+**Idea, not built (the orchestrator, 2026-11-04):** the first aim is a fixed 5 s past the clock, so every switch takes about
+8 s end to end whatever the stream. The standby's open took 0.8 to 2.7 s and its first seek 0.5 to 1.8 s on 30 and 25 fps
+videos, so a lead adapted to the measured prep time would save about 2 s there; a heavy stream (a first seek of 6.7 to
+12.9 s) needs the 5 s or more, so the adapted lead needs a floor and a re-aim, which it already has.
+
 **A switch made at the end of the media (2026-11-04), fixed:** the standby parked at the end by a paused swap is at mpv's
 end of file with media_kit never seeing `completed`, so play set the button to playing and mpv paused again: the clock
 stood still, and the next switch waited out its 30 s (35.9 s, then the in-place fallback). `SwappingEngine.play` and
