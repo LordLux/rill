@@ -42,8 +42,7 @@ late ProviderContainer container;
 /// process's stdout `onDone` arrives asynchronously, and a stale callback landing
 /// after the next test has spawned its replacement tears the new one down.
 Future<void> boot({String mode = ''}) async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = [
     'run',
     'app/test/fake_sidecar.ts',
@@ -84,8 +83,7 @@ void main() {
 
   tearDown(() async {
     container.dispose();
-    RpcClient.instance.killForTest();
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await RpcClient.instance.killForTestAndWait();
   });
 
   group('resumeAt — the queue-replacement undo', () {

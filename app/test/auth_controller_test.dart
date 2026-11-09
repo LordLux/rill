@@ -147,8 +147,7 @@ const String goodCookie = 'SAPISID=fake-sapisid; SID=fake-sid';
 const String staleCookie = 'SAPISID=fake-sapisid; SID=degraded-session';
 
 Future<void> boot() async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
   await RpcClient.instance.start();
   await newContainer();

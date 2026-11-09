@@ -33,8 +33,7 @@ late FakeEngine engine;
 late ProviderContainer container;
 
 Future<void> boot() async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
   await RpcClient.instance.start();
   PlaybackController.seekStuckAfter = const Duration(milliseconds: 150);
@@ -66,8 +65,7 @@ void main() {
   tearDown(() async {
     PlaybackController.seekStuckAfter = const Duration(seconds: 20);
     container.dispose();
-    RpcClient.instance.killForTest();
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await RpcClient.instance.killForTestAndWait();
   });
 
   group('a file that ends well short of its duration', () {

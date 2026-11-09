@@ -42,8 +42,7 @@ late FakeEngine engine;
 late ProviderContainer container;
 
 Future<void> boot() async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
   await RpcClient.instance.start();
 
@@ -68,8 +67,7 @@ void main() {
 
   tearDown(() async {
     container.dispose();
-    RpcClient.instance.killForTest();
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await RpcClient.instance.killForTestAndWait();
   });
 
   test('entering audio-only waits for nothing', () async {
