@@ -142,6 +142,26 @@ void main() {
     await clickRemoveOn(tester, row);
   }
 
+  testWidgets('the playing row has no X, wherever the cursor is', (tester) async {
+    await pumpPanel(tester, ['a', 'b', 'c']);
+    Finder removeOn(String id) => find.descendant(of: rowFor(id), matching: find.byWidgetPredicate((w) => w is ShortcutTooltip && w.label == 'Remove'));
+
+    expect(removeOn('a'), findsNothing);
+    expect(removeOn('b'), findsOneWidget);
+
+    // The cursor moves (a row tapped, autoplay): the X goes with it.
+    container.read(queueProvider.notifier).jumpTo(2);
+    await tester.pumpAndSettle();
+    expect(removeOn('c'), findsNothing);
+    expect(removeOn('a'), findsOneWidget);
+
+    // And the user's sequence: the last video is playing and there is nothing to click.
+    await mouse.moveTo(tester.getCenter(rowFor('c')));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(idsIn(container), ['a', 'b', 'c']);
+    expect(container.read(queueProvider).current?.id, 'c');
+  });
+
   testWidgets('hovering the X names it, to its left and inside the row', (tester) async {
     await pumpPanel(tester, ['a', 'b']);
     final row = rowFor('b');

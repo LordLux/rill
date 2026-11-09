@@ -292,23 +292,21 @@ class QueueState {
 
   /// Remove one entry, keeping the cursor on the same *item* wherever possible.
   ///
-  /// Removing the current entry moves the cursor to whatever slides into its
-  /// place — the next video — because that is what "remove the thing I am
-  /// watching" means. Removing the last item while it is current stops:
-  /// `currentIndex` becomes null rather than pointing past the end.
+  /// **The playing entry is not removable while others are queued.** Removing it
+  /// left the cursor on nothing when it was the last one — the watch page's empty
+  /// state over a queue that still held the earlier videos, and the next video
+  /// played landed after them as a ghost second entry. The panel shows no X on
+  /// that row; this is the same rule for any other caller. A queue of one is the
+  /// exception: removing it just empties the queue.
   QueueState removedAt(int index) {
     if (index < 0 || index >= entries.length) return this;
-    final next = [...entries]..removeAt(index);
     final cursor = currentIndex;
+    if (index == cursor && entries.length > 1) return this;
+    final next = [...entries]..removeAt(index);
 
     if (cursor == null) return _with(next, null);
     if (next.isEmpty) return _with(next, null, playheadMoved: true); // Stopped playing
-    if (index < cursor) return _with(next, cursor - 1);
-    if (index > cursor) return _with(next, cursor);
-
-    // The current entry went. Whatever took its slot is now current; if nothing
-    // did, the queue has run out and playback stops.
-    return _with(next, cursor < next.length ? cursor : null, playheadMoved: true);
+    return _with(next, index < cursor ? cursor - 1 : cursor);
   }
 
   /// Remove Entry by identity.

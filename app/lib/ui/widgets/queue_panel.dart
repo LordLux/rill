@@ -1479,8 +1479,11 @@ class _QueueItemTileState extends State<_QueueItemTile> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // No Remove on the playing row: removing it would leave nothing to play (the watch
+                    // page's empty state) or strand the rest of the queue. Skip it, or Clear.
                     // The tooltip wraps the cross-fade, not the button: `AnimatedCrossFade` clips to its
                     // box, and a bubble to the left of the X is outside it.
+                    if (!widget.isCurrent)
                     ShortcutTooltip(
                       label: 'Remove',
                       silent: true,

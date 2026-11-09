@@ -109,9 +109,11 @@ Future<void> main() async {
   // `RILL_MPV_LOG=<path>` writes both players' log to a file (`mpv_log.dart`).
   // Two players behind one engine, so a quality switch need not stop the picture
   // (`architecture.md` §2.16). `RILL_SECOND_PLAYER=0` turns the second one off.
+  // Each player of the shell is `shell0`, `shell1`, … in that log, so the two sides of a swap can be told apart.
+  var shellPlayers = 0;
   final engine = SwappingEngine(
     () => createEngine(
-      'shell',
+      'shell${shellPlayers++}',
       logLevel: Platform.environment['RILL_LAUNCH_PROBE'] == '1' ? MPVLogLevel.v : null,
     ),
     enabled: Platform.environment['RILL_SECOND_PLAYER'] != '0',

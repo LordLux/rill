@@ -29,7 +29,7 @@ This document lists all the environment variables read across the Rill project (
 | Variable | File | Purpose |
 | --- | --- | --- |
 | `RILL_STREAM_LAVF_O` | `data/playback/engine.dart` | Replaces the mpv stream-lavf-o option string |
-| `RILL_MPV_LOG` | `data/playback/mpv_log.dart` | Path: write both players' mpv log to this file |
+| `RILL_MPV_LOG` | `data/playback/mpv_log.dart` | Path: write the players' mpv log to this file (the shell's are `shell0`, `shell1`, … so the two sides of a swap can be told apart). `RILL_MPV_LOG_CLOCK=1` also logs `audio-pts`, `time-pos` and `avsync` for each (the seam and the swapped-in player's A/V offset); they change every frame, so a run with them on measures the seam, not the load |
 | `RILL_LOG_FILE` | `data/log_capture.dart` | Override the release log path |
 | `RILL_LOG_CAPTURE` | `windows/runner/log_capture.cpp` | Set to `0` to disable release log capture |
 | `RILL_LOG_TEST` | `main.dart` | Enable test logging |

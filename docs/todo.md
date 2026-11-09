@@ -1530,6 +1530,28 @@ answered; whether a lighter standby (less read-ahead, or the audio opened later)
 videos, so a lead adapted to the measured prep time would save about 2 s there; a heavy stream (a first seek of 6.7 to
 12.9 s) needs the 5 s or more, so the adapted lead needs a floor and a re-aim, which it already has.
 
+**Measured 2026-11-04** (a release build, a 2160p60 / 1080p60 SDR video, 24 switches started mid-video, each by the second
+player; mpv's own `audio-pts`, `time-pos` and `avsync` through `RILL_MPV_LOG_CLOCK=1`, the app's log, and the app's private
+bytes sampled once a second; the three scripts are `sidecar/scratch/swap-seam.ts`, `mem-analysis.ts` and `switch-table.ts`, not tracked):
+- **The seam (12 swaps, clock logged):** silence 0 to 14 ms (median 3). Sound skipped 0 to 137 ms (median 4; two swaps skipped
+  126 and 137 ms, at a resolution of one event, about 40 ms). The clock stepped forward 33 to 84 ms (median 34) and never
+  back, as the viewer's position stream sees it. **This meets the done-when below.**
+- **End to end (24):** 6.2 to 8.8 s, median 7.2 s, and one of 15.2 s with two re-aims (a first seek of 5.1 s, a second of
+  2.3 s). Three re-aims in two switches, both to 2160p60. No fallback and no failure in 24.
+- **Dropped frames on the viewed player (24):** 22 to 45 a switch. 38 to 45 (median 40, about 9% of the frames of a 7 s
+  switch) when the viewed player is 2160p60; 22 to 34 (median 26) when it is 1080p60. On a 4K HDR 60 fps stream, 276 and 451.
+  This is the lag.
+- **Memory (12 switches in a row, private bytes):** 673 to 701 MB before the first; 734 to 920 MB while a standby exists;
+  654 to 842 MB 2.5 s after a swap; 676 to 740 MB idle after the twelfth. A drift of -3.8 MB a switch, so each disposed
+  standby gives its memory back.
+- **A/V sync:** the swapped-in player's `avsync` stays within 5 ms from the swap until the next standby is started (2.8 to
+  6 s). The 120 to 161 ms excursions (11 of 11 that had a next standby) are on the viewed player while *that* standby is
+  made: the same load as the dropped frames, not the seam.
+- **`video-add` failures:** none in the 24 standbys measured and none in 32 earlier; none in 55 ordinary opens in today's
+  logs. Every "the video stream would not open" line is a hover preview cancelled while its `video-add` was in flight
+  (8 of 8 command errors came within 300 ms after that preview's own `stop`; 7 such lines in 14 preview opens), a cancelled
+  open reported as a failure. The spike's one failure in six was not seen in 56 standbys.
+
 **A switch made at the end of the media (2026-11-04), fixed:** the standby parked at the end by a paused swap is at mpv's
 end of file with media_kit never seeing `completed`, so play set the button to playing and mpv paused again: the clock
 stood still, and the next switch waited out its 30 s (35.9 s, then the in-place fallback). `SwappingEngine.play` and
