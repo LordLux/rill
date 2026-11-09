@@ -38,10 +38,26 @@ import 'queue_controller.dart';
 import '../data/hard_exit.dart';
 import '../domain/youtube_link.dart';
 
+/// **Turns semantics on only once the window has painted and has the keyboard, and not at all when the
+/// platform already did.** Forcing them at startup handed a screen reader that attached as the window
+/// opened a partial tree: the first `AXTree` error came ~110 ms after the old "semantics on" line, as the
+/// window took the foreground, and every update after it failed (`architecture.md` F51, 2026-11-04).
 void runSemanticsProbe(ProviderContainer container) {
   if (Platform.environment['RILL_SEMANTICS_PROBE'] != '1') return;
-  SemanticsBinding.instance.ensureSemantics();
-  WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_probe(container)));
+  final binding = WidgetsBinding.instance;
+  binding.addPostFrameCallback((_) async {
+    // The first frame is on screen. The window is shown by then, but a window a tool started may not
+    // have the foreground yet, and a screen reader attaches when it does: wait for the lifecycle.
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (binding.lifecycleState != AppLifecycleState.resumed && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    final byPlatform = SemanticsBinding.instance.semanticsEnabled;
+    if (!byPlatform) SemanticsBinding.instance.ensureSemantics();
+    await binding.endOfFrame;
+    unawaited(_probe(container, byPlatform: byPlatform));
+  });
 }
 
 /// Whether the dump runs: `RILL_SEMANTICS_DUMP=1` asks for it, `=0` refuses it, and with neither it is
@@ -279,14 +295,14 @@ void _dumpTree(String label, {bool quiet = false}) {
   if (!quiet) _say('tree dumped to $path');
 }
 
-Future<void> _probe(ProviderContainer container) async {
+Future<void> _probe(ProviderContainer container, {required bool byPlatform}) async {
   try {
     final videoId = Platform.environment['RILL_SEMANTICS_PROBE_VIDEO']?.trim().isNotEmpty == true
         ? Platform.environment['RILL_SEMANTICS_PROBE_VIDEO']!.trim()
         : 'dQw4w9WgXcQ';
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final size = view.physicalSize / view.devicePixelRatio;
-    _say('semantics on, window=$size');
+    _say('semantics on (${byPlatform ? 'by the platform' : 'forced by the probe'}), window=$size');
 
     await _wait(6000);
     await _step('1-feed', () {});
