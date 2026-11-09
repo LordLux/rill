@@ -2367,7 +2367,9 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
   cost was the engine's own 20 s seek wait, or the 30 s prepare deadline, and then the in-place switch. `SwapTuning.seekTimeout` (10 s, `RILL_SWAP_SEEK_TIMEOUT_MS`)
   now bounds the standby's seek, and an overrun is a `_SwapAbandoned`, not a failure: a request the network never answered
   is not the engine's fault and does not count towards `maxFailures`. 10 s is above the longest seek that finished
-  (6.7 s, on a busy machine). What is **not** known is why the second connection to the same audio URL hangs.
+  (6.7 s, on a busy machine). Why it hangs is **not** known, and it is not that the standby reuses the playing media's URLs: 40 switches on a 2160p60 HDR video,
+half with the standby opened from freshly resolved URLs (new video and audio URL), fell back 3 times in 20 with the same URLs and 4
+in 20 with new ones (`todo.md` 109, 2026-11-09).
 - **Audio-only on and off during a switch killed the player (2026-11-04, a hand check).** `setVideoTrack(false)` drops the
   standby (stops and disposes it) and the swap in flight kept its reference. With the picture back on by the next check
   nothing said the standby was gone, and `_swap` made the disposed player the active one: `[Player] has been disposed`,

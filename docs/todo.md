@@ -1482,8 +1482,37 @@ hand: the miniplayer playing across a swap, audio-only, captions and volume acro
 **A standby's seek that hangs (2026-11-04), bounded:** on a 4K HDR 60 fps video three of four switches went wrong (a hung
 audio range request for 20 s, a first seek of 12.9 s, one of 13.8 s with 363 frames dropped), 13 of 13 on 30 and 25 fps
 were clean. `SwapTuning.seekTimeout` (10 s) now gives the standby that long to finish one seek and then switches in place,
-not counting it as a failure (`architecture.md` §2.16). **Open:** why the second connection to the same audio URL is not
-answered; whether a lighter standby (less read-ahead, or the audio opened later) avoids it on heavy streams.
+not counting it as a failure (`architecture.md` §2.16). **Open:** whether a lighter standby (less read-ahead, or the
+audio opened later) avoids it on heavy streams.
+
+**Fresh URLs for the standby do not fix it (2026-11-09).** The question was whether the second connection goes unanswered
+because it is to the *same* URL as the playing player's. Tried: `RILL_STANDBY_PROBE=10` on a 2160p60 HDR video
+(`LXb3EKWsInQ`, 5:14, rungs 2160p60 itag 337 and 1440p60 itag 336), four app launches in the order A B A B, ten switches
+each (the ladder's own URLs, then the standby opened with a second `playback.open {preload: true}` answer, the sidecar's
+player-response cache off, video and audio URL both new in all 20). Per arm, 20 switches:
+
+| | A, the ladder's URLs | B, fresh URLs |
+|---|---|---|
+| fell back to the in-place switch | 3 | 4 |
+| a standby seek over 5 s | 7 | 11 |
+| re-aims | 13 in 7 switches | 21 in 10 switches |
+| standby ready, median | 4.96 s | 5.01 s |
+| end to end, median | 8.2 s | 14.4 s |
+
+No better, and if anything worse (the medians are dragged by the switches that re-aimed, and n=20 does not separate 3 from
+4 fallbacks). So the slow or unanswered seek is **not a property of reusing a URL**; a new URL set meets it just as often.
+The mpv logs show the standby's video seeks landing far into the file (stream-level seeks of tens to hundreds of MB, at
+the same time as the viewed player is reading its own stream), on both arms alike; that is consistent with a heavy range
+request into a busy link, and was not tested as the cause. Not pursued further. The knob that ran it (a re-resolve in
+`PlaybackController`, and `SwappingEngine` accepting a variant whose audio URL is not the playing one's, which the
+in-place check requires and the second player does not) was removed again; `ui/standby_probe.dart` stays.
+
+**What a second `playback.open` costs, for `todo.md` 107 (expired URLs):** with `preload: true` it is 133 to 498 ms (median
+about 165 ms, 20 of 20), and it registers no session, so `playback.report` and the watch history see nothing. A non-preload
+open would mint a second session for one watch and double the history entry (the reason `switchQuality` makes no RPC).
+The sidecar answers either from its 5 minute player-response cache (`SIDECAR_PLAYER_RESPONSE_TTL_MS`), so the URLs only
+change once that has lapsed, which is fine for an expired one (hours) and not for a retry within minutes. A standby that
+resolved its own variant is therefore cheap; it would not have helped this.
 
 **Idea, not built (the orchestrator, 2026-11-04):** the first aim is a fixed 5 s past the clock, so every switch takes about
 8 s end to end whatever the stream. The standby's open took 0.8 to 2.7 s and its first seek 0.5 to 1.8 s on 30 and 25 fps
