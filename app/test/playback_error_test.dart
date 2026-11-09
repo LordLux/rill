@@ -30,8 +30,7 @@ late FakeEngine engine;
 late ProviderContainer container;
 
 Future<void> boot({String mode = ''}) async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = [
     'run',
     'app/test/fake_sidecar.ts',
@@ -54,8 +53,7 @@ void main() {
 
   tearDown(() async {
     container.dispose();
-    RpcClient.instance.killForTest();
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await RpcClient.instance.killForTestAndWait();
   });
 
   test('a STREAM_UNAVAILABLE open surfaces an error with a retry, not a dead end', () async {

@@ -29,8 +29,7 @@ Future<void> _settle(
 }
 
 Future<ProviderContainer> _boot(String mode) async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1', mode];
   await RpcClient.instance.start();
   return ProviderContainer();

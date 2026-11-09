@@ -15,8 +15,7 @@ import 'package:rill/data/rpc/client.dart';
 import 'package:rill/ui/search_suggest_controller.dart';
 
 Future<ProviderContainer> _boot() async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
   await RpcClient.instance.start();
   return ProviderContainer();

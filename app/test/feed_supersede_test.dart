@@ -44,8 +44,7 @@ Future<void> _settle(ProviderContainer container, {Duration timeout = const Dura
 /// streams close while `_process` is still null, where `_handleExit` returns
 /// early and does no damage.
 Future<ProviderContainer> _boot({String mode = ''}) async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = [
     'run',
     'app/test/fake_sidecar.ts',
@@ -70,8 +69,7 @@ void main() {
 
   tearDown(() async {
     container.dispose();
-    RpcClient.instance.killForTest();
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await RpcClient.instance.killForTestAndWait();
   });
 
   test('a superseded payload is dropped even when it lands after its replacement', () async {

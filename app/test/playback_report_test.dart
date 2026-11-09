@@ -30,8 +30,7 @@ late FakeEngine engine;
 late ProviderContainer container;
 
 Future<void> boot({String mode = ''}) async {
-  RpcClient.instance.killForTest();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  await RpcClient.instance.killForTestAndWait();
   RpcClient.instance.mockCommand = [
     'run',
     'app/test/fake_sidecar.ts',
@@ -67,8 +66,7 @@ void main() {
   tearDown(() async {
     PlaybackController.reportInterval = realInterval;
     container.dispose();
-    RpcClient.instance.killForTest();
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await RpcClient.instance.killForTestAndWait();
   });
 
   test('the app reports on a cadence, not only at completion', () async {
