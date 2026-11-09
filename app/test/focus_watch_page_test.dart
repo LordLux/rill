@@ -262,8 +262,8 @@ void main() {
       // (The fake sidecar sends no related videos; where there are some they come last.)
       if (related >= 0) expect(meta, lessThan(related), reason: 'the related videos come last: $walk');
 
-      // The queue's row buttons are stops too: Remove (shown on focus) after each row.
-      expect(walk.where((stop) => stop == 'Remove').length, 3, reason: 'a Remove stop per queue row: $walk');
+      // The queue's row buttons are stops too: Remove (shown on focus) after each row but the playing one.
+      expect(walk.where((stop) => stop == 'Remove').length, 2, reason: 'a Remove stop per queue row except the playing one: $walk');
 
       // The queue is walked header (Clear, collapse), then each row — one group,
       // nothing from another surface in between.

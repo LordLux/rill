@@ -84,15 +84,20 @@ void main() {
       expect(describe(queueOf(['a', 'b', 'c'], current: 0).removedAt(2)), '[a] b');
     });
 
-    test('removing the current entry moves to whatever took its place', () {
-      expect(describe(queueOf(['a', 'b', 'c'], current: 1).removedAt(1)), 'a [c]');
+    test('the playing entry is not removable while others are queued', () {
+      // Middle, last and first: none of them changes anything, and the cursor stays on a video.
+      for (final (ids, at) in [(['a', 'b', 'c'], 1), (['a', 'b'], 1), (['a', 'b'], 0)]) {
+        final before = queueOf(ids, current: at);
+        final after = before.removedAt(at);
+        expect(describe(after), describe(before), reason: 'removing $at of $ids');
+        expect(after.currentIndex, at);
+        expect(after.removedEntry(before.entries[at]).currentIndex, at, reason: 'by identity too');
+      }
     });
 
-    test('removing the current last entry stops rather than pointing past the end', () {
-      final state = queueOf(['a', 'b'], current: 1).removedAt(1);
-      expect(state.currentIndex, isNull);
-      expect(state.current, isNull);
-      expect(describe(state), 'a');
+    test('a new video after a refused removal lands straight after the playing one', () {
+      final state = queueOf(['a', 'b'], current: 1).removedAt(1).playingNow(video('c'));
+      expect(describe(state), 'a b [c]');
     });
 
     test('emptying the queue clears the cursor', () {
