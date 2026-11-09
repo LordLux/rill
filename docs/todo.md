@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 110.** A new item takes it, and the same edit bumps this line.
+**Next number: 111.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1807,6 +1807,25 @@ only for `=1`. It writes a ring of tree dumps once a second to
   AXTree errors from dev-build sessions between 2026-10-06 and 2026-10-23 with Narrator started after
   the app are explained by this and do not count toward extending the date.
 - Released builds were never affected: they carry a version and so need `RILL_SEMANTICS_DUMP=1`.
+
+### 110. Report the `flutter_windows.dll` accessibility crash upstream
+
+Four crash dumps from the semantics probe (2026-11-04, `architecture.md` F51) all fault at
+`flutter_windows.dll+0x3a9fa`: a read at null+0x48 inside the engine's own accessibility code, in a
+run where the first `Failed to update ui::AXTree` came ~110 ms after the window took the foreground
+with Narrator on. It looks like the engine's Windows accessibility bridge dereferencing a node or
+window it has not been given yet; that is a guess, the symbols were not read.
+
+- **File it against flutter/flutter** with the Flutter version (3.44.9, `app/.fvmrc`), the stack (symbolise
+  `+0x3a9fa` against the `flutter_windows.dll.pdb` in the FVM engine artefacts), the timing above and
+  what makes it likely (the probe forcing semantics on before the window was shown, Narrator on).
+  **The stack and the steps, never the dump:** a dump holds the session cookie (CLAUDE.md, "A release
+  `rill.exe` is two processes").
+- Check first whether `flutter/flutter#190357` or an open accessibility crash issue already covers it.
+- The probe no longer forces semantics before the first paint and the foreground (2026-11-08; 3 of 3 clean runs with Narrator on), so if the
+  crash still appears with that, the report is stronger: it would not need the probe at all.
+
+**Done when:** an issue is filed and linked here, or an existing one is found and linked.
 
 ### 89. Distinct playlist tile
 
