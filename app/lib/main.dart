@@ -39,6 +39,7 @@ import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 import 'ui/semantics_probe.dart';
+import 'ui/session_restore.dart';
 import 'ui/swap_spike.dart';
 import 'ui/video_add_probe.dart';
 import 'ui/update_controller.dart';
@@ -124,6 +125,7 @@ Future<void> main() async {
   final drawerOpen = await readDrawerOpen();
   final audioMode = await readAudioMode();
   final hideQueue = await readHideQueue();
+  final restoreSession = await readRestoreSession();
 
   // Decided before the sidecar can possibly spawn — `RpcClient` reads
   // `extraEnvironment` at its very first `_spawn`, which the first RPC call
@@ -140,6 +142,7 @@ Future<void> main() async {
       playbackEngineProvider.overrideWithValue(engine),
       audioModeProvider.overrideWith(() => AudioModeController(initial: audioMode)),
       hideQueueProvider.overrideWith(() => HideQueueController(initial: hideQueue)),
+      restoreSessionProvider.overrideWith(() => RestoreSessionController(initial: restoreSession)),
       drawerStateProvider.overrideWith(() => DrawerStateController(initial: drawerOpen)),
     ],
   );
@@ -178,6 +181,9 @@ Future<void> main() async {
   restoreAuthWhenSidecarRestarts(container);
   // `RILL_COOKIE_DUMP=1`: the WebView2 jar, names only (Task 33 §1).
   unawaited(dumpCookieJar('startup'));
+  // After the account (above), and not awaited: the last session's queue and page, if this start is to bring them
+  // back — always after an update, otherwise with the setting on (`architecture.md` §2.17).
+  unawaited(restoreSessionOnStart(container));
 
   _openOnLaunch(container);
   runControlsProbe(container);

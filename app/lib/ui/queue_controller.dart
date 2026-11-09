@@ -713,6 +713,19 @@ class QueueController extends Notifier<QueueState> {
   @visibleForTesting
   void debugSetStateForTest(QueueState next) => _set(next);
 
+  /// The queue the last session ended with, put back (`architecture.md` §2.17).
+  ///
+  /// One write that moves the playhead, so the playback controller opens [currentIndex]. Nothing is
+  /// offered back as an undo: there is no earlier queue to return to. A mix or playlist picks up its
+  /// top-ups from here, through [_set].
+  void restoreFrom(List<VideoItem> items, {required int currentIndex, MixQueue? mix}) {
+    if (items.isEmpty || currentIndex < 0 || currentIndex >= items.length) return;
+    _replaced = null;
+    _mixError = null;
+    _abandonExtension();
+    _set(QueueState(items: items, currentIndex: currentIndex, version: state.version + 1, mix: mix));
+  }
+
   /// Open a video now. The one the feed and the related rail both call.
   void play(VideoItem item) => _edit(state.playingNow(item));
 

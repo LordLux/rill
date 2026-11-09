@@ -11,6 +11,7 @@ import '../../domain/ytdlp/ytdlp_state.dart';
 import '../auth_controller.dart';
 import '../focus_ring.dart';
 import '../pages/login_page.dart';
+import '../session_restore.dart';
 import '../update_controller.dart';
 import '../ytdlp_controller.dart';
 import 'titlebar_button.dart';
@@ -1059,6 +1060,31 @@ class _UpdatesPanelState extends ConsumerState<_UpdatesPanel> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              // After an update the last video is always reopened; this is for a close the viewer chose
+              // (`architecture.md` §2.17).
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: MergeSemantics(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Flexible(child: Text('Reopen where I left off', style: textTheme.bodySmall)),
+                      SizedBox(
+                        height: 28,
+                        child: FittedBox(
+                          alignment: Alignment.centerRight,
+                          child: Switch(
+                            key: const ValueKey('restore-session-switch'),
+                            value: ref.watch(restoreSessionProvider),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            onChanged: (value) => unawaited(ref.read(restoreSessionProvider.notifier).setEnabled(value)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

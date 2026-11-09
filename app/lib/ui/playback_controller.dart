@@ -345,7 +345,7 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   Timer? _restoreWatchdog;
 
-  @visibleForTesting
+  /// The height the viewer last chose, or null for "whatever ranks first". The session snapshot keeps it.
   int? get preferredHeight => _preferredHeight;
 
   /// A report can be on the wire when the container goes away — at app exit, or
@@ -421,7 +421,10 @@ class PlaybackController extends Notifier<PlaybackState> {
         state = const PlaybackState();
         return;
       }
-      unawaited(open(item));
+      // A restored session opens its video paused (`restoreNext`); everything else plays.
+      final paused = _openPausedFor == item.id;
+      _openPausedFor = null;
+      unawaited(open(item, wantPlaying: !paused));
     });
 
     // Preload the item after the current one so the transition is instant
@@ -730,6 +733,21 @@ class PlaybackController extends Notifier<PlaybackState> {
   }
 
   ({String videoId, Duration position})? _resumeAt;
+
+  /// The video the next queue move opens **paused**, once. Sound starting by itself on launch is a surprise.
+  String? _openPausedFor;
+
+  /// The last session's video, to open at [position] and paused (`architecture.md` §2.17).
+  ///
+  /// Called with the id the queue is about to move to, *before* it moves: the open is what consumes both.
+  /// One-shot, and dropped by any open of a different video, like [resumeAt].
+  void restoreNext({required String videoId, Duration position = Duration.zero}) {
+    _openPausedFor = videoId;
+    _resumeAt = position > Duration.zero ? (videoId: videoId, position: position) : null;
+  }
+
+  /// The quality the last session was on, for the next open to pick the rung for.
+  void restorePreferredHeight(int? height) => _preferredHeight = height;
 
   /// The user answering a `retry: "user"` error (§4).
   Future<void> retry() async {

@@ -53,6 +53,19 @@ class CurrentRoute extends Notifier<String?> {
 /// The topmost **page** route's name. Popups and dialogs do not change it.
 final currentRouteProvider = NotifierProvider<CurrentRoute, String?>(CurrentRoute.new);
 
+/// What the topmost page route was opened with (`RouteSettings.arguments`): the playlist's id, the search text.
+/// Read by the session snapshot, which has to say which page to come back to.
+class CurrentRouteArgument extends Notifier<Object?> {
+  @override
+  Object? build() => null;
+
+  void set(Object? value) {
+    if (state != value) state = value;
+  }
+}
+
+final currentRouteArgumentProvider = NotifierProvider<CurrentRouteArgument, Object?>(CurrentRouteArgument.new);
+
 /// The section the user is in, which the watch page does not change.
 ///
 /// The rail highlights a *section*, and opening a video is not leaving one — a
@@ -131,7 +144,7 @@ final transientRouteOpenProvider =
 class RouteTracker extends NavigatorObserver {
   RouteTracker({required this.onPageRoute, required this.onTransientChange});
 
-  final void Function(String? routeName) onPageRoute;
+  final void Function(String? routeName, Object? arguments) onPageRoute;
   final void Function(bool pushed) onTransientChange;
 
   /// The reportable page routes, bottom first.
@@ -163,7 +176,8 @@ class RouteTracker extends NavigatorObserver {
 
   void _report(Route<dynamic>? route) {
     final name = route?.settings.name;
-    WidgetsBinding.instance.addPostFrameCallback((_) => onPageRoute(name));
+    final arguments = route?.settings.arguments;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onPageRoute(name, arguments));
   }
 
   void _transient(bool pushed) {
@@ -232,8 +246,9 @@ class RouteTracker extends NavigatorObserver {
 
 final routeTrackerProvider = Provider<RouteTracker>((ref) {
   return RouteTracker(
-    onPageRoute: (name) {
+    onPageRoute: (name, arguments) {
       ref.read(currentRouteProvider.notifier).set(name);
+      ref.read(currentRouteArgumentProvider.notifier).set(arguments);
       // The watch page is a route but not a section — see [sectionRouteProvider].
       if (name != watchRouteName) ref.read(sectionRouteProvider.notifier).set(name);
     },

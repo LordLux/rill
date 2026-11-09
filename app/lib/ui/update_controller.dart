@@ -12,6 +12,7 @@ import '../data/update/update_http.dart';
 import '../data/update/update_downloader.dart';
 import '../data/update/update_verifier.dart';
 import '../data/update/installer_launcher.dart';
+import 'session_restore.dart';
 
 final updateConfigProvider = Provider<UpdateConfig>((ref) => UpdateConfig.fromEnvironment());
 final updateHttpProvider = Provider<UpdateHttp>((ref) => IoUpdateHttp());
@@ -268,6 +269,14 @@ class UpdateController extends Notifier<UpdateState> {
     final downloader = ref.read(updateDownloaderProvider);
     final launcher = ref.read(updateInstallerLauncherProvider);
     
+    // The restart that follows is the one the viewer did not choose, so the session is saved now and marked
+    // (`architecture.md` §2.17). A failure here costs the restore and never the update.
+    try {
+      await ref.read(sessionWriterProvider).prepareForUpdate();
+    } on Object catch (e) {
+      stderr.writeln('rill update: session not saved before the install: $e');
+    }
+
     try {
       final root = downloader.root.path;
       final args = [
@@ -288,6 +297,11 @@ class UpdateController extends Notifier<UpdateState> {
       await ref.read(updateExitAppProvider)();
     } catch (e) {
       stderr.writeln('rill update: install failed: $e');
+      try {
+        await ref.read(sessionWriterProvider).cancelUpdate();
+      } on Object catch (_) {
+        // The marker is read once and ignored without a snapshot; nothing here is worth a second failure.
+      }
       state = state.copyWith(phase: UpdatePhase.error(kind: UpdateErrorKind.install, message: e.toString(), origin: UpdateCheckOrigin.manual, manifest: manifest));
     }
   }
