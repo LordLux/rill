@@ -31,7 +31,7 @@ const String playlistRouteName = 'playlist';
 void openPlaylistPage(String playlistId) {
   rootNavigatorKey.currentState?.push(
     MaterialPageRoute<void>(
-      settings: const RouteSettings(name: playlistRouteName),
+      settings: RouteSettings(name: playlistRouteName, arguments: playlistId),
       builder: (_) => PlaylistPage(playlistId: playlistId),
     ),
   );

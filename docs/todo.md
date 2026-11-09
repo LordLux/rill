@@ -1306,46 +1306,6 @@ Windows 11's taskbar button has a progress bar for exactly this (`ITaskbarList3`
 **Done when:** a download shows its fraction on the taskbar button, an error shows
 red, and every end state (done, failed, cancelled, app closed) leaves no bar behind.
 
-### 101. Pick up where you left off after a restart
-
-Keep a copy of the app's state and put it back on the next start, so closing the app (or
-updating it) does not cost the viewer their place. Two triggers with different rules:
-- **After an update: always.** The updater restarts the app itself, so it is the one restart
-  the viewer did not choose, and losing the video they were watching is the worst moment to
-  lose it. Needs a marker the updater leaves for the next start (the installer's arguments
-  come from the old version, see `rill.iss`), so a restart that follows an update is told
-  apart from a launch.
-- **After a manual close: only with a setting turned on,** off by default. Opening a fresh
-  app is what most people expect from a launch.
-
-**What to keep, as a start:** the page stack's top (which watch page, playlist, channel or
-search), the queue (item ids, the current one, the mix and its playlist id), the current
-position and whether it was playing, audio-only, volume and the preferred quality. Ids and
-numbers only: no cookie, no URL (`playback.open` resolves again), and nothing that was
-fetched. Scroll positions and open menus are not worth it.
-
-**Care:**
-- **The app ends with `TerminateProcess`** (CLAUDE.md, "The app ends itself"), so there is no
-  exit hook to write from. The snapshot is written as things change (debounced), and a
-  crash then leaves the last one, which is a feature.
-- **A snapshot that crashes the app on restore must not loop.** Delete or mark it before
-  applying, and apply it once.
-- **Order on start:** the account is restored first (`restoreAuthWhenSidecarRestarts`), then
-  the queue and page, then `resumeAt` for the position (`playback_controller.dart`), the same
-  one the queue-replacement undo uses. The restored video should open **paused**: sound
-  starting by itself on launch is a surprise.
-- **A video that is gone** (private, removed, a premiere) lands on the ordinary error slate;
-  restoring must not turn that into a retry loop.
-- **Settings:** a toggle on the settings page, which needs the keyboard and screen reader
-  rules in CLAUDE.md, "Accessibility".
-- **Other platforms:** where the file lives and how an update is told apart are the only
-  platform parts, so keep them behind one small interface.
-
-**Done when:** after an update the same video is open at the same place, paused; with the
-setting on a manual restart does the same, and with it off a launch is a fresh start; a
-corrupt or stale snapshot is ignored, never retried; tests cover write, read, the once-only
-apply, and the update marker.
-
 ### 104. Adding a video to Watch Later answered HTTP 400
 
 Reported 2026-10-24: adding `-jknl-GNjDw` to Watch Later showed "could not add … to WL: Request to

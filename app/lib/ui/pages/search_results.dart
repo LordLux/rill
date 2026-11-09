@@ -55,13 +55,17 @@ void openSearchOrVideo(WidgetRef ref, String text) {
 /// Pushes the results page, the same way `openWatch` pushes the watch page —
 /// `FeedPage` stays mounted underneath, which is what carries its scroll
 /// position through the round trip without any extra bookkeeping (Task 20 §5).
-void openSearch(WidgetRef ref, String query, {SearchFilters? filters}) {
+void openSearch(WidgetRef ref, String query, {SearchFilters? filters}) =>
+    openSearchIn(ProviderScope.containerOf(ref.context, listen: false), query, filters: filters);
+
+/// [openSearch] for a caller with a container and no widget — the session restore.
+void openSearchIn(ProviderContainer container, String query, {SearchFilters? filters}) {
   final trimmed = query.trim();
   if (trimmed.isEmpty) return;
-  ref.read(currentSearchQueryProvider.notifier).set(trimmed);
+  container.read(currentSearchQueryProvider.notifier).set(trimmed);
   rootNavigatorKey.currentState?.push(
     MaterialPageRoute<void>(
-      settings: const RouteSettings(name: searchRouteName),
+      settings: RouteSettings(name: searchRouteName, arguments: trimmed),
       builder: (_) => SearchResultsPage(query: trimmed, filters: filters),
     ),
   );

@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rill/data/update/update_config.dart';
 import 'package:rill/domain/update/app_version.dart';
 import 'package:rill/domain/update/update_manifest.dart';
@@ -190,6 +191,24 @@ void main() {
     expect(find.text("Couldn't reach the update server"), findsOneWidget);
     expect(find.text('HTTP 503'), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
+  });
+
+  testWidgets('the panel has a switch for reopening where the viewer left off, off until it is turned on', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await pump(tester, ready());
+    await openMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+
+    final switchFinder = find.byKey(const ValueKey('restore-session-switch'));
+    expect(find.text('Reopen where I left off'), findsOneWidget);
+    expect(tester.widget<Switch>(switchFinder).value, isFalse);
+
+    await tester.tap(switchFinder);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<Switch>(switchFinder).value, isTrue);
+    expect((await SharedPreferences.getInstance()).getBool('restore_session'), isTrue);
   });
 
   testWidgets('a test build says so on the panel', (tester) async {

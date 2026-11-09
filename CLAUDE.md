@@ -877,6 +877,13 @@ the answer.
   app sets on the sidecar is re-sent from `RpcClient.onRestarted`
   (`restoreAuthWhenSidecarRestarts`); a new thing the sidecar remembers goes there too.
   yt-dlp restarts it only when `YT_DLP_PATH` changes. Playback sessions are `todo.md` 96.
+- **The session snapshot is removed before it is applied, and its writer starts after — 2026-11-09.** The app ends with
+  `TerminateProcess`, so what a restart reads was written as things changed (`SessionWriter`, only while the setting is on).
+  `restoreSessionOnStart` clears the stored copy first so a snapshot that crashes the app cannot be read again, and a
+  restored video opens **paused** (`PlaybackController.restoreNext`). After an update the restore is unconditional: the
+  updater sets a marker (`UpdateController.install`) because the installer's arguments come from the old version. A new
+  thing the app should remember across a restart goes in `data/session/session_snapshot.dart` and is read back there.
+  `architecture.md` §2.17.
 - **At most one watch route exists. `showWatchPageIn` is the only place that
   pushes one — Task 36.** Opening a video from a page over the watch page
   (a playlist, the search results) pushes the new watch route and removes the

@@ -9,12 +9,18 @@ import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/data/session/session_snapshot.dart';
 import 'package:rill/data/update/update_config.dart';
 import 'package:rill/data/update/update_downloader.dart';
 import 'package:rill/data/update/update_http.dart';
+import 'package:rill/domain/feed_item.dart';
 import 'package:rill/domain/update/update_state.dart';
+import 'package:rill/ui/playback_controller.dart';
+import 'package:rill/ui/queue_controller.dart';
 import 'package:rill/ui/update_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fake_engine.dart';
 
 /// Serves one signed manifest and one installer from memory.
 class FakeUpdateHttp implements UpdateHttp {
@@ -161,6 +167,8 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         updateConfigProvider.overrideWithValue(config),
+        // The session the updater saves before it installs reads the player.
+        playbackEngineProvider.overrideWithValue(FakeEngine()),
         updateHttpProvider.overrideWithValue(client),
         updateDownloaderProvider.overrideWithValue(UpdateDownloader(http: client, root: tempDir)),
         updateTimerFactoryProvider.overrideWithValue((delay, callback) {
@@ -359,6 +367,41 @@ void main() {
     final phase = container.read(updateControllerProvider).phase;
     expect((phase as UpdateError).kind, UpdateErrorKind.install);
     expect(exits, 0);
+  });
+
+  test('install leaves the marker for the start that follows it, with the session saved (architecture.md §2.17)', () async {
+    final http = await feed('0.2.0');
+    final (container, controller) = await start(config: config('0.1.0'), http: http);
+    await controller.checkNow();
+    container.read(queueProvider.notifier).addToQueue(VideoItem(
+          kind: 'video',
+          id: 'abc',
+          title: 'A',
+          channelName: 'C',
+          thumbnailUrl: 'https://i.ytimg.com/vi/abc/hq.jpg',
+          isLive: false,
+          canWatchLater: true,
+          canAddToQueue: true,
+        ));
+
+    await controller.install();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('session_restore_after_update'), isTrue);
+    expect(SnapshotQueue.tryDecode(prefs.getString('session_queue'))?.videos.single.id, 'abc');
+    expect(exits, 1);
+  });
+
+  test('a failed launch takes the marker back, so the next launch is an ordinary one', () async {
+    final http = await feed('0.2.0');
+    final (_, controller) = await start(config: config('0.1.0'), http: http);
+    await controller.checkNow();
+    launcher.fail = true;
+
+    await controller.install();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.containsKey('session_restore_after_update'), isFalse);
   });
 
   test('a dev build schedules nothing and checks nothing', () async {

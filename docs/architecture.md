@@ -2382,6 +2382,43 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
 - **Open.** One standby open in six failed in the spike (`video-add` produced no track); not understood. The frame-drop
   trigger that sends weak hardware to the in-place switch is not built (`todo.md` 109).
 
+### 2.17 Picking up where the viewer left off (decided 2026-11-09, was `todo.md` 101)
+
+The app keeps a copy of the session and puts it back on the next start. **Two triggers with different rules:** after an
+update, always (the updater restarts the app itself, the one restart the viewer did not choose); after a manual close,
+only with the setting on, off by default ("Reopen where I left off", in the account menu's Updates panel, beside the
+automatic-download switch). A launch with the setting off is a fresh start, and the stored copy is removed.
+
+- **What is kept** (`data/session/session_snapshot.dart`): the queue (each row's id, title, channel, thumbnail, length and
+  live flags, the playing index, the mix or playlist with its id, title, exhausted flag and page token), the position, the
+  page on top (watch, a playlist's page with its id, a search with its text; anything else is home), the volume and the
+  quality last chosen. **No cookie, no stream URL, no response** (`playback.open` resolves again). It is more than the ids
+  the todo asked for: a queue row with no title reads as a broken one until something fetches it, and the strings are public
+  display text. Audio-only is not in it: it already survives a restart on its own (`audio_only_mode`).
+- **Two parts, stored apart** (`SharedPreferences`: `session_queue`, `session_state`). The queue is large and changes rarely;
+  the position changes every few seconds, and one blob would rewrite a playlist of hundreds of rows for each tick. A list over
+  500 rows is cut to a window around the playing one, and a playlist that lost its tail stops there (its token no longer
+  follows the rows that are kept).
+- **There is no exit to write from** (the app ends with `TerminateProcess`, CLAUDE.md). `SessionWriter`
+  (`ui/session_restore.dart`) writes as things change, debounced by 1 s, plus a 5 s tick for the position, and only what
+  differs; what a crash leaves is the last one. It runs only while the setting is on; turning the setting off removes
+  what it had written.
+- **Once, and never in a loop.** The start reads both parts and the marker, **removes the stored copy before applying
+  anything**, then applies. The writer starts after the apply, so it cannot put the rows back before they are known to be
+  good. A snapshot that is unreadable, of another format, or older than 7 days is ignored. A restore never overrides what
+  the viewer has already started.
+- **Applied in order:** volume and quality, then the queue (`QueueController.restoreFrom`, one write that moves the
+  playhead so the ordinary open path runs, and a mix or playlist tops itself up from there), then the page after the first
+  frame. `PlaybackController.restoreNext` makes that one open **paused**, at the saved position: sound starting by itself
+  on launch is a surprise. A video that has gone lands on the ordinary error slate through the same open; there is no retry.
+  The account is restored first and not waited for (`restoreAuthWhenSidecarRestarts`).
+- **The update marker.** The installer's arguments come from the old version (`rill.iss`), so the new start cannot be told
+  it follows an update. `UpdateController.install` saves the session and sets `session_restore_after_update` just before it
+  starts the installer, whatever the setting; the next start reads and clears the marker. An install that does not start
+  clears it again (and the copy, for a viewer with the setting off).
+- **Not kept, on purpose:** scroll positions and open menus; the page stack below the top (Back from a restored playlist
+  page goes to the feed); the subscriptions pages; search filters.
+
 ## 3. Phasing
 
 **Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with yt-dlp
