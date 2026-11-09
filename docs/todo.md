@@ -1822,7 +1822,7 @@ window it has not been given yet; that is a guess, the symbols were not read.
   **The stack and the steps, never the dump:** a dump holds the session cookie (CLAUDE.md, "A release
   `rill.exe` is two processes").
 - Check first whether `flutter/flutter#190357` or an open accessibility crash issue already covers it.
-- The probe no longer forces semantics before the first paint and the foreground (2026-11-08), so if the
+- The probe no longer forces semantics before the first paint and the foreground (2026-11-08; 3 of 3 clean runs with Narrator on), so if the
   crash still appears with that, the report is stronger: it would not need the probe at all.
 
 **Done when:** an issue is filed and linked here, or an existing one is found and linked.
