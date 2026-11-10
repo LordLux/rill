@@ -1482,8 +1482,46 @@ hand: the miniplayer playing across a swap, audio-only, captions and volume acro
 **A standby's seek that hangs (2026-11-04), bounded:** on a 4K HDR 60 fps video three of four switches went wrong (a hung
 audio range request for 20 s, a first seek of 12.9 s, one of 13.8 s with 363 frames dropped), 13 of 13 on 30 and 25 fps
 were clean. `SwapTuning.seekTimeout` (10 s) now gives the standby that long to finish one seek and then switches in place,
-not counting it as a failure (`architecture.md` §2.16). **Open:** why the second connection to the same audio URL is not
-answered; whether a lighter standby (less read-ahead, or the audio opened later) avoids it on heavy streams.
+not counting it as a failure (`architecture.md` §2.16). **Open:** whether a lighter standby (less read-ahead, or the
+audio opened later) avoids it on heavy streams.
+
+**Fresh URLs for the standby do not fix it (2026-11-09, two runs).** The question was whether the second connection goes
+unanswered because it is to the *same* URL as the playing player's. Tried: `RILL_STANDBY_PROBE=10` on a 2160p60 HDR video
+(`LXb3EKWsInQ`, 5:14, rungs 2160p60 itag 337 and 1440p60 itag 336), each arm a fresh app launch with ten switches
+alternating the two rungs: **A** the ladder's own URLs, **B** the standby opened with a second `playback.open {preload: true}`
+answer, the sidecar's player-response cache off, video and audio URL both new in every one. Run 1 ran A B A B and might have been
+a slow moment on the machine, so run 2 ran B A B A about 20 hours later (its first B arm
+ended after one switch, see below, and was repeated).
+
+| | run 1 A | run 1 B | run 2 A | run 2 B |
+|---|---|---|---|---|
+| switches | 20 | 20 | 20 | 21 |
+| fell back to the in-place switch | 3 | 4 | 0 | 1 |
+| a standby seek over 5 s | 7 | 11 | 1 | 2 |
+| re-aims | 13 in 7 switches | 21 in 10 switches | 4 in 3 | 5 in 4 |
+| standby ready, median | 4.96 s | 5.01 s | 4.99 s | 4.98 s |
+| end to end, median | 8.2 s | 14.4 s | 7.5 s | 7.5 s |
+
+Two things. **The conditions matter far more than the URLs:** the same code on the same video went from 3 fallbacks and 7
+slow seeks in 20 (run 1) to 0 and 1 in 20 (run 2), so run 1 was a bad moment, and a slower connection or machine than this
+one is likely to see run 1. And **fresh URLs help in neither**: 4 of 20 and 1 of 21 against 3 of 20 and 0 of 20, which n=20
+cannot tell apart, and run 2's B arm was as clean as its A arm. So the slow or unanswered seek is not a property of reusing
+a URL. The one B failure in run 2 was a different shape (the standby never became ready: the engine's own 20 s wait, on the
+first switch of the first arm, with mpv failing to open twice), after which the in-place switch was unsupported (the knob's
+fresh audio URL is not the playing media's) and the reopen ran, so that arm ended early; it was repeated clean. The mpv logs show the
+standby's video seeks landing far into the file (stream-level seeks of tens to hundreds of MB, while the viewed player
+reads its own stream), on both arms alike; consistent with a heavy range request into a busy link, not tested as the cause.
+The 10 s `seekTimeout` and the in-place fallback are what a slow moment meets; they are the right shape. Not pursued
+further. The knob that ran it (a re-resolve in `PlaybackController`, and `SwappingEngine` accepting a variant whose audio
+URL is not the playing one's, which the in-place check requires and the second player does not) was removed again;
+`ui/standby_probe.dart` stays.
+
+**What a second `playback.open` costs, for `todo.md` 107 (expired URLs):** with `preload: true` it is 133 to 498 ms (median
+about 165 ms, 20 of 20), and it registers no session, so `playback.report` and the watch history see nothing. A non-preload
+open would mint a second session for one watch and double the history entry (the reason `switchQuality` makes no RPC).
+The sidecar answers either from its 5 minute player-response cache (`SIDECAR_PLAYER_RESPONSE_TTL_MS`), so the URLs only
+change once that has lapsed, which is fine for an expired one (hours) and not for a retry within minutes. A standby that
+resolved its own variant is therefore cheap; it would not have helped this.
 
 **Idea, not built (the orchestrator, 2026-11-04):** the first aim is a fixed 5 s past the clock, so every switch takes about
 8 s end to end whatever the stream. The standby's open took 0.8 to 2.7 s and its first seek 0.5 to 1.8 s on 30 and 25 fps

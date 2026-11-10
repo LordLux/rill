@@ -39,6 +39,7 @@ import 'ui/player/launch_probe.dart';
 import 'ui/player_shell.dart';
 import 'ui/queue_controller.dart';
 import 'ui/semantics_probe.dart';
+import 'ui/standby_probe.dart';
 import 'ui/session_restore.dart';
 import 'ui/swap_spike.dart';
 import 'ui/video_add_probe.dart';
@@ -190,6 +191,7 @@ Future<void> main() async {
   runLaunchProbe(container);
   runCaptionsProbe(container);
   runSemanticsProbe(container);
+  runStandbyProbe(container);
   runSemanticsDump();
   runKeyDiag();
   runFocusProbe(container);
