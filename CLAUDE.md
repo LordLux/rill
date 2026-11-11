@@ -237,7 +237,9 @@ the flag, and `feed_view.dart` does render them, in a shelf of their own.
 **Members-only is a flag, not a badge string — added 2026-09-09.** Same rule as
 the two below, and the same reason the verified badge is read by `style`:
 `BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) is stable,
-while the `"Members only"` label is localised. It ships as
+while the `"Members only"` label is localised. A view-based tile spells it as a
+`badgeViewModel` with `badgeStyle: BADGE_MEMBERS_ONLY` and `iconName:
+SPONSORSHIP_STAR`, outside `contentImage` — missed until 2026-11-10 (F61). It ships as
 `VideoItem.isMembersOnly` / `VideoDetail.isMembersOnly` and is kept out of
 `badges[]`. **A tile carrying it says nothing about whether this account can
 watch** — YouTube puts members-only videos in a subscriber's feed either way,

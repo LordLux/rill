@@ -1689,7 +1689,9 @@ already.
 **Two signals, and only one of them is structural.** The flag on the DTOs —
 `VideoItem.isMembersOnly` and `VideoDetail.isMembersOnly` — comes from
 `BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) on a
-`metadataBadgeRenderer`, which YouTube does not localise. **The error code does
+`metadataBadgeRenderer`, or on a view-based tile `BADGE_MEMBERS_ONLY` /
+`SPONSORSHIP_STAR` on a `badgeViewModel` (`architecture.md` F61, 2026-11-10);
+neither is localised. **The error code does
 not have that luxury.** Measured 2026-09-09 on `rAWLNJoE5_Y`, the whole of
 `playabilityStatus` on the resolve clients is `{status, reason,
 playableInEmbed}`: VISIONOS carries no `errorScreen` at all, MWEB's is a generic

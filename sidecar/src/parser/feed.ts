@@ -24,7 +24,7 @@ import { logger, noteUnknownRenderer } from '../log.ts';
 import type { ArtistPanel, Chip, FeedItem, FeedResult } from '../types.ts';
 import { mapArtistPanel, mapChip, mapItem } from './items.ts';
 import { asArray, contentRoots, get, isObject, str, type Json, type JsonObject } from './tree.ts';
-import { isRendererKey, normaliseRendererName, roleOf } from './vocabulary.ts';
+import { isRendererKey, normaliseRendererName, roleOf, type RendererRole } from './vocabulary.ts';
 
 const log = logger('parser');
 
@@ -38,6 +38,27 @@ export interface Collector {
   artistPanel: ArtistPanel | null;
   /** `entityKey → subscribed`, resolved once from `frameworkUpdates.entityBatchUpdate` — see `mapArtistPanel`. */
   subscriptionEntities: ReadonlyMap<string, boolean>;
+  /** Measurement only (`parser/feed-shape.ts`, Task 37): watches the walk, never changes it. */
+  observer?: TraversalObserver;
+}
+
+/**
+ * A read-only view of the walk, for the names-only shape dump. `renderer` fires
+ * once per classified renderer key, before the walker descends into it; `enter`
+ * and `leave` bracket a descent. An observer must not throw — it is measurement,
+ * and a failure in it must never cost a request (invariant 4).
+ */
+export interface TraversalObserver {
+  renderer(event: {
+    key: string;
+    name: string;
+    role: RendererRole | null;
+    payload: Json;
+    /** What `mapItem` returned; null for every role but `item`, and for an item it declined. */
+    item: FeedItem | null;
+  }): void;
+  enter(): void;
+  leave(): void;
 }
 
 /**
@@ -130,28 +151,31 @@ function handleRenderer(
 ): boolean {
   const name = normaliseRendererName(rendererKey);
   const role = roleOf(rendererKey);
+  let item: FeedItem | null = null;
+  let descend = false;
 
   switch (role) {
     case 'item':
-      pushItem(collector, mapItem(name, payload));
-      return false;
+      item = mapItem(name, payload);
+      pushItem(collector, item);
+      break;
 
     case 'strip':
       if (SHORTS.test(name)) collector.stripped.shorts += 1;
       else collector.stripped.ads += 1;
-      return false;
+      break;
 
     case 'chip-feed':
       if (isObject(payload)) pushChip(collector, mapChip(payload, 'feed'));
-      return false;
+      break;
 
     case 'chip-shelf':
       if (isObject(payload)) pushChip(collector, mapChip(payload, 'shelf'));
-      return false;
+      break;
 
     case 'continuation':
       if (isObject(payload)) collector.continuation ??= continuationToken(payload);
-      return false;
+      break;
 
     case 'artist-panel':
       // First one wins, and never descended into — `mapArtistPanel` lifts the
@@ -161,18 +185,22 @@ function handleRenderer(
       if (isObject(payload)) {
         collector.artistPanel ??= mapArtistPanel(payload, collector.subscriptionEntities);
       }
-      return false;
+      break;
 
     case 'ignore':
-      return false;
+      break;
 
     case 'container':
-      return true;
+      descend = true;
+      break;
 
     default:
       noteUnknownRenderer(rendererKey, context);
-      return false;
+      break;
   }
+
+  collector.observer?.renderer({ key: rendererKey, name, role, payload, item });
+  return descend;
 }
 
 /**
@@ -215,7 +243,9 @@ export function traverse(collector: Collector, value: Json, context: string, dep
   for (const [key, child] of Object.entries(node)) {
     if (isRendererKey(key)) {
       if (handleRenderer(collector, key, child, context)) {
+        collector.observer?.enter();
         traverse(collector, child, context, depth + 1);
+        collector.observer?.leave();
       }
       continue;
     }
@@ -230,7 +260,7 @@ export function traverse(collector: Collector, value: Json, context: string, dep
  * `context` only labels the unknown-renderer log, so a surprise in search is
  * distinguishable from the same surprise in the home feed.
  */
-export function parseFeed(raw: Json, context = 'feed'): FeedResult {
+export function parseFeed(raw: Json, context = 'feed', observer?: TraversalObserver): FeedResult {
   const collector: Collector = {
     items: [],
     chips: [],
@@ -239,6 +269,7 @@ export function parseFeed(raw: Json, context = 'feed'): FeedResult {
     stripped: { shorts: 0, ads: 0 },
     artistPanel: null,
     subscriptionEntities: subscriptionEntitiesFrom(raw),
+    ...(observer ? { observer } : {}),
   };
 
   for (const root of contentRoots(raw)) {

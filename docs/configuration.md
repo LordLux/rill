@@ -16,6 +16,7 @@ This document lists all the environment variables read across the Rill project (
 | `YT_VIEWER_COMMENT_VIDEO` | `capture-viewer-state.ts` | Comment video for viewer-state captures |
 | `YT_VIEWER_DISLIKED_VIDEO` | `capture-viewer-state.ts` | Disliked video for viewer-state captures |
 | `SIDECAR_LOG_LEVEL` | `log.ts` | Sidecar log verbosity |
+| `SIDECAR_FEED_SHAPE` | `parser/feed-shape.ts`, `rpc/server.ts` | `1`: for every `feed.home` page (first page, each continuation, each chip), write the page's names-only shape to `%TEMP%\rill-feed-shape-<time>-<n>-<first\|continuation\|chip>.txt` and log its path to stderr (the release log). Renderer names, the parser's verdict per node, shelf header text, badge style/icon/label, enum tokens and a per-launch channel ordinal (`ch3`: first-seen order in this process, not an id). Never a video title, an id, a URL, a thumbnail or anything from the response's context block. A shelf header can itself name a channel or a video ("Because you watched …"), so read a file before sending it. Task 37 §1; measurement only, off by default |
 | `SIDECAR_PLAYER_RESPONSE_TTL_MS` | `innertube/player-response.ts` | `/player` response cache TTL override |
 | `SIDECAR_PLAYER_TTL_MS` | `innertube/player.ts` | Player-JS/decipher cache TTL override |
 | `SIDECAR_STORYBOARD_TTL_MS` | `video/storyboard.ts` | Storyboard cache TTL override |

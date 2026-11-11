@@ -251,7 +251,10 @@ export interface BadgeScan {
    *
    * The icon is read as a second route because a view-based tile carries an
    * icon where it may carry no style — the same asymmetry `hasMusicNote`
-   * already deals with. Only the classic shape above is confirmed live.
+   * already deals with. The classic shape above was confirmed live on the watch
+   * page (2026-09-09); a view-based tile's is a `badgeViewModel`
+   * (`badgeStyle: BADGE_MEMBERS_ONLY`, `iconName: SPONSORSHIP_STAR`), measured on
+   * the home feed 2026-11-10 (`architecture.md` F61) and read in `scanBadges`.
    */
   isMembersOnly: boolean;
   /**
@@ -385,6 +388,24 @@ export function scanBadges(node: Json): BadgeScan {
         text(metadataBadge['label']),
         str(metadataBadge['style']),
         badgeHasMembersIcon(metadataBadge),
+      );
+    }
+
+    // **`badgeViewModel` — read for the members marker only, never for a label.**
+    // Measured 2026-11-10 on the signed-in home feed (Task 37, `architecture.md`
+    // F61): a members-only `lockupViewModel` carries
+    // `{badgeStyle: 'BADGE_MEMBERS_ONLY', iconName: 'SPONSORSHIP_STAR'}` in a
+    // `badgeViewModel` — a different spelling of style and icon from both shapes
+    // above, and outside `contentImage`. 39 of 39 members tiles had it and the
+    // parser flagged none. Passing a null label is what keeps the other
+    // `badgeViewModel`s (`BADGE_DEFAULT`, `BADGE_PROMOTED`) from becoming new
+    // pills: `consider` returns on an empty value after the members check.
+    const viewModelBadge = candidate['badgeViewModel'];
+    if (isObject(viewModelBadge)) {
+      consider(
+        null,
+        str(viewModelBadge['badgeStyle']),
+        str(viewModelBadge['iconName']) === MEMBERS_ICON || badgeHasMembersIcon(viewModelBadge),
       );
     }
 

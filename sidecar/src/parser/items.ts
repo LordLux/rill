@@ -189,7 +189,10 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     badges: badges.labels,
     isShort: badges.isShort,
     isMusic: badges.hasMusicNote,
-    isMembersOnly: badges.isMembersOnly,
+    // The thumbnail's badges are scanned above; the members marker is a
+    // `badgeViewModel` in the metadata rows (F61), so the whole tile is searched
+    // for it. A second walk, but only for tiles that did not already say so.
+    isMembersOnly: badges.isMembersOnly || scanBadges(node).isMembersOnly,
     isVerified: ownerBadges.isVerified,
     isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),

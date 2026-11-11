@@ -313,7 +313,18 @@ async function handleRequest(request: RpcRequest) {
       const raw = token
         ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
         : await fetchBaseBrowse(HOME_BROWSE_ID);
-      const result = parseFeed(raw, 'home');
+      // `SIDECAR_FEED_SHAPE=1` (Task 37 §1): the names-only shape of this page, written to a
+      // temp file by an observer on the same walk. Off, this is exactly `parseFeed(raw, 'home')`.
+      let result: ReturnType<typeof parseFeed>;
+      if (process.env['SIDECAR_FEED_SHAPE'] === '1') {
+        const { FeedShapeRecorder, writeFeedShape } = await import('../parser/feed-shape.ts');
+        const label = continuation ? 'continuation' : chipToken ? 'chip' : 'first';
+        const recorder = new FeedShapeRecorder(label);
+        result = parseFeed(raw, 'home', recorder);
+        writeFeedShape(recorder, result, label);
+      } else {
+        result = parseFeed(raw, 'home');
+      }
       // Explicit rather than `emitResponse(id, result)`: `FeedResult` carries
       // an internal `artistPanel` field search.query uses (below), and the
       // wire contract for `feed.home` is exactly `{chips, items,
