@@ -422,7 +422,11 @@ void main() {
 
   test('a manual check is shown as running for at least the floor; an automatic one is not held', () async {
     final http = await feed('0.1.0');
-    final (container, controller) = await start(config: config('0.1.0'), http: http, manualFloor: const Duration(milliseconds: 100));
+    // A wall-clock test, so the floor is long enough that a slow machine cannot blur the two sides: the
+    // automatic check does real work (a fake feed, a hash) and took 122 ms against a floor of 100 on a
+    // loaded run. It is held to half the floor, which only a held check can miss.
+    const floor = Duration(milliseconds: 800);
+    final (container, controller) = await start(config: config('0.1.0'), http: http, manualFloor: floor);
 
     final manual = controller.checkNow();
     await Future<void>.delayed(const Duration(milliseconds: 30));
@@ -432,6 +436,6 @@ void main() {
 
     final watch = Stopwatch()..start();
     await controller.checkNow(origin: UpdateCheckOrigin.automatic);
-    expect(watch.elapsedMilliseconds, lessThan(100));
+    expect(watch.elapsed, lessThan(floor ~/ 2), reason: 'an automatic check is not held to the floor');
   });
 }
