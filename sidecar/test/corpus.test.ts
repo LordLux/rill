@@ -86,7 +86,9 @@ const KEEP_REAL = new Set([
  */
 const SANITISED_SHAPE: Record<string, RegExp> = {
   // Discriminator and contract vocabulary — not capture-derived.
-  kind: /^(video|mix|playlist|channel)$/,
+  kind: /^(video|mix|playlist|channel|post)$/,
+  // A shelf's category (`todo.md` 111) — the sidecar's own closed set, like `kind`.
+  category: /^(members|shorts|posts|other)$/,
   scope: /^(feed|shelf)$/,
   // Task 25 §3 — a closed set the sidecar itself defines, not free text off
   // the watch page. Same treatment as `kind`/`scope` above.
@@ -100,7 +102,7 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // `WL` is Watch Later's fixed, public playlist id (the save dialog's row) — a
   // constant every account shares, so it identifies nobody. Every other id is
   // replaced.
-  id: /^((vid|mix|list|chan|item|cmt)_\d{3,}|WL)$/,
+  id: /^((vid|mix|list|chan|item|cmt|post)_\d{3,}|WL)$/,
   channelId: /^chan_\d{3,}$/,
 
   // Indexed so a mapper that gives every item the same value cannot pass.
@@ -162,6 +164,14 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   likeText: /^Sanitised Likes \d+$/,
   relatedContinuation: /^CONTINUATION_TOKEN_\d+$/,
   commentsContinuation: /^CONTINUATION_TOKEN_\d+$/,
+
+  // PostItem (`todo.md` 111): free text, an image, a permalink carrying the post's
+  // own id, a public count — all replaced. `authorName`, `authorChannelId` and
+  // `authorAvatarUrl` below are Comment's and keep their one shape.
+  text: /^Sanitised Post Text \d+$/,
+  imageUrl: /^https:\/\/fake\.url\/post\d+\.jpg$/,
+  postUrl: /^https:\/\/fake\.url\/post\/\d+$/,
+  likeCountText: /^Sanitised Likes \d+$/,
 
   // Comment (Task 27)
   authorName: /^Sanitised Author \d+$/,
@@ -246,7 +256,7 @@ export function auditShapes(docs: Doc[]): string[] {
  * so exempting them here opens no hole.
  */
 function isContractVocabulary(value: string, field: string | null): boolean {
-  if (field === 'kind' || field === 'scope') return true;
+  if (field === 'kind' || field === 'scope' || field === 'category') return true;
   if (field === 'privacy' || field === 'visibility') return true;
   if (field === 'label' && value === 'All') return true;
   if (field === 'token' && value === '') return true;
@@ -407,6 +417,34 @@ describe('corpus sanitisation', () => {
       // "a brand-new field is caught" rather than quietly re-testing the fixed bug.
       const docs = poisoned({ id: 'vid_001', title: 'Sanitised Title 1', someUnsanitisedField: 'anything at all' });
       expect(auditShapes(docs).join()).toContain('no sanitised shape');
+    });
+
+    test('a real post text, link and shelf title are caught (todo 111)', () => {
+      const docs: Doc[] = [
+        {
+          name: 'planted-home.json',
+          value: {
+            shelves: [
+              {
+                category: 'posts',
+                title: 'Latest posts from channels you follow',
+                index: 0,
+                items: [{ kind: 'post', id: 'post_001', text: 'a real post', postUrl: 'https://www.youtube.com/post/Ugx1' }],
+              },
+            ],
+          },
+        },
+      ];
+      const findings = auditShapes(docs).join(' | ');
+      expect(findings).toContain('shelves[0].title');
+      expect(findings).toContain('.text');
+      expect(findings).toContain('.postUrl');
+    });
+
+    test('the home corpus carries a shelf, so the shelf shape is audited at all', () => {
+      const home = corpus.find((doc) => doc.name === 'home.json')?.value as { shelves?: { items: { kind: string }[] }[] } | undefined;
+      expect(home?.shelves?.length ?? 0).toBeGreaterThan(0);
+      expect(home?.shelves?.some((shelf) => shelf.items.some((item) => item.kind === 'post'))).toBe(true);
     });
 
     test('the control does not fire on the real corpus', () => {

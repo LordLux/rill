@@ -13,8 +13,14 @@ const version = parseInt(process.argv[2] || '1', 10);
 // 'paging-user' / 'paging-auto': the base browse hands back a continuation that
 // is rigged to fail, so a test can reach the *second* page's error path. Without
 // a continuation the controller's `loadMore` never issues anything at all.
+// 'shelves': `feed.home` ships shelves (todo 111). The first page has two (a members
+// shelf after 1 tile, a posts shelf after 2) and a continuation; the second page has one
+// Shorts shelf after 1 of *its own* tiles — a page-relative `index`, which the controller
+// must move past the 3 tiles already loaded.
 const mode = process.argv[3] || '';
-const pagingContinuation = mode === 'paging-user'
+const pagingContinuation = mode === 'shelves'
+  ? 'PAGE2'
+  : mode === 'paging-user'
   ? 'PAGE2!fail=user'
   : mode === 'paging-auto'
     ? 'PAGE2!fail=auto'
@@ -31,6 +37,24 @@ const pending = new Map();
 // Playback, recorded rather than answered blindly: `test.playbackLog` hands the
 // whole conversation back so a test can assert on the cadence of reports and on
 // preloads it has no other way to observe.
+function shelfVideo(id: string, extra: Record<string, unknown> = {}) {
+  return {
+    kind: 'video', id, title: id, channelName: 'Fake Channel', channelId: null, channelAvatarUrl: null,
+    thumbnailUrl: 'https://fake.url/img.jpg', durationSeconds: 60, isLive: false, viewCountText: null,
+    publishedText: null, badges: [], canWatchLater: false, canAddToQueue: false, ...extra,
+  };
+}
+
+function shelvesFor(tag: string) {
+  if (tag === 'PAGE2') {
+    return [{ category: 'shorts', title: 'Shorts', index: 1, items: [shelfVideo('short_a', { isShort: true }), shelfVideo('short_b', { isShort: true })] }];
+  }
+  return [
+    { category: 'members', title: 'Members row', index: 1, items: [shelfVideo('member_a', { isMembersOnly: true })] },
+    { category: 'posts', title: 'Posts row', index: 2, items: [{ kind: 'post', id: 'post_a', authorName: 'Poster', authorChannelId: null, authorAvatarUrl: null, text: 'post a text', imageUrl: null, publishedText: '2 days ago', likeCountText: '4K', postUrl: null }] },
+  ];
+}
+
 /** The one video id that is a premiere. 2026-08-22T15:00:00Z. */
 const PREMIERE_ID = 'premiere1';
 const PREMIERE_AT_MS = 1787670000_000;
@@ -754,6 +778,7 @@ rl.on('line', (line) => {
               canWatchLater: true,
               canAddToQueue: true,
             })),
+            ...(mode === 'shelves' ? { shelves: shelvesFor(tag) } : {}),
             continuation: label === '' ? pagingContinuation : null,
           },
         }) + '\n');

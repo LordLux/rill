@@ -14,6 +14,8 @@ import type {
   CommentsResult,
   FeedItem,
   PlaylistMembershipResult,
+  PostItem,
+  Shelf,
   PlaylistResult,
   VideoDetail,
   VideoItem,
@@ -105,6 +107,47 @@ function sanitiseItem(item: FeedItem, index: number): FeedItem {
   if (sanitised.avatarUrl) sanitised.avatarUrl = `https://fake.url/avatar${n}.jpg`;
   if (sanitised.channelAvatarUrl) sanitised.channelAvatarUrl = `https://fake.url/avatar${n}.jpg`;
   return sanitised as unknown as FeedItem;
+}
+
+/**
+ * A shelf (`todo.md` 111), sanitised. Its title is as much the account's as a chip
+ * label — "Because you watched …" names a video — so it is indexed and replaced.
+ * `category` and `index` are the sidecar's own closed set and a position; the
+ * tiles go through the item sanitiser, numbered on from the page's own grid tiles
+ * so no id repeats within a page.
+ */
+function sanitiseShelves(shelves: Shelf[], firstIndex: number): Shelf[] {
+  let next = firstIndex;
+  return shelves.map((shelf, shelfIndex) => ({
+    ...shelf,
+    title: shelf.title === null ? null : `Sanitised Title ${shelfIndex + 1}`,
+    items: shelf.items.map((item) => {
+      const index = next++;
+      return item.kind === 'post' ? sanitisePost(item, index) : sanitiseItem(item, index);
+    }),
+  }));
+}
+
+/**
+ * A community post. The text is free text from an arbitrary author, the link
+ * carries the post's own id, and the author is a channel: all replaced, indexed.
+ * `publishedText` and `likeCountText` are display strings (the first is kept
+ * real like every other age; the second is a public count, replaced anyway).
+ */
+function sanitisePost(post: PostItem, index: number): PostItem {
+  const n = index + 1;
+  const seq = String(n).padStart(3, '0');
+  return {
+    ...post,
+    id: `post_${seq}`,
+    authorName: `Sanitised Author ${n}`,
+    authorChannelId: post.authorChannelId === null ? null : `chan_${seq}`,
+    authorAvatarUrl: post.authorAvatarUrl === null ? null : `https://fake.url/avatar${n}.jpg`,
+    text: post.text === null ? null : `Sanitised Post Text ${n}`,
+    imageUrl: post.imageUrl === null ? null : `https://fake.url/post${n}.jpg`,
+    likeCountText: post.likeCountText === null ? null : `Sanitised Likes ${n}`,
+    postUrl: post.postUrl === null ? null : `https://fake.url/post/${n}`,
+  };
 }
 
 const ID_PREFIX: Record<string, string> = {
@@ -331,12 +374,16 @@ async function main() {
       continue;
     }
 
-    const parsed = parseFeed(raw, name);
+    // Shelves are `feed.home`'s alone: every other surface keeps a shelf's tiles in
+    // `items`, so its corpus file carries no `shelves` key at all.
+    const isHome = name.startsWith('home');
+    const { shelves, ...parsed } = parseFeed(raw, name, undefined, { shelves: isHome });
 
     const result = {
       ...parsed,
       chips: parsed.chips.map(sanitiseChip()),
       items: parsed.items.map(sanitiseItem),
+      ...(isHome ? { shelves: sanitiseShelves(shelves, parsed.items.length) } : {}),
       continuation: sanitiseContinuation(parsed.continuation, fileIndex),
       artistPanel: parsed.artistPanel ? sanitiseArtistPanel(parsed.artistPanel) : null,
     };

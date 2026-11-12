@@ -10,15 +10,48 @@ import '../open_video.dart';
 import '../../data/connectivity.dart';
 import '../../data/rpc/client.dart';
 import '../../domain/feed_item.dart';
+import '../../domain/shelf.dart';
 import '../../theme/screen_values.dart';
 import '../auth_controller.dart';
 import '../members_only_preference.dart';
+import '../shelf_visibility.dart';
 import 'account_button.dart';
 import 'channel_badge.dart';
 import 'feed_grid_metrics.dart';
 import 'feed_skeleton.dart';
 import 'media_tile.dart';
+import 'shelf_row.dart';
 import 'subscribe_button.dart';
+
+/// A shelf and where it goes among the grid rows that survive the page's filters.
+typedef PlacedShelf = ({Shelf shelf, int position});
+
+/// Which shelves are shown, and at what position in the *displayed* grid.
+///
+/// A shelf's [Shelf.index] counts tiles of [all], the unfiltered list; the grid shows
+/// only those [inGrid] accepts (a hidden members-only video, a hoisted one, an
+/// `itemFilter`), so the same shelf has to be moved back by however many tiles before it
+/// are not displayed — otherwise hiding tiles would carry every shelf down the page. A
+/// shelf with nothing left to show is dropped.
+@visibleForTesting
+List<PlacedShelf> placeShelves(
+  List<Shelf> shelves,
+  List<FeedItem> all, {
+  required bool Function(Shelf shelf) isShown,
+  required bool Function(FeedItem item) inGrid,
+}) {
+  if (shelves.isEmpty) return const [];
+  // keptBefore[n] is how many of the first n tiles are displayed.
+  final keptBefore = List<int>.filled(all.length + 1, 0);
+  for (var n = 0; n < all.length; n++) {
+    keptBefore[n + 1] = keptBefore[n] + (inGrid(all[n]) ? 1 : 0);
+  }
+  return [
+    for (final shelf in shelves)
+      if (shelf.items.isNotEmpty && isShown(shelf))
+        (shelf: shelf, position: keptBefore[shelf.index.clamp(0, all.length)]),
+  ];
+}
 
 /// The grid, chip bar, and every loading/error/empty state — generalised out
 /// of `FeedPage` (Task 20 §1) so home, search and subscriptions share one
@@ -189,7 +222,22 @@ class _FeedViewState extends ConsumerState<FeedView> {
     // that follow would call that "Nothing here yet" and render nothing, or
     // flash a skeleton over content that had already arrived. A subscriptions
     // feed of one heavily-membership channel is not a hypothetical.
-    final isEmpty = items.isEmpty && membersOnly.isEmpty;
+    //
+    // And the home feed's own shelves (`todo.md` 111), after the user's per-category
+    // switches. A shelf is content too: a page of nothing but shelves is not "Nothing
+    // here yet".
+    final shelfSwitches = ref.watch(shelfVisibilityProvider);
+    final shelves = placeShelves(
+      state.shelves,
+      state.items,
+      isShown: (shelf) =>
+          (shelfSwitches[shelf.category] ?? true) && (shelf.category != ShelfCategory.members || showMembersOnly),
+      inGrid: (item) {
+        if (widget.itemFilter != null && !widget.itemFilter!(item)) return false;
+        return !isMembersOnlyItem(item) || (showMembersOnly && !widget.groupMembersOnly);
+      },
+    );
+    final isEmpty = items.isEmpty && membersOnly.isEmpty && shelves.isEmpty;
 
     if (state.error != null && isEmpty) {
       return Center(
@@ -368,8 +416,28 @@ class _FeedViewState extends ConsumerState<FeedView> {
             rows.add(shelf);
           }
 
+          // The home feed's shelves go between the grid's rows, at the row boundary at or
+          // after the tile they follow — never inside a row.
+          var shelfCursor = 0;
+          void addShelvesUpTo(int gridItemsBefore) {
+            while (shelfCursor < shelves.length && shelves[shelfCursor].position <= gridItemsBefore) {
+              Widget row = ShelfRow(shelf: shelves[shelfCursor].shelf);
+              if (widget.isWideLayout) {
+                row = Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: ScreenValues.contentMaxWidth),
+                    child: row,
+                  ),
+                );
+              }
+              rows.add(row);
+              shelfCursor++;
+            }
+          }
+
           int i = 0;
           while (i < items.length) {
+            addShelvesUpTo(i);
             final current = items[i];
             if (current is VideoItem && current.isShort) {
               List<FeedItem> shorts = [];
@@ -479,6 +547,8 @@ class _FeedViewState extends ConsumerState<FeedView> {
               maybeAddMembersShelf();
             }
           }
+
+          addShelvesUpTo(items.length);
 
           // A feed shorter than one row — or one made entirely of members-only
           // videos — still gets the shelf, at the end rather than never.

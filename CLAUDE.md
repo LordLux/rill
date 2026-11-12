@@ -130,6 +130,33 @@ interface ChannelItem { kind: 'channel'; id: string; name: string;
   descriptionSnippet: string | null;
   isVerified: boolean; isArtistChannel: boolean; }
 
+// --- Home shelves (todo 111) ---
+// feed.home only. A shelf is a titled row between the grid's tiles; its tiles are
+// in it and not in `items`. Not a FeedItem: no other surface has anywhere to put a post.
+
+type ShelfCategory = 'members' | 'shorts' | 'posts' | 'other';   // from structure, never the title
+type ShelfItem = FeedItem | PostItem;
+
+interface PostItem {
+  kind: 'post';
+  id: string;
+  authorName: string;
+  authorChannelId: string | null;
+  authorAvatarUrl: string | null;
+  text: string | null;
+  imageUrl: string | null;
+  publishedText: string | null;
+  likeCountText: string | null;
+  postUrl: string | null;           // from the post's own link, never built from `id`
+}
+
+interface Shelf {
+  category: ShelfCategory;
+  title: string | null;             // localised, display only
+  index: number;                    // how many of this page's `items` come before it
+  items: ShelfItem[];
+}
+
 // --- Comments (Task 27) ---
 // Not a FeedItem. Sent over video.comments (which wraps /next with continuation).
 
@@ -232,7 +259,11 @@ vocabulary. A Short arriving as an **ordinary video renderer carrying a
 `SHORTS`-styled duration overlay**, which is how search returns them, is
 classified instead: `VideoItem.isShort`, with `"SHORTS"` deliberately kept
 out of `badges[]` so the fact ships once. The client decides what to do with
-the flag, and `feed_view.dart` does render them, in a shelf of their own.
+the flag, and `feed_view.dart` does render them, in a shelf of their own. **On
+`feed.home` a Shorts shelf is parsed too** (`todo.md` 111): `parseFeed(…,
+{shelves: true})` collects a `richShelfRenderer`'s `shortsLockupViewModel` tiles as
+`VideoItem`s with `isShort: true`, inside a `Shelf` of category `shorts`; a
+`postRenderer` in a shelf is a `PostItem`. Outside a shelf both are dropped as ever.
 
 **Members-only is a flag, not a badge string — added 2026-09-09.** Same rule as
 the two below, and the same reason the verified badge is read by `style`:

@@ -22,6 +22,7 @@ import 'ui/audio_mode_controller.dart';
 import 'ui/focus_probe.dart';
 import 'ui/focus_ring.dart';
 import 'ui/hide_queue_controller.dart';
+import 'ui/shelf_visibility.dart';
 import 'ui/key_diag.dart';
 import 'ui/keyboard_resync.dart';
 
@@ -127,6 +128,7 @@ Future<void> main() async {
   final audioMode = await readAudioMode();
   final hideQueue = await readHideQueue();
   final restoreSession = await readRestoreSession();
+  final shelfVisibility = await readShelfVisibility();
 
   // Decided before the sidecar can possibly spawn — `RpcClient` reads
   // `extraEnvironment` at its very first `_spawn`, which the first RPC call
@@ -143,6 +145,7 @@ Future<void> main() async {
       playbackEngineProvider.overrideWithValue(engine),
       audioModeProvider.overrideWith(() => AudioModeController(initial: audioMode)),
       hideQueueProvider.overrideWith(() => HideQueueController(initial: hideQueue)),
+      shelfVisibilityProvider.overrideWith(() => ShelfVisibility(initial: shelfVisibility)),
       restoreSessionProvider.overrideWith(() => RestoreSessionController(initial: restoreSession)),
       drawerStateProvider.overrideWith(() => DrawerStateController(initial: drawerOpen)),
     ],

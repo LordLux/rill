@@ -117,6 +117,13 @@ describe('feed shape dump', () => {
   const result = parseFeed(raw, 'test', recorder);
   const dump = recorder.render(result);
 
+  test('flags a tile whose id is not a video id, by shape and never by value', () => {
+    // 'gridvideo0002' is 13 characters, which is not a video id's 11: told apart from an
+    // ordinary tile without the id itself ever reaching the file.
+    expect(dump).toMatch(/tile#\d+ {2}mapped:video .*flags=.*idodd/);
+    expect(dump).not.toContain('gridvideo0002');
+  });
+
   test('names the shelf, its header text, and which tiles sit in it', () => {
     expect(dump).toMatch(/richShelfRenderer {2}S\d+ {2}title="Synthetic shelf heading"/);
     expect(dump).toMatch(/lockupViewModel {2}tile#2 {2}mapped:video {2}views=no .*in=S\d+/);

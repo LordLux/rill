@@ -335,6 +335,11 @@ export class FeedShapeRecorder implements TraversalObserver {
         if (item.isShort) flags.push('short');
         if (item.isMusic) flags.push('music');
         if (item.isMembersOnly) flags.push('members');
+        // Facts about the id and the actions, never the id: a promo tile that is not a video
+        // (a Premium upsell) is told by an id that is not 11 characters and by having no actions.
+        if (!/^[A-Za-z0-9_-]{11}$/.test(item.id)) flags.push('idodd');
+        if (!item.canAddToQueue) flags.push('noqueue');
+        if (!item.canWatchLater) flags.push('nowatchlater');
       }
     }
 

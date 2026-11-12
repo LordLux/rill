@@ -151,6 +151,59 @@ export interface ChannelItem {
   isArtistChannel: boolean;
 }
 
+/**
+ * A community post (`postRenderer`), shown inside a home shelf (`todo.md` 111).
+ *
+ * **Not a {@link FeedItem}.** `FeedItem` is the sealed union every grid, search
+ * result and watch-page rail switches over, and none of them has anywhere to put a
+ * post; a post exists only as a member of a {@link Shelf}, whose items are
+ * {@link ShelfItem}. A post outside a shelf stays ignored, as it always was.
+ */
+export interface PostItem {
+  kind: 'post';
+  /** The post's own id (`Ugx…`) — not a video id, and not playable. */
+  id: string;
+  authorName: string;
+  authorChannelId: string | null;
+  authorAvatarUrl: string | null;
+  /** The post's text, as one string; null for an image-only post. */
+  text: string | null;
+  imageUrl: string | null;
+  publishedText: string | null;
+  /** The like count as YouTube formatted it ("4.2K"), never parsed. */
+  likeCountText: string | null;
+  /** Absolute `https://www.youtube.com/post/…`, taken from the post's own link, never built from `id`. */
+  postUrl: string | null;
+}
+
+/** What a {@link Shelf} holds: a feed tile, or a post. */
+export type ShelfItem = FeedItem | PostItem;
+
+/**
+ * What a shelf is, decided from its **structure** and never from its title (the
+ * title is localised — the same trap as the members label).
+ *
+ * `shorts` — every tile is a Short. `posts` — every tile is a post. `members` —
+ * every tile carries the members-only flag. `other` is explicit: a shelf this
+ * parser has no rule for, or a mixed one, lands there rather than in a guess.
+ */
+export type ShelfCategory = 'members' | 'shorts' | 'posts' | 'other';
+
+/**
+ * A titled row YouTube lays between the grid's tiles (`richShelfRenderer`,
+ * `brandVideoShelfRenderer`, `shelfRenderer`), `feed.home` only.
+ *
+ * The shelf's tiles are **not** also in `items`: a shelf is where they went.
+ */
+export interface Shelf {
+  category: ShelfCategory;
+  /** The shelf's header as YouTube wrote it, localised; null when it carried none. */
+  title: string | null;
+  /** How many of this page's `items` come before the shelf. Several shelves can share one. */
+  index: number;
+  items: ShelfItem[];
+}
+
 export interface Chip {
   label: string;
   token: string;
@@ -233,6 +286,12 @@ export interface ArtistPanel {
 export interface FeedResult {
   chips: Chip[];
   items: FeedItem[];
+  /**
+   * The shelves of this page — only when `parseFeed` was asked for them
+   * (`feed.home`); `[]` everywhere else, where a shelf's tiles stay in `items`
+   * as they always did and a Shorts or posts shelf stays dropped.
+   */
+  shelves: Shelf[];
   continuation: string | null;
   /**
    * Populated only when the response carried an `officialCardViewModel` —
