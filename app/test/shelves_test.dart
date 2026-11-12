@@ -16,6 +16,7 @@ import 'package:rill/domain/shelf.dart';
 import 'package:rill/theme/accent.dart';
 import 'package:rill/theme/app_theme.dart';
 import 'package:rill/ui/feed_controller.dart';
+import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/members_only_preference.dart';
 import 'package:rill/ui/shelf_visibility.dart';
 import 'package:rill/ui/widgets/feed_view.dart';
@@ -76,8 +77,10 @@ Future<void> _pump(
   Map<ShelfCategory, bool>? switches,
   bool membersVisible = true,
   bool groupMembersOnly = false,
+  double height = 2400,
+  bool withFocusRing = false,
 }) async {
-  tester.view.physicalSize = const Size(1400, 2400);
+  tester.view.physicalSize = Size(1400, height);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 
@@ -94,7 +97,12 @@ Future<void> _pump(
       ],
       child: MaterialApp(
         theme: buildRillTheme(kDefaultAccent),
-        home: Scaffold(body: FeedView(provider: feedProvider, groupMembersOnly: groupMembersOnly)),
+        home: Scaffold(
+          body: () {
+            final view = FeedView(provider: feedProvider, groupMembersOnly: groupMembersOnly);
+            return withFocusRing ? FocusRing(child: view) : view;
+          }(),
+        ),
       ),
     ),
   );
@@ -257,6 +265,33 @@ void main() {
       }
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
       expect(reached.where(row.contains).toList(), row.reversed.toList());
+    });
+
+    testWidgets('a row below the fold is scrolled into view by Tab, not left under the window edge', (tester) async {
+      // A horizontal row inside a vertical page: the page has to be the one that moves.
+      // Measured on a real feed 2026-11-12: nine stops in a Shorts row sat past the bottom.
+      const row = ['row-a', 'row-b', 'row-c'];
+      await _pump(
+        tester,
+        items: _grid(),
+        shelves: [_shelf(ShelfCategory.other, 'Other row', 12, [for (final id in row) ShelfTile(_video(id))])],
+        height: 640,
+        withFocusRing: true,
+      );
+
+      final seen = <String>[];
+      for (var press = 0; press < 80 && !seen.contains('row-c'); press++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        await tester.pump();
+        final now = holding(tester, row);
+        if (now == null) continue;
+        seen.add(now);
+        final rect = FocusManager.instance.primaryFocus!.rect;
+        expect(rect.top, greaterThanOrEqualTo(0), reason: '$now is above the window');
+        expect(rect.bottom, lessThanOrEqualTo(640), reason: '$now is below the window (rect $rect)');
+      }
+      expect(seen, containsAll(row), reason: 'Tab never reached the whole row: $seen');
     });
   });
 
