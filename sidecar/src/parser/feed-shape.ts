@@ -33,7 +33,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { logger } from '../log.ts';
 import type { FeedItem, FeedResult } from '../types.ts';
-import type { TraversalObserver } from './feed.ts';
+import { parseFeed, type TraversalObserver } from './feed.ts';
 import { text } from './text.ts';
 import { asArray, get, isObject, str, type Json, type JsonObject } from './tree.ts';
 import { isRendererKey, type RendererRole } from './vocabulary.ts';
@@ -422,6 +422,19 @@ export class FeedShapeRecorder implements TraversalObserver {
     }
     return `${out.join('\n')}\n`;
   }
+}
+
+/**
+ * `parseFeed`, and with `SIDECAR_FEED_SHAPE=1` the names-only dump of the same walk, labelled
+ * `label` — for the surfaces besides `feed.home` that the dump now covers (the watch page's
+ * related list, where a Premium promo card turned up). Off, exactly `parseFeed(raw, context)`.
+ */
+export function parseFeedDumped(raw: Json, context: string, label: string): FeedResult {
+  if (process.env['SIDECAR_FEED_SHAPE'] !== '1') return parseFeed(raw, context);
+  const recorder = new FeedShapeRecorder(label);
+  const result = parseFeed(raw, context, recorder);
+  writeFeedShape(recorder, result, label);
+  return result;
 }
 
 /** Write one page's dump to the temp directory and say where on stderr. Never throws. */

@@ -32,7 +32,7 @@ import { messageOf } from '../errors.ts';
 import { logger } from '../log.ts';
 import { getPlayerResponse } from '../innertube/player-response.ts';
 import type { Session } from '../innertube/session.ts';
-import { parseFeed } from '../parser/feed.ts';
+import { parseFeedDumped } from '../parser/feed-shape.ts';
 import { get } from '../parser/tree.ts';
 import { parseVideoDetail } from '../parser/video.ts';
 import type { ItemListResult, VideoDetail } from '../types.ts';
@@ -141,7 +141,7 @@ export async function getRelated(
     ? raw
     : (get(raw, 'contents', 'twoColumnWatchNextResults', 'secondaryResults') ?? raw);
 
-  const result = parseFeed(root, 'video.related');
+  const result = parseFeedDumped(root, 'video.related', 'related-continuation');
   return { items: result.items, continuation: result.continuation };
 }
 
