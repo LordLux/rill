@@ -75,6 +75,17 @@ export interface VideoItem {
    * is a tile whose playback may well answer `VIDEO_MEMBERS_ONLY`.
    */
   isMembersOnly: boolean;
+  /**
+   * A paid placement YouTube itself marks as promoted — `badgeStyle: BADGE_PROMOTED`
+   * on a view-based tile's `badgeViewModel` (measured 2026-11-13 on the watch page's
+   * related list, where a "Try YouTube Premium" card turned up; the home feed had none).
+   *
+   * A structural token, not the localised label, kept out of `badges[]` like the other
+   * facts with a field of their own. Such a tile is an ordinary-looking video that
+   * cannot be saved or queued and whose id is not a video id, so opening it fails:
+   * the client hides it unless the viewer asked to see promoted tiles.
+   */
+  isPromoted: boolean;
   /** The uploading channel's verified checkmark. Never true alongside {@link isArtistChannel} — YouTube ships one badge per channel. */
   isVerified: boolean;
   /** The uploading channel's "Official Artist Channel" badge. */

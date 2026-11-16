@@ -104,6 +104,7 @@ interface VideoItem {
   isShort: boolean;                 // Task 21 — classified, not stripped
   isMusic: boolean;                 // the ♪ on the duration badge, per video
   isMembersOnly: boolean;           // BADGE_STYLE_TYPE_MEMBERS_ONLY, not the label
+  isPromoted: boolean;              // BADGE_PROMOTED — YouTube's own paid-placement marker
   isVerified: boolean;              // the uploading channel's checkmark
   isArtistChannel: boolean;         // the uploading channel's artist badge
   premiereAtMs: number | null;      // unix ms; null unless it is a premiere
@@ -275,6 +276,14 @@ SPONSORSHIP_STAR`, outside `contentImage` — missed until 2026-11-10 (F61). It 
 `badges[]`. **A tile carrying it says nothing about whether this account can
 watch** — YouTube puts members-only videos in a subscriber's feed either way,
 and the resolve path is anonymous besides.
+
+**A promoted tile is a flag too — measured 2026-11-13.** A `badgeViewModel` with
+`badgeStyle: BADGE_PROMOTED` (the "Try YouTube Premium" card in the watch page's related
+list is one) ships as `VideoItem.isPromoted`, read by the style and never the label, and
+is kept out of `badges[]`. Such a tile is an ordinary-looking `lockupViewModel` with no
+save or queue action and an id that is not a video id, so opening it ends in "This video
+is unavailable"; the app hides it unless the viewer turned the switch on
+(`architecture.md` F63).
 
 **A playlist row's view count ships without its unit — measured 2026-10-07
 (`architecture.md` F57).** `viewCountText` is a display string, and a playlist is

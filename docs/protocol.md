@@ -678,6 +678,12 @@ view-based badge shape in this corpus; classic tiles carry no equivalent icon
 field, so `isMusic` stays `false` for anything that never reaches that node —
 a real answer, not a gap, per the task's own "say so plainly" instruction.
 
+**A promoted tile — `VideoItem.isPromoted`, measured 2026-11-13.** `badgeStyle:
+BADGE_PROMOTED` on a view-based tile's `badgeViewModel`, read by the style (the label
+is localised) and kept out of `badges[]`. Seen on the watch page's related list, in
+its first page and in both continuations; none on the home pages captured the same
+run. A client that shows it should expect `playback.open` to answer `STREAM_UNAVAILABLE`.
+
 **Shorts are classified, not stripped — Task 21 §1, and this reverses the
 original "no Shorts" requirement deliberately.** Two structurally different
 shapes carry a Short, and only one is changed:

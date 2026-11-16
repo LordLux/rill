@@ -139,6 +139,7 @@ function seedItemFrom(detail: VideoDetail, seed: string): VideoItem | null {
     isShort: false,
     isMusic: false,
     isMembersOnly: detail.isMembersOnly,
+    isPromoted: false,
     isVerified: detail.isVerified,
     isArtistChannel: detail.isArtistChannel,
     premiereAtMs: detail.premiereAtMs,

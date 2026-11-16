@@ -171,6 +171,8 @@ export function mapLockup(node: JsonObject): FeedItem | null {
   const detailRows = flatRows;
   const actions = scanTileActions(node);
   const ownerBadges = scanOwnerBadges(node);
+  // One walk of the whole tile for the two flags that live outside the thumbnail.
+  const wholeTile = scanBadges(node);
 
   return {
     kind: 'video',
@@ -191,8 +193,10 @@ export function mapLockup(node: JsonObject): FeedItem | null {
     isMusic: badges.hasMusicNote,
     // The thumbnail's badges are scanned above; the members marker is a
     // `badgeViewModel` in the metadata rows (F61), so the whole tile is searched
-    // for it. A second walk, but only for tiles that did not already say so.
-    isMembersOnly: badges.isMembersOnly || scanBadges(node).isMembersOnly,
+    // for it (`wholeTile`, above).
+    isMembersOnly: badges.isMembersOnly || wholeTile.isMembersOnly,
+    // Same sweep as above: the promoted marker is a `badgeViewModel` outside the thumbnail.
+    isPromoted: badges.isPromoted || wholeTile.isPromoted,
     isVerified: ownerBadges.isVerified,
     isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),
@@ -258,6 +262,7 @@ export function mapClassicVideo(node: JsonObject): VideoItem | null {
     isShort: badges.isShort,
     isMusic: badges.hasMusicNote,
     isMembersOnly: badges.isMembersOnly,
+    isPromoted: badges.isPromoted,
     isVerified: ownerBadges.isVerified,
     isArtistChannel: ownerBadges.isArtistChannel,
     premiereAtMs: premiereStartMs(node),

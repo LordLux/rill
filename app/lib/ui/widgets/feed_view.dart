@@ -14,6 +14,7 @@ import '../../domain/shelf.dart';
 import '../../theme/screen_values.dart';
 import '../auth_controller.dart';
 import '../members_only_preference.dart';
+import '../promoted_preference.dart';
 import '../shelf_visibility.dart';
 import 'account_button.dart';
 import 'channel_badge.dart';
@@ -196,7 +197,10 @@ class _FeedViewState extends ConsumerState<FeedView> {
 
   Widget _buildBody(BuildContext context, FeedState state, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final filtered = widget.itemFilter == null ? state.items : state.items.where(widget.itemFilter!).toList();
+    final showPromoted = ref.watch(promotedVisibleProvider);
+    final filtered = state.items
+        .where((i) => (showPromoted || !isPromotedItem(i)) && (widget.itemFilter == null || widget.itemFilter!(i)))
+        .toList();
 
     // **Members-only content: hidden, hoisted, or left alone.**
     //
@@ -234,6 +238,7 @@ class _FeedViewState extends ConsumerState<FeedView> {
           (shelfSwitches[shelf.category] ?? true) && (shelf.category != ShelfCategory.members || showMembersOnly),
       inGrid: (item) {
         if (widget.itemFilter != null && !widget.itemFilter!(item)) return false;
+        if (!showPromoted && isPromotedItem(item)) return false;
         return !isMembersOnlyItem(item) || (showMembersOnly && !widget.groupMembersOnly);
       },
     );

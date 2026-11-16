@@ -74,6 +74,7 @@ export function mapShortsLockup(node: Json): VideoItem | null {
     isShort: true,
     isMusic: false,
     isMembersOnly: false,
+    isPromoted: false,
     isVerified: false,
     isArtistChannel: false,
     premiereAtMs: null,

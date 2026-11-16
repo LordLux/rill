@@ -10,6 +10,7 @@ import '../../domain/shelf.dart';
 import '../../theme/screen_values.dart';
 import '../focus_surface.dart';
 import '../open_video.dart';
+import '../promoted_preference.dart';
 import 'feed_grid_metrics.dart';
 import 'media_tile.dart';
 
@@ -47,6 +48,13 @@ class ShelfRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final title = shelf.title ?? shelfFallbackTitle(shelf.category);
+    final showPromoted = ref.watch(promotedVisibleProvider);
+    final entries = [
+      for (final entry in shelf.items)
+        if (showPromoted || entry is! ShelfTile || !isPromotedItem(entry.item)) entry,
+    ];
+    // A row whose every tile was a promoted one has nothing left to show.
+    if (entries.isEmpty) return const SizedBox.shrink();
     final kind = _GeometryKind.of(shelf);
 
     return FocusSurface(
@@ -83,14 +91,14 @@ class ShelfRow extends ConsumerWidget {
                   height: geometry.height,
                   child: SilkyListView.builder(
                     scrollDirection: Axis.horizontal,
-                    itemCount: shelf.items.length,
+                    itemCount: entries.length,
                     // Wide enough that every tile of a row is built (see the class comment).
                     cacheExtent: 100000,
                     itemBuilder: (context, index) => Padding(
                       padding: EdgeInsets.only(right: 16.0, bottom: 8.0, top: 9.0, left: index == 0 ? 10.5 : 0),
                       child: SizedBox(
                         width: geometry.itemWidth,
-                        child: _tile(context, ref, shelf.items[index], kind),
+                        child: _tile(context, ref, entries[index], kind),
                       ),
                     ),
                   ),

@@ -85,6 +85,7 @@ const SHAPES = {
     isShort: 'boolean',
     isMusic: 'boolean',
     isMembersOnly: 'boolean',
+    isPromoted: 'boolean',
     isVerified: 'boolean',
     isArtistChannel: 'boolean',
     premiereAtMs: 'number?',
