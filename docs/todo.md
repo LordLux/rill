@@ -57,28 +57,6 @@ and it is a guess until a real occurrence says otherwise.
 
 ## Soon
 
-### 111. The home feed's shelves are flattened into the grid: decide what to do with them
-
-**Measured 2026-11-10 (`architecture.md` F61, Task 37 §1); the choice is the user's
-and nothing is built.** `parseFeed` treats `richShelf`, `richSection` and
-`brandVideoShelf` as containers, so their tiles become ordinary grid items with
-no sign of the shelf they came from. The members shelf was the one that hurt
-(12 tiles, 8 from one channel, "Get more from memberships"); with the members
-flag fixed (Task 37 §2) the app's own members shelf (`FeedView(groupMembersOnly:
-true)`) hoists them again, which covers that shelf. What is still flat is
-"Top hyped videos this week" (12 tiles, `brandVideoShelfRenderer`, one per
-channel), and whatever shelf YouTube adds next. Options, each costed in the
-Task 37 report:
-
-- **A. Titled rows**: shelves become titled rows inside the grid. Changes the
-  `FeedPage` DTO, so `protocol.md`, `types.ts`, CLAUDE.md's DTO block, the Dart
-  model, the corpus and the feed UI.
-- **B. A members chip**: the members shelf leaves the main grid for a chip or page.
-- **C. Flatten with a shelf label**: tag each tile with its shelf's title and let
-  the UI mark it. One nullable field on `VideoItem`.
-
-**Done** when the user has picked one (or none) and it is built or closed.
-
 ### 112. `VideoDetail.isMembersOnly` reads the whole `/next` body and only `metadataBadgeRenderer`
 
 `parseVideoDetail` collects every `metadataBadgeRenderer` in `body`, which is the
