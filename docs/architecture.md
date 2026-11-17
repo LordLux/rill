@@ -2425,6 +2425,25 @@ automatic-download switch). A launch with the setting off is a fresh start, and 
 - **Not kept, on purpose:** scroll positions and open menus; the page stack below the top (Back from a restored playlist
   page goes to the feed); the subscriptions pages; search filters.
 
+### 2.18 `RpcClient._spawn` starts the sidecar in a guarded zone (decided 2026-11-17, `todo.md` 113)
+
+A sidecar started close behind a killed one can fail with `SocketException: Write failed (OS Error: The pipe is being
+closed, errno = 232)`. The error is not always raised out of the awaited `Process.start`: it can come from the pipe's own
+async machinery with nothing awaiting it, so the retry in `_spawn` never saw it, and it surfaced as an unhandled error on
+whichever test was running (CI runs 43976683267 and 44007227084, `quality_in_place_test.dart`, both green on a rerun).
+
+- **The start runs in `runZonedGuarded`** (`_startGuarded`). What `Process.start` schedules is bound to the zone it was
+  called in, so those errors arrive at the zone's handler. **Before the start has completed** an error fails that attempt
+  and `_spawn` retries (≤5 attempts); a process that arrives after its attempt was abandoned is killed, not leaked. **After
+  it has completed** the process stands and the late error is logged and dropped: a dead sidecar is already handled by the
+  exit handlers on stdout (`_handleExit(process)`), and re-spawning on a pipe error would double-start a healthy one.
+- **Not reproduced on demand** (a plain Dart script writing to dead and killed children 70 times raised nothing), so the
+  guard is exercised with a forced failure: `RpcClient.processStarter` is a `@visibleForTesting` seam over `Process.start`,
+  and `test/rpc_client_spawn_test.dart` raises the same error from a timer in each of the two phases. Mutation-checked:
+  with the zone removed both tests fail with that error unhandled.
+- **Production cost:** one zone per spawn. Nothing else on the start path changed. Errors raised on the caller's own zone
+  (a `stdin.writeln` from `_send`) are not covered; no evidence says that is where it comes from.
+
 ## 3. Phasing
 
 **Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with yt-dlp

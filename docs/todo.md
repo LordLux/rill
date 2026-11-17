@@ -72,30 +72,20 @@ watch page's own owner/title area (capture one), with a fixture.
 
 ### 113. A fake-sidecar test occasionally fails on a spawn race, in CI only
 
-**Seen once, 2026-11-16, on the Task 37 pull request (CI run 43976683267): the
-"App - tests" step, one test of 1461, `quality_in_place_test.dart` ("a pause pressed
-while it runs…"), `SocketException: Write failed (OS Error: The pipe is being
-closed, errno = 232)`. A rerun of the same commit passed.** Nothing on the branch
-touched that test or the playback code, `main` passed its scheduled run the same
-morning, and the file passed 6 of 6 here and 4 of 4 when run four at once (the
-next round of that stress run hung, which proved nothing). Not reproduced.
+**Seen twice, 2026-11-16 and 2026-11-17 (CI runs 43976683267 and 44007227084): one test of
+~1460, `quality_in_place_test.dart` ("a pause pressed while it runs…"), `SocketException: Write
+failed (OS Error: The pipe is being closed, errno = 232)`; a rerun passed both times.** Neither
+branch touched playback or `RpcClient`.
 
-**What is known.** It is the race `RpcClient._spawn` documents
-(`data/rpc/client.dart`): starting a fake sidecar soon after killing the last one can
-fail inside `Process.start`, and the error arrives as an unhandled async error, so it
-lands on whichever test is running. The suites that restart the sidecar per test
-already wait for the old process to exit (`killForTestAndWait`) and `_spawn` retries,
-which that comment calls "a hedge": a retry cannot catch an error that does not come
-out of the awaited call. Replacing a fixed sleep with polling, as `captions_test`
-needed, would not help here: this test already waits on the exit.
+**Landed 2026-11-17: `RpcClient._spawn` starts the process in a guarded zone** and retries on an
+async error that arrives before the start completes (`architecture.md` §2.18), with
+`test/rpc_client_spawn_test.dart` forcing the failure and mutation-checked. **It has not been seen
+to fix the CI failure**, which was never reproduced locally: the guard is verified against a forced
+error, not against the real one.
 
-**The candidate fix, not tried because it could not be verified:** run `Process.start`
-in a guarded zone inside `_spawn` so the async error is caught and the spawn retried.
-That changes the production start path, not only a test.
-
-**Done** when it has not recurred across enough CI runs to call it gone, or the spawn is
-guarded and a run that forces the failure shows the retry catching it. If it recurs,
-note the run id here first: how often decides whether the guard is worth the risk.
+**Done** when it has not recurred across enough CI runs to call it gone; then delete this entry. If
+it recurs, note the run id here first: the error is then not one the zone sees (a write on the
+caller's zone, say), and the next step is logging the stack in the failing run.
 
 ### 56. Sign-in and sign-out: two questions left after Task 31
 
