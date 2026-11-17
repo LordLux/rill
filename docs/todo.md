@@ -80,6 +80,12 @@ touched that test or the playback code, `main` passed its scheduled run the same
 morning, and the file passed 6 of 6 here and 4 of 4 when run four at once (the
 next round of that stress run hung, which proved nothing). Not reproduced.
 
+**Seen again, 2026-11-17, on PR 40 (CI run 44007227084): the same test, the same
+error (three `errno = 232` lines), commit `9263f34`.** That branch touched the
+sign-in page and the sidecar's auth check, nothing in playback or `RpcClient`. Its
+previous CI run (44005546291, one commit earlier) got past the app tests and failed
+on the text-file guard instead. Two hits in two days, both on this one test.
+
 **What is known.** It is the race `RpcClient._spawn` documents
 (`data/rpc/client.dart`): starting a fake sidecar soon after killing the last one can
 fail inside `Process.start`, and the error arrives as an unhandled async error, so it
