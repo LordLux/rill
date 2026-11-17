@@ -17,7 +17,7 @@
 import { describe, expect, test } from 'bun:test';
 import { BrowseAuth } from '../src/innertube/auth.ts';
 import { isRpcError } from '../src/errors.ts';
-import type { Session } from '../src/innertube/session.ts';
+import { describeEmptyHome, type Session } from '../src/innertube/session.ts';
 
 // ---------------------------------------------------------------------------
 // A fake session
@@ -377,5 +377,23 @@ describe('YT_COOKIE seeds, the client overrides', () => {
     auth.signOut();
     await auth.session();
     expect(recorder.cookies.at(-1)).toBeUndefined();
+  });
+});
+
+describe('describeEmptyHome', () => {
+  // The log line that tells "YouTube stopped honouring the cookie" (sign in
+  // again) from "YouTube sent an empty home page to a valid account" (no
+  // sign-in helps). Measured 2026-11-17 on a degraded session: loggedOut=true.
+  test("reports YouTube's own loggedOut reading and what the page held", () => {
+    const raw = {
+      responseContext: { mainAppWebResponseContext: { loggedOut: true } },
+      contents: { richGridRenderer: { contents: [{ feedNudgeRenderer: {} }, { feedNudgeRenderer: {} }] } },
+    };
+    expect(describeEmptyHome(raw)).toBe('loggedOut=true; renderers: feedNudgeRenderer×2, richGridRenderer×1');
+  });
+
+  test('says absent rather than guessing when the field is missing', () => {
+    expect(describeEmptyHome(EMPTY_FEED)).toBe('loggedOut=absent; renderers: none');
+    expect(describeEmptyHome(null)).toBe('loggedOut=absent; renderers: none');
   });
 });

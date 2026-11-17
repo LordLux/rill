@@ -352,6 +352,38 @@ export function countTiles(raw: unknown): number {
 }
 
 /**
+ * What a zero-tile home response *did* hold, names only, for the log.
+ *
+ * Zero tiles has two causes that need opposite fixes: YouTube no longer
+ * honouring the cookie (sign in again), and a home feed YouTube really sent
+ * empty or in a shape `countTiles` does not know (no sign-in will help). The
+ * response says which: `loggedOut` is YouTube's own reading of the cookie, and
+ * the renderer keys show what the page held instead of tiles.
+ */
+export function describeEmptyHome(raw: unknown): string {
+  const ctx = (raw as { responseContext?: { mainAppWebResponseContext?: { loggedOut?: unknown } } } | null)
+    ?.responseContext?.mainAppWebResponseContext;
+  const loggedOut = typeof ctx?.loggedOut === 'boolean' ? String(ctx.loggedOut) : 'absent';
+  const keys = new Map<string, number>();
+  const seen = new WeakSet<object>();
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 60 || value === null || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) walk(entry, depth + 1);
+      return;
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      if (/(Renderer|ViewModel|Model)$/.test(key)) keys.set(key, (keys.get(key) ?? 0) + 1);
+      walk(entry, depth + 1);
+    }
+  };
+  walk(raw, 0);
+  const listed = [...keys].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, n]) => `${k}×${n}`);
+  return `loggedOut=${loggedOut}; renderers: ${listed.length ? listed.join(', ') : 'none'}`;
+}
+
+/**
  * The only trustworthy authentication check.
  *
  * Never trust `logged_in` (hard invariant 5): it reflects cookie presence, not
@@ -371,9 +403,10 @@ export async function verifyAuth(
     s.execute('/browse', { browseId: 'FEwhat_to_watch' }),
 ): Promise<AuthVerification> {
   let tileCount = 0;
+  let raw: unknown = null;
 
   try {
-    const raw = await fetchHome(session);
+    raw = await fetchHome(session);
     tileCount = countTiles(raw);
   } catch (error) {
     log.error(`auth verification request failed: ${(error as Error).message}`);
@@ -392,6 +425,7 @@ export async function verifyAuth(
         'Cookies were invalidated server-side — re-export from an incognito window ' +
         'parked on youtube.com/robots.txt, and keep main-profile YouTube tabs closed.',
     );
+    log.error(`degraded home response: ${describeEmptyHome(raw)}`);
   } else {
     log.info(`auth state=${state} tiles=${tileCount}`);
   }
