@@ -169,6 +169,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             'rill auth: the jar holds a session the app is not signed in with — '
             'clearing it so Google asks again (${describe(jar)})',
           );
+          // One delete per cookie: ~8 s for 50 of them, measured 2026-11-17,
+          // so the page is blank long enough to need saying why.
+          _setMessage('Clearing the expired session…');
           await cookies.clear();
         }
       } on Object catch (error) {
@@ -177,7 +180,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       }
     }
     if (!mounted) return;
-    _ready = true;
+    _setMessage('Waiting for you to sign in…');
+    setState(() => _ready = true);
     _poll?.cancel();
     _poll = Timer.periodic(_pollInterval, (_) => _checkCookies());
     unawaited(_controller?.loadUrl(urlRequest: URLRequest(url: _signIn)));
@@ -467,7 +471,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   color: scheme.surfaceContainerHighest,
                   child: Row(
                     children: [
-                      if (busy)
+                      if (busy || !_ready)
                         const SizedBox(
                           width: 16,
                           height: 16,
