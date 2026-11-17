@@ -118,7 +118,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   bool _ready = false;
   bool _checking = false;
 
-  /// Whether "Why sign in here?" is expanded ([SignInHereNote]).
+  /// Whether "Why sign in here?" is expanded ([SignInHereToggle], [SignInHerePanel]).
   bool _whyOpen = false;
   bool _finished = false;
 
@@ -470,7 +470,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               if (!_canRetry)
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
                   color: scheme.surfaceContainerHighest,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -492,14 +492,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               style: TextStyle(color: scheme.onSurfaceVariant),
                             ),
                           ),
+                          // In the same row as the status, always: the bar's height
+                          // never changes at the hand-off, only when the user opens it.
+                          SignInHereToggle(
+                            open: _whyOpen,
+                            onToggle: () => setState(() => _whyOpen = !_whyOpen),
+                          ),
                         ],
                       ),
-                      // Always present while the bar is, so the WebView above is
-                      // never resized by the hand-off — only by the user opening it.
-                      SignInHereNote(
-                        open: _whyOpen,
-                        onToggle: () => setState(() => _whyOpen = !_whyOpen),
-                      ),
+                      if (_whyOpen) const SignInHerePanel(),
                     ],
                   ),
                 ),
@@ -558,93 +559,109 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   }
 }
 
-/// Why the sign-in happens in Rill's own window and not in the browser — one
-/// line, and three points behind "Why sign in here?" (`architecture.md` §2.5).
+/// "Why sign in here?" — the bar's toggle for [SignInHerePanel], which says why
+/// the sign-in happens in Rill's own window and not in the browser
+/// (`architecture.md` §2.5).
 ///
 /// In the tree, expanded in place: no overlay, so nothing here can orphan a
-/// semantics node (CLAUDE.md, Accessibility). The toggle keeps one name and
-/// says whether it is open through `expanded`, rather than renaming itself.
+/// semantics node (CLAUDE.md, Accessibility). It keeps one name and says
+/// whether it is open through `expanded`, rather than renaming itself.
 @visibleForTesting
-class SignInHereNote extends StatelessWidget {
-  const SignInHereNote({super.key, required this.open, required this.onToggle});
+class SignInHereToggle extends StatelessWidget {
+  const SignInHereToggle({super.key, required this.open, required this.onToggle});
 
   final bool open;
   final VoidCallback onToggle;
 
-  static const String note = "Signing in here keeps Rill's session separate from your browser, "
-      "so browsing YouTube elsewhere won't sign Rill out.";
-  static const String toggleLabel = 'Why sign in here?';
+  static const String label = 'Why sign in here?';
 
-  /// Lead-in, then the point.
-  static const List<(String, String)> points = [
+  @override
+  Widget build(BuildContext context) {
+    // Merged, or `expanded` lands on the bar's node and not the button's.
+    return MergeSemantics(
+      child: Semantics(
+        expanded: open,
+        child: TextButton(
+          onPressed: onToggle,
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.info_outline, size: 16),
+              const SizedBox(width: 6),
+              const Text(label),
+              const SizedBox(width: 2),
+              Icon(open ? Icons.expand_less : Icons.expand_more, size: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The three points behind [SignInHereToggle]: an icon, a title, a line.
+@visibleForTesting
+class SignInHerePanel extends StatelessWidget {
+  const SignInHerePanel({super.key});
+
+  static const List<(IconData, String, String)> points = [
     (
-      'Why not your browser? ',
-      "Rill can't use your browser's Google sign-in without sharing it, and a shared "
-          'sign-in gets signed out whenever your browser refreshes it.',
+      Icons.layers_outlined,
+      "Your own session, not your browser's",
+      "Browsing YouTube elsewhere won't sign Rill out. Rill can't use your browser's "
+          'Google sign-in without sharing it, and a shared one gets signed out whenever '
+          'your browser refreshes it.',
     ),
     (
-      'No password needed. ',
-      'If Google offers a passkey or Windows Hello, choose it.',
+      Icons.key_outlined,
+      'No password needed',
+      'Choose a passkey or Windows Hello if Google offers it.',
     ),
     (
-      'The Windows prompt. ',
-      'Windows may say the request comes from "Msedgewebview2". That is Microsoft '
-          "WebView2, the component showing Google's page inside Rill.",
+      Icons.shield_outlined,
+      '"Msedgewebview2" in the Windows prompt',
+      "That's Microsoft WebView2, which shows Google's page inside Rill.",
     ),
   ];
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final style = TextStyle(color: scheme.onSurfaceVariant, fontSize: 13);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Icon(Icons.info_outline, size: 16, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 12),
-            Expanded(child: Text(note, style: style)),
-            const SizedBox(width: 12),
-            // Merged, or `expanded` lands on the bar's node and not the button's.
-            MergeSemantics(
-              child: Semantics(
-                expanded: open,
-                child: TextButton.icon(
-                  onPressed: onToggle,
-                  iconAlignment: IconAlignment.end,
-                  icon: Icon(open ? Icons.expand_less : Icons.expand_more, size: 18),
-                  label: const Text(toggleLabel),
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (open)
-          Padding(
-            padding: const EdgeInsets.only(left: 28, top: 4, right: 12, bottom: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final (lead, body) in points)
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 8, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (icon, title, body) in points)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(text: lead, style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600)),
-                          TextSpan(text: body),
-                        ],
-                      ),
-                      style: style,
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(icon, size: 18, color: scheme.primary),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 2),
+                        Text(body, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+                      ],
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -256,30 +256,31 @@ void main() {
     Future<void> open(WidgetTester tester) =>
         openLogin(tester, ScriptedAuth([AuthStatus.authenticated]), ScriptedJar([<String, String>{}]));
 
-    testWidgets('one line always, the three points only when asked', (tester) async {
+    testWidgets('one row, and the three points only when asked', (tester) async {
       await open(tester);
 
-      expect(find.text(SignInHereNote.note), findsOneWidget);
-      expect(find.textContaining('Msedgewebview2'), findsNothing);
+      expect(find.text(SignInHereToggle.label), findsOneWidget);
+      expect(find.byType(SignInHerePanel), findsNothing);
 
-      await tester.tap(find.text(SignInHereNote.toggleLabel));
+      await tester.tap(find.text(SignInHereToggle.label));
       await tester.pump();
-      for (final (lead, _) in SignInHereNote.points) {
-        expect(find.textContaining(lead, findRichText: true), findsOneWidget);
+      for (final (_, title, body) in SignInHerePanel.points) {
+        expect(find.text(title), findsOneWidget);
+        expect(find.text(body), findsOneWidget);
       }
 
-      await tester.tap(find.text(SignInHereNote.toggleLabel));
+      await tester.tap(find.text(SignInHereToggle.label));
       await tester.pump();
-      expect(find.textContaining('Msedgewebview2', findRichText: true), findsNothing);
+      expect(find.byType(SignInHerePanel), findsNothing);
     });
 
     testWidgets('the toggle keeps its name and says whether it is open', (tester) async {
       final semantics = tester.ensureSemantics();
       await open(tester);
 
-      final toggle = find.bySemanticsLabel(SignInHereNote.toggleLabel);
+      final toggle = find.bySemanticsLabel(SignInHereToggle.label);
       expect(tester.getSemantics(toggle), matchesSemantics(
-        label: SignInHereNote.toggleLabel,
+        label: SignInHereToggle.label,
         isButton: true,
         hasTapAction: true,
         hasFocusAction: true,
@@ -290,7 +291,7 @@ void main() {
         isEnabled: true,
       ));
 
-      await tester.tap(find.text(SignInHereNote.toggleLabel));
+      await tester.tap(find.text(SignInHereToggle.label));
       await tester.pump();
       expect(tester.getSemantics(toggle).flagsCollection.isExpanded, Tristate.isTrue);
       semantics.dispose();
@@ -300,7 +301,7 @@ void main() {
       await open(tester);
 
       bool inNote() =>
-          FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<SignInHereNote>() != null;
+          FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<SignInHereToggle>() != null;
       for (var i = 0; i < 6 && !inNote(); i++) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pump();
@@ -309,7 +310,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pump();
 
-      expect(find.textContaining('Msedgewebview2', findRichText: true), findsOneWidget);
+      expect(find.byType(SignInHerePanel), findsOneWidget);
     });
   });
 
