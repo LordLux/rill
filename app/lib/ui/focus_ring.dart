@@ -312,6 +312,12 @@ class _FocusRingState extends State<FocusRing> {
         scrollable != null;
         scrollable = Scrollable.maybeOf(walk)
       ) {
+        // What this scrollable is asked to reveal: the control for the innermost one, and
+        // for each one outside it the scrollable just handled — with the control named as
+        // the target, as `Scrollable.ensureVisible` does. Handing an outer scrollable the
+        // control itself measures it against the inner viewport's axis, and a horizontal
+        // shelf in a vertical page then never scrolled the page (`todo.md` 111, measured).
+        final revealing = walk.findRenderObject();
         walk = scrollable.context;
         final viewport = walk.findRenderObject();
         if (viewport is! RenderBox || !viewport.attached) continue;
@@ -333,9 +339,10 @@ class _FocusRingState extends State<FocusRing> {
         final room = extent - size;
         final wantedStart = start < margin ? margin : extent - margin - size;
         scrollable.position.ensureVisible(
-          target,
+          revealing ?? target,
           alignment: room <= 0 ? 0 : (wantedStart / room).clamp(0.0, 1.0),
           duration: Duration.zero,
+          targetRenderObject: target,
         );
       }
     });

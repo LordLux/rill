@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { parseFeed } from '../src/parser/feed.ts';
 import { scanBadges } from '../src/parser/text.ts';
 import { parsePlayer } from '../src/parser/player.ts';
 import { openPlayback } from '../src/playback/resolve.ts';
@@ -124,6 +125,123 @@ describe('scanBadges', () => {
 
   test('nothing members-ish is false, not undefined', () => {
     expect(scanBadges({}).isMembersOnly).toBe(false);
+  });
+});
+
+/**
+ * The view-based marker — Task 37, measured 2026-11-10 on a signed-in home feed
+ * (`architecture.md` F61). Renderer names, styles and icons only; the ids,
+ * titles and channel are invented. 39 of 39 members tiles had this and the
+ * parser flagged none, because `mapLockup` scanned `contentImage` and
+ * `scanBadges` did not read `badgeViewModel`.
+ */
+const MEMBERS_BADGE_VIEW_MODEL = {
+  badgeViewModel: { badgeText: 'Members only', badgeStyle: 'BADGE_MEMBERS_ONLY', iconName: 'SPONSORSHIP_STAR' },
+};
+
+function membersLockup(id: string, badges: unknown[]) {
+  return {
+    lockupViewModel: {
+      contentId: id,
+      contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+      contentImage: {
+        thumbnailViewModel: {
+          image: { sources: [{ url: `https://i.example.test/${id}.jpg`, width: 720 }] },
+          overlays: [
+            { thumbnailBadgeViewModel: { text: '22:28', badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT' } },
+            {
+              thumbnailBadgeViewModel: {
+                badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT',
+                icon: { sources: [{ clientResource: { imageName: 'PLAY_DISABLED' } }] },
+              },
+            },
+          ],
+        },
+      },
+      metadata: {
+        lockupMetadataViewModel: {
+          title: { content: `Synthetic title ${id}` },
+          metadata: {
+            contentMetadataViewModel: {
+              metadataRows: [
+                { metadataParts: [{ text: { content: 'Synthetic Channel' } }] },
+                { metadataParts: [{ text: { content: '3w ago' } }], badges },
+              ],
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+describe('scanBadges: badgeViewModel', () => {
+  test('flags the measured marker and keeps its label out of badges[]', () => {
+    const scan = scanBadges({ badges: [MEMBERS_BADGE_VIEW_MODEL] });
+    expect(scan.isMembersOnly).toBe(true);
+    expect(scan.labels).toEqual([]);
+  });
+
+  test('the style alone is enough, and so is the icon alone', () => {
+    expect(scanBadges({ b: { badgeViewModel: { badgeStyle: 'BADGE_MEMBERS_ONLY' } } }).isMembersOnly).toBe(true);
+    expect(scanBadges({ b: { badgeViewModel: { iconName: 'SPONSORSHIP_STAR', badgeText: 'Réservé aux membres' } } })).toMatchObject({
+      isMembersOnly: true,
+      labels: [],
+    });
+  });
+
+  test('the other badgeViewModels measured beside it are not members, and add no pill', () => {
+    // BADGE_DEFAULT/STAR_SHOOTING is the "Top hyped" shelf's; BADGE_PROMOTED a promoted tile's.
+    for (const badge of [
+      { badgeStyle: 'BADGE_DEFAULT', iconName: 'STAR_SHOOTING', badgeText: 'Hyped' },
+      { badgeStyle: 'BADGE_PROMOTED', badgeText: 'Promoted' },
+    ]) {
+      const scan = scanBadges({ b: { badgeViewModel: badge } });
+      expect(scan.isMembersOnly).toBe(false);
+      expect(scan.labels).toEqual([]);
+    }
+  });
+});
+
+describe('a view-based tile carrying the marker', () => {
+  const wrap = (tiles: unknown[]) => ({ contents: { richGridRenderer: { contents: tiles } } });
+
+  test('is flagged, on every surface that shares the tile parser', () => {
+    for (const context of ['home', 'search', 'subscriptions', 'video.related']) {
+      const { items } = parseFeed(wrap([{ richItemRenderer: { content: membersLockup('abc', [MEMBERS_BADGE_VIEW_MODEL]) } }]), context);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ kind: 'video', isMembersOnly: true, badges: [] });
+    }
+  });
+
+  test('a tile without it is not', () => {
+    const { items } = parseFeed(wrap([{ richItemRenderer: { content: membersLockup('abc', []) } }]), 'home');
+    expect(items[0]).toMatchObject({ isMembersOnly: false });
+  });
+
+  test('a promoted members tile is flagged and its promoted badge is not a pill', () => {
+    const promoted = { badgeViewModel: { badgeStyle: 'BADGE_PROMOTED', badgeText: 'Promoted' } };
+    const { items } = parseFeed(
+      wrap([{ richItemRenderer: { content: membersLockup('abc', [promoted, MEMBERS_BADGE_VIEW_MODEL]) } }]),
+      'home',
+    );
+    expect(items[0]).toMatchObject({ isMembersOnly: true, badges: [] });
+  });
+
+  test('the members shelf: every tile in a brandVideoShelf is flagged, none dropped', () => {
+    const shelf = {
+      richSectionRenderer: {
+        content: {
+          brandVideoShelfRenderer: {
+            title: { runs: [{ text: 'Synthetic shelf' }] },
+            contents: [1, 2, 3].map((n) => membersLockup(`vid${n}`, [MEMBERS_BADGE_VIEW_MODEL])),
+          },
+        },
+      },
+    };
+    const { items } = parseFeed(wrap([shelf]), 'home');
+    expect(items).toHaveLength(3);
+    expect(items.every((item) => item.kind === 'video' && item.isMembersOnly)).toBe(true);
   });
 });
 

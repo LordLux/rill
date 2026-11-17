@@ -38,7 +38,10 @@ class FeedPage extends StatelessWidget {
           },
         ),
       ],
-      body: FeedView(provider: feedProvider, groupMembersOnly: true),
+      // No `groupMembersOnly`: YouTube's own members shelf arrives as a shelf now
+      // (`todo.md` 111), and the scattered members tiles stay in the grid as they do
+      // on youtube.com. Hoisting them as well would put two members rows on the page.
+      body: FeedView(provider: feedProvider),
     );
   }
 }

@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/caption_track.dart';
 import 'package:rill/domain/comment.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/domain/shelf.dart';
 import 'package:rill/domain/video_detail.dart';
 import 'package:rill/ui/queue_controller.dart' show PlaylistResult;
 
@@ -117,6 +118,23 @@ const playlistHeaderKeys = <String>{
   'isOwnedByViewer',
 };
 
+/// Every key `PostItem.fromJson` reads, hand-written from `lib/domain/shelf.dart`.
+const postItemKeys = <String>{
+  'kind',
+  'id',
+  'authorName',
+  'authorChannelId',
+  'authorAvatarUrl',
+  'text',
+  'imageUrl',
+  'publishedText',
+  'likeCountText',
+  'postUrl',
+};
+
+/// Every key a shelf on the wire carries — `Shelf.fromJson` reads these four.
+const shelfKeys = <String>{'category', 'title', 'index', 'items'};
+
 /// Keys in [payload] that no field of the model claims.
 ///
 /// Returned rather than asserted so the mutation checks can drive the same
@@ -160,6 +178,47 @@ void main() {
         expect(item, isNotNull);
       }
     }
+  });
+
+  group('home shelves (todo 111), strict-key', () {
+    late List<dynamic> shelves;
+
+    setUp(() {
+      final file = File('../corpus/home.json');
+      expect(file.existsSync(), isTrue, reason: 'corpus/home.json missing. Run bun run export-contract-corpus.');
+      shelves = (jsonDecode(file.readAsStringSync()) as Map<String, dynamic>)['shelves'] as List<dynamic>? ?? const [];
+    });
+
+    test('the home corpus carries a shelf, so there is something to check', () {
+      expect(shelves, isNotEmpty);
+    });
+
+    test('every shelf key and every post key maps to a field', () {
+      for (final raw in shelves) {
+        final shelf = raw as Map<String, dynamic>;
+        expect(unknownKeys(shelf, shelfKeys), isEmpty, reason: 'the sidecar ships a shelf key Shelf drops');
+        expect(missingKeys(shelf, shelfKeys), isEmpty);
+        for (final item in shelf['items'] as List<dynamic>) {
+          final json = item as Map<String, dynamic>;
+          if (json['kind'] != 'post') continue;
+          expect(unknownKeys(json, postItemKeys), isEmpty, reason: 'the sidecar ships a post key PostItem drops');
+          expect(missingKeys(json, postItemKeys), isEmpty, reason: 'PostItem declares a key the sidecar never sends');
+        }
+      }
+    });
+
+    test('they round-trip: items in order, a post as a post', () {
+      for (final raw in shelves) {
+        final shelf = Shelf.fromJson(raw as Map<String, dynamic>);
+        expect(shelf.items, isNotEmpty);
+        expect(shelf.category == ShelfCategory.posts, shelf.items.every((i) => i is ShelfPost));
+      }
+    });
+
+    test('MUTATION: a post key PostItem does not know is caught', () {
+      final poisoned = <String, dynamic>{'kind': 'post', 'id': 'post_001', 'authorName': 'x', 'replyCount': 3};
+      expect(unknownKeys(poisoned, postItemKeys), {'replyCount'});
+    });
   });
 
   group('VideoDetail, strict-key', () {

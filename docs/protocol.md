@@ -169,7 +169,7 @@ unreachable by reading the source and silent when it happens.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `feed.home` | `{chipToken?, continuation?}` | `{chips[], items[], continuation?}` |
+| `feed.home` | `{chipToken?, continuation?}` | `{chips[], items[], shelves[], continuation?}` |
 | `feed.subscriptions` | `{continuation?}` | `{items[], continuation?}` |
 | `feed.watchLater` | `{continuation?}` | `{items[], continuation?}` — **not implemented** |
 | `feed.history` | `{continuation?}` | `{items[], continuation?}` — **not implemented** |
@@ -187,6 +187,51 @@ the feed response already said.
 `chips[]` merges both generations: top-level `chipCloudChipRenderer` and
 shelf-scoped `ChipView`. Each carries `{label, token, selected, scope}` where
 `scope` is `'feed' | 'shelf'`.
+
+**`shelves[]` is `feed.home`'s alone** (`todo.md` 111, `architecture.md` F62). A shelf
+is a titled row YouTube lays between the grid's tiles; the page's `items` hold the
+grid and each shelf holds its own tiles, so a tile is in one place or the other,
+never both. Every other list method keeps a shelf's tiles in `items`, as ever.
+
+```ts
+type ShelfCategory = 'members' | 'shorts' | 'posts' | 'other';
+type ShelfItem = FeedItem | PostItem;
+
+interface PostItem {
+  kind: 'post';
+  id: string;
+  authorName: string;
+  authorChannelId: string | null;
+  authorAvatarUrl: string | null;
+  text: string | null;
+  imageUrl: string | null;
+  publishedText: string | null;
+  likeCountText: string | null;
+  postUrl: string | null;
+}
+
+interface Shelf {
+  category: ShelfCategory;
+  title: string | null;
+  index: number;
+  items: ShelfItem[];
+}
+```
+
+- **`category` is decided from what the tiles are, never from `title`.** The title is
+  localised, which is the members label's trap again. `shorts`: every tile is a Short;
+  `posts`: every tile is a post; `members`: every tile carries `isMembersOnly`; anything
+  else, mixed shelves included, is `other`. `other` is explicit so a shelf this parser
+  has no rule for is shown or hidden by its own setting and not guessed into another.
+- **`index` is page-relative.** It counts the tiles of *this response's* `items` that
+  come before the shelf; the client adds its own running total when it appends a
+  continuation. Several shelves can share an index; array order is page order.
+- **A Short is a `VideoItem` with `isShort: true`** (`channelName: ''`, no duration), so
+  the app's Short tile and open-as-video path apply unchanged. A post is a `PostItem`,
+  which exists only inside a `Shelf`: a post anywhere else is still ignored.
+- **The sidecar ships every shelf and the app filters** by category; the sidecar does
+  not know the setting and stays a pure parser. A shelf with no mappable tile is not
+  sent.
 
 ### 3.3 Video and playlists
 
@@ -632,6 +677,12 @@ co-located with the duration text on the same badge node. Seen only on the
 view-based badge shape in this corpus; classic tiles carry no equivalent icon
 field, so `isMusic` stays `false` for anything that never reaches that node —
 a real answer, not a gap, per the task's own "say so plainly" instruction.
+
+**A promoted tile — `VideoItem.isPromoted`, measured 2026-11-13.** `badgeStyle:
+BADGE_PROMOTED` on a view-based tile's `badgeViewModel`, read by the style (the label
+is localised) and kept out of `badges[]`. Seen on the watch page's related list, in
+its first page and in both continuations; none on the home pages captured the same
+run. A client that shows it should expect `playback.open` to answer `STREAM_UNAVAILABLE`.
 
 **Shorts are classified, not stripped — Task 21 §1, and this reverses the
 original "no Shorts" requirement deliberately.** Two structurally different
@@ -1689,7 +1740,9 @@ already.
 **Two signals, and only one of them is structural.** The flag on the DTOs —
 `VideoItem.isMembersOnly` and `VideoDetail.isMembersOnly` — comes from
 `BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) on a
-`metadataBadgeRenderer`, which YouTube does not localise. **The error code does
+`metadataBadgeRenderer`, or on a view-based tile `BADGE_MEMBERS_ONLY` /
+`SPONSORSHIP_STAR` on a `badgeViewModel` (`architecture.md` F61, 2026-11-10);
+neither is localised. **The error code does
 not have that luxury.** Measured 2026-09-09 on `rAWLNJoE5_Y`, the whole of
 `playabilityStatus` on the resolve clients is `{status, reason,
 playableInEmbed}`: VISIONOS carries no `errorScreen` at all, MWEB's is a generic

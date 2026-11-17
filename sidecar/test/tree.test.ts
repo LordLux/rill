@@ -136,6 +136,9 @@ describe('the three "is this an object?" implementations agree', () => {
   function freshCollector(): Collector {
     return {
       items: [],
+      shelves: [],
+      collectShelves: false,
+      frames: [],
       chips: [],
       continuation: null,
       seenChips: new Set(),

@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 111.** A new item takes it, and the same edit bumps this line.
+**Next number: 114.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -56,6 +56,46 @@ and it is a guess until a real occurrence says otherwise.
 ---
 
 ## Soon
+
+### 112. `VideoDetail.isMembersOnly` reads the whole `/next` body and only `metadataBadgeRenderer`
+
+`parseVideoDetail` collects every `metadataBadgeRenderer` in `body`, which is the
+whole `/next` response, related rail included, so a classic members badge on a
+*related* tile would flag the video being watched. It also does not read the
+`badgeViewModel` that F61 measured on view-based tiles, so if the watch page's
+own badge moved the same way the flag misses it. Neither has been seen on a real
+members watch page since 2026-09-09; the members slate itself is not affected
+(it also reads `playback.isMembersOnly`, from the error code). Left alone in
+Task 37 on purpose: adding `badgeViewModel` to a whole-body scan would make the
+related-rail false positive worse. **Done** when the badge is read from the
+watch page's own owner/title area (capture one), with a fixture.
+
+### 113. A fake-sidecar test occasionally fails on a spawn race, in CI only
+
+**Seen once, 2026-11-16, on the Task 37 pull request (CI run 43976683267): the
+"App - tests" step, one test of 1461, `quality_in_place_test.dart` ("a pause pressed
+while it runs…"), `SocketException: Write failed (OS Error: The pipe is being
+closed, errno = 232)`. A rerun of the same commit passed.** Nothing on the branch
+touched that test or the playback code, `main` passed its scheduled run the same
+morning, and the file passed 6 of 6 here and 4 of 4 when run four at once (the
+next round of that stress run hung, which proved nothing). Not reproduced.
+
+**What is known.** It is the race `RpcClient._spawn` documents
+(`data/rpc/client.dart`): starting a fake sidecar soon after killing the last one can
+fail inside `Process.start`, and the error arrives as an unhandled async error, so it
+lands on whichever test is running. The suites that restart the sidecar per test
+already wait for the old process to exit (`killForTestAndWait`) and `_spawn` retries,
+which that comment calls "a hedge": a retry cannot catch an error that does not come
+out of the awaited call. Replacing a fixed sleep with polling, as `captions_test`
+needed, would not help here: this test already waits on the exit.
+
+**The candidate fix, not tried because it could not be verified:** run `Process.start`
+in a guarded zone inside `_spawn` so the async error is caught and the spawn retried.
+That changes the production start path, not only a test.
+
+**Done** when it has not recurred across enough CI runs to call it gone, or the spawn is
+guarded and a run that forces the failure shows the retry catching it. If it recurs,
+note the run id here first: how often decides whether the guard is worth the risk.
 
 ### 56. Sign-in and sign-out: two questions left after Task 31
 

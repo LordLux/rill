@@ -313,14 +313,30 @@ async function handleRequest(request: RpcRequest) {
       const raw = token
         ? await session.execute('/browse', { browseId: 'FEwhat_to_watch', continuation: token })
         : await fetchBaseBrowse(HOME_BROWSE_ID);
-      const result = parseFeed(raw, 'home');
+      // `SIDECAR_FEED_SHAPE=1` (Task 37 §1): the names-only shape of this page, written to a
+      // temp file by an observer on the same walk. Off, this is exactly `parseFeed(raw, 'home')`.
+      let result: ReturnType<typeof parseFeed>;
+      if (process.env['SIDECAR_FEED_SHAPE'] === '1') {
+        const { FeedShapeRecorder, writeFeedShape } = await import('../parser/feed-shape.ts');
+        const label = continuation ? 'continuation' : chipToken ? 'chip' : 'first';
+        const recorder = new FeedShapeRecorder(label);
+        result = parseFeed(raw, 'home', recorder, { shelves: true });
+        writeFeedShape(recorder, result, label);
+      } else {
+        result = parseFeed(raw, 'home', undefined, { shelves: true });
+      }
       // Explicit rather than `emitResponse(id, result)`: `FeedResult` carries
       // an internal `artistPanel` field search.query uses (below), and the
-      // wire contract for `feed.home` is exactly `{chips, items,
+      // wire contract for `feed.home` is exactly `{chips, items, shelves,
       // continuation}` — picking fields here is what keeps a field added to
       // the parser's return type from silently widening every surface's
       // response.
-      emitResponse(id, { chips: result.chips, items: result.items, continuation: result.continuation });
+      emitResponse(id, {
+        chips: result.chips,
+        items: result.items,
+        shelves: result.shelves,
+        continuation: result.continuation,
+      });
     } else if (method === 'feed.subscriptions') {
       // Same base-browse cache as `feed.home` (`auth.verify`-then-`feed.home`
       // is exactly the pattern the app also runs on this surface for the

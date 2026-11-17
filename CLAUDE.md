@@ -104,6 +104,7 @@ interface VideoItem {
   isShort: boolean;                 // Task 21 — classified, not stripped
   isMusic: boolean;                 // the ♪ on the duration badge, per video
   isMembersOnly: boolean;           // BADGE_STYLE_TYPE_MEMBERS_ONLY, not the label
+  isPromoted: boolean;              // BADGE_PROMOTED — YouTube's own paid-placement marker
   isVerified: boolean;              // the uploading channel's checkmark
   isArtistChannel: boolean;         // the uploading channel's artist badge
   premiereAtMs: number | null;      // unix ms; null unless it is a premiere
@@ -129,6 +130,33 @@ interface ChannelItem { kind: 'channel'; id: string; name: string;
   avatarUrl: string; subscriberText: string | null;
   descriptionSnippet: string | null;
   isVerified: boolean; isArtistChannel: boolean; }
+
+// --- Home shelves (todo 111) ---
+// feed.home only. A shelf is a titled row between the grid's tiles; its tiles are
+// in it and not in `items`. Not a FeedItem: no other surface has anywhere to put a post.
+
+type ShelfCategory = 'members' | 'shorts' | 'posts' | 'other';   // from structure, never the title
+type ShelfItem = FeedItem | PostItem;
+
+interface PostItem {
+  kind: 'post';
+  id: string;
+  authorName: string;
+  authorChannelId: string | null;
+  authorAvatarUrl: string | null;
+  text: string | null;
+  imageUrl: string | null;
+  publishedText: string | null;
+  likeCountText: string | null;
+  postUrl: string | null;           // from the post's own link, never built from `id`
+}
+
+interface Shelf {
+  category: ShelfCategory;
+  title: string | null;             // localised, display only
+  index: number;                    // how many of this page's `items` come before it
+  items: ShelfItem[];
+}
 
 // --- Comments (Task 27) ---
 // Not a FeedItem. Sent over video.comments (which wraps /next with continuation).
@@ -232,16 +260,30 @@ vocabulary. A Short arriving as an **ordinary video renderer carrying a
 `SHORTS`-styled duration overlay**, which is how search returns them, is
 classified instead: `VideoItem.isShort`, with `"SHORTS"` deliberately kept
 out of `badges[]` so the fact ships once. The client decides what to do with
-the flag, and `feed_view.dart` does render them, in a shelf of their own.
+the flag, and `feed_view.dart` does render them, in a shelf of their own. **On
+`feed.home` a Shorts shelf is parsed too** (`todo.md` 111): `parseFeed(…,
+{shelves: true})` collects a `richShelfRenderer`'s `shortsLockupViewModel` tiles as
+`VideoItem`s with `isShort: true`, inside a `Shelf` of category `shorts`; a
+`postRenderer` in a shelf is a `PostItem`. Outside a shelf both are dropped as ever.
 
 **Members-only is a flag, not a badge string — added 2026-09-09.** Same rule as
 the two below, and the same reason the verified badge is read by `style`:
 `BADGE_STYLE_TYPE_MEMBERS_ONLY` (or the `SPONSORSHIP_STAR` icon) is stable,
-while the `"Members only"` label is localised. It ships as
+while the `"Members only"` label is localised. A view-based tile spells it as a
+`badgeViewModel` with `badgeStyle: BADGE_MEMBERS_ONLY` and `iconName:
+SPONSORSHIP_STAR`, outside `contentImage` — missed until 2026-11-10 (F61). It ships as
 `VideoItem.isMembersOnly` / `VideoDetail.isMembersOnly` and is kept out of
 `badges[]`. **A tile carrying it says nothing about whether this account can
 watch** — YouTube puts members-only videos in a subscriber's feed either way,
 and the resolve path is anonymous besides.
+
+**A promoted tile is a flag too — measured 2026-11-13.** A `badgeViewModel` with
+`badgeStyle: BADGE_PROMOTED` (the "Try YouTube Premium" card in the watch page's related
+list is one) ships as `VideoItem.isPromoted`, read by the style and never the label, and
+is kept out of `badges[]`. Such a tile is an ordinary-looking `lockupViewModel` with no
+save or queue action and an id that is not a video id, so opening it ends in "This video
+is unavailable"; the app hides it unless the viewer turned the switch on
+(`architecture.md` F63).
 
 **A playlist row's view count ships without its unit — measured 2026-10-07
 (`architecture.md` F57).** `viewCountText` is a display string, and a playlist is

@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import '../domain/artist_panel.dart';
 import '../domain/feed_item.dart';
 import '../domain/search_filters.dart';
+import '../domain/shelf.dart';
 import '../data/rpc/client.dart';
 import 'auth_controller.dart';
 
@@ -138,6 +139,11 @@ class FeedState {
   final ArtistPanel? artist;
 
   final List<FeedItem> items;
+
+  /// The titled rows between [items]' tiles — `feed.home` only, `[]` on every other
+  /// surface. [Shelf.index] is absolute here (a count of [items] before the shelf), so
+  /// a shelf from a later page has already been moved past the tiles loaded before it.
+  final List<Shelf> shelves;
   final String? continuation;
   final bool isLoading;
   final String? error;
@@ -162,6 +168,7 @@ class FeedState {
     this.filters,
     this.artist,
     this.items = const [],
+    this.shelves = const [],
     this.continuation,
     this.isLoading = true,
     this.error,
@@ -183,6 +190,7 @@ class FeedState {
     Object? filters = _unchanged,
     Object? artist = _unchanged,
     List<FeedItem>? items,
+    List<Shelf>? shelves,
     Object? continuation = _unchanged,
     bool? isLoading,
     Object? error = _unchanged,
@@ -199,6 +207,7 @@ class FeedState {
       filters: identical(filters, _unchanged) ? this.filters : filters as SearchFilters?,
       artist: identical(artist, _unchanged) ? this.artist : artist as ArtistPanel?,
       items: items ?? this.items,
+      shelves: shelves ?? this.shelves,
       continuation:
           identical(continuation, _unchanged) ? this.continuation : continuation as String?,
       isLoading: isLoading ?? this.isLoading,
@@ -416,6 +425,9 @@ class FeedController extends Notifier<FeedState> {
         error: null,
         errorRetry: null,
         items: const [],
+        // Cleared with the items it is indexed into: a shelf kept from the previous
+        // filter would sit at a position in a grid it was never part of.
+        shelves: const [],
         continuation: null,
         selectedToken: chipToken,
         query: effectiveQuery,
@@ -498,8 +510,14 @@ class FeedController extends Notifier<FeedState> {
           : const <Chip>[];
 
       final rawItems = response['items'] as List<dynamic>? ?? [];
-      final parsedItems = await Isolate.run(
-          () => rawItems.map((i) => FeedItem.fromJson(i as Map<String, dynamic>)).toList());
+      final rawShelves = response['shelves'] as List<dynamic>? ?? const [];
+      final (parsedItems, parsedShelves) = await Isolate.run(() => (
+            rawItems.map((i) => FeedItem.fromJson(i as Map<String, dynamic>)).toList(),
+            rawShelves.map((s) => Shelf.fromJson(s as Map<String, dynamic>)).toList(),
+          ));
+      // A page's shelf positions count that page's own tiles; moving a later page's past
+      // the tiles already loaded is what makes them absolute.
+      final alreadyLoaded = isLoadMore ? state.items.length : 0;
 
       // An empty token is the "All" chip, which the sidecar treats as a base
       // browse — so it comes back with a bar, and is one.
@@ -520,6 +538,9 @@ class FeedController extends Notifier<FeedState> {
             ? storeChipBar(state.chipBars, config.surface, parsedChips, isBaseBrowse: isBaseBrowse)
             : state.chipBars,
         items: isLoadMore ? [...state.items, ...parsedItems] : parsedItems,
+        shelves: isLoadMore
+            ? [...state.shelves, for (final shelf in parsedShelves) shelf.shifted(alreadyLoaded)]
+            : parsedShelves,
         continuation: response['continuation'] as String?,
         artist: parsedArtist,
       );

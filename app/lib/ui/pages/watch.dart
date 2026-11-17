@@ -15,6 +15,7 @@ import '../../domain/feed_item.dart' hide Chip;
 import '../../domain/video_detail.dart';
 import '../../theme/tokens.dart';
 import '../open_video.dart';
+import '../promoted_preference.dart';
 import '../page_wrapper.dart';
 import '../player_shell.dart' show currentRouteProvider, watchRouteName;
 import '../audio_mode_controller.dart';
@@ -424,7 +425,11 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     final scheme = Theme.of(context).colorScheme;
     if (detail == null) return const [];
 
-    final items = [...detail.related, ..._extraRelated];
+    final showPromoted = ref.watch(promotedVisibleProvider);
+    final items = [
+      for (final related in [...detail.related, ..._extraRelated])
+        if (showPromoted || !isPromotedItem(related)) related,
+    ];
     final continuation = _relatedContinuation ?? detail.relatedContinuation;
 
     final header = Padding(

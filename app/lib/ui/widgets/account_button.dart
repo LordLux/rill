@@ -14,6 +14,7 @@ import '../pages/login_page.dart';
 import '../session_restore.dart';
 import '../update_controller.dart';
 import '../ytdlp_controller.dart';
+import 'home_feed_settings.dart';
 import 'titlebar_button.dart';
 
 /// The titlebar's account surface.
@@ -210,7 +211,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Which page the overlay is currently showing.
-enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates, ytdlp }
+enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates, ytdlp, homeFeed }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account menu overlay — no ModalBarrier, pointer events pass through
@@ -458,6 +459,10 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
       header: _AccountMenuPageHeader(title: 'yt-dlp', onBack: _back),
       children: const [_YtDlpPanel()],
     ),
+    _AccountMenuPage.homeFeed => _AccountMenuBody(
+      header: _AccountMenuPageHeader(title: 'Home page rows', onBack: _back),
+      children: const [HomeFeedSettingsPanel()],
+    ),
   };
 }
 
@@ -516,6 +521,11 @@ class _SignedOutRootPage extends StatelessWidget {
         ],
       ),
       children: [
+        _AccountMenuNavItem(
+          icon: Icons.view_agenda_outlined,
+          label: 'Home page rows',
+          onTap: () => onGo(_AccountMenuPage.homeFeed),
+        ),
         _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
         _YtDlpMenuItem(onOpen: () => onGo(_AccountMenuPage.ytdlp)),
         const SizedBox(height: 4),
@@ -630,6 +640,11 @@ class _AccountRootPage extends StatelessWidget {
         // ── Settings ───────────────────────────────────────────────────────
         const _AccountMenuDivider(),
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () {}),
+        _AccountMenuNavItem(
+          icon: Icons.view_agenda_outlined,
+          label: 'Home page rows',
+          onTap: () => onGo(_AccountMenuPage.homeFeed),
+        ),
         _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
         _YtDlpMenuItem(onOpen: () => onGo(_AccountMenuPage.ytdlp)),
         // ── Help ───────────────────────────────────────────────────────────

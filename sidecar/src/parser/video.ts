@@ -13,7 +13,7 @@
 
 import type { FeedItem, VideoDetail } from '../types.ts';
 import { parseChapters } from './chapters.ts';
-import { parseFeed } from './feed.ts';
+import { parseFeedDumped } from './feed-shape.ts';
 import { parseMusicTracks } from './music.ts';
 import { premiereStartMs } from './premiere.ts';
 import {
@@ -82,7 +82,7 @@ export function parseVideoDetail(raw: Json, context = 'video'): VideoDetail {
     get(body, 'contents', 'twoColumnWatchNextResults', 'secondaryResults') ??
     get(body, 'contents', 'twoColumnWatchNextResults') ??
     body;
-  const related = parseFeed(relatedRoot, `${context}.related`);
+  const related = parseFeedDumped(relatedRoot, `${context}.related`, 'watch-related');
 
   const id =
     str(get(details, 'videoId')) ??

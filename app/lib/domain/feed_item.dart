@@ -46,6 +46,11 @@ sealed class FeedItem with _$FeedItem {
     /// resolve path is anonymous besides — so a tile with this set is one whose
     /// playback may answer `VIDEO_MEMBERS_ONLY`.
     @Default(false) bool isMembersOnly,
+    /// A tile YouTube marks as promoted (`BADGE_PROMOTED`) — a paid placement, such as
+    /// the "Try YouTube Premium" card in the related list. Hidden unless the viewer
+    /// turned on "Promoted videos" (`promoted_preference.dart`); opening one ends in
+    /// "This video is unavailable".
+    @Default(false) bool isPromoted,
     /// The uploading channel's verified checkmark.
     @Default(false) bool isVerified,
     /// The uploading channel's "Official Artist Channel" badge.

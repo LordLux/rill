@@ -58,9 +58,22 @@ Future<void> boot() async {
 
 Future<void> settle([int millis = 250]) => Future<void>.delayed(Duration(milliseconds: millis));
 
+/// Polls until [done], for up to [timeout]. The sidecar here is a real process, so how long an answer
+/// takes depends on the machine; a fixed [settle] was a guess at that and lost on a loaded run (the
+/// resume test saw no caption after 250 ms). Falls through on timeout so the `expect` that follows
+/// reports what was missing.
+Future<void> eventually(bool Function() done, {Duration timeout = const Duration(seconds: 10)}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!done() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 Future<void> play(String id) async {
   container.read(queueProvider.notifier).play(video(id));
   await settle();
+  // The list is asked for once the player has the video; wait for it to be answered.
+  await eventually(() => !captions.isLoadingTracks && (captions.tracks.isNotEmpty || captions.error != null || id == 'nocaps1'));
 }
 
 CaptionsState get captions => container.read(captionsProvider);
@@ -188,7 +201,7 @@ void main() {
       expect(captions.selectedId, 'a.de');
 
       await play('vid2');
-      await settle();
+      await eventually(() => captions.selectedId == 'a.de' && engine.subtitle != null);
       expect(captions.selectedId, 'a.de', reason: 'German was chosen, German should resume');
       expect(engine.subtitle, contains('a.de'));
     });

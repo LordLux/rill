@@ -251,9 +251,18 @@ export interface BadgeScan {
    *
    * The icon is read as a second route because a view-based tile carries an
    * icon where it may carry no style — the same asymmetry `hasMusicNote`
-   * already deals with. Only the classic shape above is confirmed live.
+   * already deals with. The classic shape above was confirmed live on the watch
+   * page (2026-09-09); a view-based tile's is a `badgeViewModel`
+   * (`badgeStyle: BADGE_MEMBERS_ONLY`, `iconName: SPONSORSHIP_STAR`), measured on
+   * the home feed 2026-11-10 (`architecture.md` F61) and read in `scanBadges`.
    */
   isMembersOnly: boolean;
+  /**
+   * A tile YouTube marks as promoted — ships as `VideoItem.isPromoted`, never as a
+   * label. Read from a `badgeViewModel`'s `badgeStyle` (`BADGE_PROMOTED`), which is not
+   * localised; measured 2026-11-13 on the watch page's related list.
+   */
+  isPromoted: boolean;
   /**
    * A 24/7 radio/music station — ships as `VideoItem.isStation`, alongside
    * `isLive: true` rather than instead of it, and never as a `"STATION"`
@@ -303,6 +312,8 @@ function badgeHasMembersIcon(badge: JsonObject): boolean {
 }
 
 const MEMBERS_STYLE = /MEMBERS_ONLY/i;
+/** `BADGE_PROMOTED` — see {@link BadgeScan.isPromoted}. */
+const PROMOTED_STYLE = /PROMOTED/i;
 const MEMBERS_ICON = 'SPONSORSHIP_STAR';
 
 /**
@@ -318,6 +329,7 @@ export function scanBadges(node: Json): BadgeScan {
   let isStation = false;
   let isShort = false;
   let isMembersOnly = false;
+  let isPromoted = false;
 
   /**
    * `membersIcon` is the badge's own `SPONSORSHIP_STAR`, decided by the caller.
@@ -388,6 +400,25 @@ export function scanBadges(node: Json): BadgeScan {
       );
     }
 
+    // **`badgeViewModel` — read for the members marker only, never for a label.**
+    // Measured 2026-11-10 on the signed-in home feed (Task 37, `architecture.md`
+    // F61): a members-only `lockupViewModel` carries
+    // `{badgeStyle: 'BADGE_MEMBERS_ONLY', iconName: 'SPONSORSHIP_STAR'}` in a
+    // `badgeViewModel` — a different spelling of style and icon from both shapes
+    // above, and outside `contentImage`. 39 of 39 members tiles had it and the
+    // parser flagged none. Passing a null label is what keeps the other
+    // `badgeViewModel`s (`BADGE_DEFAULT`, `BADGE_PROMOTED`) from becoming new
+    // pills: `consider` returns on an empty value after the members check.
+    const viewModelBadge = candidate['badgeViewModel'];
+    if (isObject(viewModelBadge)) {
+      if (PROMOTED_STYLE.test(str(viewModelBadge['badgeStyle']) ?? '')) isPromoted = true;
+      consider(
+        null,
+        str(viewModelBadge['badgeStyle']),
+        str(viewModelBadge['iconName']) === MEMBERS_ICON || badgeHasMembersIcon(viewModelBadge),
+      );
+    }
+
     const timeStatus = candidate['thumbnailOverlayTimeStatusRenderer'];
     if (isObject(timeStatus)) {
       consider(text(timeStatus['text']), str(timeStatus['style']));
@@ -396,7 +427,7 @@ export function scanBadges(node: Json): BadgeScan {
     return true;
   });
 
-  return { labels, durationSeconds, isLive, isStation, isShort, hasMusicNote, isMembersOnly };
+  return { labels, durationSeconds, isLive, isStation, isShort, hasMusicNote, isMembersOnly, isPromoted };
 }
 
 const VERIFIED_STYLE = 'BADGE_STYLE_TYPE_VERIFIED';
