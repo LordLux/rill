@@ -84,8 +84,9 @@ to fix the CI failure**, which was never reproduced locally: the guard is verifi
 error, not against the real one.
 
 **Done** when it has not recurred across enough CI runs to call it gone; then delete this entry. If
-it recurs, note the run id here first: the error is then not one the zone sees (a write on the
-caller's zone, say), and the next step is logging the stack in the failing run.
+it recurs, note the run id here first: the error is then not one the zone sees, and the next step
+is logging the stack in the failing run. The failure was forced as a `stdin` write error from a
+hand-built sink, which approximates the real pipe; that approximation is the unverified part.
 
 ### 56. Sign-in and sign-out: two questions left after Task 31
 

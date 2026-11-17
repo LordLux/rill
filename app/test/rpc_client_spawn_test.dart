@@ -91,4 +91,53 @@ void main() {
     expect(reply, 'hi');
     expect(calls, 1, reason: 'a process that started is kept');
   });
+
+  test('a stdin write that fails asynchronously, as the real pipe does, is not raised on whatever is running', () async {
+    var calls = 0;
+    RpcClient.processStarter = (exe, args, {workingDirectory, environment}) async {
+      calls++;
+      final real = await realStart(exe, args, workingDirectory: workingDirectory, environment: environment);
+      // Built here, inside the guarded zone, as the real `Process.stdin` is.
+      return _WriteFailsProcess(real, IOSink(_FailingConsumer(pipeClosed())));
+    };
+
+    // The write fails, so no reply ever comes: the call is allowed to time out. What is
+    // under test is where the error goes, and flutter_test fails the test if it is unhandled.
+    final reply = RpcClient.instance.call('test.echo', {'msg': 'hi'});
+    await expectLater(reply.timeout(const Duration(seconds: 2)), throwsA(isA<TimeoutException>()));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(calls, 1);
+  });
+}
+
+/// A pipe whose consumer fails the way a closing Windows pipe does: asynchronously, on write.
+/// A hand-built [IOSink] approximates the real pipe's sink, it is not the same object.
+class _FailingConsumer implements StreamConsumer<List<int>> {
+  _FailingConsumer(this.error);
+  final Object error;
+
+  @override
+  Future<dynamic> addStream(Stream<List<int>> stream) =>
+      Future<void>.delayed(const Duration(milliseconds: 10), () => throw error);
+
+  @override
+  Future<dynamic> close() => Future<void>.value();
+}
+
+class _WriteFailsProcess implements Process {
+  _WriteFailsProcess(this._real, this.stdin);
+  final Process _real;
+
+  @override
+  final IOSink stdin;
+  @override
+  Stream<List<int>> get stdout => _real.stdout;
+  @override
+  Stream<List<int>> get stderr => _real.stderr;
+  @override
+  Future<int> get exitCode => _real.exitCode;
+  @override
+  int get pid => _real.pid;
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) => _real.kill(signal);
 }

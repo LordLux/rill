@@ -279,8 +279,10 @@ class RpcClient {
   /// process that arrives after its attempt was abandoned is killed, not leaked.
   /// After it has completed the process stands: the same pipe's late errors are
   /// logged and dropped, because a dead sidecar is already handled by the exit
-  /// handlers on its stdout. Not reproduced on demand — the guard is tested with
-  /// a forced failure (`rpc_client_spawn_test.dart`) — see `architecture.md` §2.18.
+  /// handlers on its stdout. That includes a `stdin` write failing asynchronously,
+  /// whose error belongs to the zone the pipe's sink was built in. Not reproduced on
+  /// demand — the guard is tested with forced failures (`rpc_client_spawn_test.dart`)
+  /// — see `architecture.md` §2.18.
   Future<Process> _spawn(String executable, List<String> command, String root) async {
     for (var attempt = 0; ; attempt++) {
       try {
