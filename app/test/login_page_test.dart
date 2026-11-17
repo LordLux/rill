@@ -6,7 +6,10 @@
 /// the retries, the cover and the message — is the real page.
 library;
 
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/auth/web_session_cookies.dart';
@@ -246,6 +249,67 @@ void main() {
       await elapse(tester, const Duration(seconds: 6));
 
       expect(auth.cookies, isEmpty, reason: 'cookie presence is a precondition, not the answer');
+    });
+  });
+
+  group('the page says why the sign-in is here and not in the browser', () {
+    Future<void> open(WidgetTester tester) =>
+        openLogin(tester, ScriptedAuth([AuthStatus.authenticated]), ScriptedJar([<String, String>{}]));
+
+    testWidgets('one line always, the three points only when asked', (tester) async {
+      await open(tester);
+
+      expect(find.text(SignInHereNote.note), findsOneWidget);
+      expect(find.textContaining('Msedgewebview2'), findsNothing);
+
+      await tester.tap(find.text(SignInHereNote.toggleLabel));
+      await tester.pump();
+      for (final (lead, _) in SignInHereNote.points) {
+        expect(find.textContaining(lead, findRichText: true), findsOneWidget);
+      }
+
+      await tester.tap(find.text(SignInHereNote.toggleLabel));
+      await tester.pump();
+      expect(find.textContaining('Msedgewebview2', findRichText: true), findsNothing);
+    });
+
+    testWidgets('the toggle keeps its name and says whether it is open', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await open(tester);
+
+      final toggle = find.bySemanticsLabel(SignInHereNote.toggleLabel);
+      expect(tester.getSemantics(toggle), matchesSemantics(
+        label: SignInHereNote.toggleLabel,
+        isButton: true,
+        hasTapAction: true,
+        hasFocusAction: true,
+        hasExpandedState: true,
+        isExpanded: false,
+        isFocusable: true,
+        hasEnabledState: true,
+        isEnabled: true,
+      ));
+
+      await tester.tap(find.text(SignInHereNote.toggleLabel));
+      await tester.pump();
+      expect(tester.getSemantics(toggle).flagsCollection.isExpanded, Tristate.isTrue);
+      semantics.dispose();
+    });
+
+    testWidgets('it opens from the keyboard', (tester) async {
+      await open(tester);
+
+      bool inNote() =>
+          FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<SignInHereNote>() != null;
+      for (var i = 0; i < 6 && !inNote(); i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+      }
+      expect(inNote(), isTrue, reason: 'Tab reaches the toggle');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+
+      expect(find.textContaining('Msedgewebview2', findRichText: true), findsOneWidget);
     });
   });
 

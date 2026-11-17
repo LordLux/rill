@@ -117,6 +117,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   /// the ones that just failed, and reading them is the loop F64 describes.
   bool _ready = false;
   bool _checking = false;
+
+  /// Whether "Why sign in here?" is expanded ([SignInHereNote]).
+  bool _whyOpen = false;
   bool _finished = false;
 
   /// The login is done and the WebView is covered while the session is checked.
@@ -469,22 +472,33 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   color: scheme.surfaceContainerHighest,
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (busy || !_ready)
-                        const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else
-                        Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _message,
-                          style: TextStyle(color: scheme.onSurfaceVariant),
-                        ),
+                      Row(
+                        children: [
+                          if (busy || !_ready)
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          else
+                            Icon(Icons.lock_outline, size: 16, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _message,
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Always present while the bar is, so the WebView above is
+                      // never resized by the hand-off — only by the user opening it.
+                      SignInHereNote(
+                        open: _whyOpen,
+                        onToggle: () => setState(() => _whyOpen = !_whyOpen),
                       ),
                     ],
                   ),
@@ -540,6 +554,97 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         resources: request.resources,
         action: PermissionResponseAction.DENY,
       ),
+    );
+  }
+}
+
+/// Why the sign-in happens in Rill's own window and not in the browser — one
+/// line, and three points behind "Why sign in here?" (`architecture.md` §2.5).
+///
+/// In the tree, expanded in place: no overlay, so nothing here can orphan a
+/// semantics node (CLAUDE.md, Accessibility). The toggle keeps one name and
+/// says whether it is open through `expanded`, rather than renaming itself.
+@visibleForTesting
+class SignInHereNote extends StatelessWidget {
+  const SignInHereNote({super.key, required this.open, required this.onToggle});
+
+  final bool open;
+  final VoidCallback onToggle;
+
+  static const String note = "Signing in here keeps Rill's session separate from your browser, "
+      "so browsing YouTube elsewhere won't sign Rill out.";
+  static const String toggleLabel = 'Why sign in here?';
+
+  /// Lead-in, then the point.
+  static const List<(String, String)> points = [
+    (
+      'Why not your browser? ',
+      "Rill can't use your browser's Google sign-in without sharing it, and a shared "
+          'sign-in gets signed out whenever your browser refreshes it.',
+    ),
+    (
+      'No password needed. ',
+      'If Google offers a passkey or Windows Hello, choose it.',
+    ),
+    (
+      'The Windows prompt. ',
+      'Windows may say the request comes from "Msedgewebview2". That is Microsoft '
+          "WebView2, the component showing Google's page inside Rill.",
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = TextStyle(color: scheme.onSurfaceVariant, fontSize: 13);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Icon(Icons.info_outline, size: 16, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Expanded(child: Text(note, style: style)),
+            const SizedBox(width: 12),
+            // Merged, or `expanded` lands on the bar's node and not the button's.
+            MergeSemantics(
+              child: Semantics(
+                expanded: open,
+                child: TextButton.icon(
+                  onPressed: onToggle,
+                  iconAlignment: IconAlignment.end,
+                  icon: Icon(open ? Icons.expand_less : Icons.expand_more, size: 18),
+                  label: const Text(toggleLabel),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (open)
+          Padding(
+            padding: const EdgeInsets.only(left: 28, top: 4, right: 12, bottom: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final (lead, body) in points)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: lead, style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600)),
+                          TextSpan(text: body),
+                        ],
+                      ),
+                      style: style,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

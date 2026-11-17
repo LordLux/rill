@@ -505,6 +505,19 @@ with an empty feed and no error. The sidecar must therefore:
 Login is a one-time WebView2 flow owned by the app. Because nothing else touches
 that session, browser-side cookie rotation cannot invalidate it.
 
+**The sign-in page says so, because people expect the browser — added 2026-11-17.**
+A website's "Sign in with Google" is one click because it is OAuth on top of the
+browser's own Google session; here OAuth is closed (A4) and borrowing the
+browser's session is the rotation this paragraph exists to avoid, so a sign-in in
+the user's browser was asked for and declined. `SignInHereNote`
+(`ui/pages/login_page.dart`) puts one line under the page and three points behind
+*Why sign in here?*: why not the browser, that a passkey or Windows Hello needs
+no password, and that Windows' passkey prompt names `Msedgewebview2` (WebView2's
+browser process makes the WebAuthn call, Microsoft-signed, and nothing in
+WebView2 renames it — repackaging it would break the signature and read worse).
+In the tree rather than an overlay, and always present, so the WebView is never
+resized by the hand-off, only by the user opening the note.
+
 #### The WebView2 binding, decided by what it can read — built 2026-09-08
 
 Task 22's stop condition was whether a Flutter Windows WebView2 package can hand
