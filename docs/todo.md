@@ -116,6 +116,9 @@ Two causes are still unknown; neither blocks anything.
    that attempt's full name list with the next one's: different names mean the jar
    was incomplete; the same names mean YouTube had not honoured the session yet.
    Record the answer in `architecture.md` and keep or drop the retry accordingly.
+   Since 2026-11-17 the sidecar also logs `degraded home response: loggedOut=…`
+   on each such attempt (F64): `true` means YouTube had not taken the cookies as a
+   login yet, `false` means it did and sent an empty home page.
 2. **Comment votes: which failure it was is unmeasured.** The list is now
    re-fetched on every identity change, so a vote is always made on rows fetched
    under the identity voting, and the user confirmed votes stick. What the old

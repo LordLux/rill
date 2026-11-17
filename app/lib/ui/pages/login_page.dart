@@ -17,10 +17,11 @@ import '../widgets/window_controls.dart';
 /// Sign in to YouTube, and return whether it worked.
 ///
 /// `true` means the sidecar measured `authenticated` and the cookie is stored.
-/// `false` means cancelled or failed — and in that case **nothing changed**
-/// (Task 22 §6's last line): no cookie was written, no session was replaced,
-/// and the surface underneath is exactly as it was. The one path that mutates
-/// anything is the one that answers `true`.
+/// `false` means cancelled or failed — and in that case **the app is as it
+/// was** (Task 22 §6's last line): no cookie was written, the sidecar's session
+/// was not replaced, and the surface underneath shows what it showed. The one
+/// thing that may have changed is the WebView's own jar: a session the app is
+/// not signed in with is cleared when the page opens (`architecture.md` F64).
 Future<bool> showLoginFlow(BuildContext context) async {
   final result = await Navigator.of(context, rootNavigator: true).push<bool>(
     MaterialPageRoute<bool>(
@@ -110,6 +111,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   Timer? _poll;
   InAppWebViewController? _controller;
+
+  /// The jar has been cleared of any stale session and the sign-in page asked
+  /// for. Until then [_checkCookies] does nothing: the cookies it would find are
+  /// the ones that just failed, and reading them is the loop F64 describes.
+  bool _ready = false;
   bool _checking = false;
   bool _finished = false;
 
@@ -137,7 +143,44 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   void initState() {
     super.initState();
+    // The real WebView starts this from `onWebViewCreated`, because the jar
+    // needs a live webview to answer; a test's stand-in has none.
+    if (widget.webViewBuilder != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_start()));
+    }
+  }
+
+  /// Clear a session the app is not signed in with, then ask for the sign-in
+  /// page and start watching the jar — in that order (`architecture.md` F64).
+  ///
+  /// The page only opens while the app is anonymous or degraded, so session
+  /// cookies already in the jar are by definition ones that do not work: left
+  /// there, the first check finds them before the account picker can be used,
+  /// sends them, gets `degraded`, and *Try again* does the same. Clearing goes
+  /// through [WebSessionCookies.clear], sign-out's rule, which keeps Google's
+  /// trusted-device mark and the picker's list (F53).
+  Future<void> _start() async {
+    if (ref.read(authProvider).status != AuthStatus.authenticated) {
+      final cookies = ref.read(webSessionCookiesProvider);
+      try {
+        final jar = await cookies.read();
+        if (hasSessionCookies(jar.keys)) {
+          stderr.writeln(
+            'rill auth: the jar holds a session the app is not signed in with — '
+            'clearing it so Google asks again (${describe(jar)})',
+          );
+          await cookies.clear();
+        }
+      } on Object catch (error) {
+        // Carry on: at worst this is the old behaviour, one failed check.
+        stderr.writeln('rill auth: could not clear the jar before sign-in ($error)');
+      }
+    }
+    if (!mounted) return;
+    _ready = true;
+    _poll?.cancel();
     _poll = Timer.periodic(_pollInterval, (_) => _checkCookies());
+    unawaited(_controller?.loadUrl(urlRequest: URLRequest(url: _signIn)));
   }
 
   @override
@@ -155,7 +198,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   /// set by a half-finished flow, or one the server declines, leaves the
   /// WebView open and the user where they were.
   Future<void> _checkCookies() async {
-    if (_checking || _finished || !mounted) return;
+    if (!_ready || _checking || _finished || !mounted) return;
     _checking = true;
     try {
       var jar = await ref.read(webSessionCookiesProvider).read();
@@ -297,22 +340,22 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   ///
   /// The only way out of a [_canRetry] state. `_finished` blocks
   /// [_checkCookies] outright, so it has to come back down along with
-  /// [_checking]; the poll timer was cancelled on the way into `degraded`
-  /// (`_checkCookies`), so it has to be recreated, not just trusted to still
-  /// be running. Reloading `_signIn` matters as much as the flags — without
-  /// it the WebView is still parked on `robots.txt`, and the next poll tick
-  /// would just read the same jar and land right back here.
+  /// [_checking]; the poll timer was cancelled on the way into `degraded`.
+  /// [_start] does the rest, and its clear is what makes this a real second
+  /// sign-in: the jar still holds the session YouTube just refused, and
+  /// without the clear the next check sends it again and lands right back
+  /// here, with the account picker never usable (F64).
   void _retry() {
+    _poll?.cancel();
     setState(() {
+      _ready = false;
       _canRetry = false;
       _finished = false;
       _checking = false;
       _handingOff = false;
     });
-    _poll?.cancel();
-    _poll = Timer.periodic(_pollInterval, (_) => _checkCookies());
     _setMessage('Waiting for you to sign in…');
-    unawaited(_controller?.loadUrl(urlRequest: URLRequest(url: _signIn)));
+    unawaited(_start());
   }
 
   void _setMessage(String message) {
@@ -400,7 +443,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               ),
                               if (_canRetry) ...[
                                 const SizedBox(height: 20),
-                                FilledButton(onPressed: _retry, child: const Text('Try again')),
+                                FilledButton(onPressed: _retry, child: const Text('Sign in again')),
                               ],
                             ],
                           ),
@@ -458,7 +501,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final builder = widget.webViewBuilder;
     if (builder != null) return builder(context, () => unawaited(_checkCookies()));
     return InAppWebView(
-      initialUrlRequest: URLRequest(url: _signIn),
+      // No initial page: [_start] loads `_signIn` once the jar is cleared.
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         // Third-party cookies are the sign-in: accounts.google.com sets
@@ -474,7 +517,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       // A page load is one of the two triggers; the timer is the other.
       // Neither is a URL match — see `youtube_cookies.dart` for why.
       onLoadStop: (_, _) => _checkCookies(),
-      onWebViewCreated: (controller) => _controller = controller,
+      onWebViewCreated: (controller) {
+        _controller = controller;
+        unawaited(_start());
+      },
       // **Deny every permission, immediately.** This is the exact
       // callback the 2026-09-09 crash faulted inside: the page asks,
       // the plugin waits on a reply from Dart, and if the webview is

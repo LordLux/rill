@@ -37,20 +37,32 @@ class ScriptedAuth extends AuthController {
 }
 
 /// A jar that serves each scripted read in turn, then repeats the last.
+///
+/// [stale] is what the jar already held when the page opened: the page's first
+/// read gets it, and so does every read after that until [clear] is called.
+/// Empty by default, which is a jar with nothing left over in it.
 class ScriptedJar implements WebSessionCookies {
-  ScriptedJar(this.reads);
+  ScriptedJar(this.reads, {this.stale = const {}});
 
   final List<Map<String, String>> reads;
+  final Map<String, String> stale;
   int count = 0;
+  int clears = 0;
+  bool _opened = false;
 
   @override
   Future<Map<String, String>> read() async {
+    if (!_opened) {
+      _opened = true;
+      return stale;
+    }
+    if (stale.isNotEmpty && clears == 0) return stale;
     final index = count++;
     return reads[index < reads.length ? index : reads.length - 1];
   }
 
   @override
-  Future<void> clear() async {}
+  Future<void> clear() async => clears++;
 }
 
 const Map<String, String> completeJar = {'SAPISID': 'a', 'SID': 'b'};
@@ -140,7 +152,7 @@ void main() {
       expect(auth.cookies, hasLength(1));
       expect(find.text('Checking with YouTube…'), findsWidgets);
       expect(find.textContaining(emptyFeedMessage), findsNothing);
-      expect(find.text('Try again'), findsNothing);
+      expect(find.text('Sign in again'), findsNothing);
 
       await elapse(tester, const Duration(seconds: 4));
       await tester.pumpAndSettle();
@@ -155,7 +167,59 @@ void main() {
       expect(auth.cookies, hasLength(3), reason: 'one attempt and at most two extra — retrying forever is the bug');
       expect(opened.popped, isFalse);
       expect(find.textContaining(emptyFeedMessage), findsOneWidget);
-      expect(find.text('Try again'), findsOneWidget);
+      expect(find.text('Sign in again'), findsOneWidget);
+    });
+
+    testWidgets('Sign in again clears the session YouTube just refused before asking again', (tester) async {
+      // Mutation: drop the clear from `_start` and `clears` stays 0 — the jar
+      // keeps the refused session, the next check sends it, and the account
+      // picker is never usable (architecture.md F64).
+      final auth = ScriptedAuth([AuthStatus.degraded]);
+      final jar = ScriptedJar([completeJar]);
+      await openLogin(tester, auth, jar);
+      await elapse(tester, const Duration(seconds: 12));
+      expect(jar.clears, 0, reason: 'nothing was left over when the page opened');
+
+      await tester.tap(find.text('Sign in again'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(jar.clears, 1);
+      expect(find.textContaining(emptyFeedMessage), findsNothing);
+    });
+  });
+
+  group('a session left in the jar is cleared before the sign-in page (F64)', () {
+    testWidgets('it never reaches signIn, and the page waits for a real sign-in', (tester) async {
+      // The user's report, 2026-11-17: an expired session's cookies were still
+      // in the jar, so the first check found them while the account picker was
+      // still on screen, covered it with "Checking with YouTube…", and ended on
+      // the empty-feed message — every time, Try again included.
+      // Mutation: drop the clear from `_start` and signIn receives the stale jar.
+      final auth = ScriptedAuth([AuthStatus.degraded]);
+      final jar = ScriptedJar([<String, String>{}], stale: completeJar);
+      await openLogin(tester, auth, jar);
+
+      await elapse(tester, const Duration(seconds: 6));
+
+      expect(jar.clears, 1);
+      expect(auth.cookies, isEmpty);
+      expect(find.text('Checking with YouTube…'), findsNothing);
+      expect(find.text('Waiting for you to sign in…'), findsWidgets);
+    });
+
+    testWidgets('a sign-in completed after the clear goes through as before', (tester) async {
+      final auth = ScriptedAuth([AuthStatus.authenticated]);
+      final jar = ScriptedJar([<String, String>{}, {...completeJar, 'SID': 'new'}], stale: completeJar);
+      final opened = await openLogin(tester, auth, jar);
+
+      for (var i = 0; i < 100 && !opened.popped; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await tester.pumpAndSettle();
+
+      expect(opened.result, isTrue);
+      expect(auth.cookies.single, contains('SID=new'));
     });
 
     testWidgets('each attempt reads the jar afresh and sends what it holds now', (tester) async {
