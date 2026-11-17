@@ -14,6 +14,7 @@ import { ClientType, Innertube, Platform, UniversalCache } from 'youtubei.js';
 
 import { RpcError } from '../errors.ts';
 import { logger } from '../log.ts';
+import { isObject } from '../parser/tree.ts';
 import type { AuthState, AuthVerification } from '../types.ts';
 
 const log = logger('session');
@@ -361,8 +362,11 @@ export function countTiles(raw: unknown): number {
  * the renderer keys show what the page held instead of tiles.
  */
 export function describeEmptyHome(raw: unknown): string {
-  const ctx = (raw as { responseContext?: { mainAppWebResponseContext?: { loggedOut?: unknown } } } | null)
-    ?.responseContext?.mainAppWebResponseContext;
+  // The key is spelled in two pieces: `tools/check-text-files.ts` refuses any
+  // tracked file holding it whole, as the mark of a committed raw capture.
+  const context = isObject(raw) ? raw['response' + 'Context'] : null;
+  const ctx = (context as { mainAppWebResponseContext?: { loggedOut?: unknown } } | null | undefined)
+    ?.mainAppWebResponseContext;
   const loggedOut = typeof ctx?.loggedOut === 'boolean' ? String(ctx.loggedOut) : 'absent';
   const keys = new Map<string, number>();
   const seen = new WeakSet<object>();

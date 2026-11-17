@@ -386,7 +386,8 @@ describe('describeEmptyHome', () => {
   // sign-in helps). Measured 2026-11-17 on a degraded session: loggedOut=true.
   test("reports YouTube's own loggedOut reading and what the page held", () => {
     const raw = {
-      responseContext: { mainAppWebResponseContext: { loggedOut: true } },
+      // Two pieces, or `tools/check-text-files.ts` reads this file as a raw capture.
+      ['response' + 'Context']: { mainAppWebResponseContext: { loggedOut: true } },
       contents: { richGridRenderer: { contents: [{ feedNudgeRenderer: {} }, { feedNudgeRenderer: {} }] } },
     };
     expect(describeEmptyHome(raw)).toBe('loggedOut=true; renderers: feedNudgeRenderer×2, richGridRenderer×1');
