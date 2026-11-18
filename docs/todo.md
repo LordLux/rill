@@ -80,6 +80,12 @@ touched that test or the playback code, `main` passed its scheduled run the same
 morning, and the file passed 6 of 6 here and 4 of 4 when run four at once (the
 next round of that stress run hung, which proved nothing). Not reproduced.
 
+**Seen again, 2026-11-17, on PR 40 (CI run 44007227084): the same test, the same
+error (three `errno = 232` lines), commit `9263f34`.** That branch touched the
+sign-in page and the sidecar's auth check, nothing in playback or `RpcClient`. Its
+previous CI run (44005546291, one commit earlier) got past the app tests and failed
+on the text-file guard instead. Two hits in two days, both on this one test.
+
 **What is known.** It is the race `RpcClient._spawn` documents
 (`data/rpc/client.dart`): starting a fake sidecar soon after killing the last one can
 fail inside `Process.start`, and the error arrives as an unhandled async error, so it
@@ -116,6 +122,9 @@ Two causes are still unknown; neither blocks anything.
    that attempt's full name list with the next one's: different names mean the jar
    was incomplete; the same names mean YouTube had not honoured the session yet.
    Record the answer in `architecture.md` and keep or drop the retry accordingly.
+   Since 2026-11-17 the sidecar also logs `degraded home response: loggedOut=…`
+   on each such attempt (F64): `true` means YouTube had not taken the cookies as a
+   login yet, `false` means it did and sent an empty home page.
 2. **Comment votes: which failure it was is unmeasured.** The list is now
    re-fetched on every identity change, so a vote is always made on rows fetched
    under the identity voting, and the user confirmed votes stick. What the old
