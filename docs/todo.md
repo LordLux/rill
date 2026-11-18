@@ -87,6 +87,23 @@ error, not against the real one.
 it recurs, note the run id here first: the error is then not one the zone sees, and the next step
 is logging the stack in the failing run. The failure was forced as a `stdin` write error from a
 hand-built sink, which approximates the real pipe; that approximation is the unverified part.
+### 113. A fake-sidecar test occasionally fails on a spawn race, in CI only
+
+**Seen twice, 2026-11-16 and 2026-11-17 (CI runs 43976683267 and 44007227084): one test of
+~1460, `quality_in_place_test.dart` ("a pause pressed while it runs…"), `SocketException: Write
+failed (OS Error: The pipe is being closed, errno = 232)`; a rerun passed both times.** Neither
+branch touched playback or `RpcClient`.
+
+**Landed 2026-11-17: `RpcClient._spawn` starts the process in a guarded zone** and retries on an
+async error that arrives before the start completes (`architecture.md` §2.18), with
+`test/rpc_client_spawn_test.dart` forcing the failure and mutation-checked. **It has not been seen
+to fix the CI failure**, which was never reproduced locally: the guard is verified against a forced
+error, not against the real one.
+
+**Done** when it has not recurred across enough CI runs to call it gone; then delete this entry. If
+it recurs, note the run id here first: the error is then not one the zone sees, and the next step
+is logging the stack in the failing run. The failure was forced as a `stdin` write error from a
+hand-built sink, which approximates the real pipe; that approximation is the unverified part.
 
 ### 56. Sign-in and sign-out: two questions left after Task 31
 
@@ -107,6 +124,9 @@ Two causes are still unknown; neither blocks anything.
    that attempt's full name list with the next one's: different names mean the jar
    was incomplete; the same names mean YouTube had not honoured the session yet.
    Record the answer in `architecture.md` and keep or drop the retry accordingly.
+   Since 2026-11-17 the sidecar also logs `degraded home response: loggedOut=…`
+   on each such attempt (F64): `true` means YouTube had not taken the cookies as a
+   login yet, `false` means it did and sent an empty home page.
 2. **Comment votes: which failure it was is unmeasured.** The list is now
    re-fetched on every identity change, so a vote is always made on rows fetched
    under the identity voting, and the user confirmed votes stick. What the old
