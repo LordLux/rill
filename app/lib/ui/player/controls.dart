@@ -969,7 +969,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             ),
           ),
           const SizedBox(width: 4),
-          const SleepTimerIndicator(),
+          // The moon alone here: the time overflowed a narrow portrait bar (measured in
+          // `sleep_timer_fade_test.dart`); the tooltip still says it.
+          const SleepTimerIndicator(showTime: false),
           _ControlIcon(
             iconKey: playerFullscreenKey,
             icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,

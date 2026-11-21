@@ -22,13 +22,18 @@ const Key sleepCountdownCancelKey = ValueKey('sleep-countdown-cancel');
 /// Informational, not a control: it is not focusable, and it names itself once for a screen reader
 /// (the spoken time, never digits — `spoken.dart`).
 class SleepTimerIndicator extends ConsumerWidget {
-  const SleepTimerIndicator({super.key, this.side = TooltipSide.above, this.color});
+  const SleepTimerIndicator({super.key, this.side = TooltipSide.above, this.color, this.showTime = true});
 
   /// Where the bubble opens. [TooltipSide.left] in the miniplayer, which clips above itself.
   final TooltipSide side;
 
   /// The foreground; the ambient icon theme when null.
   final Color? color;
+
+  /// False draws the moon alone even for a countdown, where the bar has no room for the time (the
+  /// vertical layout, whose only flex child is the scrubber). The tooltip and the spoken label
+  /// still carry it.
+  final bool showTime;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -57,7 +62,7 @@ class SleepTimerIndicator extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.bedtime, size: 18, color: color),
-                if (time != null) ...[
+                if (time != null && showTime) ...[
                   const SizedBox(width: 4),
                   Text(time, style: TextStyle(fontSize: 12, color: color, fontFeatures: const [FontFeature.tabularFigures()])),
                 ],
@@ -133,9 +138,19 @@ class _SleepCountdownBannerState extends ConsumerState<SleepCountdownBanner> {
   final FocusNode _cancel = FocusNode(debugLabel: 'sleep countdown cancel');
   bool _listening = false;
 
+  /// What had focus when the countdown took it, to give back when it ends (Escape closes and focus
+  /// returns, as for every overlay here).
+  FocusNode? _before;
+
+  @override
+  void initState() {
+    super.initState();
+    if (ref.read(sleepEndProvider) != null) _start();
+  }
+
   @override
   void dispose() {
-    _stopListening();
+    _stop();
     _cancel.dispose();
     super.dispose();
   }
@@ -148,29 +163,42 @@ class _SleepCountdownBannerState extends ConsumerState<SleepCountdownBanner> {
     return false;
   }
 
-  void _startListening() {
+  void _start() {
     if (_listening) return;
     _listening = true;
     HardwareKeyboard.instance.addHandler(_onKey);
+    _before = FocusManager.instance.primaryFocus;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _cancel.context != null) _cancel.requestFocus();
     });
   }
 
-  void _stopListening() {
+  void _stop() {
     if (!_listening) return;
     _listening = false;
     HardwareKeyboard.instance.removeHandler(_onKey);
+    final before = _before;
+    _before = null;
+    if (!_cancel.hasFocus) return;
+    if (before != null && before.context != null && before.canRequestFocus) {
+      before.requestFocus();
+    } else {
+      _cancel.unfocus();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Before the rebuild that removes the button, so focus can still be handed back from it.
+    ref.listen<SleepCountdown?>(sleepEndProvider, (previous, next) {
+      if (next != null) {
+        _start();
+      } else {
+        _stop();
+      }
+    });
     final countdown = ref.watch(sleepEndProvider);
-    if (countdown == null) {
-      _stopListening();
-      return const SizedBox.shrink();
-    }
-    _startListening();
+    if (countdown == null) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
 
     return Align(

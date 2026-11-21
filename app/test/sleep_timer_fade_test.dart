@@ -11,7 +11,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/theme/app_theme.dart';
+import 'package:rill/ui/audio_mode_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
+import 'package:rill/ui/player/controls.dart';
 import 'package:rill/ui/player/settings_menu.dart';
 import 'package:rill/ui/player/shortcuts.dart' show textEntryHasFocus;
 import 'package:rill/ui/player/sleep_timer_widgets.dart';
@@ -280,6 +282,38 @@ void main() {
       expect(find.byKey(sleepCountdownKey), findsNothing);
     });
 
+    testWidgets('the countdown takes focus for its Cancel, and gives it back when it ends', (tester) async {
+      final before = FocusNode(debugLabel: 'before');
+      addTearDown(before.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: [
+                  TextButton(focusNode: before, onPressed: () {}, child: const Text('elsewhere')),
+                  const Expanded(child: SleepCountdownBanner()),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      before.requestFocus();
+      await tester.pump();
+      container.read(sleepEndProvider.notifier).begin(SleepEndAction.sleep);
+      await tester.pump();
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'sleep countdown cancel');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.byKey(sleepCountdownKey), findsNothing);
+      expect(before.hasFocus, isTrue, reason: 'focus went back where it was');
+      await tester.pump(const Duration(seconds: 40));
+      expect(power.runs, isEmpty);
+    });
+
     testWidgets('the choice is not remembered by a new run of Rill', (tester) async {
       container.read(sleepEndActionProvider.notifier).set(SleepEndAction.shutDown);
       container.dispose();
@@ -429,4 +463,45 @@ void main() {
       expect(find.byKey(sleepTimerIndicatorKey), findsNothing);
     });
   });
+
+  // A `RenderFlex` overflow is silent in a release build: controls cut off past the edge. Every other
+  // layout test runs with the timer off, where the moon takes no width.
+  group('the bars with the moon showing', () {
+    Future<void> pumpBar(WidgetTester tester, Size size, {double? aspect}) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: buildRillTheme(const Color(0xFF7C4DFF)),
+            home: Scaffold(body: SizedBox.expand(child: PlayerControls(engine: engine, actualAspectRatio: aspect))),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 150));
+    }
+
+    for (final (name, size, aspect, audio) in [
+      ('normal bar, compact', const Size(560, 315), null, false),
+      ('normal bar, just under the compact threshold', const Size(639, 360), null, false),
+      ('normal bar, wide', const Size(1000, 560), null, false),
+      ('audio-only bar, compact', const Size(560, 315), null, true),
+      ('vertical bar, narrow', const Size(300, 534), 0.5625, false),
+    ]) {
+      testWidgets('$name: no overflow with an hour-long countdown', (tester) async {
+        if (audio) await container.read(audioModeProvider.notifier).setMode(true);
+        sleep.startDuration(const Duration(hours: 1, minutes: 2, seconds: 3));
+        await pumpBar(tester, size, aspect: aspect);
+        expect(find.byKey(sleepTimerIndicatorKey), findsOneWidget);
+        // The vertical bar shows the moon alone; the others show the time.
+        expect(find.text('1:02:03'), aspect == null ? findsOneWidget : findsNothing);
+        expect(tester.takeException(), isNull);
+        sleep.off();
+        await tester.pump();
+      });
+    }
+  });
+
 }

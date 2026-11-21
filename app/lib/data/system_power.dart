@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:ffi/ffi.dart';
+import 'package:meta/meta.dart';
 import 'package:win32/win32.dart' show CloseHandle, GetCurrentProcess, OpenProcessToken, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY;
 
 /// What the sleep timer does after it has paused (Task 38, `architecture.md` §2.18).
@@ -71,6 +72,19 @@ class Win32SystemPower implements SystemPower {
   static const int _reasonPlannedOther = 0x80000000;
   static const int _sePrivilegeEnabled = 0x00000002;
 
+  /// Resolves every function above without calling the two that act. A wrong name or signature
+  /// would otherwise surface only when a viewer's timer fires. For `system_power_test.dart`.
+  @visibleForTesting
+  static void resolveAll() {
+    for (final Object f in [_isPwrSuspendAllowed, _isPwrHibernateAllowed, _setSuspendState, _exitWindowsEx, _lookupPrivilegeValue, _adjustTokenPrivileges]) {
+      if (f is! Function) throw StateError('not resolved');
+    }
+  }
+
+  /// [_enableShutdownPrivilege], for a test: whether every call in it succeeded.
+  @visibleForTesting
+  static bool enableShutdownPrivilegeForTest() => _enableShutdownPrivilege();
+
   @override
   bool get canSleep => _isPwrSuspendAllowed() != 0;
 
@@ -104,26 +118,29 @@ class Win32SystemPower implements SystemPower {
   }
 
   /// Turns `SE_SHUTDOWN_NAME` on for this process's token, which both `SetSuspendState` and
-  /// `ExitWindowsEx` require. Judged by what the calls after it return, not by `GetLastError`,
+  /// `ExitWindowsEx` require. Measured 2026-11-21: a non-elevated user's token lists
+  /// `SeShutdownPrivilege` as Disabled (`whoami /priv`), so this needs no elevation. Judged by what the calls after it return, not by `GetLastError`,
   /// which `installer_launcher.dart` measured unreliable across FFI.
-  static void _enableShutdownPrivilege() {
+  static bool _enableShutdownPrivilege() {
     final token = calloc<IntPtr>();
     final name = 'SeShutdownPrivilege'.toNativeUtf16();
     final privileges = calloc<_TokenPrivileges>();
     try {
       if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, token) == 0) {
         stderr.writeln('rill: sleep timer: OpenProcessToken failed');
-        return;
+        return false;
       }
       privileges.ref.privilegeCount = 1;
       if (_lookupPrivilegeValue(nullptr, name, Pointer<_Luid>.fromAddress(privileges.address + 4)) == 0) {
         stderr.writeln('rill: sleep timer: LookupPrivilegeValue failed');
-        return;
+        return false;
       }
       privileges.ref.attributes = _sePrivilegeEnabled;
       if (_adjustTokenPrivileges(token.value, 0, privileges, 0, nullptr, nullptr) == 0) {
         stderr.writeln('rill: sleep timer: AdjustTokenPrivileges failed');
+        return false;
       }
+      return true;
     } finally {
       if (token.value != 0) CloseHandle(token.value);
       calloc.free(token);
