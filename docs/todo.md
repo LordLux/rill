@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 114.** A new item takes it, and the same edit bumps this line.
+**Next number: 115.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1627,6 +1627,30 @@ separate audio (kept on the old layout), Narrator's reaction to a switch, and ca
 does not touch).
 
 **Done when:** the open or a switch is measurably shorter from it, or the measurement shows it is not worth it.
+
+---
+
+### 114. Sleep timer: what Task 38 left
+
+**Added 2026-11-21, Task 38** (`architecture.md` §2.18).
+
+- **Neither probe walks the timer's pages.** `RILL_FOCUS_PROBE=watch` and `RILL_SEMANTICS_PROBE=1`
+  do not open *Sleep timer*, *Custom…* or *When it ends*. *Custom…* puts two `TextField`s and two
+  steppers in the settings panel, which fades and unmounts. The fields' context menu, an overlay, is
+  off for that reason. Add steps that open each page, Tab through it and close it, then run both
+  probes as two runs. Also run Narrator started second, over the countdown banner's single live
+  announcement.
+- **Clicking the moon does nothing.** It could open the timer page, which would also make it
+  focusable. It was kept informational to stay within the brief.
+- **Shut down and Restart have not been run on a real machine** by the change that added them; Sleep
+  and Close Rill were handed to the user. `ExitWindowsEx` with `EWX_POWEROFF` and no force flag is
+  expected to show Windows' "apps are preventing shutdown" screen when one holds unsaved work. Record
+  what it does.
+- **Sleep on a Modern Standby machine.** `IsPwrSuspendAllowed` decides whether *Sleep* is offered.
+  What `SetSuspendState(FALSE, …)` does on an S0 machine is not measured.
+
+**Done when:** both probes cover the three pages and read 0 `Failed to update ui::AXTree`, and each
+remaining line above has a measurement or a decision recorded here.
 
 ---
 

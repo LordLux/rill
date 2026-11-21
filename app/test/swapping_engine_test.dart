@@ -561,6 +561,41 @@ void main() {
     });
   });
 
+  // Task 38: the sleep timer's fade is a gain on the output, owned here so a swap cannot drop it.
+  testWidgets('a fade carries onto the player that swaps in, and the setting never moves', (tester) async {
+    await tester.runAsync(() async {
+      final rig = Rig();
+      await mount(tester, rig.engine);
+      await started(rig);
+      await rig.engine.setVolume(80);
+      final reported = <double>[];
+      final subscription = rig.engine.volumeStream.listen(reported.add);
+      await rig.engine.setOutputGain(0.5);
+      expect(rig.first.volume, 40, reason: 'the player plays at setting x gain');
+      expect(rig.engine.volume, 80, reason: 'the engine reports the setting, not the fade');
+      rig.runClock();
+
+      await rig.engine.switchVideo(variant(720));
+      final standby = rig.slots[1];
+      expect(rig.engine.active, same(standby));
+      // MUTATION: hand the standby `old.volume` (the faded 40) instead of setting x gain and this
+      // fails at 20; hand it the bare setting and it fails at 80, with the fade gone mid-fade.
+      expect(standby.volume, 40, reason: 'the new player is at the faded level, not the setting');
+
+      await rig.engine.setOutputGain(0.25);
+      expect(standby.volume, 20, reason: 'the fade goes on, on the new player');
+      await rig.engine.setOutputGain(1);
+      expect(standby.volume, 80);
+      expect(rig.engine.volume, 80);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(reported, isEmpty, reason: 'nothing the fade did was reported as a volume change');
+
+      await subscription.cancel();
+      rig.stopClock();
+      await rig.engine.dispose();
+    });
+  });
+
   testWidgets('turning the picture off in the middle of a switch ends the second player', (tester) async {
     await tester.runAsync(() async {
       final rig = Rig();
@@ -664,7 +699,13 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 50));
           seen.clear();
 
-          row.emit(standby);
+          // The volume is the engine's setting, not a player's (see the check below): it is set
+          // through the engine, and what matters is that a listener from before the swap hears it.
+          if (row.name == 'volumeStream') {
+            await rig.engine.setVolume(33);
+          } else {
+            row.emit(standby);
+          }
           await Future<void>.delayed(const Duration(milliseconds: 50));
           await subscription.cancel();
           expect(seen, contains(row.value), reason: '${row.name} did not arrive from the new player');
@@ -687,6 +728,14 @@ void main() {
 
       final source = File('lib/data/playback/swapping_engine.dart').readAsStringSync();
       for (final name in declared) {
+        // The one stream that is not a player's state: the volume *setting*, which the engine owns
+        // so a sleep-timer fade (each player at setting x gain) never leaks into what is reported.
+        // Its row above still proves it reaches a listener attached before the swap.
+        if (name == 'volumeStream') {
+          expect(source, contains('Stream<double> get volumeStream => _volumeForward.stream;'));
+          expect(source, isNot(contains('_volumeForward.bind(slot);')), reason: 'bound, a fade would report the faded level');
+          continue;
+        }
         expect(
           RegExp('_Forward<[^>]*>\\(\\(s\\) => s\\.$name\\)').hasMatch(source),
           isTrue,

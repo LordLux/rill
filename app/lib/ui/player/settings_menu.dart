@@ -11,6 +11,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
@@ -20,6 +21,8 @@ import '../audio_mode_controller.dart';
 import '../captions_controller.dart';
 import '../focus_ring.dart';
 import '../playback_controller.dart';
+import '../sleep_timer.dart';
+import '../video_info.dart';
 
 const Key playerSettingsButtonKey = ValueKey('player-settings-button');
 const Key playerQualityButtonKey = ValueKey('player-quality-button');
@@ -68,7 +71,10 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 /// button beside quality's, so reaching it through the gear would be a second
 /// route to a place that already has a door. [_depthOf] and [back] both encode
 /// that — only `moreOptions` is under anything.
-enum SettingsPage { root, moreOptions, quality, captions, captionStyle, forceStyle }
+///
+/// The sleep timer's three pages (Task 38) are under the root: [sleepTimer] one level down, and its
+/// *Custom…* and *When it ends* pages under that.
+enum SettingsPage { root, moreOptions, quality, captions, captionStyle, forceStyle, sleepTimer, sleepTimerCustom, sleepTimerAction }
 
 @immutable
 class PlayerMenuState {
@@ -133,8 +139,13 @@ class PlayerMenuController extends Notifier<PlayerMenuState> {
   /// Only [SettingsPage.moreOptions] is under anything. Quality is its own top
   /// level — see [SettingsPage].
   bool back() {
-    if (state.page != SettingsPage.moreOptions) return false;
-    state = const PlayerMenuState(open: true, page: SettingsPage.root);
+    final up = switch (state.page) {
+      SettingsPage.moreOptions || SettingsPage.sleepTimer => SettingsPage.root,
+      SettingsPage.sleepTimerCustom || SettingsPage.sleepTimerAction => SettingsPage.sleepTimer,
+      _ => null,
+    };
+    if (up == null) return false;
+    state = PlayerMenuState(open: true, page: up);
     return true;
   }
 }
@@ -334,7 +345,11 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
     super.dispose();
   }
 
-  static int _depthOf(SettingsPage page) => page == SettingsPage.moreOptions || page == SettingsPage.captionStyle ? 1 : 0;
+  static int _depthOf(SettingsPage page) => switch (page) {
+    SettingsPage.moreOptions || SettingsPage.captionStyle || SettingsPage.sleepTimer => 1,
+    SettingsPage.sleepTimerCustom || SettingsPage.sleepTimerAction => 2,
+    _ => 0,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -361,6 +376,9 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.captions => const _CaptionsPage(),
         SettingsPage.captionStyle => const CaptionStylePage(),
         SettingsPage.forceStyle => const _ForceStylePage(),
+        SettingsPage.sleepTimer => const _SleepTimerPage(),
+        SettingsPage.sleepTimerCustom => const _SleepCustomPage(),
+        SettingsPage.sleepTimerAction => const _SleepActionPage(),
       },
     );
 
@@ -464,7 +482,6 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
 /// engine has no rate control to drive it and wiring one is a
 /// `data/playback/engine.dart` change rather than a menu change.
 const List<({IconData icon, String label})> _rootPlaceholders = [
-  (icon: Icons.bedtime_outlined, label: 'Sleep timer'),
   (icon: Icons.multitrack_audio, label: 'Audio track'),
   (icon: Icons.subtitles_outlined, label: 'Subtitle track / CC'),
   (icon: Icons.slow_motion_video, label: 'Playback speed'),
@@ -537,6 +554,7 @@ class _RootPage extends ConsumerWidget {
             );
           },
         ),
+        const _SleepTimerRow(),
         for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );
@@ -1794,6 +1812,381 @@ class _StyleSlider extends StatelessWidget {
               style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- The sleep timer (Task 38, `architecture.md` §2.18) ---
+
+const Key playerSleepTimerRowKey = ValueKey('player-sleep-timer-row');
+const Key playerSleepTimerMenuKey = ValueKey('player-sleep-timer-menu');
+const Key playerSleepCustomRowKey = ValueKey('player-sleep-custom-row');
+const Key playerSleepActionRowKey = ValueKey('player-sleep-action-row');
+const Key playerSleepCustomMenuKey = ValueKey('player-sleep-custom-menu');
+const Key playerSleepActionMenuKey = ValueKey('player-sleep-action-menu');
+const Key sleepCustomMinutesKey = ValueKey('sleep-custom-minutes');
+const Key sleepCustomSecondsKey = ValueKey('sleep-custom-seconds');
+const Key sleepCustomStartKey = ValueKey('sleep-custom-start');
+const Key sleepCustomChaptersStartKey = ValueKey('sleep-custom-chapters-start');
+const Key sleepCustomVideosStartKey = ValueKey('sleep-custom-videos-start');
+
+/// The timer page's fixed lengths, in minutes.
+const List<int> sleepPresetMinutes = [1, 2, 5, 10, 15, 30, 45, 60];
+
+/// The root page's row: the state, read at a glance — `Off`, `12:34`, `End of video`, and the
+/// action after it when there is one.
+class _SleepTimerRow extends ConsumerWidget {
+  const _SleepTimerRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final timer = ref.watch(sleepTimerProvider);
+    final action = ref.watch(sleepEndActionProvider);
+    return _MenuRow(
+      key: playerSleepTimerRowKey,
+      icon: timer.isOn ? Icons.bedtime : Icons.bedtime_outlined,
+      label: 'Sleep timer',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(sleepTimerSummary(timer, action), style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          const SizedBox(width: 4),
+          const Icon(Icons.chevron_right, size: 18),
+        ],
+      ),
+      onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.sleepTimer),
+    );
+  }
+}
+
+/// Whether the video open now is a live stream: it has no end for *End of video* to wait for.
+bool _isLive(PlaybackState playback) => playback.item?.isLive == true || (playback.source != null && playback.source!.durationMs == null);
+
+/// Off, the lengths, the two endings, *Custom…*, and what happens after. The current choice is
+/// ticked, as on the quality page. Picking anything replaces the timer running now, which is how a
+/// timer is stopped (decided: no warning, no "+10 min").
+class _SleepTimerPage extends ConsumerWidget {
+  const _SleepTimerPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final timer = ref.watch(sleepTimerProvider);
+    final action = ref.watch(sleepEndActionProvider);
+    final playback = ref.watch(playbackProvider);
+    final item = playback.item;
+    final chapters = item == null ? const <Object>[] : (ref.watch(videoInfoProvider(item.id)).value?.chapters ?? const <Object>[]);
+    final controller = ref.read(sleepTimerProvider.notifier);
+    final menu = ref.read(playerMenuProvider.notifier);
+
+    void pick(void Function() start) {
+      start();
+      menu.close();
+    }
+
+    final preset = timer.kind == SleepKind.duration && sleepPresetMinutes.any((m) => timer.total == Duration(minutes: m));
+    final custom = timer.kind == SleepKind.chapters || timer.kind == SleepKind.videos || (timer.kind == SleepKind.duration && !preset);
+
+    return _MenuBody(
+      key: playerSleepTimerMenuKey,
+      header: _MenuHeader(title: 'Sleep timer', onBack: menu.back, value: timer.isOn ? timer.waitsFor : null),
+      children: [
+        _CaptionRow(label: 'Off', selected: !timer.isOn, onTap: () => pick(controller.off)),
+        for (final minutes in sleepPresetMinutes)
+          _CaptionRow(
+            label: minutes == 1 ? '1 minute' : '$minutes minutes',
+            selected: timer.kind == SleepKind.duration && timer.total == Duration(minutes: minutes),
+            onTap: () => pick(() => controller.startDuration(Duration(minutes: minutes))),
+          ),
+        // Only when the video has chapters: without them there is no chapter to end.
+        if (chapters.isNotEmpty) _CaptionRow(label: 'End of chapter', selected: timer.kind == SleepKind.chapterEnd, onTap: () => pick(controller.endOfChapter)),
+        // Not for a live stream, which has no end.
+        if (!_isLive(playback)) _CaptionRow(label: 'End of video', selected: timer.kind == SleepKind.videoEnd, onTap: () => pick(controller.endOfVideo)),
+        _SleepChoiceRow(key: playerSleepCustomRowKey, label: 'Custom…', selected: custom, onTap: () => menu.go(SettingsPage.sleepTimerCustom)),
+        Divider(height: 9, indent: 12, endIndent: 12, color: scheme.outlineVariant),
+        _MenuRow(
+          key: playerSleepActionRowKey,
+          icon: Icons.power_settings_new,
+          label: 'When it ends: ${action.label}',
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => menu.go(SettingsPage.sleepTimerAction),
+        ),
+      ],
+    );
+  }
+}
+
+/// A ticked row with a chevron: *Custom…*, which is a choice and a door at once.
+class _SleepChoiceRow extends StatelessWidget {
+  const _SleepChoiceRow({super.key, required this.label, required this.selected, required this.onTap});
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+        child: Row(
+          children: [
+            Icon(Icons.check, size: 16, color: selected ? scheme.primary : Colors.transparent),
+            const SizedBox(width: 8),
+            Expanded(child: Text(label, style: TextStyle(fontSize: 13, color: scheme.onSurface))),
+            const Icon(Icons.chevron_right, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// *When it ends*: **Do nothing** first and the default. Sleep and Hibernate are offered only when
+/// Windows allows them. The choice lasts while Rill runs and is not remembered across a restart.
+class _SleepActionPage extends ConsumerWidget {
+  const _SleepActionPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final power = ref.watch(systemPowerProvider);
+    final choice = ref.watch(sleepEndActionProvider);
+    final menu = ref.read(playerMenuProvider.notifier);
+    final actions = [
+      SleepEndAction.nothing,
+      SleepEndAction.closeRill,
+      if (power.canSleep) SleepEndAction.sleep,
+      if (power.canHibernate) SleepEndAction.hibernate,
+      SleepEndAction.shutDown,
+      SleepEndAction.restart,
+    ];
+    return _MenuBody(
+      key: playerSleepActionMenuKey,
+      header: _MenuHeader(title: 'When it ends', onBack: menu.back),
+      children: [
+        for (final action in actions)
+          _CaptionRow(
+            key: ValueKey('sleep-action-${action.name}'),
+            label: action.label,
+            selected: choice == action,
+            onTap: () {
+              ref.read(sleepEndActionProvider.notifier).set(action);
+              menu.back();
+            },
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+          child: Text(
+            'Sleep, hibernate, shut down and restart wait 30 s first, with a Cancel.',
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// *Custom…*: a duration, *After N chapters* (when the video has chapters) and *After N videos*.
+/// It opens on the values last started here.
+///
+/// The fields take focus, and while one has it no player shortcut fires (`textEntryHasFocus`).
+/// Enter starts; Escape goes back a page — here and from the global handler (`shortcuts.dart`).
+class _SleepCustomPage extends ConsumerStatefulWidget {
+  const _SleepCustomPage();
+
+  @override
+  ConsumerState<_SleepCustomPage> createState() => _SleepCustomPageState();
+}
+
+class _SleepCustomPageState extends ConsumerState<_SleepCustomPage> {
+  final TextEditingController _minutes = TextEditingController(text: '30');
+  final TextEditingController _seconds = TextEditingController(text: '00');
+  int _chapters = 2;
+  int _videos = 2;
+  bool _invalid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      SleepCustomValues.read().then((values) {
+        if (!mounted) return;
+        setState(() {
+          _minutes.text = '${values.seconds ~/ 60}';
+          _seconds.text = (values.seconds % 60).toString().padLeft(2, '0');
+          _chapters = values.chapters;
+          _videos = values.videos;
+        });
+      }),
+    );
+  }
+
+  @override
+  void dispose() {
+    _minutes.dispose();
+    _seconds.dispose();
+    super.dispose();
+  }
+
+  void _started() => ref.read(playerMenuProvider.notifier).close();
+
+  void _startDuration() {
+    final minutes = int.tryParse(_minutes.text.trim().isEmpty ? '0' : _minutes.text.trim());
+    final seconds = int.tryParse(_seconds.text.trim().isEmpty ? '0' : _seconds.text.trim());
+    final total = minutes == null || seconds == null || seconds > 59 ? 0 : minutes * 60 + seconds;
+    if (total < 1 || total > SleepCustomValues.maxSeconds) {
+      setState(() => _invalid = true);
+      return;
+    }
+    ref.read(sleepTimerProvider.notifier).startDuration(Duration(seconds: total));
+    unawaited(SleepCustomValues.write(seconds: total));
+    _started();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
+      ref.read(playerMenuProvider.notifier).back();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final item = ref.watch(playbackProvider.select((p) => p.item));
+    final chapters = item == null ? const <Object>[] : (ref.watch(videoInfoProvider(item.id)).value?.chapters ?? const <Object>[]);
+    final timer = ref.read(sleepTimerProvider.notifier);
+    final menu = ref.read(playerMenuProvider.notifier);
+
+    Widget field(Key key, TextEditingController controller, String label, int maxLength) => SizedBox(
+      width: 72,
+      child: TextField(
+        key: key,
+        controller: controller,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(maxLength)],
+        // No context menu: it is an overlay, and this panel fades and unmounts (CLAUDE.md, Accessibility).
+        contextMenuBuilder: null,
+        style: const TextStyle(fontSize: 13),
+        decoration: InputDecoration(isDense: true, labelText: label, border: const OutlineInputBorder()),
+        onChanged: (_) {
+          if (_invalid) setState(() => _invalid = false);
+        },
+        onSubmitted: (_) => _startDuration(),
+      ),
+    );
+
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      includeSemantics: false,
+      onKeyEvent: _onKey,
+      child: _MenuBody(
+        key: playerSleepCustomMenuKey,
+        header: _MenuHeader(title: 'Custom', onBack: menu.back),
+        children: [
+          const _StyleSection(label: 'Duration'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 12, 4),
+            child: Row(
+              children: [
+                field(sleepCustomMinutesKey, _minutes, 'Minutes', 4),
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Text(':')),
+                field(sleepCustomSecondsKey, _seconds, 'Seconds', 2),
+                const Spacer(),
+                FilledButton.tonal(key: sleepCustomStartKey, onPressed: _startDuration, child: const Text('Start')),
+              ],
+            ),
+          ),
+          if (_invalid)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
+              child: Semantics(
+                liveRegion: true,
+                child: Text('From 0:01 to 23:59:59', style: TextStyle(fontSize: 11, color: scheme.error)),
+              ),
+            ),
+          if (chapters.isNotEmpty) ...[
+            const _StyleSection(label: 'After chapters'),
+            _SleepStepper(
+              noun: 'chapters',
+              value: _chapters,
+              onChanged: (value) => setState(() => _chapters = value),
+              startKey: sleepCustomChaptersStartKey,
+              onStart: () {
+                timer.afterChapters(_chapters);
+                unawaited(SleepCustomValues.write(chapters: _chapters));
+                _started();
+              },
+            ),
+          ],
+          const _StyleSection(label: 'After videos'),
+          _SleepStepper(
+            noun: 'videos',
+            value: _videos,
+            onChanged: (value) => setState(() => _videos = value),
+            startKey: sleepCustomVideosStartKey,
+            onStart: () {
+              timer.afterVideos(_videos);
+              unawaited(SleepCustomValues.write(videos: _videos));
+              _started();
+            },
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+}
+
+/// N from 1 to 99, with a minus and a plus, and *Start*.
+class _SleepStepper extends StatelessWidget {
+  const _SleepStepper({required this.noun, required this.value, required this.onChanged, required this.onStart, required this.startKey});
+
+  final String noun;
+  final int value;
+  final ValueChanged<int> onChanged;
+  final VoidCallback onStart;
+  final Key startKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 0, 12, 4),
+      child: Row(
+        children: [
+          IconButton(
+            key: ValueKey('sleep-$noun-fewer'),
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.remove, size: 18, semanticLabel: 'Fewer $noun'),
+            onPressed: value > 1 ? () => onChanged(value - 1) : null,
+          ),
+          SizedBox(
+            width: 28,
+            child: Semantics(
+              liveRegion: true,
+              label: '$value $noun',
+              child: ExcludeSemantics(
+                child: Text('$value', key: ValueKey('sleep-$noun-value'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+              ),
+            ),
+          ),
+          IconButton(
+            key: ValueKey('sleep-$noun-more'),
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.add, size: 18, semanticLabel: 'More $noun'),
+            onPressed: value < 99 ? () => onChanged(value + 1) : null,
+          ),
+          const Spacer(),
+          FilledButton.tonal(key: startKey, onPressed: onStart, child: const Text('Start')),
         ],
       ),
     );

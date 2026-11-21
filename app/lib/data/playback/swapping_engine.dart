@@ -127,6 +127,7 @@ class SwappingEngine implements PlaybackEngine {
     this.trace,
   }) : _settle = settle ?? _afterFrames {
     _active = _create();
+    _setting = _active.volume;
     _bind(_active);
   }
 
@@ -177,7 +178,12 @@ class SwappingEngine implements PlaybackEngine {
   final _buffer = _Forward<Duration>((s) => s.bufferStream);
   final _width = _Forward<int?>((s) => s.widthStream);
   final _height = _Forward<int?>((s) => s.heightStream);
+  /// The volume the viewer set. **Not forwarded from a player**: while the sleep timer fades, each
+  /// player plays at `_setting * _gain` and reports that, and the setting is what everything above
+  /// the engine reads (`PlaybackEngine.outputGain`). Unbound, so only [setVolume] puts a value here.
   final _volumeForward = _Forward<double>((s) => s.volumeStream);
+  late double _setting;
+  double _gain = 1;
   final _completed = _Forward<bool>((s) => s.completedStream);
   final _videoOutput = _Forward<bool>((s) => s.videoOutputStream);
   final _audioMissingForward = _Forward<bool>((s) => s.audioMissingStream);
@@ -192,7 +198,6 @@ class SwappingEngine implements PlaybackEngine {
     _buffer.bind(slot);
     _width.bind(slot);
     _height.bind(slot);
-    _volumeForward.bind(slot);
     _completed.bind(slot);
     _videoOutput.bind(slot);
     _audioMissingForward.bind(slot);
@@ -209,7 +214,6 @@ class SwappingEngine implements PlaybackEngine {
     _buffer.push(slot.buffer);
     _width.push(slot.width);
     _height.push(slot.height);
-    _volumeForward.push(slot.volume);
     _videoOutput.push(slot.videoOutputReady);
     _audioMissingForward.push(slot.audioMissing);
     _seekingForward.push(slot.seeking);
@@ -257,7 +261,7 @@ class SwappingEngine implements PlaybackEngine {
   @override
   int? get height => _active.height;
   @override
-  double get volume => _active.volume;
+  double get volume => _setting;
   @override
   bool get videoOutputReady => _active.videoOutputReady;
   @override
@@ -303,9 +307,27 @@ class SwappingEngine implements PlaybackEngine {
 
   @override
   Future<void> setVolume(double volume) async {
+    _setting = volume;
+    _volumeForward.push(volume);
+    await _applyVolume();
+  }
+
+  @override
+  double get outputGain => _gain;
+
+  /// Applied to both players, so a standby that swaps in mid-fade is already at the faded level,
+  /// and [_startStandby] hands a new standby the same product.
+  @override
+  Future<void> setOutputGain(double gain) async {
+    _gain = gain.clamp(0.0, 1.0);
+    await _applyVolume();
+  }
+
+  Future<void> _applyVolume() async {
+    final level = _setting * _gain;
     final standby = _standby;
-    if (standby != null) unawaited(standby.setVolume(volume).catchError((Object _) {}));
-    await _active.setVolume(volume);
+    if (standby != null) unawaited(standby.setVolume(level).catchError((Object _) {}));
+    await _active.setVolume(level);
   }
 
   @override
@@ -575,7 +597,9 @@ class SwappingEngine implements PlaybackEngine {
     _surface.value++;
     try {
       await _settle();
-      await standby.setVolume(old.volume).timeout(const Duration(seconds: 10));
+      // The setting times the fade's gain, not `old.volume`: that is what the old player is playing
+      // at, which under a fade is the faded level and would then be faded again.
+      await standby.setVolume(_setting * _gain).timeout(const Duration(seconds: 10));
       await standby.prepareStandby();
     } on Object {
       if (identical(_dropped, standby)) throw const _SwapAbandoned('the standby was dropped');

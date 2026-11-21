@@ -24,6 +24,36 @@ final playbackEngineProvider = Provider<PlaybackEngine>((ref) {
   );
 });
 
+/// What the sleep timer needs from the controller, kept out of both so neither depends on the other
+/// (Task 38, `architecture.md` §2.18). The controller writes to it and the timer reads it.
+class PlaybackSignals {
+  /// Asked at a **real** ending, the point where autoplay would advance — after
+  /// `PlaybackController._endedShort` has ruled out a dropped read, and never on a recovery reopen.
+  /// True keeps the queue where it is: the asker has paused instead.
+  bool Function()? holdAtRealEnding;
+
+  /// Every seek the viewer made, as its target. Every seek in the app goes through
+  /// [PlaybackController.seek], so this is the one place to hear about them.
+  final StreamController<Duration> _seeks = StreamController<Duration>.broadcast(sync: true);
+  Stream<Duration> get seeks => _seeks.stream;
+
+  /// The viewer changed the volume (the slider, a step, a mute), as opposed to a fade touching the
+  /// output.
+  final StreamController<void> _volumeChanges = StreamController<void>.broadcast(sync: true);
+  Stream<void> get volumeChanges => _volumeChanges.stream;
+
+  void dispose() {
+    unawaited(_seeks.close());
+    unawaited(_volumeChanges.close());
+  }
+}
+
+final playbackSignalsProvider = Provider<PlaybackSignals>((ref) {
+  final signals = PlaybackSignals();
+  ref.onDispose(signals.dispose);
+  return signals;
+});
+
 /// Where the video is, while the engine cannot say.
 ///
 /// **One object, not two nullable fields** (architecture §2.7): holding only the
@@ -851,6 +881,9 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
     _endSession(reportState: 'ended');
+    // The sleep timer's "end of video" and its kin (Task 38): it pauses here, and nothing moves on.
+    // After `_endedShort`, so a dropped read can never fire it.
+    if (ref.read(playbackSignalsProvider).holdAtRealEnding?.call() ?? false) return;
     // Autoplay, or stop. `advance` answers false at the end of the queue — and
     // at the end of a mix with a top-up still out, the queue remembers and
     // advances itself when it lands (`QueueController._advanceWhenExtended`).
@@ -954,6 +987,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.isUnplayable || state.isLoading) return Future<void>.value();
     final held = state.hold;
     if (held != null) state = state.copyWith(hold: held.at(to));
+    ref.read(playbackSignalsProvider)._seeks.add(to);
     return _engine.seek(to);
   }
 
@@ -1018,12 +1052,14 @@ class PlaybackController extends Notifier<PlaybackState> {
     // Unmuting by dragging the slider is unmuting. Without this the level to
     // restore stays whatever it was before the *first* mute, forever.
     if (clamped > 0) _volumeBeforeMute = null;
+    ref.read(playbackSignalsProvider)._volumeChanges.add(null);
     return _engine.setVolume(clamped);
   }
 
   Future<void> nudgeVolume(double delta) => setVolume(_engine.volume + delta);
 
   Future<void> toggleMute() {
+    ref.read(playbackSignalsProvider)._volumeChanges.add(null);
     final current = _engine.volume;
     if (current > 0) {
       _volumeBeforeMute = current;
