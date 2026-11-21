@@ -349,6 +349,23 @@ class FakeEngine implements PlaybackEngine {
     _volume.add(volume);
   }
 
+  /// Every gain handed to [setOutputGain], in order: the sleep timer's fade, which must never show
+  /// in [volumes] (it fades the output, not the setting).
+  final List<double> gains = [];
+  double _gain = 1;
+
+  @override
+  double get outputGain => _gain;
+
+  @override
+  Future<void> setOutputGain(double gain) async {
+    gains.add(gain);
+    _gain = gain;
+  }
+
+  /// What would reach the speakers: the setting times the gain.
+  double get audibleVolume => _volumeValue * _gain;
+
   /// mpv's `frame-step` pauses; so does this, or the assertion "stepping a frame
   /// leaves a still picture" would pass here and fail in front of a user.
   @override

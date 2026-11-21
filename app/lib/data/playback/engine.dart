@@ -178,6 +178,15 @@ abstract class PlaybackEngine {
   Future<void> seek(Duration to);
   Future<void> setVolume(double volume);
 
+  /// What reaches the speakers, as a share of [volume]: 1 is the setting itself, 0 is silence.
+  ///
+  /// The sleep timer's fade (`architecture.md` §2.18). **It fades the output, not the setting:**
+  /// [volume] and [volumeStream] go on reporting what the viewer set while this is below 1, so the
+  /// slider, a mute, a volume step and the session snapshot all read the setting and never the
+  /// fade. [SwappingEngine] owns it for the app, so a player that swaps in mid-fade plays at it too.
+  double get outputGain;
+  Future<void> setOutputGain(double gain);
+
   /// One frame forward (`direction > 0`) or back — the `,` and `.` keys.
   ///
   /// A distinct operation from [seek] rather than a seek of 1/fps, because
@@ -513,7 +522,7 @@ class MediaKitEngine implements SwapSlot {
   @override
   int? get height => _height;
   @override
-  double get volume => _volume;
+  double get volume => _gain < 1 ? (_setting ?? _volume) : _volume;
 
   /// Open a variant: video first, then the audio track attached to it.
   ///
@@ -1121,7 +1130,27 @@ class MediaKitEngine implements SwapSlot {
   @override
   Future<void> setVolume(double volume) {
     trace?.call('setVolume $volume');
-    return _player.setVolume(volume);
+    _setting = volume;
+    return _player.setVolume(volume * _gain);
+  }
+
+  /// The volume last asked for, while a gain below 1 makes mpv's own differ from it. Null until
+  /// [setVolume] is first called, when mpv's is the setting.
+  double? _setting;
+  double _gain = 1;
+
+  /// **The app never calls this on a slot:** [SwappingEngine] keeps the gain and hands each player
+  /// the product through [setVolume]. It is here for an engine used alone, where mpv's reported
+  /// volume is the faded one while the gain is below 1 and [volume] answers the setting instead.
+  @override
+  double get outputGain => _gain;
+
+  @override
+  Future<void> setOutputGain(double gain) {
+    _gain = gain.clamp(0.0, 1.0);
+    final setting = _setting ?? _volume;
+    _setting = setting;
+    return _player.setVolume(setting * _gain);
   }
 
   /// mpv's own `frame-step` / `frame-back-step`.

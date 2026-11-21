@@ -368,6 +368,13 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         // dismiss one panel would be a key doing the arrow's job badly.
         // `close()` resets the page too, so the next open starts at the root.
         if (ref.read(playerMenuProvider).open) {
+          // The one exception: the sleep timer's *Custom…* page, a small form, where Escape goes
+          // back a page (Task 38) — from a field (its own handler, since this one stands aside for
+          // text entry) or from a button (here).
+          if (ref.read(playerMenuProvider).page == SettingsPage.sleepTimerCustom) {
+            ref.read(playerMenuProvider.notifier).back();
+            return true;
+          }
           ref.read(playerMenuProvider.notifier).close();
           return true;
         }

@@ -54,7 +54,7 @@ class SwitchingPlayback extends PlaybackController {
   );
 }
 
-const rootPlaceholders =['Sleep timer', 'Audio track', 'Playback speed'];
+const rootPlaceholders =['Audio track', 'Playback speed'];
 const morePlaceholders = ['Audio channel', 'Sticky player', 'Annotations', 'Ambient mode'];
 
 late ProviderContainer container;
@@ -158,7 +158,7 @@ void main() {
   });
 
   group('the root page', () {
-    testWidgets('is More options over a divider; only it navigates', (tester) async {
+    testWidgets('is More options over a divider; only it and the sleep timer navigate', (tester) async {
       container.read(playerMenuProvider.notifier).open();
       await tester.pumpWidget(host());
       await tester.pumpAndSettle();
@@ -187,6 +187,15 @@ void main() {
         expect(container.read(playerMenuProvider).page, SettingsPage.root,
             reason: '$label is a placeholder and must not navigate');
       }
+      // The sleep timer (Task 38) is a real row now, below the divider, reading its state.
+      expect(tester.getTopLeft(find.byKey(playerSleepTimerRowKey)).dy, greaterThan(divider));
+      expect(find.descendant(of: find.byKey(playerSleepTimerRowKey), matching: find.text('Off')), findsOneWidget);
+      await tester.tap(find.byKey(playerSleepTimerRowKey));
+      await tester.pumpAndSettle();
+      expect(container.read(playerMenuProvider).page, SettingsPage.sleepTimer);
+      container.read(playerMenuProvider.notifier).back();
+      await tester.pumpAndSettle();
+
       await tester.tap(find.byKey(playerSettingsMoreRowKey));
       await tester.pumpAndSettle();
       expect(container.read(playerMenuProvider).page, SettingsPage.moreOptions);
