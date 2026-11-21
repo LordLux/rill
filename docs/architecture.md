@@ -2526,8 +2526,10 @@ end actions, and the menu pages are in `settings_menu.dart`.
     `IsPwrHibernateAllowed`) go through `SetSuspendState`.
   - *Shut down* (`EWX_POWEROFF`) and *Restart* (`EWX_REBOOT`) go through `ExitWindowsEx`, with the
     reason `SHTDN_REASON_FLAG_PLANNED`.
-  - All four first enable `SE_SHUTDOWN_NAME` for the process. Every interactive user holds it,
-    disabled, so no elevation is needed.
+  - All four first enable `SE_SHUTDOWN_NAME` for the process. A non-elevated user's token lists it as
+    Disabled (`whoami /priv`, measured 2026-11-21), so no elevation is needed.
+    `system_power_test.dart` resolves every binding and enables the privilege; it calls neither
+    action.
   - **Never `EWX_FORCE` or `EWX_FORCEIFHUNG`, and no `bForce`:** an app holding unsaved work must be
     able to stop a shutdown, and Windows shows its own "apps are preventing shutdown" screen.
   - The calls are FFI, as `hard_exit.dart` is: `package:win32` binds none of them.
@@ -2546,7 +2548,8 @@ end actions, and the menu pages are in `settings_menu.dart`.
   - Enter starts, and Escape goes back a page there, from a field or a button. A field holds the
     player shortcuts off (`textEntryHasFocus`).
 - **The moon** (`SleepTimerIndicator`) is in the control bar and the miniplayer. It shows the time
-  left for a duration and is alone otherwise, with a silent in-tree tooltip saying what it waits for
+  left for a duration and is alone otherwise. In the vertical bar it is always alone, because the
+  time overflowed a narrow portrait bar, with a silent in-tree tooltip saying what it waits for
   and the action after it. It is informational and not focusable, and it names itself once with the
   spoken time.
 
