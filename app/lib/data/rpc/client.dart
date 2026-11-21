@@ -267,18 +267,68 @@ class RpcClient {
   /// really was closing — see `_handleExit`, which now checks process identity.
   /// The retry stays, because a spawn racing the OS is still possible and the
   /// hedge costs nothing, but it is a hedge and no longer the fix.
+  ///
+  /// **The retry runs the start in a guarded zone (`todo.md` 113, 2026-11-17).** The
+  /// failure above does not always come out of the awaited call: it can be raised
+  /// from the pipe's own async machinery, with nothing to catch it, so the `try`
+  /// below never saw it and it surfaced as an unhandled error on whichever test was
+  /// running (CI runs 43976683267 and 44007227084, both `quality_in_place_test.dart`,
+  /// both passing on a rerun). Everything `Process.start` schedules is bound to the
+  /// zone it was called in, so [runZonedGuarded] receives those errors. Before the
+  /// start has completed an error fails *this attempt* and it is retried, and a
+  /// process that arrives after its attempt was abandoned is killed, not leaked.
+  /// After it has completed the process stands: the same pipe's late errors are
+  /// logged and dropped, because a dead sidecar is already handled by the exit
+  /// handlers on its stdout. That includes a `stdin` write failing asynchronously,
+  /// whose error belongs to the zone the pipe's sink was built in. Not reproduced on
+  /// demand — the guard is tested with forced failures (`rpc_client_spawn_test.dart`)
+  /// — see `architecture.md` §2.18.
   Future<Process> _spawn(String executable, List<String> command, String root) async {
     for (var attempt = 0; ; attempt++) {
       try {
-        return await Process.start(executable, command, workingDirectory: root, environment: {
-          'FLUTTER_PARENT_PID': pid.toString(),
-          ...extraEnvironment,
-        });
+        return await _startGuarded(executable, command, root);
       } on Object {
         if (attempt >= 4) rethrow;
         await Future<void>.delayed(Duration(milliseconds: 100 * (attempt + 1)));
       }
     }
+  }
+
+  /// `Process.start`, replaceable so a test can force the failure `_spawn` guards.
+  @visibleForTesting
+  static Future<Process> Function(
+    String executable,
+    List<String> arguments, {
+    String? workingDirectory,
+    Map<String, String>? environment,
+  }) processStarter = Process.start;
+
+  Future<Process> _startGuarded(String executable, List<String> command, String root) {
+    final result = Completer<Process>();
+    var abandoned = false;
+    runZonedGuarded(() async {
+      try {
+        final process = await processStarter(executable, command, workingDirectory: root, environment: {
+          'FLUTTER_PARENT_PID': pid.toString(),
+          ...extraEnvironment,
+        });
+        if (abandoned) {
+          process.kill();
+        } else {
+          result.complete(process);
+        }
+      } on Object catch (e, s) {
+        if (!result.isCompleted) result.completeError(e, s);
+      }
+    }, (e, s) {
+      if (result.isCompleted) {
+        stderr.writeln('rill: sidecar pipe error after start: $e');
+      } else {
+        abandoned = true;
+        result.completeError(e, s);
+      }
+    });
+    return result.future;
   }
 
   Future<void> _startInternal() async {

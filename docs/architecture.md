@@ -2442,6 +2442,33 @@ automatic-download switch). A launch with the setting off is a fresh start, and 
 - **Not kept, on purpose:** scroll positions and open menus; the page stack below the top (Back from a restored playlist
   page goes to the feed); the subscriptions pages; search filters.
 
+### 2.18 `RpcClient._spawn` starts the sidecar in a guarded zone (decided 2026-11-17, `todo.md` 113)
+
+A sidecar started close behind a killed one can fail with `SocketException: Write failed (OS Error: The pipe is being
+closed, errno = 232)`. The error is not always raised out of the awaited `Process.start`: it can come from the pipe's own
+async machinery with nothing awaiting it, so the retry in `_spawn` never saw it, and it surfaced as an unhandled error on
+whichever test was running (CI runs 43976683267 and 44007227084, `quality_in_place_test.dart`, both green on a rerun).
+
+- **The start runs in `runZonedGuarded`** (`_startGuarded`). What `Process.start` schedules is bound to the zone it was
+  called in, so those errors arrive at the zone's handler. **Before the start has completed** an error fails that attempt
+  and `_spawn` retries (≤5 attempts); a process that arrives after its attempt was abandoned is killed, not leaked. **After
+  it has completed** the process stands and the late error is logged and dropped: a dead sidecar is already handled by the
+  exit handlers on stdout (`_handleExit(process)`), and re-spawning on a pipe error would double-start a healthy one.
+- **Not reproduced on demand** (a plain Dart script writing to dead and killed children 70 times raised nothing), so the
+  guard is exercised with forced failures: `RpcClient.processStarter` is a `@visibleForTesting` seam over `Process.start`,
+  and `test/rpc_client_spawn_test.dart` has three. An error raised from a timer before the start completes (retried, the
+  late process killed); the same error after it completes (logged); and **the one closest to the real thing, a `stdin`
+  write that fails asynchronously with errno 232**, from an `IOSink` built inside the starter as the real pipe's sink is,
+  written to by an ordinary `RpcClient.call`. That last one is the case that matters: `Process.start` writes nothing, so the
+  CI error is most likely a `stdin.writeln` (`_send`, `cancel`) failing on the pipe. Its error belongs to the zone the sink
+  was built in, so it reaches the guard's *logged* branch, not the retry, and the call whose write failed gets no reply
+  (a dead sidecar fails its pending calls through the stdout exit handler). All three are mutation-checked: with the zone
+  removed each fails with that error unhandled. A hand-built `IOSink` approximates the real pipe's sink; it is not the same
+  object, which is why the todo stays open until CI stops failing.
+- **Production cost:** one zone per spawn. Nothing else on the start path changed. A future created inside the guarded
+  zone (`exitCode`, `stdin.done`) does not deliver its errors to a listener outside it; nothing does that today, because
+  `killForTestAndWait` only awaits a value.
+
 ## 3. Phasing
 
 **Phase 1 — plain URLs.** Browse as `WEB`, resolve as `VISIONOS` with yt-dlp

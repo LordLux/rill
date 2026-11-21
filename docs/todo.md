@@ -72,36 +72,38 @@ watch page's own owner/title area (capture one), with a fixture.
 
 ### 113. A fake-sidecar test occasionally fails on a spawn race, in CI only
 
-**Seen once, 2026-11-16, on the Task 37 pull request (CI run 43976683267): the
-"App - tests" step, one test of 1461, `quality_in_place_test.dart` ("a pause pressed
-while it runs…"), `SocketException: Write failed (OS Error: The pipe is being
-closed, errno = 232)`. A rerun of the same commit passed.** Nothing on the branch
-touched that test or the playback code, `main` passed its scheduled run the same
-morning, and the file passed 6 of 6 here and 4 of 4 when run four at once (the
-next round of that stress run hung, which proved nothing). Not reproduced.
+**Seen twice, 2026-11-16 and 2026-11-17 (CI runs 43976683267 and 44007227084): one test of
+~1460, `quality_in_place_test.dart` ("a pause pressed while it runs…"), `SocketException: Write
+failed (OS Error: The pipe is being closed, errno = 232)`; a rerun passed both times.** Neither
+branch touched playback or `RpcClient`.
 
-**Seen again, 2026-11-17, on PR 40 (CI run 44007227084): the same test, the same
-error (three `errno = 232` lines), commit `9263f34`.** That branch touched the
-sign-in page and the sidecar's auth check, nothing in playback or `RpcClient`. Its
-previous CI run (44005546291, one commit earlier) got past the app tests and failed
-on the text-file guard instead. Two hits in two days, both on this one test.
+**Landed 2026-11-17: `RpcClient._spawn` starts the process in a guarded zone** and retries on an
+async error that arrives before the start completes (`architecture.md` §2.18), with
+`test/rpc_client_spawn_test.dart` forcing the failure and mutation-checked. **It has not been seen
+to fix the CI failure**, which was never reproduced locally: the guard is verified against a forced
+error, not against the real one.
 
-**What is known.** It is the race `RpcClient._spawn` documents
-(`data/rpc/client.dart`): starting a fake sidecar soon after killing the last one can
-fail inside `Process.start`, and the error arrives as an unhandled async error, so it
-lands on whichever test is running. The suites that restart the sidecar per test
-already wait for the old process to exit (`killForTestAndWait`) and `_spawn` retries,
-which that comment calls "a hedge": a retry cannot catch an error that does not come
-out of the awaited call. Replacing a fixed sleep with polling, as `captions_test`
-needed, would not help here: this test already waits on the exit.
+**Done** when it has not recurred across enough CI runs to call it gone; then delete this entry. If
+it recurs, note the run id here first: the error is then not one the zone sees, and the next step
+is logging the stack in the failing run. The failure was forced as a `stdin` write error from a
+hand-built sink, which approximates the real pipe; that approximation is the unverified part.
+### 113. A fake-sidecar test occasionally fails on a spawn race, in CI only
 
-**The candidate fix, not tried because it could not be verified:** run `Process.start`
-in a guarded zone inside `_spawn` so the async error is caught and the spawn retried.
-That changes the production start path, not only a test.
+**Seen twice, 2026-11-16 and 2026-11-17 (CI runs 43976683267 and 44007227084): one test of
+~1460, `quality_in_place_test.dart` ("a pause pressed while it runs…"), `SocketException: Write
+failed (OS Error: The pipe is being closed, errno = 232)`; a rerun passed both times.** Neither
+branch touched playback or `RpcClient`.
 
-**Done** when it has not recurred across enough CI runs to call it gone, or the spawn is
-guarded and a run that forces the failure shows the retry catching it. If it recurs,
-note the run id here first: how often decides whether the guard is worth the risk.
+**Landed 2026-11-17: `RpcClient._spawn` starts the process in a guarded zone** and retries on an
+async error that arrives before the start completes (`architecture.md` §2.18), with
+`test/rpc_client_spawn_test.dart` forcing the failure and mutation-checked. **It has not been seen
+to fix the CI failure**, which was never reproduced locally: the guard is verified against a forced
+error, not against the real one.
+
+**Done** when it has not recurred across enough CI runs to call it gone; then delete this entry. If
+it recurs, note the run id here first: the error is then not one the zone sees, and the next step
+is logging the stack in the failing run. The failure was forced as a `stdin` write error from a
+hand-built sink, which approximates the real pipe; that approximation is the unverified part.
 
 ### 56. Sign-in and sign-out: two questions left after Task 31
 
