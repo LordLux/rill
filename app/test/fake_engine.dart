@@ -182,6 +182,21 @@ class FakeEngine implements PlaybackEngine {
     }
   }
 
+  /// Every variant handed to [switchAudio], in order, whatever it answered.
+  final List<PlaybackVariant> audioSwitches = [];
+
+  /// What [switchAudio] answers. `unsupported` by default, as a plain engine does: the caller
+  /// reopens. A test of the second player's path sets `done`.
+  VideoSwitch audioSwitchResult = VideoSwitch.unsupported;
+
+  @override
+  Future<VideoSwitch> switchAudio(PlaybackVariant variant) async {
+    audioSwitches.add(variant);
+    final result = audioSwitchResult;
+    if (result == VideoSwitch.done) _current = variant;
+    return result;
+  }
+
   /// Held open by a test that needs `open` to still be in flight later. media_kit really can
   /// take ~20 s here, waiting on a duration before it attaches the audio track.
   Future<void>? openGate;

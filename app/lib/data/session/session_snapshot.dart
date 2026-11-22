@@ -208,6 +208,7 @@ class SnapshotState {
     required this.savedAtMs,
     this.volume,
     this.preferredHeight,
+    this.audioTrackId,
   });
 
   final int positionMs;
@@ -218,6 +219,10 @@ class SnapshotState {
   final double? volume;
   final int? preferredHeight;
 
+  /// The audio track chosen for the playing video (Task 39), YouTube's opaque id. Null when none
+  /// was chosen, which is the original; an id the video no longer has is ignored by the sidecar.
+  final String? audioTrackId;
+
   String encode() => jsonEncode({
         'v': SessionSnapshot.format,
         'positionMs': positionMs,
@@ -226,6 +231,7 @@ class SnapshotState {
         'savedAtMs': savedAtMs,
         'volume': volume,
         'preferredHeight': preferredHeight,
+        'audioTrackId': audioTrackId,
       });
 
   static SnapshotState? tryDecode(String? raw) {
@@ -244,12 +250,14 @@ class SnapshotState {
           : SnapshotPage(kind, argument);
       final volume = json['volume'];
       final height = json['preferredHeight'];
+      final track = json['audioTrackId'];
       return SnapshotState(
         positionMs: position < 0 ? 0 : position,
         page: page,
         savedAtMs: saved,
         volume: volume is num ? volume.toDouble().clamp(0.0, 100.0) : null,
         preferredHeight: height is int && height > 0 ? height : null,
+        audioTrackId: track is String && track.isNotEmpty ? track : null,
       );
     } on Object {
       return null;

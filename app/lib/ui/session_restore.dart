@@ -105,6 +105,7 @@ typedef SessionRead = T Function<T>(ProviderListenable<T> provider);
     savedAtMs: now.millisecondsSinceEpoch,
     volume: read(playbackEngineProvider).volume,
     preferredHeight: read(playbackProvider.notifier).preferredHeight,
+    audioTrackId: read(playbackProvider.notifier).chosenAudioTrackId,
   );
   return (queue: stored.encode(), state: state.encode());
 }
@@ -249,6 +250,8 @@ final sessionWriterProvider = Provider<SessionWriter>((ref) {
   ref.listen(currentRouteProvider, (_, _) => writer.changed());
   ref.listen(currentRouteArgumentProvider, (_, _) => writer.changed());
   ref.listen(playbackProvider.select((p) => p.item?.id), (_, _) => writer.changed());
+  // The audio track chosen (Task 39): written when it lands, not at the next tick.
+  ref.listen(playbackProvider.select((p) => p.source?.audioTrackId), (_, _) => writer.changed());
   ref.onDispose(writer.dispose);
   return writer;
 });
@@ -321,7 +324,11 @@ Future<void> _apply(
   if (volume != null) {
     unawaited(playback.setVolume(volume).catchError((Object error) => stderr.writeln('rill session: volume not restored: $error')));
   }
-  playback.restoreNext(videoId: current.id, position: Duration(milliseconds: snapshot.state.positionMs));
+  playback.restoreNext(
+    videoId: current.id,
+    position: Duration(milliseconds: snapshot.state.positionMs),
+    audioTrackId: snapshot.state.audioTrackId,
+  );
 
   final mix = snapshot.queue.mix;
   container.read(queueProvider.notifier).restoreFrom(

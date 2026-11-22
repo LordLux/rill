@@ -9,7 +9,7 @@ import 'package:rill/data/session/session_snapshot.dart';
 SnapshotVideo video(String id) => SnapshotVideo(id: id, title: 'Video $id', channelName: 'Channel', thumbnailUrl: 'https://i.ytimg.com/vi/$id/hq.jpg');
 
 SnapshotState stateAt(DateTime saved, {SnapshotPage page = SnapshotPage.home}) =>
-    SnapshotState(positionMs: 42000, page: page, savedAtMs: saved.millisecondsSinceEpoch, volume: 35, preferredHeight: 720);
+    SnapshotState(positionMs: 42000, page: page, savedAtMs: saved.millisecondsSinceEpoch, volume: 35, preferredHeight: 720, audioTrackId: 'hi.10');
 
 void main() {
   final now = DateTime(2026, 11, 9, 12);
@@ -38,6 +38,7 @@ void main() {
     expect(back.state.page, const SnapshotPage(SnapshotPageKind.search, 'lofi'));
     expect(back.state.volume, 35);
     expect(back.state.preferredHeight, 720);
+    expect(back.state.audioTrackId, 'hi.10', reason: 'the audio track chosen (Task 39)');
   });
 
   test('it carries ids and display strings, and no URL but the thumbnail', () {
@@ -111,6 +112,13 @@ void main() {
     final back = SnapshotState.tryDecode(jsonEncode(json))!;
     expect(back.volume, 100);
     expect(back.preferredHeight, isNull);
+  });
+
+  test('an audio track that is not a non-empty string is none: the original', () {
+    for (final junk in <Object?>['', 42, null]) {
+      final json = jsonDecode(stateAt(now).encode()) as Map<String, Object?>..['audioTrackId'] = junk;
+      expect(SnapshotState.tryDecode(jsonEncode(json))!.audioTrackId, isNull);
+    }
   });
 
   group('a long list is cut to a window', () {

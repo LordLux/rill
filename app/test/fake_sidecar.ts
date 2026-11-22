@@ -112,6 +112,14 @@ const CHAPTERS = [
 
 /** A live stream: no duration, a start time — the shape the scrubber remaps. */
 const LIVE_ID = 'live1';
+// Task 39: a video with three audio tracks. Its answer carries the one `audioTrackId` asked for
+// (the original when none, or one it does not have), in every variant's audioUrl.
+const TRACKS_ID = 'tracks1';
+const TRACKS = [
+  { id: 'en.4', displayName: 'English', isOriginal: true, isDubbed: false, isAutoDubbed: false },
+  { id: 'hi.10', displayName: 'Hindi', isOriginal: false, isDubbed: false, isAutoDubbed: true },
+  { id: 'es.3', displayName: 'Spanish', isOriginal: false, isDubbed: true, isAutoDubbed: false },
+];
 
 /** No caption tracks at all — the CC control must not be drawn. */
 const NO_CAPTIONS_ID = 'nocaps1';
@@ -175,7 +183,7 @@ let authState: 'authenticated' | 'degraded' | 'anonymous' = 'authenticated';
 const authCookies: string[] = [];
 let signOuts = 0;
 
-const opens: Array<{ videoId?: string; preload: boolean }> = [];
+const opens: Array<{ videoId?: string; preload: boolean; audioTrackId?: string | null }> = [];
 const reports: unknown[] = [];
 const closes: unknown[] = [];
 let sessions = 0;
@@ -292,7 +300,12 @@ rl.on('line', (line) => {
       // retry:"user" — the §4 shape the watch page has to offer a retry out of.
       // The ladder's floor is a very good bet and not a promise (F9), so this is
       // a state a user can retry out of, and the retry has to actually work.
-      opens.push({ videoId: req.params?.videoId, playlistId: req.params?.playlistId, preload: req.params?.preload === true });
+      opens.push({
+        videoId: req.params?.videoId,
+        playlistId: req.params?.playlistId,
+        preload: req.params?.preload === true,
+        audioTrackId: req.params?.audioTrackId ?? null,
+      });
       const isPreload = req.params?.preload === true;
       if (req.params?.videoId === BROKEN_ID) {
         process.stdout.write(JSON.stringify({
@@ -368,6 +381,8 @@ rl.on('line', (line) => {
       // A preload "resolves and caches without opening a session" (§3.6), so it
       // does not mint one here either.
       const sessionId = isPreload ? 'preload' : `session_${++sessions}`;
+      const hasTracks = req.params?.videoId === TRACKS_ID;
+      const track = hasTracks ? (TRACKS.find((t) => t.id === req.params?.audioTrackId) ?? TRACKS[0]!).id : null;
       process.stdout.write(JSON.stringify({
         id: req.id,
         result: {
@@ -377,6 +392,8 @@ rl.on('line', (line) => {
           storyboardTemplate: null,
           qualityDegraded: false,
           transport: 'plain',
+          audioTracks: hasTracks ? TRACKS : [],
+          audioTrackId: track,
           // A real ladder, ranked best-first. One rung was enough while nothing
           // consumed `variants[]`; the quality picker is what made the shape of
           // the list matter, and "the client may switch without reopening"
@@ -388,7 +405,7 @@ rl.on('line', (line) => {
             [360, 30, 134],
           ].map(([height, fps, itag]) => ({
             videoUrl: `https://fake.invalid/${req.params?.videoId}/video/${height}`,
-            audioUrl: `https://fake.invalid/${req.params?.videoId}/audio`,
+            audioUrl: `https://fake.invalid/${req.params?.videoId}/audio${track ? `/${track}` : ''}`,
             itag,
             height,
             fps,

@@ -106,12 +106,13 @@ const tuning = SwapTuning(
 );
 
 class Rig {
-  Rig({bool enabled = true, bool standbyPlayFails = false}) {
+  Rig({bool enabled = true, bool standbyPlayFails = false, Object? standbyOpenFails}) {
     engine = SwappingEngine(
       () {
         final slot = FakeSlot('p${slots.length}');
         if (slots.isNotEmpty) slot.openGate = standbyGate?.future;
         if (slots.isNotEmpty && standbyPlayFails) slot.playFails = StateError('[Player] has been disposed');
+        if (slots.isNotEmpty) slot.openFails = standbyOpenFails;
         slots.add(slot);
         return slot;
       },
@@ -177,6 +178,89 @@ void main() {
       expect(find.byKey(standby.pictureKey), findsOneWidget, reason: 'after the swap it is the one on stage');
       expect(find.byKey(rig.first.pictureKey, skipOffstage: false), findsNothing, reason: 'and the old one is out of the tree');
       await rig.engine.dispose();
+    });
+  });
+
+  group('another audio track (Task 39)', () {
+    final dubbed = variant(1080).copyWith(audioUrl: 'https://fake.invalid/audio/hi.10');
+
+    testWidgets('swaps to a second player past the clock, with the captions and the volume carried over', (tester) async {
+      await tester.runAsync(() async {
+        final rig = Rig();
+        await mount(tester, rig.engine);
+        await started(rig);
+        await rig.engine.setSubtitle('[Script Info]');
+        await rig.engine.setVolume(40);
+        rig.runClock();
+
+        expect(rig.engine.canSwitchVideo(dubbed), isFalse, reason: 'never in place: the audio is the file mpv opened (F60)');
+        expect(await rig.engine.switchAudio(dubbed), VideoSwitch.done);
+
+        final standby = rig.slots[1];
+        expect(rig.engine.active, same(standby));
+        expect(standby.opened.single.audioUrl, 'https://fake.invalid/audio/hi.10');
+        expect(standby.aimedAt.single, greaterThan(const Duration(seconds: 100)), reason: 'aimed past the clock, never behind it');
+        expect(standby.playing, isTrue);
+        expect(rig.first.playing, isFalse);
+        expect(rig.first.switched, isEmpty, reason: 'no in-place step on the way');
+        expect(standby.subtitles.last, '[Script Info]', reason: 'captions continue');
+        expect(standby.volumes.last, mpvVolumeFor(40), reason: 'the volume is unchanged');
+        rig.stopClock();
+        await rig.engine.dispose();
+      });
+    });
+
+    testWidgets('paused, it swaps at exactly where the clock stands and stays paused', (tester) async {
+      await tester.runAsync(() async {
+        final rig = Rig();
+        await mount(tester, rig.engine);
+        await started(rig);
+        await rig.engine.pause();
+
+        // MUTATION: aim the standby at `Duration.zero` in `_prepareAndSwap` (the swap restarting
+        // the clock at 0) and this fails.
+        expect(await rig.engine.switchAudio(dubbed), VideoSwitch.done);
+        final standby = rig.slots[1];
+        expect(standby.aimedAt.single, const Duration(seconds: 100));
+        expect(rig.engine.position, const Duration(seconds: 100));
+        expect(standby.playing, isFalse);
+        expect(rig.engine.playing, isFalse);
+        await rig.engine.dispose();
+      });
+    });
+
+    testWidgets('in audio-only mode, unmounted, or muxed, there is no second player: the caller reopens', (tester) async {
+      await tester.runAsync(() async {
+        final rig = Rig();
+        await mount(tester, rig.engine);
+        await started(rig);
+        await rig.engine.setVideoTrack(false);
+        expect(await rig.engine.switchAudio(dubbed), VideoSwitch.unsupported);
+        await rig.engine.setVideoTrack(true);
+        expect(await rig.engine.switchAudio(dubbed.copyWith(audioUrl: null)), VideoSwitch.unsupported);
+        expect(rig.slots, hasLength(1), reason: 'no standby was made');
+        await rig.engine.dispose();
+
+        final unmounted = Rig();
+        await unmounted.engine.open(variant(1080));
+        expect(await unmounted.engine.switchAudio(dubbed), VideoSwitch.unsupported);
+        await unmounted.engine.dispose();
+      });
+    });
+
+    testWidgets('a standby that will not open is refused, and the old audio keeps playing', (tester) async {
+      await tester.runAsync(() async {
+        final rig = Rig(standbyOpenFails: StateError('would not open'));
+        await mount(tester, rig.engine);
+        await started(rig);
+        await rig.engine.play();
+        expect(await rig.engine.switchAudio(dubbed), VideoSwitch.refused);
+        expect(rig.engine.active, same(rig.first));
+        expect(rig.engine.hasStandby, isFalse, reason: 'the standby was dropped');
+        expect(rig.first.playing, isTrue);
+        expect(rig.first.opened.single.audioUrl, 'https://fake.invalid/audio', reason: 'nothing touched the old audio');
+        await rig.engine.dispose();
+      });
     });
   });
 

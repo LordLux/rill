@@ -54,7 +54,33 @@ class SwitchingPlayback extends PlaybackController {
   );
 }
 
-const rootPlaceholders =['Audio track', 'Playback speed'];
+// *Audio track* left the placeholders with Task 39: it is a real row, shown only for a video with
+// more than one track (the group 'the audio track page' below).
+/// A video with three audio tracks, the original playing; records what the menu picks.
+class TracksPlayback extends PlaybackController {
+  final List<String> picked = [];
+
+  @override
+  PlaybackState build() => PlaybackState(
+    source: PlaybackSource(
+      sessionId: 's',
+      durationMs: 100000,
+      variants: ladder,
+      audioTrackId: 'en-US.4',
+      audioTracks: const [
+        AudioTrackOption(id: 'en-US.4', displayName: 'English (US)', isOriginal: true),
+        AudioTrackOption(id: 'hi.10', displayName: 'Hindi', isAutoDubbed: true),
+        AudioTrackOption(id: 'es.3', displayName: 'Spanish', isDubbed: true),
+      ],
+    ),
+    variant: ladder[2],
+  );
+
+  @override
+  Future<void> chooseAudioTrack(String trackId) async => picked.add(trackId);
+}
+
+const rootPlaceholders = ['Playback speed'];
 const morePlaceholders = ['Audio channel', 'Sticky player', 'Annotations', 'Ambient mode'];
 
 late ProviderContainer container;
@@ -233,6 +259,63 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('More options'), findsOneWidget);
       expect(tester.getSize(find.byKey(settingsMenuPanelKey)), rootSize);
+    });
+  });
+
+  group('the audio track page (Task 39)', () {
+    testWidgets('a video with one track has no Audio track row at all', (tester) async {
+      container.read(playerMenuProvider.notifier).open();
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+      expect(find.byKey(playerAudioTrackRowKey), findsNothing);
+      expect(find.text('Audio track'), findsNothing);
+    });
+
+    testWidgets('lists the tracks, badges the original and the AI dubs, ticks the current, and a pick asks for it', (tester) async {
+      final handle = tester.ensureSemantics();
+      final tracks = ProviderContainer(
+        overrides: [
+          playbackProvider.overrideWith(TracksPlayback.new),
+          playbackEngineProvider.overrideWithValue(FakeEngine()),
+        ],
+      );
+      addTearDown(tracks.dispose);
+      container = tracks;
+      container.read(playerMenuProvider.notifier).open();
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+
+      // The root row reads the track that plays.
+      expect(find.descendant(of: find.byKey(playerAudioTrackRowKey), matching: find.text('English (US)')), findsOneWidget);
+      await tester.tap(find.byKey(playerAudioTrackRowKey));
+      await tester.pumpAndSettle();
+      expect(container.read(playerMenuProvider).page, SettingsPage.audioTrack);
+
+      Finder row(String id) => find.byKey(ValueKey('player-audio-track-$id'));
+      expect(find.descendant(of: row('en-US.4'), matching: find.text('Original')), findsOneWidget);
+      expect(find.descendant(of: row('hi.10'), matching: find.text('AI dub')), findsOneWidget);
+      expect(find.descendant(of: row('es.3'), matching: find.text('AI dub')), findsNothing, reason: "a creator's own dub is a plain row");
+      expect(find.descendant(of: row('es.3'), matching: find.text('Original')), findsNothing);
+
+      // Narrator: one node per row, its name with the badge said once, and whether it is selected.
+      expect(
+        tester.getSemantics(row('en-US.4')),
+        matchesSemantics(label: 'English (US), original', isButton: true, isSelected: true, hasSelectedState: true, isEnabled: true, hasEnabledState: true, hasTapAction: true, isFocusable: true, hasFocusAction: true),
+      );
+      expect(
+        tester.getSemantics(row('hi.10')),
+        matchesSemantics(label: 'Hindi, AI dub', isButton: true, isSelected: false, hasSelectedState: true, isEnabled: true, hasEnabledState: true, hasTapAction: true, isFocusable: true, hasFocusAction: true),
+      );
+      expect(tester.getSemantics(row('es.3')).label, 'Spanish');
+
+      await tester.tap(row('hi.10'));
+      await tester.pump();
+      expect((container.read(playbackProvider.notifier) as TracksPlayback).picked, ['hi.10']);
+
+      container.read(playerMenuProvider.notifier).back();
+      await tester.pumpAndSettle();
+      expect(container.read(playerMenuProvider).page, SettingsPage.root, reason: 'back leads to the root');
+      handle.dispose();
     });
   });
 

@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/domain/caption_track.dart';
 import 'package:rill/domain/comment.dart';
 import 'package:rill/domain/feed_item.dart';
+import 'package:rill/domain/playback_source.dart';
 import 'package:rill/domain/shelf.dart';
 import 'package:rill/domain/video_detail.dart';
 import 'package:rill/ui/queue_controller.dart' show PlaylistResult;
@@ -132,6 +133,26 @@ const postItemKeys = <String>{
   'postUrl',
 };
 
+/// Every key `PlaybackSource` reads, hand-written from `lib/domain/playback_source.dart`.
+const playbackSourceKeys = <String>{
+  'sessionId',
+  'durationMs',
+  'startTimestamp',
+  'storyboardTemplate',
+  'posterUrl',
+  'qualityDegraded',
+  'transport',
+  'audioTracks',
+  'audioTrackId',
+  'variants',
+};
+
+/// Every key `AudioTrackOption` reads (the sidecar's `AudioTrack`, Task 39).
+const audioTrackKeys = <String>{'id', 'displayName', 'isOriginal', 'isDubbed', 'isAutoDubbed'};
+
+/// Every key `PlaybackVariant` reads.
+const playbackVariantKeys = <String>{'videoUrl', 'audioUrl', 'itag', 'height', 'fps', 'videoCodec', 'audioCodec'};
+
 /// Every key a shelf on the wire carries — `Shelf.fromJson` reads these four.
 const shelfKeys = <String>{'category', 'title', 'index', 'items'};
 
@@ -218,6 +239,45 @@ void main() {
     test('MUTATION: a post key PostItem does not know is caught', () {
       final poisoned = <String, dynamic>{'kind': 'post', 'id': 'post_001', 'authorName': 'x', 'replyCount': 3};
       expect(unknownKeys(poisoned, postItemKeys), {'replyCount'});
+    });
+  });
+
+  group('PlaybackSource and its audio tracks (Task 39), strict-key', () {
+    late Map<String, dynamic> payload;
+
+    setUp(() {
+      final file = File('../corpus/playback-source.json');
+      expect(file.existsSync(), isTrue, reason: 'corpus/playback-source.json missing. Run bun run export-contract-corpus.');
+      payload = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    });
+
+    test('every key maps to a field, and every field is supplied', () {
+      expect(unknownKeys(payload, playbackSourceKeys), isEmpty, reason: 'the sidecar ships a key PlaybackSource drops');
+      expect(missingKeys(payload, playbackSourceKeys), isEmpty, reason: 'PlaybackSource declares a key the sidecar never sends');
+      final tracks = (payload['audioTracks'] as List<dynamic>).cast<Map<String, dynamic>>();
+      expect(tracks.length, greaterThan(1), reason: 'the entry exists to hold several tracks');
+      for (final track in tracks) {
+        expect(unknownKeys(track, audioTrackKeys), isEmpty);
+        expect(missingKeys(track, audioTrackKeys), isEmpty);
+      }
+      for (final variant in (payload['variants'] as List<dynamic>).cast<Map<String, dynamic>>()) {
+        expect(unknownKeys(variant, playbackVariantKeys), isEmpty);
+        expect(missingKeys(variant, playbackVariantKeys), isEmpty);
+      }
+    });
+
+    test('it round-trips: the original first, the current track among them', () {
+      final source = PlaybackSource.fromJson(payload);
+      expect(source.audioTracks, hasLength(greaterThan(1)));
+      expect(source.audioTracks.first.isOriginal, isTrue);
+      expect(source.audioTracks.where((track) => track.isAutoDubbed), isNotEmpty);
+      expect(source.audioTracks.map((track) => track.id), contains(source.audioTrackId));
+    });
+
+    test('MUTATION: a track key AudioTrackOption does not know is caught, and so is a missing one', () {
+      final track = (payload['audioTracks'] as List<dynamic>).first as Map<String, dynamic>;
+      expect(unknownKeys({...track, 'isDescriptive': false}, audioTrackKeys), {'isDescriptive'});
+      expect(missingKeys({...track}..remove('isAutoDubbed'), audioTrackKeys), {'isAutoDubbed'});
     });
   });
 

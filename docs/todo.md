@@ -564,46 +564,28 @@ chip.
 **Done when:** the chips YouTube returns for a query show above the results, and
 choosing one reloads through its token.
 
-### 84. Videos with AI dubs can play in the wrong language
+### 84. Audio track language preferences (waits for item 69)
 
-Reported 2026-10-01. Some videos open with a dubbed audio track instead of the
-original. Example: `MLgrNktS67c` (Xisumavoid, English only) played in another
-language in rill, and correctly on youtube.com. It carries dozens of audio
-tracks, most of them YouTube's automatic AI dubs.
+Reported 2026-10-01 as "videos with AI dubs play in the wrong language" (`MLgrNktS67c` opened in
+a dub). **Points 1 and 2 landed with Task 39** (`architecture.md` F65, `protocol.md` §3.5): the
+original track plays by default on every tier that carries tracks, read from `xtags`
+`acont=original`, and the player's settings menu has an *Audio track* page that switches track
+through the second player, the choice sticking for the video. What is left is the preference:
 
-**The cause is visible in the code.** `rankAudio` (`playback/resolve.ts`) picks
-the audio by DRC, then stereo before surround, then **bitrate**. It knows nothing
-about languages, and the parser keeps no track information at all
-(`parser/player.ts` maps `isDrc` and nothing like it), so with dozens of
-same-itag tracks whichever has the highest bitrate wins. Each adaptive audio
-format describes its track: an `audioTrack` object (display name, id, an
-is-default flag) and track tags in the URL (`xtags`: original, dubbed or
-auto-dubbed, and the language). Which of these the `VISIONOS` response actually
-carries is unmeasured. Check the other ladder tiers (yt-dlp, the itag 18 floor)
-too.
+- **A switch to "play a dubbed track in my language when there is one"**, off by default, and
+  **an ordered list of preferred languages**, on the settings page (item 69). The ranking is
+  `trackRank` in `sidecar/src/playback/audio-tracks.ts`; a preference would be a parameter of
+  `playback.open` (beside `audioTrackId`) that a track whose `lang` matches wins over the original,
+  so it holds across videos where `audioTrackId` is one video's choice.
+- **youtube.com keeps its own version at `youtube.com/account_playback`.** Measure whether the
+  signed-in account's setting can be read; otherwise keep it local. The resolve path is anonymous
+  (CLAUDE.md, "Browse and resolve are different clients"), so an account setting would be read on
+  the browse session and handed over, never by resolving signed in.
 
-**Wanted, in order:**
+**Done when:** with a preferred language set, a video with a dub in it opens in that dub, and one
+without opens in the original; with the switch off, every video opens in its original.
 
-1. **Original audio by default.** Parse the track fields into `PlayerFormat`,
-   and rank the original (or the track YouTube marks as the default) first.
-   This alone fixes the report.
-2. **An "Audio track" entry in the player's settings menu,** as youtube.com has,
-   to switch track for the current video. Signing every track's URL up front is
-   wasteful with dozens of them, so list the tracks and sign the chosen one on
-   demand. That is a new protocol method or a `PlaybackSource` field, measured
-   and specified first.
-3. **Later, with the settings page (item 69):** a switch to "play a dubbed track
-   in my language when there is one" (off by default), and an ordered list of
-   preferred languages. youtube.com keeps its version of these at
-   `youtube.com/account_playback`. Measure whether the account's own setting can
-   be read for the signed-in user; otherwise keep it local.
-
-**Done when:** `MLgrNktS67c` and a few other multi-track videos play their
-original audio on every tier. A test with a fixture holding several tracks shows
-the original ranked first even when a dub has a higher bitrate. Mutation: rank by
-bitrate alone, and the test fails.
-
-(Added 2026-10-01 as item 83; that edit was lost when Task 32 rewrote this file, and the number went to its follow-ups, so this is 84.)
+(Added 2026-10-01 as item 83; that edit was lost when Task 32 rewrote this file, and the number went to its follow-ups, so this is 84. Narrowed to point 3 by Task 39, 2026-11-22.)
 
 ### 105. The previous video's last frame stays on the player when another video replaces it
 
