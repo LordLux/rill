@@ -1332,13 +1332,14 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// Only once the new audio is playing does [PlaybackState.source] become the new one, so every
   /// later quality switch, recovery reopen and audio-only toggle stays on the chosen track.
   ///
-  /// The latest pick wins. A quality picked meanwhile is kept and switched to afterwards; a pick
-  /// made while a quality switch is under way is ignored, as the menu shows those busy.
+  /// One at a time: a pick made while a track switch or a quality switch is under way is ignored
+  /// (two swaps in flight would drop each other's standby). A quality picked during a track switch
+  /// is kept and switched to afterwards.
   Future<void> chooseAudioTrack(String trackId) async {
     final item = state.item;
     final source = state.source;
     if (item == null || source == null || state.isLoading || state.error != null) return;
-    if (state.isChangingQuality || state.hold != null || _inPlaceBusy) return;
+    if (state.isChangingQuality || state.hold != null || _inPlaceBusy || state.switchingAudioTrackId != null) return;
     if (!source.audioTracks.any((track) => track.id == trackId)) return;
     if (trackId == (state.switchingAudioTrackId ?? source.audioTrackId)) return;
 

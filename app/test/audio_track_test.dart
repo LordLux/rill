@@ -153,6 +153,22 @@ void main() {
     expect(engine.opened.last.audioUrl, endsWith('/audio/hi.10'));
   });
 
+  test('a pick while a track switch is under way is ignored: two swaps would drop each other', () async {
+    await watching();
+    engine.audioSwitchResult = VideoSwitch.done;
+    final first = controller.chooseAudioTrack('hi.10');
+    expect(playback.audioTrackId, 'hi.10', reason: 'the menu ticks the pick at once');
+    await controller.chooseAudioTrack('es.3');
+    await first;
+
+    expect((await opens()).where((open) => open['preload'] == true), hasLength(1));
+    expect(engine.audioSwitches.map((v) => v.audioUrl), [endsWith('/audio/hi.10')]);
+    expect(playback.source?.audioTrackId, 'hi.10');
+    // Once it has landed, the next pick goes through.
+    await controller.chooseAudioTrack('es.3');
+    expect(playback.source?.audioTrackId, 'es.3');
+  });
+
   test('another video starts on its original: the choice was for one video', () async {
     await watching();
     engine.audioSwitchResult = VideoSwitch.done;

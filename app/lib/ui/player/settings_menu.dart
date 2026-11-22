@@ -2304,8 +2304,6 @@ class _AudioTrackPage extends ConsumerWidget {
     final tracks = playback.audioTracks;
     final currentId = playback.audioTrackId;
     final current = tracks.where((track) => track.id == currentId).firstOrNull;
-    // A quality change in flight: a pick now would be ignored, so the rows say they are busy.
-    final busy = playback.isChangingQuality || playback.hold != null;
 
     return _MenuBody(
       key: playerAudioTrackMenuKey,
@@ -2321,7 +2319,10 @@ class _AudioTrackPage extends ConsumerWidget {
               track: track,
               selected: track.id == currentId,
               switching: track.id == playback.switchingAudioTrackId,
-              onTap: busy ? null : () => unawaited(controller.chooseAudioTrack(track.id)),
+              // Always enabled: a disabled control cannot hold focus (Task 32), and the row just
+              // pressed is the one the reopen fallback makes busy. A press while a switch is under
+              // way is ignored by the controller instead.
+              onTap: () => unawaited(controller.chooseAudioTrack(track.id)),
             ),
       ],
     );
