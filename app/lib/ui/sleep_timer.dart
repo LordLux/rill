@@ -6,6 +6,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,7 @@ import '../domain/now_playing_track.dart' show chapterIndexAt;
 import '../domain/video_detail.dart';
 import 'playback_controller.dart';
 import 'queue_controller.dart';
+import 'spoken.dart';
 import 'video_info.dart';
 
 export '../data/system_power.dart' show SleepEndAction, SystemPower;
@@ -153,6 +155,11 @@ class SleepTimerController extends Notifier<SleepTimerState> {
   int? _chapter;
   Duration? _lastPosition;
 
+  /// The chapter list [_chapter] was worked out from. The list arrives with `video.info`, which can
+  /// be after playback started: when it changes, the chapter is worked out again, silently, since a
+  /// jump from "no chapters" to "chapter 2" is the list arriving, not chapter 1 ending.
+  List<Chapter> _chaptersSeen = const [];
+
   /// A seek in flight: samples are ignored until one lands near it, because the ones before it
   /// still carry the old position.
   Duration? _seekTarget;
@@ -168,6 +175,11 @@ class SleepTimerController extends Notifier<SleepTimerState> {
     final signals = ref.read(playbackSignalsProvider);
     signals.holdAtRealEnding = _holdAtRealEnding;
     ref.listen(queueProvider.select((queue) => queue.version), (_, _) => _onQueueMoved());
+    // The queue played out short of N: nothing it waits for can end now, and left on it would count
+    // a video started hours later and fire there.
+    ref.listen(queueProvider.select((queue) => queue.playedOut), (_, out) {
+      if (out && (state.kind == SleepKind.chapters || state.kind == SleepKind.videos) && !_firing) off();
+    });
     ref.onDispose(() {
       _disposed = true;
       _disarm();
@@ -205,6 +217,7 @@ class SleepTimerController extends Notifier<SleepTimerState> {
     state = next;
     _videoId = ref.read(playbackProvider).item?.id;
     _chapter = null;
+    _chaptersSeen = const [];
     _lastPosition = null;
     _seekTarget = null;
     final engine = ref.read(playbackEngineProvider);
@@ -243,10 +256,17 @@ class SleepTimerController extends Notifier<SleepTimerState> {
   /// queue and does not count.
   void _onQueueMoved() {
     if (!state.isOn || _firing) return;
-    final current = ref.read(queueProvider).current;
-    if (current == null) return;
+    final queue = ref.read(queueProvider);
+    final current = queue.current;
+    if (current == null) {
+      // Playback stopped (the miniplayer's close, a cleared queue): no player is left to show the
+      // timer or to change it, so it goes too. A mix starting is empty for a moment, and is not this.
+      if (queue.startingMixId == null) off();
+      return;
+    }
     _videoId = current.id;
     _chapter = null;
+    _chaptersSeen = const [];
     _lastPosition = null;
     _seekTarget = null;
     if (state.kind != SleepKind.duration) state = state.copyWith(started: state.started + 1);
@@ -262,7 +282,8 @@ class SleepTimerController extends Notifier<SleepTimerState> {
   void _onSeek(Duration to) {
     _seekTarget = to;
     _seekAt = _now();
-    _chapter = chapterIndexAt(_chapters(), to) ?? 0;
+    _chaptersSeen = _chapters();
+    _chapter = chapterIndexAt(_chaptersSeen, to) ?? 0;
     _lastPosition = to;
   }
 
@@ -275,7 +296,12 @@ class SleepTimerController extends Notifier<SleepTimerState> {
       if ((position - target).abs() > const Duration(milliseconds: 1500) && _now() - _seekAt < const Duration(seconds: 15)) return;
       _seekTarget = null;
     }
-    final index = chapterIndexAt(_chapters(), position) ?? 0;
+    final chapters = _chapters();
+    if (!listEquals(chapters, _chaptersSeen)) {
+      _chaptersSeen = chapters;
+      _chapter = null;
+    }
+    final index = chapterIndexAt(chapters, position) ?? 0;
     final last = _lastPosition;
     _lastPosition = position;
     final was = _chapter;
@@ -614,4 +640,11 @@ class SleepCustomValues {
 String sleepTimerSummary(SleepTimerState timer, SleepEndAction action) {
   if (!timer.isOn) return 'Off';
   return action == SleepEndAction.nothing ? timer.waitsFor : '${timer.waitsFor} · then ${action.label}';
+}
+
+/// [sleepTimerSummary] as a screen reader says it: a time left in words, never digits (`spoken.dart`).
+String sleepTimerSpokenSummary(SleepTimerState timer, SleepEndAction action) {
+  if (timer.kind != SleepKind.duration) return sleepTimerSummary(timer, action);
+  final left = '${spokenDuration(timer.left ?? Duration.zero)} left';
+  return action == SleepEndAction.nothing ? left : '$left, then ${action.label}';
 }

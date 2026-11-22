@@ -42,9 +42,7 @@ class SleepTimerIndicator extends ConsumerWidget {
     final action = ref.watch(sleepEndActionProvider);
     final time = timer.kind == SleepKind.duration ? formatSleepLeft(timer.left ?? Duration.zero) : null;
     final summary = sleepTimerSummary(timer, action);
-    final spoken = time == null
-        ? 'Sleep timer: $summary'
-        : 'Sleep timer: ${spokenDuration(timer.left ?? Duration.zero)} left${action == SleepEndAction.nothing ? '' : ', then ${action.label}'}';
+    final spoken = 'Sleep timer: ${sleepTimerSpokenSummary(timer, action)}';
 
     return ShortcutTooltip(
       silent: true,

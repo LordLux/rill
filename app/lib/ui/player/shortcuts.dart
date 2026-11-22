@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../captions_controller.dart';
 import '../playback_controller.dart';
+import '../sleep_timer.dart' show sleepEndProvider;
 import '../focus_surface.dart';
 import '../player_shell.dart';
 import 'settings_menu.dart';
@@ -315,6 +316,10 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
     if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.f6) return _toggleMiniPlayerFocus();
 
     if (textEntryHasFocus()) return false;
+
+    // While the sleep timer's countdown is up, Escape is its Cancel (`SleepCountdownBanner`) and
+    // nothing else: not a fullscreen exit or a menu close as well.
+    if (event.logicalKey == LogicalKeyboardKey.escape && ref.read(sleepEndProvider) != null) return false;
 
     final shortcut = resolvePlayerShortcut(event);
     if (shortcut == null) return false;

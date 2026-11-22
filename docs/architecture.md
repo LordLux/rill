@@ -946,8 +946,11 @@ and a bubble above the pointer names the time and the chapter. The code is
 - **Not built: a "most replayed" graph, and thumbnails in the bubble.** The
   mini-player's `LinearProgressIndicator` shows no chapters, deliberately.
 
-**Volume from the mouse is the right button held + scroll (decided 2026-11-21, Task 38; it replaced
-Shift + scroll).**
+**Volume from the mouse is the right button held + scroll over the picture (decided 2026-11-21,
+Task 38; it replaced Shift + scroll).** Only over the bare video surface: the wheel is heard by the
+click surface's own `Listener`, and a `Stack` stops at the first child hit, so over the control bar,
+the settings panel, the queue or a slate the wheel is theirs (the user's call, 2026-11-22: a wheel
+over the settings ladder scrolled it *and* changed the volume).
 - **Why Shift went:** Shift is also the horizontal-wheel modifier, so the gesture fought every
   horizontal scrollable near it, and it needed the keyboard for a mouse gesture.
 - **The button is tracked from the player's own `Listener`:**
@@ -2484,7 +2487,9 @@ end actions, and the menu pages are in `settings_menu.dart`.
     `_onCompleted` asks `PlaybackSignals.holdAtRealEnding` *after* `_endedShort`, so a dropped read can
     never fire it. A recovery reopen does not move the queue, so it never counts as anything. When it
     fires the video pauses at its end and the queue does not advance (neither `advance` nor `playedOut`
-    is called). Not offered for a live stream.
+    is called). Not offered for a live stream. **Play from there opens the video again**
+    (`PlaybackController._replayHeld`), from a seek made while held or from the start, so the replay
+    has a session and is reported; unpausing the parked player would replay it with none.
   - **After N videos.** The current video is the first. Each start counts as one, whether autoplay,
     Next, a click or the queue started it: the timer counts queue `version` moves, which the retry and
     recovery paths do not make. It fires at the first **real** ending once N have started. **A skip
@@ -2495,6 +2500,12 @@ end actions, and the menu pages are in `settings_menu.dart`.
     autoplayed videos. Each video start counts its first chapter, and a video without chapters
     counts as one. It fires at the first chapter end once N have started. The last chapter's end is
     the video's real ending, through the same hook. A seek into another chapter counts nothing.
+    **A chapter list that arrives after playback started** (`video.info` answering late) is not
+    a chapter ending: when the list changes, the chapter is worked out again silently.
+  - **Nothing left to wait for turns it off.** Stopping playback (the miniplayer's close, a cleared
+    queue; not the empty moment of a mix starting) turns off any timer, since no player is left to
+    show or change it. A queue that plays out short of N turns off an *After N* timer, which would
+    otherwise count a video started hours later and fire there.
 - **The fade.** For the kinds whose end is known in advance (a duration, end of chapter, end of
   video), the output goes down linearly over the last 10 s. mpv's volume is cubic, so a linear gain
   sounds even.
@@ -2533,6 +2544,8 @@ end actions, and the menu pages are in `settings_menu.dart`.
   - **Never `EWX_FORCE` or `EWX_FORCEIFHUNG`, and no `bForce`:** an app holding unsaved work must be
     able to stop a shutdown, and Windows shows its own "apps are preventing shutdown" screen.
   - The calls are FFI, as `hard_exit.dart` is: `package:win32` binds none of them.
+  - While the countdown is up, Escape is its *Cancel* and nothing else (`PlayerShortcuts` stands
+    aside), so cancelling does not also leave fullscreen.
   - **A system action waits 30 s first**, with *Cancel* and Escape, in a banner over the whole window
     (`SleepCountdownBanner`), because a mistaken shutdown loses work in other apps. This is separate
     from the timer, which has no warning.

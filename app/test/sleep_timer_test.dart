@@ -148,6 +148,16 @@ void main() {
       expect(engine.playing, isFalse, reason: 'paused at the end');
       expect(timer.isOn, isFalse);
       expect(container.read(sleepNoteProvider), 'Sleep timer: paused');
+
+      // Play from there opens the video again, with a session of its own, so the replay is
+      // reported; unpausing the parked player would have replayed it with none.
+      expect(playback.sessionId, isNull, reason: 'the ended watch closed its session');
+      await container.read(playbackProvider.notifier).togglePlayPause();
+      await settle(400);
+      expect(engine.opened, hasLength(2), reason: 'reopened');
+      expect(playback.item?.id, 'aaa');
+      expect(playback.sessionId, isNotNull, reason: 'a new session for the replay');
+      expect(engine.playing, isTrue);
     });
 
     test('a dropped read (`_endedShort`) does not fire it, and the recovery reopen does not either', () async {
@@ -166,6 +176,25 @@ void main() {
       await endsForReal();
       expect(timer.isOn, isFalse, reason: 'the real end fires it');
       expect(playback.item?.id, 'aaa');
+    });
+  });
+
+  group('when there is nothing left to wait for', () {
+    test('stopping playback (the miniplayer close button) turns the timer off', () async {
+      await playQueue(['aaa', 'bbb']);
+      sleep.endOfVideo();
+      await container.read(playbackProvider.notifier).stop();
+      await settle();
+      expect(timer.isOn, isFalse, reason: 'left on, it would fire on a video started hours later');
+    });
+
+    test('a queue that plays out short of N turns an after-N timer off', () async {
+      await playQueue(['aaa']);
+      sleep.afterVideos(3);
+      await endsForReal();
+      expect(container.read(queueProvider).playedOut, isTrue);
+      expect(timer.isOn, isFalse);
+      expect(power.runs, isEmpty, reason: 'turned off, not fired');
     });
   });
 
@@ -266,6 +295,20 @@ void main() {
       expect(engine.playing, isFalse);
     });
 
+    test('chapters that arrive after playback started are not a chapter ending', () async {
+      // Not preloaded: the timer's own first read starts `video.info`, so the first samples see none.
+      await playQueue(['chapters1', 'bbb']);
+      sleep.afterChapters(3);
+      engine.emitPosition(const Duration(seconds: 100)); // in "Explore", but no chapters known yet
+      await settle(400); // `video.info` lands
+      // MUTATION: drop the `listEquals(chapters, _chaptersSeen)` re-derive in `_onPosition` and this
+      // fails at 2: chapter 0 to chapter 1 by a 0.2 s step reads as playing to the end of one.
+      engine.emitPosition(const Duration(seconds: 100, milliseconds: 200));
+      await settle(50);
+      expect(timer.started, 1, reason: 'the list arriving ended no chapter');
+      expect(timer.isOn, isTrue);
+    });
+
     test('the last chapter ends at the real ending, and nothing autoplays', () async {
       await playChapters();
       engine.emitPosition(const Duration(seconds: 500));
@@ -285,8 +328,8 @@ void main() {
       expect(playback.item?.id, 'bbb');
       expect(timer.started, 2);
       expect(timer.isOn, isTrue);
-      await endsForReal(); // ... and the 3rd starts, on whatever is next
-      expect(timer.isOn, isTrue, reason: 'nothing left in the queue to start, but the count is not reached');
+      await endsForReal(); // bbb was the last in the queue: it plays out with 2 of 3 started
+      expect(timer.isOn, isFalse, reason: 'the queue played out short of N, so the timer is off rather than left to fire later');
     });
   });
 }

@@ -1002,12 +1002,15 @@ class _MenuBodyState extends State<_MenuBody> {
 }
 
 class _MenuHeader extends StatelessWidget {
-  const _MenuHeader({required this.title, this.onBack, this.value, this.valueKey});
+  const _MenuHeader({required this.title, this.onBack, this.value, this.valueKey, this.valueLabel});
 
   final String title;
   final VoidCallback? onBack;
   final String? value;
   final Key? valueKey;
+
+  /// What a screen reader says for [value], where the text on screen is not words (a time left).
+  final String? valueLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1034,10 +1037,14 @@ class _MenuHeader extends StatelessWidget {
             ),
           ),
           if (value != null)
-            Text(
-              value!,
-              key: valueKey,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            Semantics(
+              label: valueLabel,
+              excludeSemantics: valueLabel != null,
+              child: Text(
+                value!,
+                key: valueKey,
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
             ),
         ],
       ),
@@ -1852,7 +1859,13 @@ class _SleepTimerRow extends ConsumerWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(sleepTimerSummary(timer, action), style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          // Said in words, not digits (`spoken.dart`): `12:34` read aloud is "twelve colon thirty-four".
+          Semantics(
+            label: sleepTimerSpokenSummary(timer, action),
+            child: ExcludeSemantics(
+              child: Text(sleepTimerSummary(timer, action), style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+            ),
+          ),
           const SizedBox(width: 4),
           const Icon(Icons.chevron_right, size: 18),
         ],
@@ -1892,7 +1905,12 @@ class _SleepTimerPage extends ConsumerWidget {
 
     return _MenuBody(
       key: playerSleepTimerMenuKey,
-      header: _MenuHeader(title: 'Sleep timer', onBack: menu.back, value: timer.isOn ? timer.waitsFor : null),
+      header: _MenuHeader(
+        title: 'Sleep timer',
+        onBack: menu.back,
+        value: timer.isOn ? timer.waitsFor : null,
+        valueLabel: timer.isOn ? sleepTimerSpokenSummary(timer, SleepEndAction.nothing) : null,
+      ),
       children: [
         _CaptionRow(label: 'Off', selected: !timer.isOn, onTap: () => pick(controller.off)),
         for (final minutes in sleepPresetMinutes)
@@ -2011,12 +2029,16 @@ class _SleepCustomPageState extends ConsumerState<_SleepCustomPage> {
   int _videos = 2;
   bool _invalid = false;
 
+  /// The viewer has typed or stepped already: the remembered values, read asynchronously, must not
+  /// land on top of that.
+  bool _edited = false;
+
   @override
   void initState() {
     super.initState();
     unawaited(
       SleepCustomValues.read().then((values) {
-        if (!mounted) return;
+        if (!mounted || _edited) return;
         setState(() {
           _minutes.text = '${values.seconds ~/ 60}';
           _seconds.text = (values.seconds % 60).toString().padLeft(2, '0');
@@ -2077,6 +2099,7 @@ class _SleepCustomPageState extends ConsumerState<_SleepCustomPage> {
         style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(isDense: true, labelText: label, border: const OutlineInputBorder()),
         onChanged: (_) {
+          _edited = true;
           if (_invalid) setState(() => _invalid = false);
         },
         onSubmitted: (_) => _startDuration(),
@@ -2118,7 +2141,10 @@ class _SleepCustomPageState extends ConsumerState<_SleepCustomPage> {
             _SleepStepper(
               noun: 'chapters',
               value: _chapters,
-              onChanged: (value) => setState(() => _chapters = value),
+              onChanged: (value) => setState(() {
+                _edited = true;
+                _chapters = value;
+              }),
               startKey: sleepCustomChaptersStartKey,
               onStart: () {
                 timer.afterChapters(_chapters);
@@ -2131,7 +2157,10 @@ class _SleepCustomPageState extends ConsumerState<_SleepCustomPage> {
           _SleepStepper(
             noun: 'videos',
             value: _videos,
-            onChanged: (value) => setState(() => _videos = value),
+            onChanged: (value) => setState(() {
+              _edited = true;
+              _videos = value;
+            }),
             startKey: sleepCustomVideosStartKey,
             onStart: () {
               timer.afterVideos(_videos);
@@ -2167,7 +2196,11 @@ class _SleepStepper extends StatelessWidget {
             key: ValueKey('sleep-$noun-fewer'),
             visualDensity: VisualDensity.compact,
             icon: Icon(Icons.remove, size: 18, semanticLabel: 'Fewer $noun'),
-            onPressed: value > 1 ? () => onChanged(value - 1) : null,
+            // Never disabled at the limit: a disabled button cannot hold focus, and a keyboard user
+            // stepping down to 1 would lose it (CLAUDE.md). At the limit the press does nothing.
+            onPressed: () {
+              if (value > 1) onChanged(value - 1);
+            },
           ),
           SizedBox(
             width: 28,
@@ -2183,7 +2216,9 @@ class _SleepStepper extends StatelessWidget {
             key: ValueKey('sleep-$noun-more'),
             visualDensity: VisualDensity.compact,
             icon: Icon(Icons.add, size: 18, semanticLabel: 'More $noun'),
-            onPressed: value < 99 ? () => onChanged(value + 1) : null,
+            onPressed: () {
+              if (value < 99) onChanged(value + 1);
+            },
           ),
           const Spacer(),
           FilledButton.tonal(key: startKey, onPressed: onStart, child: const Text('Start')),

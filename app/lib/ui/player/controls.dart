@@ -371,7 +371,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   /// A hover has no button down by definition: a release that went to another window is over.
   void _onPointerHover(PointerHoverEvent event) => _secondaryHeld = false;
 
-  /// Right button held + scroll — volume (Task 38). **It replaced Shift + scroll**, which is gone:
+  /// Right button held + scroll over the video itself — volume (Task 38). Not over the bar, the
+  /// settings panel or the queue: the click surface's own `Listener` is what calls this, so only a
+  /// wheel that reaches the bare picture does. **It replaced Shift + scroll**, which is gone:
   /// Shift is also the key for a horizontal wheel, so the gesture fought every horizontal
   /// scrollable it was ever near, and it needed the keyboard for a mouse gesture.
   ///
@@ -428,7 +430,6 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             onPointerUp: _onPointerUp,
             onPointerCancel: _onPointerCancel,
             onPointerHover: _onPointerHover,
-            onPointerSignal: _onPointerSignal,
             child: MouseRegion(
               // The pointer disappears with the controls, as it does in every video
               // player. `onHover` fires on movement only, which is exactly the wake
@@ -453,13 +454,21 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // `MouseRegion` above it was the real blocker — and the gate cost
                   // tap-to-pause and double-click-to-fullscreen for nothing. The
                   // layout now sits above this instead.
-                  Semantics(
-                    button: true,
-                    label: 'Play or pause',
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _onTap,
-                      child: const SizedBox.expand(),
+                  //
+                  // The volume wheel (right button + scroll) listens here too, and only here: a
+                  // `Stack` stops at the first child that is hit, so this hears a wheel only over
+                  // the bare picture, never over the bar, the settings panel, the queue or a slate,
+                  // whose own scrolling or controls the wheel belongs to.
+                  Listener(
+                    onPointerSignal: _onPointerSignal,
+                    child: Semantics(
+                      button: true,
+                      label: 'Play or pause',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _onTap,
+                        child: const SizedBox.expand(),
+                      ),
                     ),
                   ),
                   if (widget.child != null) // Before the bar: what the slates hold is a problem the viewer has to act on (Try

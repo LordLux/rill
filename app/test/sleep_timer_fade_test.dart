@@ -444,6 +444,31 @@ void main() {
       expect(timer.target, 4);
       sleep.off();
     });
+
+    testWidgets('Custom: a stepper button stays enabled at its limit, so it keeps the focus of a keyboard user', (tester) async {
+      await openAt(tester, SettingsPage.sleepTimerCustom);
+      final fewer = find.byKey(const ValueKey('sleep-videos-fewer'));
+      await tester.tap(fewer);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<Text>(find.byKey(const ValueKey('sleep-videos-value'))).data, '1');
+      // MUTATION: put back `onPressed: value > 1 ? ... : null` and this fails: disabled at 1, the
+      // button drops the focus of whoever pressed it down there.
+      expect(tester.widget<IconButton>(fewer).onPressed, isNotNull);
+      await tester.tap(fewer);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<Text>(find.byKey(const ValueKey('sleep-videos-value'))).data, '1', reason: 'the press at the limit does nothing');
+    });
+
+    testWidgets('the root row says the time left in words, not digits', (tester) async {
+      final semantics = tester.ensureSemantics();
+      sleep.startDuration(const Duration(minutes: 12, seconds: 34));
+      await openAt(tester, SettingsPage.root);
+      expect(find.text('12:34'), findsWidgets, reason: 'shown as a clock');
+      expect(find.bySemanticsLabel(RegExp('12 minutes and 34 seconds left')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp(r'12:34')), findsNothing, reason: 'never read as digits');
+      sleep.off();
+      semantics.dispose();
+    });
   });
 
   group('the moon', () {

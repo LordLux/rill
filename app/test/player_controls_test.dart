@@ -34,9 +34,11 @@ import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
+import 'package:rill/ui/sleep_timer.dart';
 
 import 'fake_engine.dart';
 import 'sidecar_idle.dart';
+import 'sleep_timer_test.dart' show FakePower;
 
 VideoItem video(String id) => VideoItem(
       kind: 'video',
@@ -85,6 +87,8 @@ Future<void> boot() async {
     overrides: [
       playbackEngineProvider.overrideWithValue(engine),
       windowChromeProvider.overrideWithValue(window),
+      // Never the real end actions from a test: a countdown left to run would suspend the machine.
+      systemPowerProvider.overrideWithValue(FakePower()),
     ],
   );
   container.read(playbackProvider);
@@ -547,6 +551,21 @@ void main() {
       disposeContainer();
     });
 
+    testWidgets('over the control bar rather than the picture, it leaves the volume alone', (tester) async {
+      final centre = await setUpPlayer(tester);
+      await tester.sendEventToBinding(pointer.down(centre));
+      // Still held, moved onto the bar: the wheel there belongs to the bar, not to the volume.
+      final bar = tester.getRect(find.byKey(playerControlsBarKey));
+      await tester.sendEventToBinding(pointer.move(Offset(bar.center.dx, bar.bottom - 6)));
+      await scroll(tester, const Offset(0, 40));
+      // MUTATION: put `onPointerSignal: _onPointerSignal` back on the outer `Listener` (the whole
+      // player) and this fails at [45].
+      expect(engine.volumes, isEmpty, reason: 'only a wheel over the video surface is the volume');
+      await tester.sendEventToBinding(pointer.up());
+      await tester.pumpAndSettle();
+      disposeContainer();
+    });
+
     testWidgets('a plain scroll changes nothing and claims nothing', (tester) async {
       await setUpPlayer(tester);
       // MUTATION: delete the `if (!_secondaryHeld) return;` in `_onPointerSignal` (ignore the
@@ -582,6 +601,30 @@ void main() {
       expect(page.offset, greaterThan(0), reason: 'and the page scrolls');
       disposeContainer();
     });
+  });
+
+  // Task 38 review: Escape is the countdown's Cancel and nothing else.
+  testWidgets('Escape during the sleep timer countdown cancels it and does not also leave fullscreen', (tester) async {
+    await pumpWatching(tester);
+    container.read(playerViewProvider.notifier).toggleFullscreen();
+    await tester.pumpAndSettle();
+    expect(container.read(playerViewProvider).fullscreen, isTrue);
+
+    container.read(sleepEndProvider.notifier).begin(SleepEndAction.shutDown);
+    await tester.pump();
+    await tester.pump();
+    // MUTATION: drop the `sleepEndProvider` check in `PlayerShortcuts._onKey` and this fails: the
+    // same Escape also leaves fullscreen.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(container.read(sleepEndProvider), isNull, reason: 'cancelled');
+    expect(container.read(playerViewProvider).fullscreen, isTrue, reason: 'and nothing else');
+
+    // With no countdown, Escape is the player's again.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(container.read(playerViewProvider).fullscreen, isFalse);
+    disposeContainer();
   });
 
   testWidgets('no shortcut fires while a text field has focus', (tester) async {
