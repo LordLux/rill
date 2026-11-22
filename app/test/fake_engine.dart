@@ -189,9 +189,14 @@ class FakeEngine implements PlaybackEngine {
   /// reopens. A test of the second player's path sets `done`.
   VideoSwitch audioSwitchResult = VideoSwitch.unsupported;
 
+  /// Held by a test that needs a track switch to still be in flight.
+  Future<void>? audioSwitchGate;
+
   @override
   Future<VideoSwitch> switchAudio(PlaybackVariant variant) async {
     audioSwitches.add(variant);
+    final gate = audioSwitchGate;
+    if (gate != null) await gate;
     final result = audioSwitchResult;
     if (result == VideoSwitch.done) _current = variant;
     return result;

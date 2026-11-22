@@ -773,6 +773,8 @@ interface YtDlpFormat {
   ext?: string;
   abr?: number;
   protocol?: string;
+  format_id?: string;
+  audio_channels?: number;
 }
 
 export interface YtDlpDump {
@@ -837,15 +839,28 @@ export function sourceFromYtDlpDump(
   });
 }
 
-/** `lang` and `acont` off a yt-dlp format's URL, the one track marker it keeps (F65). */
-function ytDlpTrackKey(format: YtDlpFormat): string | null {
+/** A yt-dlp format's `xtags`, off its URL: the one track marker it keeps (F65). */
+function ytDlpXtags(format: YtDlpFormat): Record<string, string> | null {
   if (!format.url) return null;
   try {
-    const xtags = parseXtagsText(new URL(format.url).searchParams.get('xtags'));
-    return xtags?.['lang'] && xtags['acont'] ? `${xtags['lang']}|${xtags['acont']}` : null;
+    return parseXtagsText(new URL(format.url).searchParams.get('xtags'));
   } catch {
     return null;
   }
+}
+
+/** `lang` and `acont`, what a yt-dlp format is matched to a track by. */
+function ytDlpTrackKey(format: YtDlpFormat): string | null {
+  const xtags = ytDlpXtags(format);
+  return xtags?.['lang'] && xtags['acont'] ? `${xtags['lang']}|${xtags['acont']}` : null;
+}
+
+/**
+ * A volume-compressed copy (`drc=1` in its `xtags`, `-drc` in yt-dlp's id), which [rankAudio]
+ * puts last on the other tiers: its bitrate runs above the plain one's, so bitrate alone picks it.
+ */
+function ytDlpIsDrc(format: YtDlpFormat): boolean {
+  return /drc/i.test(format.format_id ?? '') || ytDlpXtags(format)?.['drc'] === '1';
 }
 
 /**
@@ -855,7 +870,7 @@ function ytDlpTrackKey(format: YtDlpFormat): string | null {
  * formats carry every track's fields and no URL — and yt-dlp's formats are matched to it by
  * `lang` and `acont`, which was one track each on every video measured. yt-dlp's own pick is the
  * original already (it ranks it by `language_preference`); a requested track replaces it with
- * that track's best-bitrate format. Null when there is nothing to match against: no `ANDROID`
+ * that track's best format, in [rankAudio]'s order (no DRC, no surround, then bitrate). Null when there is nothing to match against: no `ANDROID`
  * response, a muxed answer, or an audio that is none of the listed tracks.
  */
 function ytDlpTracks(
@@ -878,7 +893,15 @@ function ytDlpTracks(
   if (wanted !== null) {
     const candidates = (dump.formats ?? [])
       .filter((f) => f.vcodec === 'none' && f.acodec && f.acodec !== 'none' && f.protocol === 'https' && ytDlpTrackKey(f) === wanted)
-      .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));
+      // The order [rankAudio] gives the other tiers: plain before DRC, stereo before surround,
+      // then bitrate.
+      .sort((a, b) =>
+        compare(
+          Number(ytDlpIsDrc(a)) - Number(ytDlpIsDrc(b)),
+          Number((a.audio_channels ?? 2) > 2) - Number((b.audio_channels ?? 2) > 2),
+          (b.abr ?? 0) - (a.abr ?? 0),
+        ),
+      );
     format = candidates[0] ?? picked;
   }
   const key = ytDlpTrackKey(format);

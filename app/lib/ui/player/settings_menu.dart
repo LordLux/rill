@@ -835,7 +835,10 @@ class _QualityPage extends ConsumerWidget {
     final playback = ref.watch(playbackProvider);
     final engine = ref.watch(playbackEngineProvider);
     final variants = distinctQualities(playback.variants);
-    final current = playback.variant;
+    // A quality picked during an audio track switch is ticked at once too, and shown busy: it is
+    // switched to once the track has landed (Task 39).
+    final picked = playback.qualityAfterAudioSwitch;
+    final current = picked ?? playback.variant;
 
     return _MenuBody(
       // **No back arrow: there is nothing above this.** Quality has its own bar
@@ -847,7 +850,7 @@ class _QualityPage extends ConsumerWidget {
         stream: engine.heightStream,
         initialData: engine.height,
         builder: (context, snapshot) {
-          final actual = snapshot.data ?? current?.height;
+          final actual = snapshot.data ?? playback.variant?.height;
           return _MenuHeader(
             title: 'Quality',
             // Height only, no fps: it is mpv's number, and mpv reports a height.
@@ -885,7 +888,7 @@ class _QualityPage extends ConsumerWidget {
             // entry at all.
             selected: current != null && variant.height == current.height && variant.fps == current.fps,
             // The tick moves to the picked row at once, before that quality has loaded.
-            loading: playback.isChangingQuality,
+            loading: playback.isChangingQuality || picked != null,
             onTap: () => onPicked(variant),
           ),
         // **Last, and deliberately dead** (task §3): automatic stepping needs a
@@ -2320,8 +2323,8 @@ class _AudioTrackPage extends ConsumerWidget {
               selected: track.id == currentId,
               switching: track.id == playback.switchingAudioTrackId,
               // Always enabled: a disabled control cannot hold focus (Task 32), and the row just
-              // pressed is the one the reopen fallback makes busy. A press while a switch is under
-              // way is ignored by the controller instead.
+              // pressed is the one the reopen fallback makes busy. A press while the player is busy
+              // is ticked and waits its turn; one after the switch has started is ignored.
               onTap: () => unawaited(controller.chooseAudioTrack(track.id)),
             ),
       ],

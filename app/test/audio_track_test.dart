@@ -7,6 +7,8 @@
 /// audio-only toggle and a recovery reopen all stay on it.
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/playback/engine.dart';
@@ -167,6 +169,106 @@ void main() {
     // Once it has landed, the next pick goes through.
     await controller.chooseAudioTrack('es.3');
     expect(playback.source?.audioTrackId, 'es.3');
+  });
+
+  test('a track switch keeps the rung the viewer is on, not the one ranked first at its height', () async {
+    await watching();
+    engine.inPlaceSwitch = true;
+    final p30 = playback.variants.firstWhere((v) => v.height == 1080 && v.fps == 30);
+    await controller.switchQuality(p30);
+    expect(playback.variant?.fps, 30);
+    engine.audioSwitchResult = VideoSwitch.done;
+
+    // MUTATION: end the switch by comparing against `variantFor(variants, _preferredHeight)`, as
+    // it first did, and this fails: 1080p60 ranks above 1080p30, so a second switch follows.
+    await controller.chooseAudioTrack('hi.10');
+    await settle();
+    expect(engine.audioSwitches.single.videoUrl, endsWith('/video/1080p30'));
+    expect(playback.variant?.fps, 30);
+    expect(engine.switched, [p30], reason: 'no quality switch the viewer did not ask for');
+  });
+
+  test('a quality picked during a track switch is ticked at once, and switched to from the new ladder', () async {
+    await watching();
+    engine.inPlaceSwitch = true;
+    engine.audioSwitchResult = VideoSwitch.done;
+    final held = Completer<void>();
+    engine.audioSwitchGate = held.future;
+    final switching = controller.chooseAudioTrack('hi.10');
+    await settle();
+
+    // MUTATION: keep only the height in `switchQuality`'s guard, as it first did, and this fails:
+    // the menu keeps ticking 2160p until the track lands.
+    final lower = playback.variants.firstWhere((v) => v.height == 720);
+    await controller.switchQuality(lower);
+    expect(playback.qualityAfterAudioSwitch, lower, reason: 'what the quality menu ticks, as busy');
+    expect(playback.variant?.height, 2160, reason: 'nothing has switched yet');
+
+    held.complete();
+    await switching;
+    await settle();
+    expect(playback.qualityAfterAudioSwitch, isNull);
+    expect(playback.variant?.height, 720);
+    expect(playback.variant?.audioUrl, endsWith('/audio/hi.10'), reason: 'the quality changed, not the language');
+  });
+
+  test('a pick while a quality switch is under way waits its turn, ticked, and a later pick replaces it', () async {
+    await watching();
+    engine.inPlaceSwitch = true;
+    engine.audioSwitchResult = VideoSwitch.done;
+    final held = Completer<void>();
+    engine.switchGate = held.future;
+    final quality = controller.switchQuality(playback.variants.firstWhere((v) => v.height == 720));
+    await settle(50);
+    expect(playback.isChangingQuality, isTrue);
+
+    // MUTATION: return from `chooseAudioTrack` while a quality switch is under way, as it first did,
+    // and this fails: the pick does nothing and says nothing.
+    final first = controller.chooseAudioTrack('hi.10');
+    await settle();
+    expect(playback.audioTrackId, 'hi.10', reason: 'the menu ticks it at once');
+    final second = controller.chooseAudioTrack('es.3');
+    expect(playback.audioTrackId, 'es.3');
+    await settle();
+    expect((await opens()).where((open) => open['preload'] == true), isEmpty, reason: 'nothing is asked until its turn');
+
+    held.complete();
+    await quality;
+    await Future.wait([first, second]);
+    expect((await opens()).where((open) => open['preload'] == true).map((open) => open['audioTrackId']), ['es.3']);
+    expect(engine.audioSwitches.single.height, 720, reason: 'on the quality just switched to');
+    expect(playback.source?.audioTrackId, 'es.3');
+  });
+
+  test('picking the playing track again calls off a pick that is still waiting', () async {
+    await watching();
+    engine.inPlaceSwitch = true;
+    final held = Completer<void>();
+    engine.switchGate = held.future;
+    final quality = controller.switchQuality(playback.variants.firstWhere((v) => v.height == 720));
+    await settle(50);
+
+    final pick = controller.chooseAudioTrack('hi.10');
+    await controller.chooseAudioTrack('en.4');
+    expect(playback.audioTrackId, 'en.4');
+    expect(playback.switchingAudioTrackId, isNull);
+    held.complete();
+    await quality;
+    await pick;
+    await settle();
+    expect((await opens()).where((open) => open['preload'] == true), isEmpty);
+    expect(engine.audioSwitches, isEmpty);
+    expect(controller.chosenAudioTrackId, isNull);
+  });
+
+  test('a restored choice the sidecar no longer has is dropped, so the snapshot does not keep it', () async {
+    // MUTATION: drop the check in `open` and this fails with 'xx.1'.
+    controller.restoreNext(videoId: 'tracks1', audioTrackId: 'xx.1');
+    container.read(queueProvider.notifier).play(video('tracks1'));
+    await settle();
+    expect((await opens()).last, containsPair('audioTrackId', 'xx.1'));
+    expect(playback.source?.audioTrackId, 'en.4');
+    expect(controller.chosenAudioTrackId, isNull);
   });
 
   test('another video starts on its original: the choice was for one video', () async {

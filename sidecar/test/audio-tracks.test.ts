@@ -118,6 +118,10 @@ describe('the yt-dlp tier (no track id of its own)', () => {
       { url: xtagsUrl('hi140', 'hi', 'dubbed-auto'), vcodec: 'none', acodec: 'mp4a.40.2', abr: 129, protocol: 'https' },
       { url: xtagsUrl('hi251', 'hi', 'dubbed-auto'), vcodec: 'none', acodec: 'opus', abr: 145, protocol: 'https' },
       { url: xtagsUrl('hiHls', 'hi', 'dubbed-auto'), vcodec: 'none', acodec: 'opus', abr: 999, protocol: 'm3u8_native' },
+      // Above the plain 251 by bitrate, and each one [rankAudio] puts last on the other tiers.
+      { url: xtagsUrl('hiDrcId', 'hi', 'dubbed-auto'), vcodec: 'none', acodec: 'opus', abr: 160, protocol: 'https', format_id: '251-drc' },
+      { url: `${xtagsUrl('hiDrcTag', 'hi', 'dubbed-auto')}${encodeURIComponent(':drc=1')}`, vcodec: 'none', acodec: 'opus', abr: 170, protocol: 'https' },
+      { url: xtagsUrl('hi51', 'hi', 'dubbed-auto'), vcodec: 'none', acodec: 'mp4a.40.5', abr: 384, protocol: 'https', audio_channels: 6 },
     ],
     requested_formats: [
       { url: 'https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&c=VISIONOS&id=v399', vcodec: 'av01', acodec: 'none', height: 1080 },
@@ -132,7 +136,8 @@ describe('the yt-dlp tier (no track id of its own)', () => {
     expect(source.variants[0]!.audioUrl).toContain('id=en251');
   });
 
-  test('a requested track is matched by language and kind, best bitrate, plain https only', () => {
+  test('a requested track is matched by language and kind, plain https only, no DRC or surround, then bitrate', () => {
+    // MUTATION: sort the candidates by `abr` alone and this plays the 5.1 copy (`id=hi51`).
     const source = sourceFromYtDlpDump(dump, 'yt-dlp', android, 'hi.10');
     expect(source.audioTrackId).toBe('hi.10');
     expect(source.variants[0]!.audioUrl).toContain('id=hi251');

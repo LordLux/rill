@@ -398,13 +398,16 @@ rl.on('line', (line) => {
           // consumed `variants[]`; the quality picker is what made the shape of
           // the list matter, and "the client may switch without reopening"
           // (§3.5) is not testable against a list of one.
+          // The multi-track video has a 1080p30 rung under its 1080p60 too: a track switch must keep
+          // the viewer's rung, not the one ranked first at that height (Task 39).
           variants: [
             [2160, 60, 315],
             [1080, 60, 299],
+            ...(hasTracks ? [[1080, 30, 248]] : []),
             [720, 30, 136],
             [360, 30, 134],
           ].map(([height, fps, itag]) => ({
-            videoUrl: `https://fake.invalid/${req.params?.videoId}/video/${height}`,
+            videoUrl: `https://fake.invalid/${req.params?.videoId}/video/${height}${hasTracks && fps === 30 && height === 1080 ? 'p30' : ''}`,
             audioUrl: `https://fake.invalid/${req.params?.videoId}/audio${track ? `/${track}` : ''}`,
             itag,
             height,
