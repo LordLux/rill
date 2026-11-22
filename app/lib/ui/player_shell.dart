@@ -17,10 +17,13 @@ import 'player/controls.dart';
 import 'player/libass_layer.dart';
 import 'player/shortcuts.dart';
 import 'player/settings_menu.dart';
+import 'player/sleep_timer_widgets.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
+import 'sleep_timer.dart';
 import 'smtc_controller.dart';
 import 'taskbar_controller.dart';
+import 'widgets/shortcut_tooltip.dart' show TooltipSide;
 import 'widgets/topbar.dart';
 
 const String watchRouteName = 'watch';
@@ -538,6 +541,9 @@ class PlayerShell extends ConsumerWidget {
                 ),
               ),
             ),
+            // The sleep timer's countdown before a system action (Task 38). Last, over everything,
+            // fullscreen included: the action is the machine's, whatever is showing.
+            const Positioned.fill(child: SleepCountdownBanner()),
           ],
         ),
       ),
@@ -690,14 +696,34 @@ class MiniPlayer extends ConsumerWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 13, color: scheme.onSurface),
                         ),
-                        Text(
-                          item.channelName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                        // The sleep timer's note takes the channel's line for a few seconds after it
+                        // fired (Task 38): there is no control bar here to show it in.
+                        // Announced once as it appears, like the bar's own note (`SleepNoteView`).
+                        Builder(
+                          builder: (context) {
+                            final note = ref.watch(sleepNoteProvider);
+                            final line = Text(
+                              note ?? item.channelName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                            );
+                            if (note == null) return line;
+                            return Semantics(container: true, liveRegion: true, label: note, child: ExcludeSemantics(child: line));
+                          },
                         ),
                       ],
                     ),
+                  ),
+                  // Left of its icon: the miniplayer clips what hangs above it.
+                  // A button here too: it opens the watch page with the timer page up.
+                  SleepTimerIndicator(
+                    side: TooltipSide.left,
+                    color: scheme.onSurfaceVariant,
+                    onPressed: () {
+                      showWatchPage(ref);
+                      ref.read(playerMenuProvider.notifier).go(SettingsPage.sleepTimer);
+                    },
                   ),
                   StreamBuilder<bool>(
                     stream: engine.playingStream,

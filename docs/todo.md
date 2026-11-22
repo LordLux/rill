@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 114.** A new item takes it, and the same edit bumps this line.
+**Next number: 118.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1627,6 +1627,110 @@ separate audio (kept on the old layout), Narrator's reaction to a switch, and ca
 does not touch).
 
 **Done when:** the open or a switch is measurably shorter from it, or the measurement shows it is not worth it.
+
+---
+
+### 114. Sleep timer: what Task 38 left
+
+**Added 2026-11-21, Task 38** (`architecture.md` §2.18).
+
+- **Neither probe walks the timer's pages.** `RILL_FOCUS_PROBE=watch` and `RILL_SEMANTICS_PROBE=1`
+  do not open *Sleep timer*, *Custom…* or *When it ends*. *Custom…* puts two `TextField`s and two
+  steppers in the settings panel, which fades and unmounts. The fields' context menu, an overlay, is
+  off for that reason. Add steps that open each page, Tab through it and close it, then run both
+  probes as two runs. Also run Narrator started second, over the countdown banner's single live
+  announcement.
+- **Shut down and Restart have not been run on a real machine** by the change that added them; Sleep
+  and Close Rill were handed to the user. `ExitWindowsEx` with `EWX_POWEROFF` and no force flag is
+  expected to show Windows' "apps are preventing shutdown" screen when one holds unsaved work. Record
+  what it does.
+- **Sleep on a Modern Standby machine.** `IsPwrSuspendAllowed` decides whether *Sleep* is offered.
+  What `SetSuspendState(FALSE, …)` does on an S0 machine is not measured.
+
+**Done when:** both probes cover the three pages and read 0 `Failed to update ui::AXTree`, and each
+remaining line above has a measurement or a decision recorded here.
+
+---
+
+### 115. Translated titles: one language per video, and a setting for it
+
+**Reported 2026-11-22, with a screenshot.** The same video carried two titles at once: the watch
+page showed the original English ("THIS is what I'm talking about! Ado can thrive…"), and the queue
+row the user's region's language ("QUESTO è ciò di cui parlo! Ado può eccelle…"). The queue row keeps
+the title of the tile that was clicked (a feed or related `lockupViewModel`), and the watch page reads
+`videoPrimaryInfoRenderer.title` from `/next` (`parser/video.ts`). **A hypothesis, not measured:**
+YouTube auto-translates titles on tiles for the viewer's language, and either does not on the watch
+page or marks the original there. Both come from the same signed-in `WEB` browse session.
+
+**Where the language comes from.** The sidecar sets neither `hl` nor `gl`. With a server-fetched
+session (`createSession`'s default), youtubei.js takes both from YouTube's own answer, which YouTube
+decides from the request's IP address and from the account's own settings (the cookie). The context
+also carries the machine's time zone (`Intl`, youtubei.js's default). So the region is not sent as
+a setting; it is read from the connection, as for any visitor.
+
+**To do:**
+- Measure first. Capture one video's feed tile, related tile and `/next` with the account as it is.
+  Record which fields carry the translated text and which the original, and whether a tile marks
+  itself translated (an original-title field, an accessibility label, a badge). Names-only dumps,
+  never a raw response in the tree (CLAUDE.md).
+- Then make one title per video everywhere (the queue row, the miniplayer, SMTC and the watch page
+  agreeing), and a setting, **"Show translated titles"** (default to be decided: YouTube's own
+  default is on). Off asks for the original wherever the response has it.
+- If the original is not in the tile at all, the off state has to come from somewhere else
+  (`/next` or `/player` per video, or `hl` set to the video's language). Measure the cost before
+  promising it.
+- Related: 82 (display language), which is about the `hl` of YouTube's own text rather than video
+  titles.
+
+**Done when:** a measurement in `architecture.md` says where each title comes from; one video shows
+one title on every surface; and the setting switches it, with a test over fixtures holding both.
+
+### 116. Narrator reads the clock every second
+
+**Reported 2026-11-22, by the user with Narrator on.** While a video plays, Narrator says the
+position ("1 minute and 5 seconds of 12 minutes…") every time it changes, so it speaks once a second
+for as long as the player has focus. Two places carry a spoken time that changes with the position:
+the control bar's clock (`controls.dart`, `Text(semanticsLabel: '… of …')`) and the scrubber's own
+`Semantics(slider: true, value: formatter(value))` (`scrubber_bar.dart`). Which one Narrator is
+reading, or both, is not measured: check with `RILL_SEMANTICS_DUMP` and Narrator before changing
+either.
+
+**What it should say instead** (the user's wording, adjusted to `spoken.dart`):
+- **On focus**, the scrubber reads the position once, then stays quiet while playback moves on. The
+  clock text is not a separate announcement.
+- **A jump to a percentage** (the number keys): "Moving to 3 minutes and 10 seconds".
+- **A step** (the arrows, J/L): "Jumping forward 10 seconds, to 3 minutes and 20 seconds", or
+  "Jumping backward 5 seconds, to …", with the step the key actually took.
+- **A frame step** (`,` / `.`): "Next frame" or "Previous frame", with no time.
+
+**How, probably:** a semantics value that does not follow the position while playing (frozen at
+focus, refreshed on a seek), and the announcements sent as one-shot messages from the seek path
+(`SemanticsService.sendAnnouncement`, or a short-lived live region as `SleepNoteView` does), not as a
+value that changes. Mind the Accessibility rules in `CLAUDE.md`: semantics stable across a frame, one
+name per control.
+
+**Done when:** with Narrator on and the scrubber focused, a minute of playback is silent; each of the
+four seeks above is announced once, in words; and a widget test checks the scrubber's semantics value
+does not change while the position does.
+
+---
+
+### 117. Opening the watch page from the miniplayer by keyboard focuses the wrong thing
+
+**Reported 2026-11-22.** Tab to the miniplayer from any page and press Enter: the watch page opens
+with focus on the **queue header**, or on the **Like button** when there is no queue. It should land
+on the **player**, so Space and the arrows work at once and Tab goes on into the controls.
+
+Where: the miniplayer's tap calls `showWatchPage(ref)` → `showWatchPageIn` (`player_shell.dart`),
+which pushes the watch route; nothing then chooses a first focus, so the route's `FocusScope` takes the
+first node it finds, which is not the declared order (`ui/focus_surface.dart`: on the watch page, the
+main column before the rail). Fix by giving the player surface focus when the watch route is pushed
+**by the keyboard**. A pointer click should not draw a ring (`KeyboardNavigation.active`, F52). Also
+check the same path from F6 (the miniplayer reached by F6) and from the session restore.
+
+**Done when:** a test in the style of `test/focus_traversal_test.dart` opens the watch page from a
+focused miniplayer with and without a queue and finds focus on the player, and
+`RILL_FOCUS_PROBE=watch` still reads clean.
 
 ---
 

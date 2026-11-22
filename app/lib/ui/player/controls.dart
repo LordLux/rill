@@ -24,10 +24,12 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show GestureBinding, PointerDeviceKind, PointerScrollEvent, PointerSignalEvent, PointerUpEvent, kDoubleTapTimeout;
+import 'package:flutter/gestures.dart'
+    show GestureBinding, PointerCancelEvent, PointerDeviceKind, PointerDownEvent, PointerHoverEvent, PointerMoveEvent, PointerScrollEvent, PointerSignalEvent, PointerUpEvent, kDoubleTapTimeout, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard, KeyDownEvent, KeyEvent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silky_scroll/silky_scroll.dart' show SilkyScrollGlobalManager;
 
 import '../../data/playback/engine.dart';
 import '../../domain/playback_source.dart';
@@ -45,6 +47,7 @@ import '../focus_ring.dart' show KeyboardNavigation;
 import '../focus_surface.dart';
 import '../widgets/shortcut_tooltip.dart';
 import 'player_slates.dart' show SwitchingNote;
+import 'sleep_timer_widgets.dart';
 import 'scrubber_bar.dart';
 import 'scrubber_chapters.dart';
 import 'shortcuts.dart' show PlayerAction;
@@ -288,13 +291,24 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   void _toggleMenu() => _toggleMenuAt(SettingsPage.root);
 
   void _toggleQuality() => _toggleMenuAt(SettingsPage.quality);
+
+  /// The moon (Task 38): a button to the timer page, an anchor of the menu like the gear (so a second
+  /// press closes it rather than reopening it), and hover-held like every bar control.
+  Widget _sleepMoon({bool showTime = true}) => KeyedSubtree(
+    key: sleepTimerAnchorKey,
+    child: _buildHoverable(SleepTimerIndicator(showTime: showTime, onPressed: () => _toggleMenuAt(SettingsPage.sleepTimer))),
+  );
   void _toggleCaptions() => _toggleMenuAt(SettingsPage.captions);
 
   /// Whether a page belongs to the gear rather than to one of the two buttons
   /// with their own door. Listed positively so a fourth page defaults to *not*
   /// lighting the gear up, which is the safe direction.
   static bool _isGearPage(SettingsPage page) =>
-      page == SettingsPage.root || page == SettingsPage.moreOptions;
+      page == SettingsPage.root ||
+      page == SettingsPage.moreOptions ||
+      page == SettingsPage.sleepTimer ||
+      page == SettingsPage.sleepTimerCustom ||
+      page == SettingsPage.sleepTimerAction;
 
   void _toggleMenuAt(SettingsPage page) {
     ref.read(playerMenuProvider.notifier).toggleAt(page);
@@ -336,21 +350,51 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
     _doubleClickWindow = Timer(doubleClickWindow, () => _doubleClickWindow = null);
   }
 
-  /// Shift + scroll — volume.
+  /// The right mouse button is down, and it went down over the player (Task 38). Tracked here
+  /// from the player's own pointer events rather than read off the scroll event's `buttons`
+  /// (`architecture.md` §2.7 has the measurement). A press that started elsewhere is delivered
+  /// elsewhere, so it never sets this.
+  bool _secondaryHeld = false;
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.mouse) return;
+    _secondaryHeld = event.buttons & kSecondaryMouseButton != 0;
+  }
+
+  /// A second button pressed or released while one is already down arrives as a move with
+  /// different `buttons`, not as a down or an up.
+  void _onPointerMove(PointerMoveEvent event) {
+    if (event.kind != PointerDeviceKind.mouse) return;
+    _secondaryHeld = event.buttons & kSecondaryMouseButton != 0;
+  }
+
+  // **Where a right-click menu on the player would open, when one exists** (none does today): on
+  // the release of a right press. A right press that scrolled the volume must not open it on
+  // release — note in `_onPointerSignal` that this press scrolled, and skip the menu here.
+  void _onPointerUp(PointerUpEvent event) => _secondaryHeld = false;
+
+  void _onPointerCancel(PointerCancelEvent event) => _secondaryHeld = false;
+
+  /// A hover has no button down by definition: a release that went to another window is over.
+  void _onPointerHover(PointerHoverEvent event) => _secondaryHeld = false;
+
+  /// Right button held + scroll over the video itself — volume (Task 38). Not over the bar, the
+  /// settings panel or the queue: the click surface's own `Listener` is what calls this, so only a
+  /// wheel that reaches the bare picture does. **It replaced Shift + scroll**, which is gone:
+  /// Shift is also the key for a horizontal wheel, so the gesture fought every horizontal
+  /// scrollable it was ever near, and it needed the keyboard for a mouse gesture.
   ///
-  /// Plain scroll is deliberately left alone: over a player embedded in a
-  /// scrolling page, a bare wheel has to scroll the page.
+  /// A plain scroll is left alone: over a player embedded in a scrolling page, a bare wheel has to
+  /// scroll the page.
   ///
-  /// Claimed through the `pointerSignalResolver` rather than merely read, which
-  /// is the contract for handling a pointer signal at all.
-  ///
-  /// Measured: the page does not scroll under shift-scroll either way, because
-  /// `Scrollable` flips its axis while shift is down and then reads a `dx` a
-  /// vertical wheel leaves at zero. Registering stops that being a coincidence
-  /// the moment anything horizontal is in the ancestry.
+  /// Claimed through the `pointerSignalResolver`, which is the contract for handling a pointer
+  /// signal at all, **and** marked consumed for `silky_scroll`, whose `Listener` scrolls the page
+  /// with the wheel before any resolver resolves (F44): the claim alone left the page scrolling
+  /// under the volume change. This `Listener` is below the page's, so it runs first.
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
-    if (!HardwareKeyboard.instance.isShiftPressed) return;
+    if (!_secondaryHeld) return;
+    SilkyScrollGlobalManager.instance.consumeEvent(event);
     GestureBinding.instance.pointerSignalResolver.register(event, (_) {
       _wake();
       // Scrolling *up* is a negative `dy` on every platform Flutter reports one
@@ -388,7 +432,11 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
           includeSemantics: false,
           onFocusChange: _onFocusInsideChanged,
           child: Listener(
-            onPointerSignal: _onPointerSignal,
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: _onPointerCancel,
+            onPointerHover: _onPointerHover,
             child: MouseRegion(
               // The pointer disappears with the controls, as it does in every video
               // player. `onHover` fires on movement only, which is exactly the wake
@@ -413,13 +461,21 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // `MouseRegion` above it was the real blocker — and the gate cost
                   // tap-to-pause and double-click-to-fullscreen for nothing. The
                   // layout now sits above this instead.
-                  Semantics(
-                    button: true,
-                    label: 'Play or pause',
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _onTap,
-                      child: const SizedBox.expand(),
+                  //
+                  // The volume wheel (right button + scroll) listens here too, and only here: a
+                  // `Stack` stops at the first child that is hit, so this hears a wheel only over
+                  // the bare picture, never over the bar, the settings panel, the queue or a slate,
+                  // whose own scrolling or controls the wheel belongs to.
+                  Listener(
+                    onPointerSignal: _onPointerSignal,
+                    child: Semantics(
+                      button: true,
+                      label: 'Play or pause',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _onTap,
+                        child: const SizedBox.expand(),
+                      ),
                     ),
                   ),
                   if (widget.child != null) // Before the bar: what the slates hold is a problem the viewer has to act on (Try
@@ -654,6 +710,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // over it. Mounted always (it draws nothing when no switch is running) so the
                   // child list does not change shape for it.
                   const SwitchingNote(),
+                  // After the sleep timer fired (Task 38). The same row as the note above; the two
+                  // are never up together, since a pause ends no switch and starts none.
+                  const SleepNoteView(),
                 ],
               ),
             ),
@@ -738,6 +797,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // other control here that reports state rather than action is
                   // theatre, and for the same reason: "on" is the fact worth
                   // reading at a glance.
+                  // The sleep timer's moon and time left (Task 38). Nothing while it is off; a
+                  // button to its page while on.
+                  _sleepMoon(),
                   if (captions.hasTracks && !isAudioOnly)
                     KeyedSubtree(
                       key: captionsButtonAnchorKey,
@@ -854,6 +916,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
+                  _sleepMoon(),
                   KeyedSubtree(
                     key: settingsMenuAnchorKey,
                     child: _buildHoverable(
@@ -923,6 +986,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
             ),
           ),
           const SizedBox(width: 4),
+          // The moon alone here: the time overflowed a narrow portrait bar (measured in
+          // `sleep_timer_fade_test.dart`); the tooltip still says it.
+          _sleepMoon(showTime: false),
           _ControlIcon(
             iconKey: playerFullscreenKey,
             icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,

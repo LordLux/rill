@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../captions_controller.dart';
 import '../playback_controller.dart';
+import '../sleep_timer.dart' show sleepEndProvider;
 import '../focus_surface.dart';
 import '../player_shell.dart';
 import 'settings_menu.dart';
@@ -316,6 +317,10 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
 
     if (textEntryHasFocus()) return false;
 
+    // While the sleep timer's countdown is up, Escape is its Cancel (`SleepCountdownBanner`) and
+    // nothing else: not a fullscreen exit or a menu close as well.
+    if (event.logicalKey == LogicalKeyboardKey.escape && ref.read(sleepEndProvider) != null) return false;
+
     final shortcut = resolvePlayerShortcut(event);
     if (shortcut == null) return false;
     // Space is the one key a focused control also wants (see above).
@@ -368,6 +373,13 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
         // dismiss one panel would be a key doing the arrow's job badly.
         // `close()` resets the page too, so the next open starts at the root.
         if (ref.read(playerMenuProvider).open) {
+          // The one exception: the sleep timer's *Custom…* page, a small form, where Escape goes
+          // back a page (Task 38) — from a field (its own handler, since this one stands aside for
+          // text entry) or from a button (here).
+          if (ref.read(playerMenuProvider).page == SettingsPage.sleepTimerCustom) {
+            ref.read(playerMenuProvider.notifier).back();
+            return true;
+          }
           ref.read(playerMenuProvider.notifier).close();
           return true;
         }

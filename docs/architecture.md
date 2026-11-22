@@ -946,6 +946,54 @@ and a bubble above the pointer names the time and the chapter. The code is
 - **Not built: a "most replayed" graph, and thumbnails in the bubble.** The
   mini-player's `LinearProgressIndicator` shows no chapters, deliberately.
 
+**Volume from the mouse is the right button held + scroll over the picture (decided 2026-11-21,
+Task 38; it replaced Shift + scroll).** Only over the bare video surface: the wheel is heard by the
+click surface's own `Listener`, and a `Stack` stops at the first child hit, so over the control bar,
+the settings panel, the queue or a slate the wheel is theirs (the user's call, 2026-11-22: a wheel
+over the settings ladder scrolled it *and* changed the volume).
+- **Why Shift went:** Shift is also the horizontal-wheel modifier, so the gesture fought every
+  horizontal scrollable near it, and it needed the keyboard for a mouse gesture.
+- **The button is tracked from the player's own `Listener`:**
+  - a pointer down with `kSecondaryMouseButton` sets it;
+  - a move with different `buttons` updates it (a second button pressed while one is down arrives as
+    a move);
+  - an up, a cancel or any hover clears it (a release that went to another window is over by the
+    next hover).
+  - A press that started elsewhere is delivered elsewhere, so only one that started over the player
+    counts.
+- **`PointerScrollEvent.buttons` cannot be used, on any platform.** Checked in the pinned SDK's
+  source (Flutter 3.44.9, `gestures/events.dart`): `PointerScrollEvent`'s constructor takes no
+  `buttons`, so the field is always 0, whatever the Windows embedder sends.
+- **The scroll is claimed twice.** It is registered with the `pointerSignalResolver` as before, and
+  marked consumed for `silky_scroll` (`SilkyScrollGlobalManager.consumeEvent`). The page's
+  `SilkyScroll` scrolls from its own `Listener` and never consults the resolver (F44), so the resolver
+  alone left the page scrolling under the volume change. The player's `Listener` is below the page's,
+  so it runs first.
+- **No right-click menu exists on the player.** `_onPointerUp` marks where one would open, and a
+  right press that scrolled must not open it on release.
+
+#### The volume curve (2026-11-22)
+
+**The volume setting is even in decibels, and only `SwappingEngine` knows mpv's scale.** The slider,
+the arrow keys, right button + scroll, a mute and the session snapshot all work in a 0–100 *setting*.
+`SwappingEngine` hands each player `mpvVolumeFor(setting) × gain` (`data/playback/volume_curve.dart`),
+and `gain` is the sleep timer's fade (§2.18).
+
+- **Why.** mpv cubes `volume` (`player/audio.c` at v0.36.0, the version the app's libmpv reports:
+  `pow(gain, 3)`). Writing the slider's position straight to it put 18 dB in the top half of the slider
+  and everything else in the bottom half: 100 → 95 was 1.3 dB, 10 → 5 was 18 dB. The user reported it
+  as "only the last few steps really influence the volume".
+- **The curve.** Every point of the setting is the same number of decibels, `volumeRangeDb` = 50 across
+  the slider: a step of 5 is 2.5 dB, halfway is 25 dB down, and 0 is silence. 100 is mpv's 100, so the
+  top of the slider is as loud as before. A setting saved before this sounds quieter anywhere below
+  100, because the same number now means a lower level.
+- **The fade multiplies after the curve,** so its decibels do not depend on the setting.
+- **The cube is read from mpv's source, not measured on the DLL.** The bundled libmpv's FFmpeg has no
+  muxers, so its encode mode cannot write the output to a file for measuring (`o=` fails with
+  "format not found" for wav, s16le, matroska, nut, mp4, mov, ogg and flac).
+- `MediaKitEngine` used alone (the probes, the hover preview's 0 and 100) is still in mpv's scale. The
+  two agree at 0 and 100.
+
 ### 2.8 Watch page, queue panel, and the UI's sharp edges
 
 The rules below were each paid for once. The code points here rather than
@@ -2441,6 +2489,119 @@ automatic-download switch). A launch with the setting off is a fresh start, and 
   clears it again (and the copy, for a viewer with the setting off).
 - **Not kept, on purpose:** scroll positions and open menus; the page stack below the top (Back from a restored playlist
   page goes to the feed); the subscriptions pages; search filters.
+
+### 2.18 The sleep timer (decided 2026-11-21, Task 38)
+
+A timer in the player's settings (*Sleep timer*, under the gear) pauses playback after a time or at an
+ending, then runs an end action. `ui/sleep_timer.dart` holds the rules, `data/system_power.dart` the
+end actions, and the menu pages are in `settings_menu.dart`.
+
+- **What each kind waits for.**
+  - **A duration** counts real time from the moment it is set, on a monotonic clock (`Stopwatch`,
+    never the wall clock), whether playback is running or paused. Paused when it runs out, it still
+    fires, end action included.
+  - **End of chapter** ends at the end of the chapter the playhead is in: the next chapter's start,
+    or the video's end. A chapter ends when playback crosses into the next one by a step of 3 s or
+    less with no seek in between. A seek (every one goes through `PlaybackController.seek`, which
+    reports it on `PlaybackSignals.seeks`) or a larger jump retargets to the chapter it lands in, so a
+    seek within one chapter changes nothing.
+  - **End of video** is the controller's **real** ending, the point where autoplay would advance.
+    `_onCompleted` asks `PlaybackSignals.holdAtRealEnding` *after* `_endedShort`, so a dropped read can
+    never fire it. A recovery reopen does not move the queue, so it never counts as anything. When it
+    fires the video pauses at its end and the queue does not advance (neither `advance` nor `playedOut`
+    is called). Not offered for a live stream. **Play from there opens the video again**
+    (`PlaybackController._replayHeld`), from a seek made while held or from the start, so the replay
+    has a session and is reported; unpausing the parked player would replay it with none.
+  - **After N videos.** The current video is the first. Each start counts as one, whether autoplay,
+    Next, a click or the queue started it: the timer counts queue `version` moves, which the retry and
+    recovery paths do not make. It fires at the first **real** ending once N have started. **A skip
+    is counted and fires nothing:** a video left before its end still counts, but the viewer pressing
+    Next is awake, so the timer waits for the next real ending rather than pausing the video they
+    just chose. N = 1 is *End of video*.
+  - **After N chapters.** The current chapter is the first, and the count carries on across
+    autoplayed videos. Each video start counts its first chapter, and a video without chapters
+    counts as one. It fires at the first chapter end once N have started. The last chapter's end is
+    the video's real ending, through the same hook. A seek into another chapter counts nothing.
+    **A chapter list that arrives after playback started** (`video.info` answering late) is not
+    a chapter ending: when the list changes, the chapter is worked out again silently.
+  - **Nothing left to wait for turns it off.** Stopping playback (the miniplayer's close, a cleared
+    queue; not the empty moment of a mix starting) turns off any timer, since no player is left to
+    show or change it. A queue that plays out short of N turns off an *After N* timer, which would
+    otherwise count a video started hours later and fire there.
+- **The fade.** For the kinds whose end is known in advance (a duration, end of chapter, end of
+  video), the output goes down over the last **5 s** (10 s until 2026-11-22, shortened at the user's
+  request after the hand-off).
+  - **Even in decibels, not in volume** (2026-11-22). The first version was linear in gain. mpv cubes
+    `volume` (`player/audio.c`), so the amplitude was `gain³`: about 18 dB down at the halfway point,
+    and most of the audible change at the very end. The user heard it as "only the last few steps
+    change anything". The gain is now `10^(−p)` at progress `p`: amplitude `10^(−3p)`, so 60 dB over the
+    fade, 6 dB every tenth, then the pause. `SleepTimerController.fadeGainAt` holds the curve, and
+    `sleep_timer_fade_test.dart` checks the equal steps. The volume control has the same
+    problem and the same answer: §2.7, "The volume curve".
+  - **It fades the output, not the setting.** `PlaybackEngine.setOutputGain` multiplies what reaches
+    mpv. `volume`, `volumeStream`, the slider, a mute, a volume step and the session snapshot all see
+    the setting.
+  - `SwappingEngine` owns both the setting and the gain, and hands each player `setting x gain`,
+    including a standby as it is made. So a second player that swaps in mid-fade is already at the
+    faded level and the fade goes on there. Its `volumeStream` is therefore the one stream not
+    forwarded from a player (`swapping_engine_test.dart` names the exception).
+  - **The gain is 1 whenever playback is not playing**, so the volume comes back the moment playback
+    pauses, from anything, and is never silent at the next play. The fade picks up again on play.
+  - **Nothing the viewer does in the window stops the fade (the user's call, 2026-11-22).** A key, a
+    click, a scroll or a volume change all used to turn the timer off during the fade. Task 38 asked
+    for that, on the reasoning that input means the viewer is awake. At the hand-off it read as the
+    timer breaking whenever the app was touched near its end. Now **only turning the timer off stops
+    it**: *Off*, or another choice. A volume change during the fade sets the level the fade goes on
+    from. The input observers and `PlaybackSignals.volumeChanges` were removed with it.
+- **When it fires:** pause, restore the volume, turn the timer off, show "Sleep timer: paused" (on the
+  control bar, or in the miniplayer's channel line), then run the end action.
+- **To stop a timer, pick Off or another value.** There is no warning before it fires and no
+  *+10 min*. It survives quality switches, second-player swaps, recovery reopens, audio-only, the
+  miniplayer and fullscreen, because it lives in a provider above all of them and reads only the
+  controller's state and the engine's streams. It is never put back by the session restore (§2.17).
+- **End actions.** *Do nothing* is the default.
+  - *Close Rill* is `appWindow.close()`, the window close button's own path, so the session snapshot
+    and the exit (`main.cpp`) run as for any close.
+  - *Sleep* (offered only when `IsPwrSuspendAllowed`) and *Hibernate* (only when
+    `IsPwrHibernateAllowed`) go through `SetSuspendState`.
+  - *Shut down* (`EWX_POWEROFF`) and *Restart* (`EWX_REBOOT`) go through `ExitWindowsEx`, with the
+    reason `SHTDN_REASON_FLAG_PLANNED`.
+  - All four first enable `SE_SHUTDOWN_NAME` for the process. A non-elevated user's token lists it as
+    Disabled (`whoami /priv`, measured 2026-11-21), so no elevation is needed.
+    `system_power_test.dart` resolves every binding and enables the privilege; it calls neither
+    action.
+  - **Never `EWX_FORCE` or `EWX_FORCEIFHUNG`, and no `bForce`:** an app holding unsaved work must be
+    able to stop a shutdown, and Windows shows its own "apps are preventing shutdown" screen.
+  - The calls are FFI, as `hard_exit.dart` is: `package:win32` binds none of them.
+  - While the countdown is up, Escape is its *Cancel* and nothing else (`PlayerShortcuts` stands
+    aside), so cancelling does not also leave fullscreen.
+  - **A system action waits 30 s first**, with *Cancel* and Escape, in a banner over the whole window
+    (`SleepCountdownBanner`), because a mistaken shutdown loses work in other apps. This is separate
+    from the timer, which has no warning.
+  - **The choice is not remembered across a restart of Rill.** It goes back to *Do nothing*, so a
+    shutdown chosen weeks ago surprises no one. While Rill runs it stays until changed.
+- **The menu.** The root row reads the state (`Off`, `12:34`, `End of video`, `After 3 videos`, plus
+  `· then Sleep`).
+  - The timer page lists Off, 1 to 60 minutes, *End of chapter* (only with chapters), *End of video*
+    (not live), *Custom…* and *When it ends*, with the current choice ticked.
+  - *Custom…* takes a duration (minutes and seconds, 0:01 to 23:59:59), *After N chapters* (with
+    chapters) and *After N videos* (1 to 99, a stepper). It remembers its last values in
+    `SharedPreferences`.
+  - Enter starts, and Escape goes back a page there, from a field or a button. A field holds the
+    player shortcuts off (`textEntryHasFocus`).
+- **The moon** (`SleepTimerIndicator`) is in the control bar and the miniplayer. It shows the time
+  left for a duration and is alone otherwise. In the vertical bar it is always alone, because the
+  time overflowed a narrow portrait bar.
+  - **It is a button** (`KeyboardTap`), so the keyboard and a screen reader reach it. On the bar it
+    opens the timer page and is a menu anchor like the gear, so a second press closes it. In the
+    miniplayer it opens the watch page with the timer page up.
+  - It names itself once, with the spoken time, and carries a silent in-tree tooltip.
+- **Screen readers** (2026-11-22):
+  - The menu's ticked rows (the timer's pages, and the captions and quality pages that share the
+    rows) say `selected` through a merged `Semantics`, since the tick is colour only.
+  - "Sleep timer: paused" is a live region on the bar and in the miniplayer's channel line.
+  - The countdown is announced once, not every second.
+  - Not yet checked: Narrator itself on these pages (`todo.md` 114).
 
 ## 3. Phasing
 

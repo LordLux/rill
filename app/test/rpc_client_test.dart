@@ -63,6 +63,25 @@ void main() {
     }
   });
 
+  // CI failed `quality_in_place_test` three times with this write error, unhandled, on whichever
+  // test was running when a sidecar died mid-write (2026-11-17, 11-21, 11-22).
+  // MUTATION: drop the `process.stdin.done.catchError` in `client.dart` and this fails with
+  // `SocketException: Write failed (OS Error: The pipe is being closed, errno = 232)`.
+  test('a write the sidecar cannot take is not an unhandled error', () async {
+    final client = RpcClient.instance;
+    client.killForTest();
+    client.mockCommand = ['run', 'app/test/fake_sidecar_deaf.ts'];
+    // Not `await client.start()`: after the handshake it asks `auth.verify`, which this sidecar never
+    // answers. The first call starts it. None is answered: these are only writes into a pipe whose
+    // reader has gone.
+    for (var i = 0; i < 50; i++) {
+      unawaited(client.call('test.echo', {'msg': 'x' * 40000}).then((_) {}, onError: (Object _) {}));
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await client.killForTestAndWait();
+  });
+
   test('envelope errors decode to Dart exception carrying code, message, and retry as enum', () async {
     RpcClient.instance.mockCommand = ['run', 'app/test/fake_sidecar.ts', '1'];
     final client = RpcClient.instance;

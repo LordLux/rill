@@ -15,7 +15,8 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryMouseButton;
+import 'package:silky_scroll/silky_scroll.dart' show SilkyListView;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,9 +34,11 @@ import 'package:rill/ui/player/view_mode.dart';
 import 'package:rill/ui/player/window_chrome.dart';
 import 'package:rill/ui/player_shell.dart';
 import 'package:rill/ui/queue_controller.dart';
+import 'package:rill/ui/sleep_timer.dart';
 
 import 'fake_engine.dart';
 import 'sidecar_idle.dart';
+import 'sleep_timer_test.dart' show FakePower;
 
 VideoItem video(String id) => VideoItem(
       kind: 'video',
@@ -84,6 +87,8 @@ Future<void> boot() async {
     overrides: [
       playbackEngineProvider.overrideWithValue(engine),
       windowChromeProvider.overrideWithValue(window),
+      // Never the real end actions from a test: a countdown left to run would suspend the machine.
+      systemPowerProvider.overrideWithValue(FakePower()),
     ],
   );
   container.read(playbackProvider);
@@ -480,43 +485,145 @@ void main() {
   // Keyboard + mouse
   // -------------------------------------------------------------------------
 
-  testWidgets('Shift + scroll changes the volume, and a bare scroll does not', (tester) async {
-    await pumpWatching(tester);
-    final centre = tester.getCenter(find.byType(PlayerControls).first);
+  // Task 38: right button held + scroll replaced Shift + scroll.
+  //
+  // In a `SilkyListView`, which is what the watch page scrolls with (a `SilkyCustomScrollView`):
+  // silky handles the wheel in its own `Listener` and never asks the `pointerSignalResolver`, so a
+  // page built on a plain `ListView` would pass against a claim that did nothing in the app
+  // (`settings_menu_test.dart` learned this first). Whether the page moved is the claim's evidence.
+  group('right button + scroll', () {
+    late TestPointer pointer;
+    late ScrollController page;
+    var stamp = 0;
 
-    final pointer = TestPointer(1, PointerDeviceKind.mouse);
-    Future<void> scroll(Offset delta) async {
-      await tester.sendEventToBinding(pointer.hover(centre));
-      await tester.sendEventToBinding(pointer.scroll(delta));
-      await tester.pumpAndSettle();
+    /// One wheel notch. **A distinct timestamp each**: `silky_scroll` remembers handled events by
+    /// timestamp (F44), and with the default zero every notch after the first reads as handled.
+    Future<void> scroll(WidgetTester tester, Offset delta) async {
+      await tester.sendEventToBinding(pointer.scroll(delta, timeStamp: Duration(milliseconds: ++stamp * 1000 + 7)));
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pumpAndSettle(const Duration(milliseconds: 16), EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
     }
 
-    engine.volumes.clear();
-    await scroll(const Offset(0, -40));
-    expect(engine.volumes, isEmpty, reason: 'a bare wheel has to scroll the page, not the volume');
+    Future<Offset> setUpPlayer(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      page = ScrollController();
+      addTearDown(page.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: SilkyListView(
+                controller: page,
+                children: [
+                  SizedBox(height: 400, child: PlayerControls(engine: engine)),
+                  const SizedBox(height: 4000),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      pointer = TestPointer(1, PointerDeviceKind.mouse, null, kSecondaryMouseButton);
+      final centre = tester.getCenter(find.byType(PlayerControls));
+      await tester.sendEventToBinding(pointer.hover(centre));
+      await tester.pump(const Duration(milliseconds: 40));
+      await engine.setVolume(50);
+      engine.volumes.clear();
+      return centre;
+    }
 
-    // Where the player sits on the page: adjusting the volume must not also
-    // scroll the page out from under it. Recorded as a property rather than as a
-    // mutation check — it survives removing the `pointerSignalResolver`
-    // registration, because Flutter's `Scrollable` flips its axis under Shift and
-    // then reads a `dx` the wheel leaves at zero.
-    final playerTop = tester.getTopLeft(find.byType(PlayerControls).first).dy;
+    testWidgets('held over the player, scrolling up raises the volume and down lowers it, and the page stays put', (tester) async {
+      final centre = await setUpPlayer(tester);
+      await tester.sendEventToBinding(pointer.down(centre));
+      await scroll(tester, const Offset(0, -40));
+      expect(engine.volumes, [55], reason: 'up is louder, by the step Shift + scroll had');
+      await scroll(tester, const Offset(0, 40));
+      expect(engine.volumes, [55, 50], reason: 'down is quieter');
+      // MUTATION: drop `SilkyScrollGlobalManager.instance.consumeEvent(event)` from
+      // `_onPointerSignal` and this fails: the resolver claim alone does not stop silky.
+      expect(page.offset, 0, reason: 'the page did not scroll under the volume change');
+      await tester.sendEventToBinding(pointer.up());
+      await tester.pumpAndSettle();
+      disposeContainer();
+    });
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await scroll(const Offset(0, -40));
-    expect(engine.volumes.last, 100, reason: 'already at 100 and clamped there');
+    testWidgets('over the control bar rather than the picture, it leaves the volume alone', (tester) async {
+      final centre = await setUpPlayer(tester);
+      await tester.sendEventToBinding(pointer.down(centre));
+      // Still held, moved onto the bar: the wheel there belongs to the bar, not to the volume.
+      final bar = tester.getRect(find.byKey(playerControlsBarKey));
+      await tester.sendEventToBinding(pointer.move(Offset(bar.center.dx, bar.bottom - 6)));
+      await scroll(tester, const Offset(0, 40));
+      // MUTATION: put `onPointerSignal: _onPointerSignal` back on the outer `Listener` (the whole
+      // player) and this fails at [45].
+      expect(engine.volumes, isEmpty, reason: 'only a wheel over the video surface is the volume');
+      await tester.sendEventToBinding(pointer.up());
+      await tester.pumpAndSettle();
+      disposeContainer();
+    });
 
-    await scroll(const Offset(0, 40));
-    expect(engine.volumes.last, 95, reason: 'scrolling down is quieter');
-    await scroll(const Offset(0, 40));
-    expect(engine.volumes.last, 90);
-    await scroll(const Offset(0, -40));
-    expect(engine.volumes.last, 95, reason: 'and scrolling up is louder again');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    testWidgets('a plain scroll changes nothing and claims nothing', (tester) async {
+      await setUpPlayer(tester);
+      // MUTATION: delete the `if (!_secondaryHeld) return;` in `_onPointerSignal` (ignore the
+      // button) and this fails: a bare wheel over the player changes the volume, and the page,
+      // whose wheel it was, does not move.
+      await scroll(tester, const Offset(0, 40));
+      expect(engine.volumes, isEmpty, reason: 'a bare wheel has to scroll the page, not the volume');
+      expect(page.offset, greaterThan(0), reason: 'unclaimed: the page scrolled');
+      disposeContainer();
+    });
 
-    expect(tester.getTopLeft(find.byType(PlayerControls).first).dy, playerTop,
-        reason: 'and the page stayed put while it happened');
+    testWidgets('Shift + scroll no longer changes the volume', (tester) async {
+      await setUpPlayer(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await scroll(tester, const Offset(0, 40));
+      await scroll(tester, const Offset(0, -40));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      expect(engine.volumes, isEmpty);
+      disposeContainer();
+    });
 
+    testWidgets('after the button is released, a scroll no longer changes the volume', (tester) async {
+      final centre = await setUpPlayer(tester);
+      await tester.sendEventToBinding(pointer.down(centre));
+      await scroll(tester, const Offset(0, 40));
+      expect(engine.volumes, [45]);
+      expect(page.offset, 0);
+      await tester.sendEventToBinding(pointer.up());
+      await tester.pumpAndSettle();
+
+      await scroll(tester, const Offset(0, 40));
+      expect(engine.volumes, [45], reason: 'released: the wheel belongs to the page again');
+      expect(page.offset, greaterThan(0), reason: 'and the page scrolls');
+      disposeContainer();
+    });
+  });
+
+  // Task 38 review: Escape is the countdown's Cancel and nothing else.
+  testWidgets('Escape during the sleep timer countdown cancels it and does not also leave fullscreen', (tester) async {
+    await pumpWatching(tester);
+    container.read(playerViewProvider.notifier).toggleFullscreen();
+    await tester.pumpAndSettle();
+    expect(container.read(playerViewProvider).fullscreen, isTrue);
+
+    container.read(sleepEndProvider.notifier).begin(SleepEndAction.shutDown);
+    await tester.pump();
+    await tester.pump();
+    // MUTATION: drop the `sleepEndProvider` check in `PlayerShortcuts._onKey` and this fails: the
+    // same Escape also leaves fullscreen.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(container.read(sleepEndProvider), isNull, reason: 'cancelled');
+    expect(container.read(playerViewProvider).fullscreen, isTrue, reason: 'and nothing else');
+
+    // With no countdown, Escape is the player's again.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(container.read(playerViewProvider).fullscreen, isFalse);
     disposeContainer();
   });
 

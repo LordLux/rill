@@ -319,6 +319,19 @@ class RpcClient {
       final process = await _spawn(executable, command, root);
       _process = process;
 
+      // **A failed write to the sidecar is reported on `stdin.done`, and nothing else.** A line
+      // written as the process dies (killed between two tests, or exiting) fails on the pipe with
+      // `SocketException: Write failed (… The pipe is being closed, errno = 232)`; the socket hands
+      // that to the sink's `done` future (SDK `socket_patch.dart`, `_onError` → `_consumer.done`,
+      // then `io_sink.dart`'s `_completeDoneError`), not to `writeln`. Unlistened, it is an
+      // unhandled async error, and the test runner pins it on whichever test is running: it failed
+      // `quality_in_place_test` in CI on 2026-11-17, 11-21 and 11-22. The exit itself is handled by
+      // stdout's `onDone` below, which fails the pending calls; this only keeps the write's own
+      // error from escaping. Said on stderr when it is the live process, silent for a replaced one.
+      unawaited(process.stdin.done.catchError((Object error) {
+        if (identical(process, _process)) stderr.writeln('rill: sidecar stdin closed: $error');
+      }));
+
       // **Every exit handler names the process it belongs to.**
       //
       // A dying sidecar's `onDone` arrives asynchronously, and `killForTest`

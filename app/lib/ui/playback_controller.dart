@@ -24,6 +24,30 @@ final playbackEngineProvider = Provider<PlaybackEngine>((ref) {
   );
 });
 
+/// What the sleep timer needs from the controller, kept out of both so neither depends on the other
+/// (Task 38, `architecture.md` §2.18). The controller writes to it and the timer reads it.
+class PlaybackSignals {
+  /// Asked at a **real** ending, the point where autoplay would advance — after
+  /// `PlaybackController._endedShort` has ruled out a dropped read, and never on a recovery reopen.
+  /// True keeps the queue where it is: the asker has paused instead.
+  bool Function()? holdAtRealEnding;
+
+  /// Every seek the viewer made, as its target. Every seek in the app goes through
+  /// [PlaybackController.seek], so this is the one place to hear about them.
+  final StreamController<Duration> _seeks = StreamController<Duration>.broadcast(sync: true);
+  Stream<Duration> get seeks => _seeks.stream;
+
+  void dispose() {
+    unawaited(_seeks.close());
+  }
+}
+
+final playbackSignalsProvider = Provider<PlaybackSignals>((ref) {
+  final signals = PlaybackSignals();
+  ref.onDispose(signals.dispose);
+  return signals;
+});
+
 /// Where the video is, while the engine cannot say.
 ///
 /// **One object, not two nullable fields** (architecture §2.7): holding only the
@@ -459,6 +483,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// of going to 0:00 of 0:00 for as long as the engine takes. A first load has no clock to keep.
   Future<void> open(VideoItem item, {bool wantPlaying = true, bool keepClock = false}) async {
     final generation = ++_generation;
+    _heldAtEnd = false;
     _stallWatchdogTimer?.cancel();
     _stallWatchdogTimer = null;
     // Taken first: the engine's own position is the one thing the load is about to zero.
@@ -845,12 +870,35 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
   }
 
+  /// The sleep timer held the queue at this video's real end, and its session is closed. Play from
+  /// here opens the video again (a new session, so the replay is reported like any watch) instead
+  /// of unpausing the player parked at its end, which would replay it with no session at all.
+  bool _heldAtEnd = false;
+
+  Future<void> _replayHeld() {
+    _heldAtEnd = false;
+    final item = state.item;
+    if (item == null) return Future<void>.value();
+    // A seek made while held (back into the video with the scrubber) is where to start; at the
+    // end itself, from the beginning.
+    final position = currentPosition;
+    final duration = _engine.duration > Duration.zero ? _engine.duration : (state.source?.duration ?? Duration.zero);
+    if (position > Duration.zero && duration - position > const Duration(seconds: 2)) _resumeAt = (videoId: item.id, position: position);
+    return open(item);
+  }
+
   Future<void> _onCompleted() async {
     if (_endedShort()) {
       unawaited(_recoverRead('the file ended ${(_engine.duration - _engine.position).inSeconds}s short', playing: true));
       return;
     }
     _endSession(reportState: 'ended');
+    // The sleep timer's "end of video" and its kin (Task 38): it pauses here, and nothing moves on.
+    // After `_endedShort`, so a dropped read can never fire it.
+    if (ref.read(playbackSignalsProvider).holdAtRealEnding?.call() ?? false) {
+      _heldAtEnd = true;
+      return;
+    }
     // Autoplay, or stop. `advance` answers false at the end of the queue — and
     // at the end of a mix with a top-up still out, the queue remembers and
     // advances itself when it lands (`QueueController._advanceWhenExtended`).
@@ -928,6 +976,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// show — from acting on a video that is not there.
   Future<void> togglePlayPause() {
     if (state.isUnplayable) return Future<void>.value();
+    if (_heldAtEnd && !_engine.playing) return _replayHeld();
     if (state.isLoading) return setPlaying(!state.wantPlaying);
     // Against what the viewer sees, not a toggle the switch could run into.
     if (state.isSwitchingTrack) return setPlaying(!_engine.playing);
@@ -954,6 +1003,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.isUnplayable || state.isLoading) return Future<void>.value();
     final held = state.hold;
     if (held != null) state = state.copyWith(hold: held.at(to));
+    ref.read(playbackSignalsProvider)._seeks.add(to);
     return _engine.seek(to);
   }
 
@@ -967,6 +1017,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// already paused. Restoring a recorded value has no such race.
   Future<void> setPlaying(bool value) {
     if (state.isUnplayable) return Future<void>.value();
+    if (value && _heldAtEnd) return _replayHeld();
     if (state.isLoading) return _wantWhileLoading(value);
     // A switch in place ends by restarting playback, and a press made meanwhile has to be the
     // state it ends in: noted here, applied when it ends (see [_switchInPlace]).
