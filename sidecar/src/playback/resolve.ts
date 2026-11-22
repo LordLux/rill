@@ -48,7 +48,9 @@ import { getPlayer, type Player } from '../innertube/player.ts';
 import { getPlayerEntry, getPlayerResponse } from '../innertube/player-response.ts';
 import { refreshVisitorId, type PlayerClient, type Session } from '../innertube/session.ts';
 import { sign, adoptExternallyDeciphered, type SignedUrl } from '../innertube/signed-url.ts';
-import type { PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
+import type { AudioTrack, PlaybackSource, PlaybackTransport, PlaybackVariant, PlayerFormat, PlayerResult } from '../types.ts';
+import { chooseAudio, listAudioTracks, trackRank } from './audio-tracks.ts';
+import { parseXtagsText } from '../parser/audio-track.ts';
 import { isSabrOnly } from './sabr-detect.ts';
 import type { PoTokenProvider } from './po-token.ts';
 import { openPlaybackSession } from './sessions.ts';
@@ -119,6 +121,13 @@ export interface OpenParams {
    * `list=` on the watchtime ping.
    */
   playlistId?: string | null;
+
+  /**
+   * The audio track to carry, by YouTube's id (Task 39, `protocol.md` §3.5). Honoured by every
+   * tier that has tracks; an id the video does not have is ignored, and the answer's
+   * `audioTrackId` says what plays instead.
+   */
+  audioTrackId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,19 +172,24 @@ function rankVideo(formats: PlayerFormat[]): PlayerFormat[] {
 /**
  * Audio-only adaptive formats, best first.
  *
- * Two filters that are not obvious:
+ * Three rules that are not obvious:
  *
+ *   - **The original track first, then YouTube's default** (`trackRank`, Task 39). A video can
+ *     carry dozens of tracks, the same itags in every language, and a dub's bitrate is often a
+ *     little higher than the original's: by bitrate alone, every multi-track video measured
+ *     played a dub (`architecture.md` F65, `todo.md` 84).
  *   - DRC duplicates are pushed last. They share an itag with the original and
  *     differ only in loudness, so picking one is silent and wrong.
  *   - Surround tracks are pushed behind stereo. mpv will happily downmix 5.1,
  *     but the result is quieter and muddier than the stereo master on the
  *     two-speaker setups this app runs on.
  */
-function rankAudio(formats: PlayerFormat[]): PlayerFormat[] {
+export function rankAudio(formats: PlayerFormat[]): PlayerFormat[] {
   return formats
     .filter((f) => f.isAdaptive && f.hasAudio && !f.hasVideo && addressOf(f) !== null)
     .sort((a, b) =>
       compare(
+        trackRank(a) - trackRank(b),
         Number(a.isDrc) - Number(b.isDrc),
         Number((a.audioChannels ?? 2) > 2) - Number((b.audioChannels ?? 2) > 2),
         (b.bitrate ?? 0) - (a.bitrate ?? 0),
@@ -231,6 +245,8 @@ interface SourceParts {
   response: PlayerResult | null;
   transport: PlaybackTransport;
   durationMs?: number | null;
+  /** Absent for a tier with no track information: `[]` and null. */
+  audio?: { tracks: AudioTrack[]; audioTrackId: string | null };
 }
 
 function assemble(parts: SourceParts): PlaybackSource {
@@ -249,6 +265,10 @@ function assemble(parts: SourceParts): PlaybackSource {
     // degraded too, which the user deserves to be told either way.
     qualityDegraded: topHeight === null || topHeight < DEGRADED_BELOW_HEIGHT,
     transport: parts.transport,
+    // Both or neither: a list with no current track, or a current track in no list, is a
+    // menu that cannot tick anything.
+    audioTracks: parts.audio?.audioTrackId ? parts.audio.tracks : [],
+    audioTrackId: parts.audio?.tracks.length ? parts.audio.audioTrackId : null,
     variants: parts.variants,
   };
 }
@@ -456,6 +476,7 @@ export async function tierPlainAdaptive(
   client: PlayerClient,
   poToken: string | null,
   entry: PlayerEntry | null,
+  audioTrackId: string | null = null,
 ): Promise<PlaybackSource> {
   if (!entry) {
     throw new RpcError(
@@ -528,16 +549,21 @@ export async function tierPlainAdaptive(
 
   const rankedVideos = rankVideo(response.formats);
   const rankedAudios = rankAudio(response.formats);
-  if (rankedVideos.length === 0 || rankedAudios.length === 0) {
+  const choice = chooseAudio(rankedAudios, audioTrackId);
+  if (rankedVideos.length === 0 || choice === null) {
     throw new RpcError(
       'STREAM_REQUIRES_SABR',
       `${videoId}: no usable adaptive pair (video=${rankedVideos.length > 0} audio=${rankedAudios.length > 0})`,
     );
   }
 
-  const bestAudio = rankedAudios[0]!;
+  const bestAudio = choice.format;
+  if (audioTrackId && choice.audioTrackId !== audioTrackId) {
+    log.info(`${videoId}: audio track ${audioTrackId} is not among this video's; carrying ${choice.audioTrackId ?? 'the only one'}`);
+  }
 
-  // Sign the best audio once — it serves every video variant (§3.5 rule 5).
+  // Sign the chosen audio once — it serves every video variant (§3.5 rule 5). The other
+  // tracks are listed, never signed: a switch asks for one by id (Task 39).
   const audioUrl = await signFormat(bestAudio, player, poToken);
   const audioCodec = bestAudio.codecs ?? 'unknown';
 
@@ -574,10 +600,16 @@ export async function tierPlainAdaptive(
   log.debug(
     `${videoId}: ${client} ${variants.length} variants, best itag ${bestVariant.itag} ` +
       `(${bestVariant.height}p${bestVariant.fps} ${bestVariant.videoCodec}) + ` +
-      `audio itag ${bestAudio.itag} (${audioCodec})`,
+      `audio itag ${bestAudio.itag} (${audioCodec})` +
+      (choice.audioTrackId ? ` track ${choice.audioTrackId} of ${choice.tracks.length}` : ''),
   );
 
-  return assemble({ variants, response, transport: 'plain' });
+  return assemble({
+    variants,
+    response,
+    transport: 'plain',
+    audio: { tracks: choice.tracks, audioTrackId: choice.audioTrackId },
+  });
 }
 
 /**
@@ -690,6 +722,7 @@ export async function tierVisionOs(
   deps: PlaybackDeps,
   videoId: string,
   poToken: string | null,
+  audioTrackId: string | null = null,
 ): Promise<PlaybackSource> {
   let lastEntry: PlayerEntry | null = null;
 
@@ -703,7 +736,7 @@ export async function tierVisionOs(
     () => refreshVisitorId(deps.session),
   );
 
-  return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, lastEntry);
+  return tierPlainAdaptive(deps, videoId, 'VISIONOS', poToken, lastEntry, audioTrackId);
 }
 
 // ---------------------------------------------------------------------------
@@ -738,10 +771,14 @@ interface YtDlpFormat {
   acodec?: string;
   height?: number;
   ext?: string;
+  abr?: number;
+  protocol?: string;
 }
 
 export interface YtDlpDump {
   duration?: number;
+  /** Every format, the one place yt-dlp keeps the other audio tracks (Task 39). */
+  formats?: YtDlpFormat[];
   requested_formats?: YtDlpFormat[];
   url?: string;
   vcodec?: string;
@@ -765,10 +802,13 @@ export function sourceFromYtDlpDump(
   dump: YtDlpDump,
   tool: string,
   response: PlayerResult | null,
+  audioTrackId: string | null = null,
 ): PlaybackSource {
   const requested = dump.requested_formats ?? [];
   const video = requested.find((f) => f.vcodec && f.vcodec !== 'none') ?? null;
-  const audio = requested.find((f) => f.acodec && f.acodec !== 'none' && f.vcodec === 'none') ?? null;
+  const picked = requested.find((f) => f.acodec && f.acodec !== 'none' && f.vcodec === 'none') ?? null;
+  const tracks = ytDlpTracks(dump, response, video !== null ? picked : null, audioTrackId);
+  const audio = tracks?.format ?? picked;
 
   const videoAddress = video?.url ?? dump.url ?? null;
   if (!videoAddress) {
@@ -793,7 +833,57 @@ export function sourceFromYtDlpDump(
     response,
     transport: 'ytdlp',
     durationMs: dump.duration ? Math.round(dump.duration * 1000) : null,
+    ...(tracks ? { audio: { tracks: tracks.tracks, audioTrackId: tracks.audioTrackId } } : {}),
   });
+}
+
+/** `lang` and `acont` off a yt-dlp format's URL, the one track marker it keeps (F65). */
+function ytDlpTrackKey(format: YtDlpFormat): string | null {
+  if (!format.url) return null;
+  try {
+    const xtags = parseXtagsText(new URL(format.url).searchParams.get('xtags'));
+    return xtags?.['lang'] && xtags['acont'] ? `${xtags['lang']}|${xtags['acont']}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The tracks of a yt-dlp answer, and the audio to play.
+ *
+ * **yt-dlp keeps no track id** (F65), so the list is the `ANDROID` response's — its adaptive
+ * formats carry every track's fields and no URL — and yt-dlp's formats are matched to it by
+ * `lang` and `acont`, which was one track each on every video measured. yt-dlp's own pick is the
+ * original already (it ranks it by `language_preference`); a requested track replaces it with
+ * that track's best-bitrate format. Null when there is nothing to match against: no `ANDROID`
+ * response, a muxed answer, or an audio that is none of the listed tracks.
+ */
+function ytDlpTracks(
+  dump: YtDlpDump,
+  response: PlayerResult | null,
+  picked: YtDlpFormat | null,
+  requested: string | null,
+): { format: YtDlpFormat; tracks: AudioTrack[]; audioTrackId: string } | null {
+  if (response === null || picked === null) return null;
+  const formats = response.formats.filter((f) => f.audioTrack !== null);
+  const tracks = listAudioTracks(formats);
+  if (tracks.length === 0) return null;
+  const keyOf = (id: string): string | null => {
+    const track = formats.find((f) => f.audioTrack?.id === id)?.audioTrack;
+    return track?.language && track.content ? `${track.language}|${track.content}` : null;
+  };
+
+  let format = picked;
+  const wanted = requested ? keyOf(requested) : null;
+  if (wanted !== null) {
+    const candidates = (dump.formats ?? [])
+      .filter((f) => f.vcodec === 'none' && f.acodec && f.acodec !== 'none' && f.protocol === 'https' && ytDlpTrackKey(f) === wanted)
+      .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));
+    format = candidates[0] ?? picked;
+  }
+  const key = ytDlpTrackKey(format);
+  const playing = tracks.find((track) => key !== null && keyOf(track.id) === key);
+  return playing ? { format, tracks, audioTrackId: playing.id } : null;
 }
 
 /**
@@ -823,6 +913,7 @@ export async function tierYtDlp(
   videoId: string,
   poToken: string | null,
   response: PlayerResult | null,
+  audioTrackId: string | null = null,
 ): Promise<PlaybackSource> {
   // One place decides which binary this is, so the startup warning and the
   // spawn cannot disagree about what "yt-dlp" means on this machine.
@@ -884,7 +975,7 @@ export async function tierYtDlp(
     throw new RpcError('UPSTREAM_ERROR', `${videoId}: ${binary} returned unparseable JSON`);
   }
 
-  const source = sourceFromYtDlpDump(dump, binary, response);
+  const source = sourceFromYtDlpDump(dump, binary, response, audioTrackId);
   log.debug(`${videoId}: yt-dlp resolved ${topHeight(source) ?? '?'}p`);
   return source;
 }
@@ -1075,6 +1166,7 @@ export async function openPlayback(
   params: OpenParams,
 ): Promise<PlaybackSource> {
   const { videoId, preload = false } = params;
+  const audioTrackId = params.audioTrackId ?? null;
   // No `nullPoTokenProvider` import here, deliberately — `PoTokenProvider` is
   // `import type` only. A real provider's own module (`po-token.ts`, pulling
   // in `jsdom`/`bgutils-js`) failing to import must never be able to take
@@ -1106,10 +1198,10 @@ export async function openPlayback(
   const source = await descendLadder(
     videoId,
     [
-      { name: 'VISIONOS plain adaptive', run: () => tierVisionOs(deps, videoId, poToken) },
+      { name: 'VISIONOS plain adaptive', run: () => tierVisionOs(deps, videoId, poToken, audioTrackId) },
       {
         name: 'yt-dlp',
-        run: async () => tierYtDlp(deps, videoId, poToken, (await androidEntry())?.result ?? null),
+        run: async () => tierYtDlp(deps, videoId, poToken, (await androidEntry())?.result ?? null, audioTrackId),
       },
       {
         name: 'itag 18 progressive',

@@ -723,6 +723,29 @@ export interface PlayerFormat {
   rawUrl: string | null;
   /** Present instead of `rawUrl` when the format is signature-protected. */
   signatureCipher: string | null;
+  /**
+   * The audio track this format belongs to, or null for a video format, a muxed one, and a
+   * video with a single track (whose formats carry no track fields at all). Task 39,
+   * `architecture.md` F65.
+   */
+  audioTrack: PlayerAudioTrack | null;
+}
+
+/** What one adaptive audio format says about its track (`architecture.md` F65). */
+export interface PlayerAudioTrack {
+  /** `audioTrack.id` — YouTube's own, e.g. `en-US.4`. Opaque: the suffix is not a marker. */
+  id: string;
+  /** `audioTrack.displayName`, localised by the request's `hl`. Display only. */
+  displayName: string | null;
+  /** `audioTrack.audioIsDefault`. */
+  isDefault: boolean;
+  /**
+   * `acont` from the format's `xtags`: `original`, `dubbed`, `dubbed-auto` measured; anything
+   * else is kept as sent. Null when the format carries no `xtags`.
+   */
+  content: string | null;
+  /** `lang` from the `xtags`, a BCP-47 tag. */
+  language: string | null;
 }
 
 export interface Storyboard {
@@ -1086,6 +1109,23 @@ export const PLAYBACK_REPORT_STATES: readonly PlaybackReportState[] = [
   'ended',
 ];
 
+/** One audio track a `PlaybackSource` can be asked for (Task 39, `protocol.md` §3.5). */
+export interface AudioTrack {
+  /** YouTube's own track id; what `playback.open`'s `audioTrackId` names. */
+  id: string;
+  /**
+   * YouTube's name, localised, with its own "original" wording removed: the client draws an
+   * *Original* badge from `isOriginal` (`playback/audio-tracks.ts`, `trackDisplayName`).
+   */
+  displayName: string;
+  /** `xtags` `acont=original`. */
+  isOriginal: boolean;
+  /** `acont=dubbed`: a dub the creator uploaded. */
+  isDubbed: boolean;
+  /** `acont=dubbed-auto`: YouTube's automatic AI dub. */
+  isAutoDubbed: boolean;
+}
+
 export interface PlaybackSource {
   sessionId: string;
   /** null when live — a live stream has no final duration. */
@@ -1109,6 +1149,17 @@ export interface PlaybackSource {
   /** Drives a badge in the UI, never a dead end. */
   qualityDegraded: boolean;
   transport: PlaybackTransport;
+  /**
+   * The video's audio tracks, original first and then by name (Task 39, `protocol.md` §3.5).
+   * `[]` when there is nothing to choose from: one track, or a tier that carries no track
+   * information (the itag 18 floor, a live manifest).
+   */
+  audioTracks: AudioTrack[];
+  /**
+   * The track every variant's `audioUrl` carries — always the truth, whatever was asked for.
+   * Null exactly when `audioTracks` is `[]`.
+   */
+  audioTrackId: string | null;
   /**
    * Ranked best-first: highest height → highest fps → codec preference.
    * Every entry is a playable pair. Tiers 3–5 may return a single-entry array.

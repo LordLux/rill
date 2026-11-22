@@ -1,0 +1,182 @@
+{
+  "playabilityStatus": {
+    "status": "OK"
+  },
+  "streamingData": {
+    "expiresInSeconds": "21540",
+    "adaptiveFormats": [
+      {
+        "itag": 248,
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "mimeType": "video/webm; codecs=\"vp9\"",
+        "bitrate": 2500000,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=248&c=VISIONOS&mime=video%2Fwebm"
+      },
+      {
+        "itag": 137,
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "mimeType": "video/mp4; codecs=\"avc1.640028\"",
+        "bitrate": 4000000,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=137&c=VISIONOS&mime=video%2Fwebm"
+      },
+      {
+        "itag": 247,
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "mimeType": "video/webm; codecs=\"vp9\"",
+        "bitrate": 1500000,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=247&c=VISIONOS&mime=video%2Fwebm"
+      },
+      {
+        "itag": 140,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=140&c=VISIONOS&xtags=acont%3Ddubbed-auto%3Alang%3Dhi&mime=audio%2Fmp4",
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 131095,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "Hindi",
+          "id": "hi.10",
+          "audioIsDefault": false,
+          "isAutoDubbed": true
+        },
+        "xtags": "ChQKBWFjb250EgtkdWJiZWQtYXV0bwoKCgRsYW5nEgJoaQ"
+      },
+      {
+        "itag": 251,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=251&c=VISIONOS&xtags=acont%3Ddubbed-auto%3Alang%3Dhi&mime=audio%2Fwebm",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 148535,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "Hindi",
+          "id": "hi.10",
+          "audioIsDefault": false,
+          "isAutoDubbed": true
+        },
+        "xtags": "ChQKBWFjb250EgtkdWJiZWQtYXV0bwoKCgRsYW5nEgJoaQ"
+      },
+      {
+        "itag": 140,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=140&c=VISIONOS&xtags=acont%3Ddubbed%3Alang%3Des&mime=audio%2Fmp4",
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 132564,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "Spanish",
+          "id": "es.3",
+          "audioIsDefault": false
+        },
+        "xtags": "Cg8KBWFjb250EgZkdWJiZWQKCgoEbGFuZxICZXM"
+      },
+      {
+        "itag": 251,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=251&c=VISIONOS&xtags=acont%3Ddubbed%3Alang%3Des&mime=audio%2Fwebm",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 147812,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "Spanish",
+          "id": "es.3",
+          "audioIsDefault": false
+        },
+        "xtags": "Cg8KBWFjb250EgZkdWJiZWQKCgoEbGFuZxICZXM"
+      },
+      {
+        "itag": 140,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=140&c=VISIONOS&mime=audio%2Fmp4",
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 130990,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "German (DE)",
+          "id": "de-DE.10",
+          "audioIsDefault": false,
+          "isAutoDubbed": true
+        },
+        "xtags": "ChQKBWFjb250EgtkdWJiZWQtYXV0bwoNCgRsYW5nEgVkZS1ERQ"
+      },
+      {
+        "itag": 251,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=251&c=VISIONOS&mime=audio%2Fwebm",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 138711,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "German (DE)",
+          "id": "de-DE.10",
+          "audioIsDefault": false,
+          "isAutoDubbed": true
+        },
+        "xtags": "ChQKBWFjb250EgtkdWJiZWQtYXV0bwoNCgRsYW5nEgVkZS1ERQ"
+      },
+      {
+        "itag": 140,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=140&c=VISIONOS&xtags=acont%3Doriginal%3Alang%3Den-US&mime=audio%2Fmp4",
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 131157,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "English (US) original",
+          "id": "en-US.4",
+          "audioIsDefault": true
+        },
+        "xtags": "ChEKBWFjb250EghvcmlnaW5hbAoNCgRsYW5nEgVlbi1VUw"
+      },
+      {
+        "itag": 251,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=251&c=VISIONOS&xtags=acont%3Doriginal%3Alang%3Den-US&mime=audio%2Fwebm",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 142468,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "English (US) original",
+          "id": "en-US.4",
+          "audioIsDefault": true
+        },
+        "xtags": "ChEKBWFjb250EghvcmlnaW5hbAoNCgRsYW5nEgVlbi1VUw"
+      },
+      {
+        "itag": 251,
+        "url": "https://rr1---sn-sanitised.googlevideo.com/videoplayback?expire=1&itag=251&c=VISIONOS&xtags=acont%3Doriginal%3Adrc%3D1%3Alang%3Den-US&mime=audio%2Fwebm",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 160000,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "audioTrack": {
+          "displayName": "English (US) original",
+          "id": "en-US.4",
+          "audioIsDefault": true
+        },
+        "xtags": "ChEKBWFjb250EghvcmlnaW5hbAoICgNkcmMSATEKDQoEbGFuZxIFZW4tVVM",
+        "isDrc": true
+      }
+    ]
+  },
+  "videoDetails": {
+    "videoId": "aqz-KE-bpKQ",
+    "lengthSeconds": "634",
+    "title": "Sanitised Title 1"
+  }
+}

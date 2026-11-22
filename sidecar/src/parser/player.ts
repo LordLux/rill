@@ -10,6 +10,7 @@
  */
 
 import { isSabrOnlyAdaptive } from '../playback/sabr-detect.ts';
+import { parseAudioTrack } from './audio-track.ts';
 import { premiereStartMs } from './premiere.ts';
 import type { PlayerFormat, PlayerResult, Storyboard } from '../types.ts';
 import { asArray, deepFind, get, isObject, num, str, type Json } from './tree.ts';
@@ -45,6 +46,9 @@ function mapFormat(entry: Json, isAdaptive: boolean): PlayerFormat | null {
     num(entry['audioSampleRate']) !== null ||
     /^audio\//.test(mime ?? '');
 
+  const rawUrl = str(entry['url']);
+  const signatureCipher = str(entry['signatureCipher']) ?? str(entry['cipher']);
+
   return {
     itag,
     mimeType: mime,
@@ -62,8 +66,11 @@ function mapFormat(entry: Json, isAdaptive: boolean): PlayerFormat | null {
     hasVideo,
     hasAudio,
     isAdaptive,
-    rawUrl: str(entry['url']),
-    signatureCipher: str(entry['signatureCipher']) ?? str(entry['cipher']),
+    rawUrl,
+    signatureCipher,
+    // Adaptive audio only: a muxed format carries no track fields (itag 18, measured), and its
+    // sound is the original's (`architecture.md` F65).
+    audioTrack: isAdaptive && hasAudio && !hasVideo ? parseAudioTrack(entry, rawUrl ?? signatureCipher) : null,
   };
 }
 

@@ -54,6 +54,8 @@ export interface AgeRestrictedParams {
   /** Mirrors `OpenParams.preload` — a preload registers no reportable session. */
   preload?: boolean;
   playlistId?: string | null;
+  /** Mirrors `OpenParams.audioTrackId` (Task 39). */
+  audioTrackId?: string | null;
 }
 
 /**
@@ -63,7 +65,7 @@ export interface AgeRestrictedParams {
  * than replacing one opaque failure with another.
  */
 export async function resolveAgeRestricted(params: AgeRestrictedParams): Promise<PlaybackSource | null> {
-  const { videoId, cookie, poTokens, preload = false, playlistId = null } = params;
+  const { videoId, cookie, poTokens, preload = false, playlistId = null, audioTrackId = null } = params;
   try {
     // The same content-bound token tier 1 already tried to mint for this
     // video — re-minting is not wasted work once the shared minter is warm
@@ -79,7 +81,7 @@ export async function resolveAgeRestricted(params: AgeRestrictedParams): Promise
     const session = await createSession({ cookie, clientType: 'WEB_CREATOR', poToken });
     const entry = await getPlayerEntry(session, videoId, 'WEB_CREATOR');
     const deps: PlaybackDeps = { session };
-    const source = await tierPlainAdaptive(deps, videoId, 'WEB_CREATOR', poToken, entry);
+    const source = await tierPlainAdaptive(deps, videoId, 'WEB_CREATOR', poToken, entry, audioTrackId);
     log.info(`${videoId}: age-restricted retry succeeded (WEB_CREATOR, cookie + PO token)`);
     // Same rule `openPlayback` follows: a preload resolves and caches without
     // registering a reportable session (`OpenParams.preload`, `protocol.md` §3.6).
