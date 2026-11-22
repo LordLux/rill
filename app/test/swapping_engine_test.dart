@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/data/playback/volume_curve.dart';
 import 'package:rill/data/playback/engine.dart';
 import 'package:rill/data/playback/swapping_engine.dart';
 import 'package:rill/domain/playback_source.dart';
@@ -551,7 +552,9 @@ void main() {
 
       await rig.engine.switchVideo(variant(720));
       final standby = rig.slots[1];
-      expect(standby.volume, 35);
+      // MUTATION: hand the players the bare setting (no `mpvVolumeFor` in `_level`) and this fails
+      // at 35: the curve is what the slider's 35 becomes in mpv.
+      expect(standby.volume, closeTo(mpvVolumeFor(35), 1e-9), reason: 'the setting, through the volume curve');
       expect(standby.subtitle, '[Script Info]');
       expect(rig.engine.subtitle, '[Script Info]');
       expect(rig.engine.volume, 35);
@@ -571,21 +574,23 @@ void main() {
       final reported = <double>[];
       final subscription = rig.engine.volumeStream.listen(reported.add);
       await rig.engine.setOutputGain(0.5);
-      expect(rig.first.volume, 40, reason: 'the player plays at setting x gain');
+      final level = mpvVolumeFor(80);
+      expect(rig.first.volume, closeTo(level * 0.5, 1e-9), reason: 'the player plays at curve(setting) x gain');
       expect(rig.engine.volume, 80, reason: 'the engine reports the setting, not the fade');
       rig.runClock();
 
       await rig.engine.switchVideo(variant(720));
       final standby = rig.slots[1];
       expect(rig.engine.active, same(standby));
-      // MUTATION: hand the standby `old.volume` (the faded 40) instead of setting x gain and this
-      // fails at 20; hand it the bare setting and it fails at 80, with the fade gone mid-fade.
-      expect(standby.volume, 40, reason: 'the new player is at the faded level, not the setting');
+      // MUTATION: hand the standby `old.volume` (the faded level) instead of curve(setting) x gain
+      // and this fails at a quarter; hand it the unfaded level and it fails at the whole, with the
+      // fade gone mid-fade.
+      expect(standby.volume, closeTo(level * 0.5, 1e-9), reason: 'the new player is at the faded level, not the setting');
 
       await rig.engine.setOutputGain(0.25);
-      expect(standby.volume, 20, reason: 'the fade goes on, on the new player');
+      expect(standby.volume, closeTo(level * 0.25, 1e-9), reason: 'the fade goes on, on the new player');
       await rig.engine.setOutputGain(1);
-      expect(standby.volume, 80);
+      expect(standby.volume, closeTo(level, 1e-9));
       expect(rig.engine.volume, 80);
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(reported, isEmpty, reason: 'nothing the fade did was reported as a volume change');

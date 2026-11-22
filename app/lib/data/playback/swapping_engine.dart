@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../domain/playback_source.dart';
 import 'engine.dart';
+import 'volume_curve.dart';
 
 /// How the second player is aimed and when it is swapped in. Every number is from the spike
 /// (`todo.md` 109): the standby was ready 1.2 to 1.5 s after it started, a seek inside what it
@@ -127,7 +128,7 @@ class SwappingEngine implements PlaybackEngine {
     this.trace,
   }) : _settle = settle ?? _afterFrames {
     _active = _create();
-    _setting = _active.volume;
+    _setting = settingForMpvVolume(_active.volume);
     _bind(_active);
   }
 
@@ -178,9 +179,10 @@ class SwappingEngine implements PlaybackEngine {
   final _buffer = _Forward<Duration>((s) => s.bufferStream);
   final _width = _Forward<int?>((s) => s.widthStream);
   final _height = _Forward<int?>((s) => s.heightStream);
-  /// The volume the viewer set. **Not forwarded from a player**: while the sleep timer fades, each
-  /// player plays at `_setting * _gain` and reports that, and the setting is what everything above
-  /// the engine reads (`PlaybackEngine.outputGain`). Unbound, so only [setVolume] puts a value here.
+  /// The volume the viewer set. **Not forwarded from a player**: each player plays at
+  /// `mpvVolumeFor(_setting) * _gain` (the volume curve, then the sleep timer's fade) and reports
+  /// that, and the setting is what everything above the engine reads (`PlaybackEngine.outputGain`).
+  /// Unbound, so only [setVolume] puts a value here.
   final _volumeForward = _Forward<double>((s) => s.volumeStream);
   late double _setting;
   double _gain = 1;
@@ -323,8 +325,12 @@ class SwappingEngine implements PlaybackEngine {
     await _applyVolume();
   }
 
+  /// What a player is handed: the setting through the volume curve, then the fade. In that order,
+  /// so the fade's decibels are the same whatever the setting (both are factors of mpv's `volume`).
+  double get _level => mpvVolumeFor(_setting) * _gain;
+
   Future<void> _applyVolume() async {
-    final level = _setting * _gain;
+    final level = _level;
     final standby = _standby;
     if (standby != null) unawaited(standby.setVolume(level).catchError((Object _) {}));
     await _active.setVolume(level);
@@ -597,9 +603,9 @@ class SwappingEngine implements PlaybackEngine {
     _surface.value++;
     try {
       await _settle();
-      // The setting times the fade's gain, not `old.volume`: that is what the old player is playing
-      // at, which under a fade is the faded level and would then be faded again.
-      await standby.setVolume(_setting * _gain).timeout(const Duration(seconds: 10));
+      // The level from the setting, not `old.volume`: that is what the old player is playing at,
+      // which under a fade is the faded level and would then be faded again.
+      await standby.setVolume(_level).timeout(const Duration(seconds: 10));
       await standby.prepareStandby();
     } on Object {
       if (identical(_dropped, standby)) throw const _SwapAbandoned('the standby was dropped');

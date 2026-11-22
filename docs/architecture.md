@@ -972,6 +972,28 @@ over the settings ladder scrolled it *and* changed the volume).
 - **No right-click menu exists on the player.** `_onPointerUp` marks where one would open, and a
   right press that scrolled must not open it on release.
 
+#### The volume curve (2026-11-22)
+
+**The volume setting is even in decibels, and only `SwappingEngine` knows mpv's scale.** The slider,
+the arrow keys, right button + scroll, a mute and the session snapshot all work in a 0–100 *setting*.
+`SwappingEngine` hands each player `mpvVolumeFor(setting) × gain` (`data/playback/volume_curve.dart`),
+and `gain` is the sleep timer's fade (§2.18).
+
+- **Why.** mpv cubes `volume` (`player/audio.c` at v0.36.0, the version the app's libmpv reports:
+  `pow(gain, 3)`). Writing the slider's position straight to it put 18 dB in the top half of the slider
+  and everything else in the bottom half: 100 → 95 was 1.3 dB, 10 → 5 was 18 dB. The user reported it
+  as "only the last few steps really influence the volume".
+- **The curve.** Every point of the setting is the same number of decibels, `volumeRangeDb` = 50 across
+  the slider: a step of 5 is 2.5 dB, halfway is 25 dB down, and 0 is silence. 100 is mpv's 100, so the
+  top of the slider is as loud as before. A setting saved before this sounds quieter anywhere below
+  100, because the same number now means a lower level.
+- **The fade multiplies after the curve,** so its decibels do not depend on the setting.
+- **The cube is read from mpv's source, not measured on the DLL.** The bundled libmpv's FFmpeg has no
+  muxers, so its encode mode cannot write the output to a file for measuring (`o=` fails with
+  "format not found" for wav, s16le, matroska, nut, mp4, mov, ogg and flac).
+- `MediaKitEngine` used alone (the probes, the hover preview's 0 and 100) is still in mpv's scale. The
+  two agree at 0 and 100.
+
 ### 2.8 Watch page, queue panel, and the UI's sharp edges
 
 The rules below were each paid for once. The code points here rather than
@@ -2514,8 +2536,8 @@ end actions, and the menu pages are in `settings_menu.dart`.
     and most of the audible change at the very end. The user heard it as "only the last few steps
     change anything". The gain is now `10^(−p)` at progress `p`: amplitude `10^(−3p)`, so 60 dB over the
     fade, 6 dB every tenth, then the pause. `SleepTimerController.fadeGainAt` holds the curve, and
-    `sleep_timer_fade_test.dart` checks the equal steps. **The volume slider is a separate question.**
-    It sets mpv's cubic `volume` directly and was not changed.
+    `sleep_timer_fade_test.dart` checks the equal steps. The volume control has the same
+    problem and the same answer: §2.7, "The volume curve".
   - **It fades the output, not the setting.** `PlaybackEngine.setOutputGain` multiplies what reaches
     mpv. `volume`, `volumeStream`, the slider, a mute, a volume step and the session snapshot all see
     the setting.
