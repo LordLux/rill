@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 115.** A new item takes it, and the same edit bumps this line.
+**Next number: 116.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1640,8 +1640,6 @@ does not touch).
   off for that reason. Add steps that open each page, Tab through it and close it, then run both
   probes as two runs. Also run Narrator started second, over the countdown banner's single live
   announcement.
-- **Clicking the moon does nothing.** It could open the timer page, which would also make it
-  focusable. It was kept informational to stay within the brief.
 - **Shut down and Restart have not been run on a real machine** by the change that added them; Sleep
   and Close Rill were handed to the user. `ExitWindowsEx` with `EWX_POWEROFF` and no force flag is
   expected to show Windows' "apps are preventing shutdown" screen when one holds unsaved work. Record
@@ -1651,6 +1649,41 @@ does not touch).
 
 **Done when:** both probes cover the three pages and read 0 `Failed to update ui::AXTree`, and each
 remaining line above has a measurement or a decision recorded here.
+
+---
+
+### 115. Translated titles: one language per video, and a setting for it
+
+**Reported 2026-11-22, with a screenshot.** The same video carried two titles at once: the watch
+page showed the original English ("THIS is what I'm talking about! Ado can thrive…"), and the queue
+row the user's region's language ("QUESTO è ciò di cui parlo! Ado può eccelle…"). The queue row keeps
+the title of the tile that was clicked (a feed or related `lockupViewModel`), and the watch page reads
+`videoPrimaryInfoRenderer.title` from `/next` (`parser/video.ts`). **A hypothesis, not measured:**
+YouTube auto-translates titles on tiles for the viewer's language, and either does not on the watch
+page or marks the original there. Both come from the same signed-in `WEB` browse session.
+
+**Where the language comes from.** The sidecar sets neither `hl` nor `gl`. With a server-fetched
+session (`createSession`'s default), youtubei.js takes both from YouTube's own answer, which YouTube
+decides from the request's IP address and from the account's own settings (the cookie). The context
+also carries the machine's time zone (`Intl`, youtubei.js's default). So the region is not sent as
+a setting; it is read from the connection, as for any visitor.
+
+**To do:**
+- Measure first. Capture one video's feed tile, related tile and `/next` with the account as it is.
+  Record which fields carry the translated text and which the original, and whether a tile marks
+  itself translated (an original-title field, an accessibility label, a badge). Names-only dumps,
+  never a raw response in the tree (CLAUDE.md).
+- Then make one title per video everywhere (the queue row, the miniplayer, SMTC and the watch page
+  agreeing), and a setting, **"Show translated titles"** (default to be decided: YouTube's own
+  default is on). Off asks for the original wherever the response has it.
+- If the original is not in the tile at all, the off state has to come from somewhere else
+  (`/next` or `/player` per video, or `hl` set to the video's language). Measure the cost before
+  promising it.
+- Related: 82 (display language), which is about the `hl` of YouTube's own text rather than video
+  titles.
+
+**Done when:** a measurement in `architecture.md` says where each title comes from; one video shows
+one title on every surface; and the setting switches it, with a test over fixtures holding both.
 
 ---
 

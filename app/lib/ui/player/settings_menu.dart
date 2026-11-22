@@ -185,6 +185,10 @@ final GlobalKey qualityButtonAnchorKey = GlobalKey();
 /// clicked.
 final GlobalKey captionsButtonAnchorKey = GlobalKey();
 
+/// The sleep timer's moon on the bar, which opens the timer page: an anchor for the same reason as
+/// the other three (Task 38). Absent while no timer is set, and [_hits] answers false for that.
+final GlobalKey sleepTimerAnchorKey = GlobalKey();
+
 /// Whether a global pointer position landed on the menu — the panel, or either
 /// of the buttons that open it.
 ///
@@ -194,7 +198,8 @@ bool pointerIsOnSettingsMenu(Offset globalPosition) =>
     _hits(settingsMenuPanelKey, globalPosition) || //
     _hits(settingsMenuAnchorKey, globalPosition) ||
     _hits(qualityButtonAnchorKey, globalPosition) ||
-    _hits(captionsButtonAnchorKey, globalPosition);
+    _hits(captionsButtonAnchorKey, globalPosition) ||
+    _hits(sleepTimerAnchorKey, globalPosition);
 
 bool _hits(GlobalKey key, Offset globalPosition) {
   final box = key.currentContext?.findRenderObject();
@@ -801,7 +806,11 @@ class _CaptionRow extends StatelessWidget {
       ),
     );
     if (onTap == null) return row;
-    return InkWell(onTap: onTap, child: row);
+    // The tick is colour only, so a screen reader is told which row is the current choice
+    // (`selected`), the way `ListTile` says it: one merged node per row.
+    return MergeSemantics(
+      child: Semantics(selected: selected, button: true, child: InkWell(onTap: onTap, child: row)),
+    );
   }
 }
 
@@ -1216,7 +1225,10 @@ class _QualityRow extends StatelessWidget {
     // by asserting there is no `InkWell` under the row at all — the miss is the
     // assertion.
     if (onTap == null) return row;
-    return InkWell(onTap: onTap, child: row);
+    // Selected for a screen reader too: the tick alone is colour (see `_CaptionRow`).
+    return MergeSemantics(
+      child: Semantics(selected: selected, button: true, child: InkWell(onTap: onTap, child: row)),
+    );
   }
 }
 
@@ -1948,6 +1960,16 @@ class _SleepChoiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    return MergeSemantics(
+      child: Semantics(
+        selected: selected,
+        button: true,
+        child: _sleepChoiceInk(scheme),
+      ),
+    );
+  }
+
+  Widget _sleepChoiceInk(ColorScheme scheme) {
     return InkWell(
       onTap: onTap,
       child: Padding(

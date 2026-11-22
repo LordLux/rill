@@ -2562,9 +2562,17 @@ end actions, and the menu pages are in `settings_menu.dart`.
     player shortcuts off (`textEntryHasFocus`).
 - **The moon** (`SleepTimerIndicator`) is in the control bar and the miniplayer. It shows the time
   left for a duration and is alone otherwise. In the vertical bar it is always alone, because the
-  time overflowed a narrow portrait bar, with a silent in-tree tooltip saying what it waits for
-  and the action after it. It is informational and not focusable, and it names itself once with the
-  spoken time.
+  time overflowed a narrow portrait bar.
+  - **It is a button** (`KeyboardTap`), so the keyboard and a screen reader reach it. On the bar it
+    opens the timer page and is a menu anchor like the gear, so a second press closes it. In the
+    miniplayer it opens the watch page with the timer page up.
+  - It names itself once, with the spoken time, and carries a silent in-tree tooltip.
+- **Screen readers** (2026-11-22):
+  - The menu's ticked rows (the timer's pages, and the captions and quality pages that share the
+    rows) say `selected` through a merged `Semantics`, since the tick is colour only.
+  - "Sleep timer: paused" is a live region on the bar and in the miniplayer's channel line.
+  - The countdown is announced once, not every second.
+  - Not yet checked: Narrator itself on these pages (`todo.md` 114).
 
 ## 3. Phasing
 

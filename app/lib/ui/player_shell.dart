@@ -698,17 +698,33 @@ class MiniPlayer extends ConsumerWidget {
                         ),
                         // The sleep timer's note takes the channel's line for a few seconds after it
                         // fired (Task 38): there is no control bar here to show it in.
-                        Text(
-                          ref.watch(sleepNoteProvider) ?? item.channelName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                        // Announced once as it appears, like the bar's own note (`SleepNoteView`).
+                        Builder(
+                          builder: (context) {
+                            final note = ref.watch(sleepNoteProvider);
+                            final line = Text(
+                              note ?? item.channelName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                            );
+                            if (note == null) return line;
+                            return Semantics(container: true, liveRegion: true, label: note, child: ExcludeSemantics(child: line));
+                          },
                         ),
                       ],
                     ),
                   ),
                   // Left of its icon: the miniplayer clips what hangs above it.
-                  SleepTimerIndicator(side: TooltipSide.left, color: scheme.onSurfaceVariant),
+                  // A button here too: it opens the watch page with the timer page up.
+                  SleepTimerIndicator(
+                    side: TooltipSide.left,
+                    color: scheme.onSurfaceVariant,
+                    onPressed: () {
+                      showWatchPage(ref);
+                      ref.read(playerMenuProvider.notifier).go(SettingsPage.sleepTimer);
+                    },
+                  ),
                   StreamBuilder<bool>(
                     stream: engine.playingStream,
                     initialData: engine.playing,

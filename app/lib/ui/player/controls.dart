@@ -291,6 +291,13 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
   void _toggleMenu() => _toggleMenuAt(SettingsPage.root);
 
   void _toggleQuality() => _toggleMenuAt(SettingsPage.quality);
+
+  /// The moon (Task 38): a button to the timer page, an anchor of the menu like the gear (so a second
+  /// press closes it rather than reopening it), and hover-held like every bar control.
+  Widget _sleepMoon({bool showTime = true}) => KeyedSubtree(
+    key: sleepTimerAnchorKey,
+    child: _buildHoverable(SleepTimerIndicator(showTime: showTime, onPressed: () => _toggleMenuAt(SettingsPage.sleepTimer))),
+  );
   void _toggleCaptions() => _toggleMenuAt(SettingsPage.captions);
 
   /// Whether a page belongs to the gear rather than to one of the two buttons
@@ -790,8 +797,9 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                   // other control here that reports state rather than action is
                   // theatre, and for the same reason: "on" is the fact worth
                   // reading at a glance.
-                  // The sleep timer's moon and time left (Task 38). Nothing while it is off.
-                  const SleepTimerIndicator(),
+                  // The sleep timer's moon and time left (Task 38). Nothing while it is off; a
+                  // button to its page while on.
+                  _sleepMoon(),
                   if (captions.hasTracks && !isAudioOnly)
                     KeyedSubtree(
                       key: captionsButtonAnchorKey,
@@ -908,7 +916,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
                       ),
                     ),
                   ),
-                  const SleepTimerIndicator(),
+                  _sleepMoon(),
                   KeyedSubtree(
                     key: settingsMenuAnchorKey,
                     child: _buildHoverable(
@@ -980,7 +988,7 @@ class _PlayerControlsState extends ConsumerState<PlayerControls> {
           const SizedBox(width: 4),
           // The moon alone here: the time overflowed a narrow portrait bar (measured in
           // `sleep_timer_fade_test.dart`); the tooltip still says it.
-          const SleepTimerIndicator(showTime: false),
+          _sleepMoon(showTime: false),
           _ControlIcon(
             iconKey: playerFullscreenKey,
             icon: view.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,

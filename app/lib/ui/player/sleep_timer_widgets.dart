@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/tokens.dart';
 import '../sleep_timer.dart';
+import '../focus_surface.dart' show KeyboardTap;
 import '../spoken.dart';
 import '../widgets/shortcut_tooltip.dart';
 
@@ -19,10 +20,14 @@ const Key sleepCountdownCancelKey = ValueKey('sleep-countdown-cancel');
 /// The moon, with the time left for a countdown. For the kinds without a time the moon shows
 /// alone, and the tooltip says what it waits for and the action after it. Nothing while it is off.
 ///
-/// Informational, not a control: it is not focusable, and it names itself once for a screen reader
-/// (the spoken time, never digits — `spoken.dart`).
+/// **A button, when given [onPressed]**: a Tab stop (`KeyboardTap`) that opens the timer page, so a
+/// keyboard or screen-reader user can reach it, read it and change it. It names itself once, with
+/// the spoken time, never digits (`spoken.dart`).
 class SleepTimerIndicator extends ConsumerWidget {
-  const SleepTimerIndicator({super.key, this.side = TooltipSide.above, this.color, this.showTime = true});
+  const SleepTimerIndicator({super.key, this.side = TooltipSide.above, this.color, this.showTime = true, this.onPressed});
+
+  /// Opens the timer page. Null draws it as a plain, unfocusable read-out.
+  final VoidCallback? onPressed;
 
   /// Where the bubble opens. [TooltipSide.left] in the miniplayer, which clips above itself.
   final TooltipSide side;
@@ -43,32 +48,34 @@ class SleepTimerIndicator extends ConsumerWidget {
     final time = timer.kind == SleepKind.duration ? formatSleepLeft(timer.left ?? Duration.zero) : null;
     final summary = sleepTimerSummary(timer, action);
     final spoken = 'Sleep timer: ${sleepTimerSpokenSummary(timer, action)}';
+    final face = Padding(
+      key: sleepTimerIndicatorKey,
+      // Wide enough to aim at as a button.
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.bedtime, size: 18, color: color),
+          if (time != null && showTime) ...[
+            const SizedBox(width: 4),
+            Text(time, style: TextStyle(fontSize: 12, color: color, fontFeatures: const [FontFeature.tabularFigures()])),
+          ],
+        ],
+      ),
+    );
 
     return ShortcutTooltip(
       silent: true,
       announce: false,
       side: side,
       label: 'Sleep timer: $summary',
-      child: Semantics(
-        container: true,
-        label: spoken,
-        child: ExcludeSemantics(
-          child: Padding(
-            key: sleepTimerIndicatorKey,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.bedtime, size: 18, color: color),
-                if (time != null && showTime) ...[
-                  const SizedBox(width: 4),
-                  Text(time, style: TextStyle(fontSize: 12, color: color, fontFeatures: const [FontFeature.tabularFigures()])),
-                ],
-              ],
+      child: onPressed == null
+          ? Semantics(container: true, label: spoken, child: ExcludeSemantics(child: face))
+          : Semantics(
+              container: true,
+              hint: 'Opens the sleep timer',
+              child: KeyboardTap(label: spoken, onTap: onPressed, child: ExcludeSemantics(child: face)),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

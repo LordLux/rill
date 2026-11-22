@@ -7,9 +7,12 @@ library;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rill/domain/feed_item.dart';
 import 'package:rill/theme/app_theme.dart';
 import 'package:rill/ui/audio_mode_controller.dart';
 import 'package:rill/ui/playback_controller.dart';
@@ -17,6 +20,7 @@ import 'package:rill/ui/player/controls.dart';
 import 'package:rill/ui/player/settings_menu.dart';
 import 'package:rill/ui/player/shortcuts.dart' show textEntryHasFocus;
 import 'package:rill/ui/player/sleep_timer_widgets.dart';
+import 'package:rill/ui/player_shell.dart' show MiniPlayer;
 import 'package:rill/ui/sleep_timer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -377,6 +381,13 @@ void main() {
       }
 
       expect(tickOf('Off'), isNot(Colors.transparent));
+      // The tick is colour; a screen reader is told by `selected` (MUTATION: drop the
+      // `Semantics(selected:)` around `_CaptionRow`'s `InkWell` and this fails).
+      final semantics = tester.ensureSemantics();
+      bool selectedFor(String label) => tester.getSemantics(find.text(label)).getSemanticsData().flagsCollection.isSelected == Tristate.isTrue;
+      expect(selectedFor('Off'), isTrue);
+      expect(selectedFor('5 minutes'), isFalse);
+      semantics.dispose();
       await tester.tap(find.text('15 minutes'));
       await tester.pumpAndSettle();
       expect(timer.total, const Duration(minutes: 15));
@@ -529,4 +540,86 @@ void main() {
     }
   });
 
+
+  group('the moon as a button', () {
+    testWidgets('on the bar it is a Tab stop that opens the timer page, and a second press closes it', (tester) async {
+      tester.view.physicalSize = const Size(1000, 560);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final semantics = tester.ensureSemantics();
+      sleep.startDuration(const Duration(minutes: 12, seconds: 34));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: buildRillTheme(const Color(0xFF7C4DFF)),
+            home: Scaffold(body: SizedBox.expand(child: PlayerControls(engine: engine))),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 150));
+
+      final node = tester.getSemantics(find.byKey(sleepTimerIndicatorKey)).getSemanticsData();
+      expect(node.flagsCollection.isButton, isTrue, reason: 'a button');
+      expect(node.flagsCollection.isFocused, isNot(Tristate.none), reason: 'focusable: the keyboard can reach it');
+      expect(node.label, contains('12 minutes and 34 seconds left'));
+
+      await tester.tap(find.byKey(sleepTimerIndicatorKey));
+      await tester.pumpAndSettle();
+      expect(container.read(playerMenuProvider), const PlayerMenuState(open: true, page: SettingsPage.sleepTimer));
+      await tester.tap(find.byKey(sleepTimerIndicatorKey));
+      await tester.pumpAndSettle();
+      expect(container.read(playerMenuProvider).open, isFalse);
+      sleep.off();
+      semantics.dispose();
+    });
+  });
+
+  group('the miniplayer', () {
+    testWidgets('says "Sleep timer: paused" in its channel line, as a live region', (tester) async {
+      container.dispose();
+      engine = FakeEngine();
+      power = FakePower();
+      container = ProviderContainer(overrides: [
+        playbackEngineProvider.overrideWithValue(engine),
+        sleepClockProvider.overrideWithValue(() => clock),
+        systemPowerProvider.overrideWithValue(power),
+        playbackProvider.overrideWith(_Playing.new),
+      ]);
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(theme: buildRillTheme(const Color(0xFF7C4DFF)), home: const Scaffold(body: Center(child: MiniPlayer()))),
+        ),
+      );
+      expect(find.text('Channel'), findsOneWidget);
+      container.read(sleepNoteProvider.notifier).show('Sleep timer: paused');
+      await tester.pump();
+      expect(find.text('Sleep timer: paused'), findsOneWidget);
+      // MUTATION: drop the live-region `Semantics` around the note in `MiniPlayer` and this fails.
+      final node = tester.getSemantics(find.bySemanticsLabel('Sleep timer: paused')).getSemanticsData();
+      expect(node.flagsCollection.isLiveRegion, isTrue);
+      await tester.pump(const Duration(seconds: 6));
+      expect(find.text('Channel'), findsOneWidget, reason: 'the channel comes back');
+      semantics.dispose();
+    });
+  });
+
+}
+
+class _Playing extends PlaybackController {
+  @override
+  PlaybackState build() => const PlaybackState(
+    item: VideoItem(
+      kind: 'video',
+      id: 'aaa',
+      title: 'Video aaa',
+      channelName: 'Channel',
+      thumbnailUrl: 'https://i.ytimg.com/vi/aaa/hq.jpg',
+      isLive: false,
+      canWatchLater: true,
+      canAddToQueue: true,
+    ),
+  );
 }
