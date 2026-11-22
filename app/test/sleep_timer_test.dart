@@ -206,7 +206,7 @@ void main() {
       await endsForReal();
       expect(playback.item?.id, 'bbb', reason: 'the first ending is not the second video');
       expect(timer.started, 2);
-      expect(timer.waitsFor, 'After 1 video');
+      expect(timer.waitsFor, 'At the end of this video', reason: 'one left reads as where it ends (the user, 2026-11-22)');
       await endsForReal();
       expect(playback.item?.id, 'bbb', reason: 'paused at the end of the second, nothing autoplayed');
       expect(engine.playing, isFalse);

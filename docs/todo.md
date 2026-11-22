@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 116.** A new item takes it, and the same edit bumps this line.
+**Next number: 118.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1684,6 +1684,53 @@ a setting; it is read from the connection, as for any visitor.
 
 **Done when:** a measurement in `architecture.md` says where each title comes from; one video shows
 one title on every surface; and the setting switches it, with a test over fixtures holding both.
+
+### 116. Narrator reads the clock every second
+
+**Reported 2026-11-22, by the user with Narrator on.** While a video plays, Narrator says the
+position ("1 minute and 5 seconds of 12 minutes…") every time it changes, so it speaks once a second
+for as long as the player has focus. Two places carry a spoken time that changes with the position:
+the control bar's clock (`controls.dart`, `Text(semanticsLabel: '… of …')`) and the scrubber's own
+`Semantics(slider: true, value: formatter(value))` (`scrubber_bar.dart`). Which one Narrator is
+reading, or both, is not measured: check with `RILL_SEMANTICS_DUMP` and Narrator before changing
+either.
+
+**What it should say instead** (the user's wording, adjusted to `spoken.dart`):
+- **On focus**, the scrubber reads the position once, then stays quiet while playback moves on. The
+  clock text is not a separate announcement.
+- **A jump to a percentage** (the number keys): "Moving to 3 minutes and 10 seconds".
+- **A step** (the arrows, J/L): "Jumping forward 10 seconds, to 3 minutes and 20 seconds", or
+  "Jumping backward 5 seconds, to …", with the step the key actually took.
+- **A frame step** (`,` / `.`): "Next frame" or "Previous frame", with no time.
+
+**How, probably:** a semantics value that does not follow the position while playing (frozen at
+focus, refreshed on a seek), and the announcements sent as one-shot messages from the seek path
+(`SemanticsService.sendAnnouncement`, or a short-lived live region as `SleepNoteView` does), not as a
+value that changes. Mind the Accessibility rules in `CLAUDE.md`: semantics stable across a frame, one
+name per control.
+
+**Done when:** with Narrator on and the scrubber focused, a minute of playback is silent; each of the
+four seeks above is announced once, in words; and a widget test checks the scrubber's semantics value
+does not change while the position does.
+
+---
+
+### 117. Opening the watch page from the miniplayer by keyboard focuses the wrong thing
+
+**Reported 2026-11-22.** Tab to the miniplayer from any page and press Enter: the watch page opens
+with focus on the **queue header**, or on the **Like button** when there is no queue. It should land
+on the **player**, so Space and the arrows work at once and Tab goes on into the controls.
+
+Where: the miniplayer's tap calls `showWatchPage(ref)` → `showWatchPageIn` (`player_shell.dart`),
+which pushes the watch route; nothing then chooses a first focus, so the route's `FocusScope` takes the
+first node it finds, which is not the declared order (`ui/focus_surface.dart`: on the watch page, the
+main column before the rail). Fix by giving the player surface focus when the watch route is pushed
+**by the keyboard**. A pointer click should not draw a ring (`KeyboardNavigation.active`, F52). Also
+check the same path from F6 (the miniplayer reached by F6) and from the session restore.
+
+**Done when:** a test in the style of `test/focus_traversal_test.dart` opens the watch page from a
+focused miniplayer with and without a queue and finds focus on the player, and
+`RILL_FOCUS_PROBE=watch` still reads clean.
 
 ---
 

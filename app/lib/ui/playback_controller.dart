@@ -37,14 +37,8 @@ class PlaybackSignals {
   final StreamController<Duration> _seeks = StreamController<Duration>.broadcast(sync: true);
   Stream<Duration> get seeks => _seeks.stream;
 
-  /// The viewer changed the volume (the slider, a step, a mute), as opposed to a fade touching the
-  /// output.
-  final StreamController<void> _volumeChanges = StreamController<void>.broadcast(sync: true);
-  Stream<void> get volumeChanges => _volumeChanges.stream;
-
   void dispose() {
     unawaited(_seeks.close());
-    unawaited(_volumeChanges.close());
   }
 }
 
@@ -1075,14 +1069,12 @@ class PlaybackController extends Notifier<PlaybackState> {
     // Unmuting by dragging the slider is unmuting. Without this the level to
     // restore stays whatever it was before the *first* mute, forever.
     if (clamped > 0) _volumeBeforeMute = null;
-    ref.read(playbackSignalsProvider)._volumeChanges.add(null);
     return _engine.setVolume(clamped);
   }
 
   Future<void> nudgeVolume(double delta) => setVolume(_engine.volume + delta);
 
   Future<void> toggleMute() {
-    ref.read(playbackSignalsProvider)._volumeChanges.add(null);
     final current = _engine.volume;
     if (current > 0) {
       _volumeBeforeMute = current;

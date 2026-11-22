@@ -7,8 +7,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show listEquals;
-import 'package:flutter/gestures.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -65,7 +63,8 @@ class SleepTimerState {
   /// It fires at the end of a chapter or video once this has reached [target].
   final int started;
 
-  /// Inside the fade: the output is going down, and any input from the viewer turns the timer off.
+  /// Inside the fade: the output is going down. Nothing the viewer does in the window stops it —
+  /// only turning the timer off does (the user's call, 2026-11-22, §2.18).
   final bool fading;
 
   bool get isOn => kind != SleepKind.off;
@@ -79,8 +78,9 @@ class SleepTimerState {
     SleepKind.duration => formatSleepLeft(left ?? Duration.zero),
     SleepKind.chapterEnd => 'End of chapter',
     SleepKind.videoEnd => 'End of video',
-    SleepKind.chapters => 'After $toGo ${toGo == 1 ? 'chapter' : 'chapters'}',
-    SleepKind.videos => 'After $toGo ${toGo == 1 ? 'video' : 'videos'}',
+    // One left reads as where it ends, not as a count (the user's wording, 2026-11-22).
+    SleepKind.chapters => toGo == 1 ? 'At the end of this chapter' : 'After $toGo chapters',
+    SleepKind.videos => toGo == 1 ? 'At the end of this video' : 'After $toGo videos',
   };
 
   SleepTimerState copyWith({Object? left = _unchanged, int? started, bool? fading}) => SleepTimerState(
@@ -129,7 +129,7 @@ final systemPowerProvider = Provider<SystemPower>((ref) => Win32SystemPower());
 class SleepTimerController extends Notifier<SleepTimerState> {
   /// How long the output fades before an end known in advance. Mutable only for tests.
   @visibleForTesting
-  static Duration fadeLength = const Duration(seconds: 10);
+  static Duration fadeLength = const Duration(seconds: 5);
 
   /// How often the countdown and the fade are worked out. Mutable only for tests.
   @visibleForTesting
@@ -166,7 +166,6 @@ class SleepTimerController extends Notifier<SleepTimerState> {
   Duration _seekAt = Duration.zero;
 
   double _gain = 1;
-  bool _watchingInput = false;
 
   Duration _now() => ref.read(sleepClockProvider)();
 
@@ -226,8 +225,6 @@ class SleepTimerController extends Notifier<SleepTimerState> {
       engine.positionStream.listen(_onPosition),
       engine.playingStream.listen((_) => _applyGain()),
       signals.seeks.listen(_onSeek),
-      // A volume change in Rill's window is input like a key or a click.
-      signals.volumeChanges.listen((_) => _interrupted()),
     ]);
     _ticker = Timer.periodic(tick, (_) => _onTick());
   }
@@ -239,7 +236,6 @@ class SleepTimerController extends Notifier<SleepTimerState> {
       unawaited(subscription.cancel());
     }
     _subscriptions.clear();
-    _stopWatchingInput();
     _deadline = null;
   }
 
@@ -379,11 +375,6 @@ class SleepTimerController extends Notifier<SleepTimerState> {
       return;
     }
     final fading = state.kind.fades && remaining != null && remaining <= fadeLength;
-    if (fading) {
-      _startWatchingInput();
-    } else {
-      _stopWatchingInput();
-    }
     final left = state.kind == SleepKind.duration && remaining != null ? _roundUp(remaining) : null;
     if (left != state.left || fading != state.fading) state = state.copyWith(left: left, fading: fading);
     _applyGain();
@@ -391,61 +382,41 @@ class SleepTimerController extends Notifier<SleepTimerState> {
 
   // --- The fade ---
 
-  /// The gain the output should be at now: down linearly over the fade, and **1 whenever playback
-  /// is not playing** — restored the moment it pauses, so it is never silent at the next play.
+  /// The fade's floor, in decibels below the level the viewer set: where it ends, the moment
+  /// before the pause.
+  static const double _fadeFloorDb = 60;
+
+  /// The gain the output should be at now, and **1 whenever playback is not playing** — restored
+  /// the moment it pauses, so it is never silent at the next play.
+  ///
+  /// **Even in decibels, not in volume.** The ear hears loudness logarithmically, so a fade that
+  /// takes the same number of dB off every second sounds like a steady fade; one linear in amplitude
+  /// barely changes for most of its length and then drops. The gain multiplies mpv's `volume`, which
+  /// mpv cubes (`player/audio.c`), so the amplitude is `gain³`: a fall of `floor × p` dB at
+  /// progress `p` is `gain = 10^(−floor × p / 60)`. At 60 dB that is `10^−p`.
   double _targetGain() {
     if (!state.isOn || !state.fading) return 1;
     if (!ref.read(playbackEngineProvider).playing) return 1;
     final remaining = _remaining();
     if (remaining == null) return 1;
-    return (remaining.inMicroseconds / fadeLength.inMicroseconds).clamp(0.0, 1.0);
+    final progress = (1 - remaining.inMicroseconds / fadeLength.inMicroseconds).clamp(0.0, 1.0);
+    return fadeGainAt(progress);
   }
+
+  /// [_targetGain]'s curve at [progress] (0 at the fade's start, 1 at its end).
+  @visibleForTesting
+  static double fadeGainAt(double progress) => math.pow(10, -_fadeFloorDb * progress.clamp(0.0, 1.0) / 60).toDouble();
 
   void _applyGain() => _setGain(_targetGain());
 
   void _setGain(double gain, {bool force = false}) {
     if (_disposed) return;
-    // Small steps are dropped: mpv's volume is cubic, so a hundredth is inaudible, and a property
-    // write per tick for nothing is not free. Reaching 1 is never dropped.
-    if (!force && (gain == _gain || (gain != 1 && (gain - _gain).abs() < 0.01))) return;
+    // Only an unchanged gain is dropped: a tick outside the fade asks for 1 again and again. Inside
+    // it every tick is a step of the same few dB, and dropping small ones would make the quiet end
+    // coarse.
+    if (!force && gain == _gain) return;
     _gain = gain;
     unawaited(ref.read(playbackEngineProvider).setOutputGain(gain));
-  }
-
-  /// Any input from the viewer in Rill's window during the fade: a key, a click, a scroll, a
-  /// volume change. Mouse movement alone is not input. The viewer is awake, so control goes back to
-  /// them: the volume straight back, the timer off, nothing paused and no end action.
-  void _interrupted() {
-    if (!state.fading || _firing || _disposed) return;
-    off();
-  }
-
-  void _startWatchingInput() {
-    if (_watchingInput) return;
-    _watchingInput = true;
-    // Observed, never claimed: the key or click still does what it does.
-    HardwareKeyboard.instance.addHandler(_onKey);
-    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
-  }
-
-  void _stopWatchingInput() {
-    if (!_watchingInput) return;
-    _watchingInput = false;
-    HardwareKeyboard.instance.removeHandler(_onKey);
-    GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
-  }
-
-  bool _onKey(KeyEvent event) {
-    // Deferred a microtask: this runs inside the keyboard's own dispatch, which `off` would
-    // otherwise edit by removing this handler.
-    if (event is KeyDownEvent) scheduleMicrotask(_interrupted);
-    return false;
-  }
-
-  void _onPointer(PointerEvent event) {
-    if (event is PointerDownEvent || event is PointerScrollEvent || event is PointerPanZoomStartEvent) {
-      scheduleMicrotask(_interrupted);
-    }
   }
 
   // --- Firing ---

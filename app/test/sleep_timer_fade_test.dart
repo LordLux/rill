@@ -5,6 +5,8 @@
 /// clock is a value the test moves ([sleepClockProvider]).
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'dart:ui' show Tristate;
@@ -73,30 +75,32 @@ Future<void> pumpHost(WidgetTester tester, {bool menu = false}) async {
   await tester.pump();
 }
 
-/// Playing, with a one-minute timer five seconds from its end: halfway down the fade.
+/// Playing, with a one-minute timer two and a half seconds from its end: halfway down the fade.
 Future<void> intoFade(WidgetTester tester) async {
   engine.setPlaying(true);
   sleep.startDuration(const Duration(minutes: 1));
-  clock = const Duration(seconds: 55);
+  clock = const Duration(milliseconds: 57500);
   await tester.pump(const Duration(milliseconds: 150));
   expect(timer.fading, isTrue);
-  expect(engine.outputGain, closeTo(0.5, 0.02), reason: 'five of ten seconds left');
+  expect(engine.outputGain, closeTo(0.316, 0.005), reason: 'halfway: 30 dB down, 10^-0.5 before mpv cubes it');
 }
 
-/// Back to the state a stopped fade leaves: control is the viewer's.
-void expectHandedBack() {
-  expect(timer.isOn, isFalse, reason: 'the timer turned off');
-  expect(engine.outputGain, 1, reason: 'the volume went straight back');
-  expect(engine.playing, isTrue, reason: 'nothing paused');
-  expect(power.runs, isEmpty, reason: 'and no end action ran');
-}
-
-/// Moves the clock well past where the stopped timer would have ended, to show nothing fires late.
-Future<void> runPastTheEnd(WidgetTester tester) async {
-  clock = const Duration(minutes: 5);
-  await tester.pump(const Duration(seconds: 1));
+/// The fade is still running: the timer on, the output below the setting, nothing paused.
+void expectStillFading() {
+  expect(timer.isOn, isTrue, reason: 'input never stops the timer (the user, 2026-11-22)');
+  expect(timer.fading, isTrue);
+  expect(engine.outputGain, lessThan(1), reason: 'and the output is still down');
   expect(engine.playing, isTrue);
-  expect(container.read(sleepNoteProvider), isNull);
+}
+
+/// Runs the clock past the end: the timer fires where it was always going to.
+Future<void> runToTheEnd(WidgetTester tester) async {
+  clock = const Duration(seconds: 61);
+  await tester.pump(const Duration(milliseconds: 150));
+  expect(engine.playing, isFalse, reason: 'it paused at its end');
+  expect(timer.isOn, isFalse);
+  expect(engine.outputGain, 1);
+  await tester.pump(const Duration(seconds: 6)); // the note's own timer
 }
 
 void main() {
@@ -107,14 +111,30 @@ void main() {
   tearDown(() => container.dispose());
 
   group('the fade', () {
+    test('is 5 s long', () {
+      expect(SleepTimerController.fadeLength, const Duration(seconds: 5));
+    });
+
+    test('takes the same number of decibels off every second', () {
+      // The output's amplitude is gain³ (mpv cubes `volume`), so dB = 60·log10(gain).
+      double db(double progress) => 60 * math.log(SleepTimerController.fadeGainAt(progress)) / math.ln10;
+      expect(SleepTimerController.fadeGainAt(0), 1, reason: 'it starts at the level the viewer set');
+      expect(db(1), closeTo(-60, 1e-9), reason: 'and ends 60 dB down, a moment before the pause');
+      // MUTATION: a linear `1 - progress` fails here — its steps are 2.7 dB at the start and
+      // unbounded at the end, where this asks for 6 dB every tenth of the way.
+      for (var i = 0; i < 10; i++) {
+        expect(db(i / 10) - db((i + 1) / 10), closeTo(6, 1e-9), reason: 'step $i');
+      }
+    });
+
     testWidgets('fades the output and never the setting', (tester) async {
       await pumpHost(tester);
       await engine.setVolume(80);
       engine.volumes.clear();
       await intoFade(tester);
-      clock = const Duration(seconds: 58);
+      clock = const Duration(seconds: 59);
       await tester.pump(const Duration(milliseconds: 150));
-      expect(engine.outputGain, closeTo(0.2, 0.02));
+      expect(engine.outputGain, closeTo(0.158, 0.005), reason: 'four fifths of the way: 48 dB down');
       expect(engine.volume, 80, reason: 'the setting is untouched');
       expect(engine.volumes, isEmpty, reason: 'the fade never set a volume');
       sleep.off();
@@ -123,17 +143,16 @@ void main() {
     testWidgets('the volume is restored the moment playback pauses, and the fade picks up on play', (tester) async {
       await pumpHost(tester);
       await intoFade(tester);
-      // A pause that is not input in Rill's window — a media key, the taskbar button.
       // MUTATION 3: drop the `if (!...playing) return 1;` in `_targetGain` and this fails: the
-      // output stays at half while paused, and the next play starts quiet.
+      // output stays down while paused, and the next play starts quiet.
       engine.setPlaying(false);
       await tester.pump();
       expect(engine.outputGain, 1, reason: 'restored at once, before any tick');
-      expect(timer.isOn, isTrue, reason: 'a pause from outside the window is not the viewer waking it');
+      expect(timer.isOn, isTrue, reason: 'a pause does not stop the timer');
 
       engine.setPlaying(true);
       await tester.pump(const Duration(milliseconds: 150));
-      expect(engine.outputGain, closeTo(0.5, 0.02), reason: 'the fade goes on from where the clock is');
+      expect(engine.outputGain, closeTo(0.316, 0.005), reason: 'the fade goes on from where the clock is');
       sleep.off();
     });
 
@@ -150,74 +169,61 @@ void main() {
       expect(container.read(sleepNoteProvider), isNull, reason: 'a short note');
     });
 
-    // MUTATION 4: make `_interrupted` restore the gain without calling `off()` and the four tests
-    // below fail on "the timer turned off" — and then fire at the old deadline.
-    testWidgets('a key press during it stops it', (tester) async {
+    // Input in the window does not stop the fade: only turning the timer off does (the user's call,
+    // 2026-11-22, reversing Task 38's "any input during the fade cancels it").
+    // MUTATION: put back a key handler that calls `off()` during the fade and the first fails.
+    testWidgets('a key press during it does not stop it', (tester) async {
       await pumpHost(tester);
       await intoFade(tester);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
       await tester.pump();
-      expectHandedBack();
-      await runPastTheEnd(tester);
+      expectStillFading();
+      await runToTheEnd(tester);
     });
 
-    testWidgets('a click during it stops it', (tester) async {
+    testWidgets('a click during it does not stop it', (tester) async {
       await pumpHost(tester);
       await intoFade(tester);
       await tester.tapAt(const Offset(500, 300));
       await tester.pump();
-      expectHandedBack();
-      await runPastTheEnd(tester);
+      expectStillFading();
+      await runToTheEnd(tester);
     });
 
-    testWidgets('a scroll during it stops it', (tester) async {
+    testWidgets('a scroll during it does not stop it', (tester) async {
       await pumpHost(tester);
       await intoFade(tester);
       final pointer = TestPointer(1, PointerDeviceKind.mouse);
       await tester.sendEventToBinding(pointer.hover(const Offset(500, 300)));
       await tester.sendEventToBinding(pointer.scroll(const Offset(0, 40)));
       await tester.pump();
-      expectHandedBack();
-      await runPastTheEnd(tester);
+      expectStillFading();
+      await runToTheEnd(tester);
     });
 
-    testWidgets('a volume change during it stops it, and the new volume stands', (tester) async {
+    testWidgets('a volume change during it does not stop it, and the new volume is what it fades from', (tester) async {
       await pumpHost(tester);
       await intoFade(tester);
       await container.read(playbackProvider.notifier).setVolume(40);
-      await tester.pump();
-      expectHandedBack();
+      await tester.pump(const Duration(milliseconds: 150));
+      expectStillFading();
+      expect(engine.volume, 40, reason: 'the setting is the viewer\'s');
+      expect(engine.audibleVolume, closeTo(40 * 0.316, 0.5), reason: 'under the same fade');
+      await runToTheEnd(tester);
       expect(engine.volume, 40);
-      await runPastTheEnd(tester);
     });
 
-    testWidgets('mouse movement alone does not stop it', (tester) async {
+    testWidgets('turning it off during it hands the volume straight back', (tester) async {
       await pumpHost(tester);
       await intoFade(tester);
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: const Offset(100, 100));
-      for (var x = 100.0; x < 600; x += 50) {
-        await mouse.moveTo(Offset(x, x / 2));
-        await tester.pump(const Duration(milliseconds: 20));
-      }
-      expect(timer.isOn, isTrue);
-      expect(timer.fading, isTrue);
-      expect(engine.outputGain, lessThan(1));
-      await mouse.removePointer();
       sleep.off();
-    });
-
-    testWidgets('input before the fade does not stop the timer', (tester) async {
-      await pumpHost(tester);
-      engine.setPlaying(true);
-      sleep.startDuration(const Duration(minutes: 1));
-      clock = const Duration(seconds: 20);
-      await tester.pump(const Duration(milliseconds: 150));
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
-      await tester.tapAt(const Offset(500, 300));
       await tester.pump();
-      expect(timer.isOn, isTrue);
-      sleep.off();
+      expect(timer.isOn, isFalse);
+      expect(engine.outputGain, 1);
+      clock = const Duration(minutes: 5);
+      await tester.pump(const Duration(seconds: 1));
+      expect(engine.playing, isTrue, reason: 'nothing fires late');
+      expect(container.read(sleepNoteProvider), isNull);
     });
   });
 

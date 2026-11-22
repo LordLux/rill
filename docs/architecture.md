@@ -2507,8 +2507,15 @@ end actions, and the menu pages are in `settings_menu.dart`.
     show or change it. A queue that plays out short of N turns off an *After N* timer, which would
     otherwise count a video started hours later and fire there.
 - **The fade.** For the kinds whose end is known in advance (a duration, end of chapter, end of
-  video), the output goes down linearly over the last 10 s. mpv's volume is cubic, so a linear gain
-  sounds even.
+  video), the output goes down over the last **5 s** (10 s until 2026-11-22, shortened at the user's
+  request after the hand-off).
+  - **Even in decibels, not in volume** (2026-11-22). The first version was linear in gain. mpv cubes
+    `volume` (`player/audio.c`), so the amplitude was `gain³`: about 18 dB down at the halfway point,
+    and most of the audible change at the very end. The user heard it as "only the last few steps
+    change anything". The gain is now `10^(−p)` at progress `p`: amplitude `10^(−3p)`, so 60 dB over the
+    fade, 6 dB every tenth, then the pause. `SleepTimerController.fadeGainAt` holds the curve, and
+    `sleep_timer_fade_test.dart` checks the equal steps. **The volume slider is a separate question.**
+    It sets mpv's cubic `volume` directly and was not changed.
   - **It fades the output, not the setting.** `PlaybackEngine.setOutputGain` multiplies what reaches
     mpv. `volume`, `volumeStream`, the slider, a mute, a volume step and the session snapshot all see
     the setting.
@@ -2518,12 +2525,12 @@ end actions, and the menu pages are in `settings_menu.dart`.
     forwarded from a player (`swapping_engine_test.dart` names the exception).
   - **The gain is 1 whenever playback is not playing**, so the volume comes back the moment playback
     pauses, from anything, and is never silent at the next play. The fade picks up again on play.
-  - **Any input from the viewer in Rill's window during the fade stops it:** a key down, a pointer
-    down, a scroll, or a volume change (`PlaybackSignals.volumeChanges`). It is observed through
-    `HardwareKeyboard` and `GestureBinding.pointerRouter`, never claimed, so the key or click still
-    does what it does (Space still pauses, as it would have). Mouse movement alone is not input. The
-    volume goes straight back, the timer turns off, nothing pauses and no end action runs: the viewer
-    is awake.
+  - **Nothing the viewer does in the window stops the fade (the user's call, 2026-11-22).** A key, a
+    click, a scroll or a volume change all used to turn the timer off during the fade. Task 38 asked
+    for that, on the reasoning that input means the viewer is awake. At the hand-off it read as the
+    timer breaking whenever the app was touched near its end. Now **only turning the timer off stops
+    it**: *Off*, or another choice. A volume change during the fade sets the level the fade goes on
+    from. The input observers and `PlaybackSignals.volumeChanges` were removed with it.
 - **When it fires:** pause, restore the volume, turn the timer off, show "Sleep timer: paused" (on the
   control bar, or in the miniplayer's channel line), then run the end action.
 - **To stop a timer, pick Off or another value.** There is no warning before it fires and no
