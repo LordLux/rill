@@ -492,7 +492,6 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
 /// engine has no rate control to drive it and wiring one is a
 /// `data/playback/engine.dart` change rather than a menu change.
 const List<({IconData icon, String label})> _rootPlaceholders = [
-  (icon: Icons.subtitles_outlined, label: 'Subtitle track / CC'),
   (icon: Icons.slow_motion_video, label: 'Playback speed'),
 ];
 

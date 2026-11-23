@@ -524,25 +524,26 @@ void main() {
   });
 
   group('page transitions', () {
-    /// Where a page's content sits, **measured from the panel's own left edge**.
+    /// How far along a page's slide is, as a fraction of the panel's width: negative is left of
+    /// where it rests, positive right of it, zero at rest.
     ///
-    /// Relative rather than absolute because the panel is no longer one fixed
-    /// width: it sizes to its widest row and is anchored on the right, so a page
-    /// whose content needs more room puts its left edge somewhere else on
-    /// screen. An absolute reading then moves for a reason that has nothing to
-    /// do with the slide these tests are about — and it does so only under a
-    /// font wide enough to push a page past the floor, which is exactly the kind
-    /// of failure that shows up on one machine and not another.
-    double offsetOf(WidgetTester tester, String text) =>
-        tester.getTopLeft(find.text(text)).dx -
-        tester.getRect(find.byKey(settingsMenuPanelKey)).left;
+    /// **The slide itself, not where the glyphs land** (the sideways test below says the same). The
+    /// panel sizes to its widest row and is anchored on the right, so two pages of different widths
+    /// morph the panel's width through the same frames as the slide, and a glyph's position mixes the
+    /// two. Removing the root page's *Subtitle track / CC* (2026-11-23) made the root narrower than
+    /// *More options* under the test font, and a position measured from the panel's left edge then
+    /// read the slide backwards.
+    double slideOf(WidgetTester tester, String text) => tester
+        .widget<SlideTransition>(find.ancestor(of: find.text(text), matching: find.byType(SlideTransition)).first)
+        .position
+        .value
+        .dx;
 
     testWidgets('a push brings the new page in from the right and takes the old out left',
         (tester) async {
       container.read(playerMenuProvider.notifier).open();
       await tester.pumpWidget(host());
       await tester.pumpAndSettle();
-      final rootAtRest = offsetOf(tester, 'Sleep timer');
 
       await tester.tap(find.byKey(playerSettingsMoreRowKey));
       await tester.pump();
@@ -552,30 +553,25 @@ void main() {
       expect(find.text('Sleep timer'), findsOneWidget, reason: 'the old page is still leaving');
       expect(find.text('Audio channel'), findsOneWidget, reason: 'the new page is arriving');
 
-      final incoming = offsetOf(tester, 'Audio channel');
-      final outgoing = offsetOf(tester, 'Sleep timer');
-      expect(incoming, greaterThan(rootAtRest), reason: 'the new page comes from the right');
-      expect(outgoing, lessThan(rootAtRest), reason: 'and the old one leaves to the left');
+      expect(slideOf(tester, 'Audio channel'), greaterThan(0), reason: 'the new page comes from the right');
+      expect(slideOf(tester, 'Sleep timer'), lessThan(0), reason: 'and the old one leaves to the left');
 
       await tester.pumpAndSettle();
       expect(find.text('Sleep timer'), findsNothing);
-      expect(offsetOf(tester, 'Audio channel'), rootAtRest, reason: 'it settles where it belongs');
+      expect(slideOf(tester, 'Audio channel'), 0, reason: 'it settles where it belongs');
     });
 
     testWidgets('going back reverses both halves', (tester) async {
       container.read(playerMenuProvider.notifier).go(SettingsPage.moreOptions);
       await tester.pumpWidget(host());
       await tester.pumpAndSettle();
-      final atRest = offsetOf(tester, 'Audio channel');
 
       await tester.tap(find.byKey(playerSettingsBackKey));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 70));
 
-      expect(offsetOf(tester, 'Sleep timer'), lessThan(atRest),
-          reason: 'the root comes back from the left');
-      expect(offsetOf(tester, 'Audio channel'), greaterThan(atRest),
-          reason: 'and More options leaves to the right');
+      expect(slideOf(tester, 'Sleep timer'), lessThan(0), reason: 'the root comes back from the left');
+      expect(slideOf(tester, 'Audio channel'), greaterThan(0), reason: 'and More options leaves to the right');
       await tester.pumpAndSettle();
     });
 
