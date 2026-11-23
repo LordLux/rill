@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 118.** A new item takes it, and the same edit bumps this line.
+**Next number: 119.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -1713,6 +1713,59 @@ check the same path from F6 (the miniplayer reached by F6) and from the session 
 **Done when:** a test in the style of `test/focus_traversal_test.dart` opens the watch page from a
 focused miniplayer with and without a queue and finds focus on the player, and
 `RILL_FOCUS_PROBE=watch` still reads clean.
+
+---
+
+### 118. A channel's custom seek bar: its colour and playhead image
+
+**Measured 2026-11-23, nothing integrated.** For a limited time, YouTube gives a channel's long-form
+videos a coloured seek bar and an image instead of the scrubber dot. Examples: YOASOBI's pink bar with
+a sakura (`qwYhKlY4Tx0`), and Mrs. GREEN APPLE's green bar with an apple (`zq9B35oai2w`). Live streams
+and Shorts are excluded. Where it is, from the web player's own code:
+
+```
+/next → playerOverlays.playerOverlayRenderer.decoratedPlayerBarRenderer.decoratedPlayerBarRenderer
+  progressColor: 4294790836          // uint32 ARGB; the web player keeps only the low 24 bits → #FD4EB4
+  playhead.decoratedPlayheadRenderer.{playheadImage, playheadFastForwardImage, playheadRewindImage}
+    .thumbnails[0].url               // gstatic /youtube/img/promos/<sha>_96x96.png, 96 px only
+```
+
+It is not in `/player`. The same object always carries the "In this video" timeline button, so its
+presence means nothing. Only these two fields mark a campaign. In both samples the three image
+URLs were identical.
+
+**How the web player draws it:**
+- The played part becomes the solid colour, replacing the red gradient.
+- The image, drawn at 24 px, replaces the scrubber dot.
+- The image fades out while the seek pill ("+10 seconds") shows, and the pill takes the colour.
+
+**Why a live request from here returns nothing.** Each campaign is time-boxed per channel:
+- Mrs. GREEN APPLE ran 2026-09-29 to 10-28 (YouTube JP blog).
+- YOASOBI's was still on 11-10 17:13 UTC and gone by 11-16.
+
+It also looks **region-gated by IP**. In the Wayback captures (all signed out), hits came from the
+US, Canada, Taiwan and Azerbaijan. Every capture from the EU or the Nordics missed, and one US capture
+missed too. So an Italian connection likely never gets it, and a test against live responses will
+almost always show nothing.
+
+**To do:**
+- Sidecar: two nullable fields on `VideoDetail`, read in the watch `/next` parse:
+  - an RGB colour (alpha dropped, as the web player does);
+  - the playhead image URL.
+  Update the contract docs together (`contract-docs.test.ts`).
+- Fixtures can only come from archived captures. One made that way cannot be recaptured, so declare it
+  `CARRIED` in `src/fixtures.ts` with that reason, and keep the raw HTML out of the tree.
+- App: `ScrubberBar` paints the played part in the colour and draws the image in place of its
+  thumb.
+  - The image is decorative (`excludeFromSemantics`). It changes nothing the scrubber announces.
+  - The thumb stays visible exactly when it does today.
+  - The colour still needs enough contrast against the unplayed track; fall back to the default
+    otherwise.
+
+**Done when:** a parser test over an archived sample reads both fields, and a capture without a
+campaign reads both as `null`. The watch page also has to draw them, with a preview in
+`scrubber_bar.dart`, checked in the running app with a hard-coded sample. A live one is not
+reachable from here.
 
 ---
 
