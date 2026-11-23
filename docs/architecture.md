@@ -975,7 +975,7 @@ over the settings ladder scrolled it *and* changed the volume).
 
 #### The volume curve (2026-11-22)
 
-**The volume setting is even in decibels, and only `SwappingEngine` knows mpv's scale.** The slider,
+**The volume setting squared is the amplitude, and only `SwappingEngine` knows mpv's scale.** The slider,
 the arrow keys, right button + scroll, a mute and the session snapshot all work in a 0–100 *setting*.
 `SwappingEngine` hands each player `mpvVolumeFor(setting) × gain` (`data/playback/volume_curve.dart`),
 and `gain` is the sleep timer's fade (§2.18).
@@ -984,10 +984,19 @@ and `gain` is the sleep timer's fade (§2.18).
   `pow(gain, 3)`). Writing the slider's position straight to it put 18 dB in the top half of the slider
   and everything else in the bottom half: 100 → 95 was 1.3 dB, 10 → 5 was 18 dB. The user reported it
   as "only the last few steps really influence the volume".
-- **The curve.** Every point of the setting is the same number of decibels, `volumeRangeDb` = 50 across
-  the slider: a step of 5 is 2.5 dB, halfway is 25 dB down, and 0 is silence. 100 is mpv's 100, so the
-  top of the slider is as loud as before. A setting saved before this sounds quieter anywhere below
-  100, because the same number now means a lower level.
+- **youtube.com's curve, measured 2026-11-23: the setting is the amplitude.** Its slider's value goes
+  straight to the `<video>` element's `volume` (50 → 0.50, 5 → 0.05), and a 1 kHz tone through Chromium
+  at those volumes came out at exactly 20·log10(volume) (0.5 → −6.0 dB, 0.1 → −20 dB). The old
+  straight write was the same shape cubed: amplitude = (setting / 100)³.
+- **The curve: (setting / 100)², halfway between the two** — 50 is 12 dB down (youtube.com 6, the old
+  write 18), 10 is 40 dB down, and it reaches silence smoothly.
+- **Chosen by ear, 2026-11-23.** The first answer was even in decibels (2026-11-22: 50 dB across the
+  slider, 50 at −25 dB); the user was unsure of it, tried youtube.com's, asked for something between,
+  and listened through a temporary switch offering powers 1, 2 and 3 and even-dB ranges of 50 and 30.
+  Power 2 was the one that sounded right; the switch is gone, and `volumePower` is the one number to change.
+- **youtube.com also turns loud videos down to a target and rill does not.** Its stats read
+  `100%/89% (cont.-13.0dB tgt.-14.0dB)` for a music video and 5 dB down for an ad, so at the same
+  setting a loud master plays louder here.
 - **The fade multiplies after the curve,** so its decibels do not depend on the setting.
 - **The cube is read from mpv's source, not measured on the DLL.** The bundled libmpv's FFmpeg has no
   muxers, so its encode mode cannot write the output to a file for measuring (`o=` fails with

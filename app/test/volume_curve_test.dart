@@ -6,8 +6,11 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/playback/volume_curve.dart';
 
-/// The output's level in dB for a setting: mpv plays at (volume / 100)³.
-double db(double setting) => 60 * math.log(mpvVolumeFor(setting) / 100) / math.ln10;
+/// The amplitude mpv plays a setting at: (volume / 100)³.
+double amplitude(double setting) => math.pow(mpvVolumeFor(setting) / 100, 3).toDouble();
+
+/// The same in dB.
+double db(double setting) => 20 * math.log(amplitude(setting)) / math.ln10;
 
 void main() {
   test('the ends: 100 is the level as it comes, 0 is silence', () {
@@ -17,13 +20,14 @@ void main() {
     expect(mpvVolumeFor(130), 100, reason: 'never louder than mpv unscaled');
   });
 
-  test('every step of the setting is the same number of decibels', () {
-    // MUTATION: `return setting;` (the old straight write, which mpv cubes) fails here — 100 → 95
-    // was 1.3 dB and 10 → 5 was 18 dB.
-    for (var s = 100.0; s > 5; s -= 5) {
-      expect(db(s) - db(s - 5), closeTo(volumeRangeDb * 5 / 100, 1e-9), reason: '$s → ${s - 5}');
+  test('the setting squared is the amplitude: 50 is 12 dB down', () {
+    // MUTATION: `return setting;` (the old straight write, which mpv cubes) fails here — 50 was 18 dB
+    // down; and youtube.com's curve, `volumePower = 1`, puts 50 at 6.
+    for (var s = 5.0; s <= 100; s += 5) {
+      expect(amplitude(s), closeTo(math.pow(s / 100, 2), 1e-9), reason: '$s');
     }
-    expect(db(50), closeTo(-volumeRangeDb / 2, 1e-9), reason: 'halfway is half the range down');
+    expect(db(50), closeTo(-12.04, 0.01));
+    expect(db(10), closeTo(-40, 1e-9));
   });
 
   test('settingForMpvVolume undoes it', () {
@@ -32,6 +36,6 @@ void main() {
     }
     expect(settingForMpvVolume(0), 0);
     expect(settingForMpvVolume(100), 100, reason: "mpv's default reads as the top of the slider");
-    expect(settingForMpvVolume(0.0001), 0, reason: 'below the bottom reads as 0, never negative');
+    expect(settingForMpvVolume(-1), 0, reason: 'never negative');
   });
 }
