@@ -89,6 +89,46 @@ void resetSettingsDialogForTest() {
   _previous = null;
 }
 
+/// **Ctrl+,** opens Settings from anywhere, as in most desktop apps. A global key handler,
+/// like the player's (`PlayerShortcuts`), mounted once above every page by the shell. The
+/// player's shortcuts never match with Ctrl held, so the two cannot both act on one press.
+class SettingsShortcut extends ConsumerStatefulWidget {
+  const SettingsShortcut({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<SettingsShortcut> createState() => _SettingsShortcutState();
+}
+
+class _SettingsShortcutState extends ConsumerState<SettingsShortcut> {
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    super.dispose();
+  }
+
+  bool _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.comma) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (!keyboard.isControlPressed || keyboard.isAltPressed || keyboard.isShiftPressed || keyboard.isMetaPressed) {
+      return false;
+    }
+    if (!mounted) return false;
+    openSettingsPage(ref);
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class SettingsDialog extends ConsumerStatefulWidget {
   const SettingsDialog({super.key, required this.onClose});
 

@@ -20,6 +20,7 @@ import 'player/settings_menu.dart';
 import 'player/sleep_timer_widgets.dart';
 import 'player/view_mode.dart';
 import 'queue_controller.dart';
+import 'settings/settings_page.dart' show SettingsShortcut;
 import 'sleep_timer.dart';
 import 'smtc_controller.dart';
 import 'taskbar_controller.dart';
@@ -455,7 +456,8 @@ class PlayerShell extends ConsumerWidget {
     final showMini = playback.item != null && !onWatchPage && !fullscreen;
     final engine = ref.read(playbackEngineProvider);
 
-    return PlayerShortcuts(
+    return SettingsShortcut(
+      child: PlayerShortcuts(
       child: Listener(
         onPointerDown: (event) {
           if (!ref.read(playerMenuProvider).open) return;
@@ -546,6 +548,7 @@ class PlayerShell extends ConsumerWidget {
             const Positioned.fill(child: SleepCountdownBanner()),
           ],
         ),
+      ),
       ),
     );
   }

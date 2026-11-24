@@ -14,6 +14,7 @@ import 'package:rill/data/update/update_config.dart';
 import 'package:rill/domain/update/update_state.dart';
 import 'package:rill/domain/ytdlp/ytdlp_state.dart';
 import 'package:rill/ui/auth_controller.dart';
+import 'package:rill/ui/settings/settings_page.dart' show resetSettingsDialogForTest, settingsSectionTabKey;
 import 'package:rill/ui/update_controller.dart';
 import 'package:rill/ui/widgets/account_button.dart';
 import 'package:rill/ui/ytdlp_controller.dart';
@@ -95,12 +96,23 @@ class _IdleUpdate extends UpdateController {
   UpdateState build() => const UpdateState(phase: UpdatePhase.idle());
 }
 
+/// Settings › About, through the account menu's Settings row.
+Future<void> openAbout(WidgetTester tester) async {
+  await openMenu(tester);
+  await tester.tap(find.text('Settings'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(settingsSectionTabKey('about')));
+  await tester.pumpAndSettle();
+}
+
 Future<void> openMenu(WidgetTester tester, {String tooltip = 'Ada Lovelace'}) async {
   await tester.tap(find.byTooltip(tooltip));
   await tester.pumpAndSettle();
 }
 
 void main() {
+  setUp(resetSettingsDialogForTest);
+
   testWidgets('resolved (onPath): no row, no dot, in either root page', (tester) async {
     await pump(tester, onPath);
     expect(find.byKey(const ValueKey('update-dot')), findsNothing);
@@ -229,32 +241,26 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Try again'), findsOneWidget);
   });
 
-  testWidgets('the Updates page shows On PATH with no Download action', (tester) async {
+  testWidgets('About shows On PATH with no Download action', (tester) async {
     await pump(tester, onPath);
-    await openMenu(tester);
-    await tester.tap(find.text('Check for updates'));
-    await tester.pumpAndSettle();
+    await openAbout(tester);
 
-    expect(find.text('yt-dlp'), findsOneWidget);
+    expect(find.text('Status'), findsOneWidget);
     expect(find.text('On PATH'), findsOneWidget);
     expect(find.text('Download'), findsNothing);
   });
 
-  testWidgets('the Updates page shows the installed version with no Download action', (tester) async {
+  testWidgets('About shows the installed version with no Download action', (tester) async {
     await pump(tester, appManaged);
-    await openMenu(tester);
-    await tester.tap(find.text('Check for updates'));
-    await tester.pumpAndSettle();
+    await openAbout(tester);
 
     expect(find.text('2026.08.19'), findsOneWidget);
     expect(find.text('Download'), findsNothing);
   });
 
-  testWidgets('the Updates page offers Download when missing, and it calls the controller', (tester) async {
+  testWidgets('About offers Download when missing, and it calls the controller', (tester) async {
     final controller = await pump(tester, missingDeclined);
-    await openMenu(tester);
-    await tester.tap(find.text('Check for updates'));
-    await tester.pumpAndSettle();
+    await openAbout(tester);
 
     expect(find.text('Not installed'), findsOneWidget);
     await tester.tap(find.text('Download'));

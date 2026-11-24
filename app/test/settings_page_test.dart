@@ -153,7 +153,8 @@ Future<void> pumpHome(WidgetTester tester, {AuthState auth = signedIn, bool upda
   await tester.pumpWidget(
     settingsTestApp(
       overrides: _overrides(auth: auth, updateReady: updateReady),
-      home: const PageWrapper(title: Text('Rill'), body: _HomeBody()),
+      // Under the shortcut, as the shell puts every page.
+      home: const SettingsShortcut(child: PageWrapper(title: Text('Rill'), body: _HomeBody())),
     ),
   );
   await tester.pump();
@@ -393,26 +394,17 @@ void main() {
     });
   });
 
-  testWidgets("the account menu's Updates page and Settings › About are one switch, not two", (tester) async {
+  testWidgets('Ctrl+, opens Settings from anywhere; a bare comma does not', (tester) async {
     await pumpHome(tester);
-    await openAccountMenu(tester);
-    // A check that finds nothing stays in the menu, on its own Updates page.
-    await tester.tap(find.text('Check for updates'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
     await tester.pumpAndSettle();
-    expect(find.byType(SettingsDialog), findsNothing);
-    expect(find.text('Rill is up to date'), findsOneWidget, reason: "the menu's own Updates page");
-    await tester.tap(find.byKey(autoUpdateSwitchKey));
-    await tester.pumpAndSettle();
+    expect(find.byType(SettingsDialog), findsNothing, reason: 'a bare comma is not the shortcut');
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
-    await openAccountMenu(tester);
-    await tapMenuSettings(tester);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(settingsSectionTabKey('about')));
-    await tester.pumpAndSettle();
-    expect(tester.widget<Switch>(find.byKey(autoUpdateSwitchKey)).value, isFalse, reason: 'About shows its own copy');
-    expect((await SharedPreferences.getInstance()).getBool('update_auto'), isFalse);
+    expect(find.byType(SettingsDialog), findsOneWidget);
   });
 
   group('a value set on the page survives a restart', () {

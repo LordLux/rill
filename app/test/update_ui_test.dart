@@ -183,6 +183,11 @@ void main() {
     expect(find.text('Rill is up to date'), findsOneWidget);
     expect(find.text('Updates'), findsOneWidget, reason: 'the panel is a page of the same menu');
     expect(find.byType(SettingsDialog), findsNothing, reason: 'nothing to act on, so it stays in the menu');
+    // The menu's page is the card, the version and the last check; nothing to set there.
+    expect(find.text('Version'), findsOneWidget);
+    expect(find.text('Last checked'), findsOneWidget);
+    expect(find.byKey(autoUpdateSwitchKey), findsNothing, reason: 'the switch is on Settings › About only');
+    expect(find.text('yt-dlp'), findsNothing, reason: "yt-dlp is About's own card");
   });
 
   testWidgets('a check that finds an update opens Settings › About, where it is acted on', (tester) async {
@@ -211,7 +216,7 @@ void main() {
     expect(find.text('Try again'), findsOneWidget);
   });
 
-  testWidgets('the panel has the automatic-update switch, and not the reopen switch, which is Settings › General', (tester) async {
+  testWidgets('About has the automatic-update switch, and not the reopen switch, which is Settings › General', (tester) async {
     final controller = await pump(tester, ready());
     await openMenu(tester);
     await tester.tap(find.text('Restart to update'));

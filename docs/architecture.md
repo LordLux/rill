@@ -2219,6 +2219,8 @@ the feed it reads is §2.13's.
 - **Where it shows: the account menu's Updates page, and Settings › About** — one widget
   (`ui/settings/update_panel.dart`, `UpdatePanel`) on one provider, drawn in both (§2.19;
   until Task 40 the menu was its only home, because there was no settings page). The menu's
+  page is the card, the version and the last check; the automatic-update switch and yt-dlp
+  are on About only. The menu's
   `Check for updates` row spins while it checks, then **routes by the answer**: nothing to act
   on (up to date, or a failure) opens the Updates page in the same overlay; an update found
   opens the settings dialog at About, where it is downloaded and installed. With an update
@@ -2226,7 +2228,7 @@ the feed it reads is §2.13's.
   offer, in the accent container, with up to five notes, a link to the full release notes,
   and `Restart to update` / `Later`; a download in progress; a failure, in the error
   container, with `Try again`; or that all is well — then the running version, the last
-  check, and the switch; the header's button checks again (it stays enabled while a check
+  check, and (on About) the switch; the header's button checks again (it stays enabled while a check
   runs and ignores the press, so keyboard focus is never dropped). The menu's page is
   300 px where the menu is 260, so the card's two buttons fit on one line. A ready update
   puts a dot on the avatar; `Later` removes it for that version (in the menu's page it goes
@@ -2637,8 +2639,10 @@ is the same provider drawn in two places, never a second copy of the value.
 
 - **A dialog over whatever page is open** (`ui/settings/settings_page.dart`), chosen over a page (a page left a
   wide window half empty, and a centred panel on the page was tried first). It is opened from the rail's
-  *Settings* tile, pinned to the rail's bottom, from the account menu's *Settings* row, signed in or out, and from
-  the menu's yt-dlp row, which opens it at About. **Not a route, and its scrim starts below the top bar**: a
+  *Settings* tile, pinned to the rail's bottom, with **Ctrl+,** from anywhere (`SettingsShortcut`, beside the
+  player's shortcuts in the shell; those never match with Ctrl held), from the account menu's *Settings* row,
+  signed in or out, and from the menu's update and yt-dlp rows, which open it at About when there is something to
+  act on. **Not a route, and its scrim starts below the top bar**: a
   `showDialog` barrier covers the whole navigator, and every page draws its own top bar — the window buttons
   included — inside it, so a modal route would leave minimize, maximize and close dead (the login page did that
   once). It is an `OverlayEntry`, as the account menu is: the scrim covers the page and the rail, focus is held in
@@ -2661,8 +2665,8 @@ is the same provider drawn in two places, never a second copy of the value.
   (`keep_caption_style`, now "Remember caption style") and *About & Licenses* from the player's *More options*.
   **New:** members-only videos (`members_only_visible`, on by default), which now filters every list — the feeds,
   the home rows and the related videos — as promoted videos already did.
-- **Two things are shown twice, each on one provider.** The updater (`UpdatePanel`, with `update_auto`) is on
-  Settings › About and on the account menu's own Updates page, where it always was. And caption style: the
+- **Two things are shown twice, each on one provider.** The updater's card (`UpdatePanel`) is on Settings › About
+  and on the account menu's own Updates page, where it always was; its switch (`update_auto`) is on About only. And caption style: the
   player's Style page and Settings › Captions both write `captionsProvider`'s style; the player's is there to
   judge a style over a picture. The style
   is remembered across videos only while "Remember caption style" is on (off, a style lasts until the next video),

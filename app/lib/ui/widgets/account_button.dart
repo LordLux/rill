@@ -466,7 +466,8 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-          child: UpdatePanel(compact: true, showYtDlp: true, onLaterDone: _back),
+          // The card, the version and the last check: the switch and yt-dlp are Settings › About's.
+          child: UpdatePanel(showAutoUpdate: false, onLaterDone: _back),
         ),
       ],
     ),

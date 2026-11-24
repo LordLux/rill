@@ -27,14 +27,12 @@ const ValueKey<String> autoUpdateSwitchKey = ValueKey('auto-update-switch');
 /// menu's Updates page. Each caller draws its own header, with [UpdateRefreshButton] and
 /// a bar while [updateChecking] says a check runs.
 class UpdatePanel extends ConsumerStatefulWidget {
-  const UpdatePanel({super.key, this.compact = false, this.showYtDlp = false, this.onLaterDone});
+  const UpdatePanel({super.key, this.showAutoUpdate = true, this.onLaterDone});
 
-  /// The account menu's narrower panel: the switch without its line of detail.
-  final bool compact;
-
-  /// yt-dlp's state as a row under the version, as the account menu always had it.
-  /// About has a yt-dlp card of its own instead.
-  final bool showYtDlp;
+  /// The "Download updates automatically" switch under the version. Settings › About has
+  /// it; the account menu's page is the card, the version and the last check, nothing
+  /// to set (the switch is the settings page's, and yt-dlp is About's own card).
+  final bool showAutoUpdate;
 
   /// After "Later": the account menu goes back to its root page. Null stays put, and
   /// hands keyboard focus to the card's main button, since "Later" removes itself.
@@ -118,17 +116,16 @@ class _UpdatePanelState extends ConsumerState<UpdatePanel> {
         const SizedBox(height: 12),
         _UpdateInfoRow(label: 'Version', value: state.currentVersion?.toString() ?? 'Development build'),
         _UpdateInfoRow(label: 'Last checked', value: lastChecked == null ? 'Never' : _ago(lastChecked)),
-        if (widget.showYtDlp) const YtDlpInfoRow(label: 'yt-dlp'),
-        const SizedBox(height: 4),
-        SettingsSwitchRow(
-          switchKey: autoUpdateSwitchKey,
-          label: 'Download updates automatically',
-          detail: widget.compact
-              ? null
-              : 'Check every 12 hours and download a new version in the background. It installs only when you restart.',
-          value: state.autoUpdate,
-          onChanged: config.enabled ? (value) => unawaited(controller.setAutoUpdate(value)) : null,
-        ),
+        if (widget.showAutoUpdate) ...[
+          const SizedBox(height: 4),
+          SettingsSwitchRow(
+            switchKey: autoUpdateSwitchKey,
+            label: 'Download updates automatically',
+            detail: 'Check every 12 hours and download a new version in the background. It installs only when you restart.',
+            value: state.autoUpdate,
+            onChanged: config.enabled ? (value) => unawaited(controller.setAutoUpdate(value)) : null,
+          ),
+        ],
       ],
     );
   }
@@ -498,10 +495,7 @@ class YtDlpCard extends ConsumerWidget {
 /// (todo.md 49): whatever state it is actually in, with a Download action
 /// only when there is something to download.
 class YtDlpInfoRow extends ConsumerWidget {
-  const YtDlpInfoRow({super.key, this.label = 'Status'});
-
-  /// "yt-dlp" in the account menu's Updates page, "Status" under About's yt-dlp heading.
-  final String label;
+  const YtDlpInfoRow({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -522,7 +516,7 @@ class YtDlpInfoRow extends ConsumerWidget {
     // first, inside its own flexible group, rather than overflowing the row.
     return Row(
       children: [
-        Expanded(child: Text(label, style: style?.copyWith(color: scheme.onSurfaceVariant))),
+        Expanded(child: Text('Status', style: style?.copyWith(color: scheme.onSurfaceVariant))),
         Flexible(
           // Right-aligned like the Version and Last checked values above it.
           child: Align(
