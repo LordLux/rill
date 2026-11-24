@@ -22,6 +22,25 @@ abstract class PlaybackVariant with _$PlaybackVariant {
   factory PlaybackVariant.fromJson(Map<String, Object?> json) => _$PlaybackVariantFromJson(json);
 }
 
+/// One audio track a video can play with — `protocol.md` §3.5, Task 39 (the sidecar's
+/// `AudioTrack`; not named so here because media_kit exports an `AudioTrack` of its own).
+///
+/// The markers are read from YouTube's `xtags`, never from [displayName], and [displayName] has
+/// YouTube's own "original" wording removed: the menu draws an *Original* badge from [isOriginal]
+/// and an *AI dub* badge from [isAutoDubbed].
+@freezed
+abstract class AudioTrackOption with _$AudioTrackOption {
+  const factory AudioTrackOption({
+    required String id,
+    required String displayName,
+    @Default(false) bool isOriginal,
+    @Default(false) bool isDubbed,
+    @Default(false) bool isAutoDubbed,
+  }) = _AudioTrackOption;
+
+  factory AudioTrackOption.fromJson(Map<String, Object?> json) => _$AudioTrackOptionFromJson(json);
+}
+
 /// `playback.open`'s result — identical in Phase 1 and Phase 2 (§3.5).
 ///
 /// **Quality selection is the client's.** `variants` arrives ranked best-first
@@ -52,6 +71,13 @@ abstract class PlaybackSource with _$PlaybackSource {
     String? posterUrl,
     @Default(false) bool qualityDegraded,
     @Default('plain') String transport,
+
+    /// The video's audio tracks, original first (Task 39). Empty when there is nothing to
+    /// choose from, and then the menu offers no *Audio track* entry.
+    @Default(<AudioTrackOption>[]) List<AudioTrackOption> audioTracks,
+
+    /// The track every variant's `audioUrl` carries. Null exactly when [audioTracks] is empty.
+    String? audioTrackId,
     @Default(<PlaybackVariant>[]) List<PlaybackVariant> variants,
   }) = _PlaybackSource;
 

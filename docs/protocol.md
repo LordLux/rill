@@ -1160,7 +1160,7 @@ this app.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `playback.open` | `{videoId, preload?, playlistId?}` | `PlaybackSource` |
+| `playback.open` | `{videoId, preload?, playlistId?, audioTrackId?}` | `PlaybackSource` |
 | `playback.report` | `{sessionId, positionMs, state}` | `{}` |
 | `playback.close` | `{sessionId}` | `{}` |
 
@@ -1185,6 +1185,14 @@ this app.
   "posterUrl": "https://i.ytimg.com/vi/…/hq720.jpg",
   "qualityDegraded": false,
   "transport": "plain",            // "plain" | "hls" | "dash" | "sabr-dash" | "ytdlp"
+  // The video's audio tracks (Task 39), original first. [] when the video has
+  // one track or the tier that served it carries no track information.
+  "audioTracks": [
+    { "id": "en-US.4", "displayName": "English (US)", "isOriginal": true, "isDubbed": false, "isAutoDubbed": false },
+    { "id": "hi.10", "displayName": "Hindi", "isOriginal": false, "isDubbed": false, "isAutoDubbed": true }
+  ],
+  // The track every variant's audioUrl carries. null exactly when audioTracks is [].
+  "audioTrackId": "en-US.4",
   // Ranked best-first. The client picks one and may switch without
   // reopening — all variants come from a single /player response.
   "variants": [
@@ -1220,6 +1228,70 @@ the sidecar would be wrong differently on every machine.
 
 Flutter never learns which tier served the request. `transport` is telemetry;
 `qualityDegraded` drives a badge, never a dead end.
+
+#### Audio tracks — Task 39, measured 2026-11-22 (`architecture.md` F65)
+
+A video can carry dozens of audio tracks: the original, dubs its creator
+uploaded, and YouTube's automatic AI dubs. Every variant of one
+`PlaybackSource` carries the **same** track; the source says which, and lists
+the others.
+
+```ts
+interface AudioTrack {
+  id: string;                // YouTube's own track id ("en-US.4"), opaque — only ever sent back
+  displayName: string;       // YouTube's name, localised, with its own "original" wording removed
+  isOriginal: boolean;       // xtags acont=original
+  isDubbed: boolean;         // acont=dubbed: a dub the creator uploaded
+  isAutoDubbed: boolean;     // acont=dubbed-auto: YouTube's automatic AI dub
+}
+
+interface PlaybackSource {
+  sessionId: string;
+  durationMs: number | null;
+  startTimestamp: string | null;
+  storyboardTemplate: string | null;
+  posterUrl: string | null;
+  qualityDegraded: boolean;
+  transport: PlaybackTransport;
+  audioTracks: AudioTrack[];   // original first, then by name; [] when there is nothing to choose from
+  audioTrackId: string | null; // the track the variants carry; null exactly when audioTracks is []
+  variants: PlaybackVariant[];
+}
+```
+
+- **Which track by default: the original, read from structure.** The ranking
+  is `acont=original` first, then the track YouTube flags `audioIsDefault`,
+  then the old order (DRC last, stereo before surround, bitrate). Bitrate alone
+  picked a dub on every multi-track video measured, because a dub's bitrate is
+  often a little higher than the original's. The markers come from the format's
+  `xtags` (in the URL as plain text, and on the format as a base64 protobuf,
+  which `ANDROID` carries alone); a display name is never matched to decide
+  anything.
+- **Choosing a track is `playback.open {videoId, preload: true, audioTrackId}`.**
+  It answers a whole `PlaybackSource` whose variants carry that track, so the
+  client swaps the media exactly as it would for a quality change, keeping its
+  own session: a preload opens no session (§3.6), so the watch is not counted
+  twice. Only the chosen track is signed. The `/player` response is the one
+  already cached (5 minutes), so a switch normally costs no request to YouTube.
+- **`audioTrackId` is always true.** An id the source does not have (another
+  video's, a track gone since) is ignored, and the source carries the default
+  track and says so. A client that asked for one track and got another keeps
+  what it was playing.
+- **A recovery reopen carries the choice.** The client sends `audioTrackId` on
+  every `playback.open` for the video the choice was made on, including the
+  non-preload reopens after a dropped read, and drops it for any other video.
+- **Per tier.** `VISIONOS` (tier 1) carries every track and the markers. yt-dlp
+  (tier 4) plays the original by its own ranking; its tracks are read from the
+  `ANDROID` response's track fields and matched to yt-dlp's formats by
+  language and kind, so it can serve a chosen track too. The itag 18 floor
+  (tier 5) is muxed: it carries no track information, its sound is the original
+  (measured), and it answers `audioTracks: []`. A live manifest answers `[]`.
+- **`displayName` is the one localised-text rule here.** YouTube's name for the
+  original already says so ("English (US) original", "Englisch (US) (Original)"),
+  and the client draws its own *Original* badge from `isOriginal`, so the
+  sidecar removes the word: the wordings measured for eight languages are
+  stripped, and a wording it does not know leaves the name as YouTube sent it.
+  It changes what a row reads, never which track plays.
 
 **Resolution ladder**, tried in order inside `playback.open`. The numbers are
 names rather than positions — code, tests and logs use them — so tiers 2 and 3

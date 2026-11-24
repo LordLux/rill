@@ -458,9 +458,11 @@ async function handleRequest(request: RpcRequest) {
       // `list=` on the watchtime ping. It is deliberately *not* passed to the
       // resolution ladder — see `OpenParams.playlistId`.
       const playlistId = optionalString(params, 'playlistId', 'playback.open');
+      // Task 39: the audio track to carry, by YouTube's id (`protocol.md` §3.5).
+      const audioTrackId = optionalString(params, 'audioTrackId', 'playback.open');
       const { openPlayback } = await import('../playback/resolve.ts');
       const session = await getResolveSession();
-      const openParams = { videoId, preload: params?.preload === true, playlistId };
+      const openParams = { videoId, preload: params?.preload === true, playlistId, audioTrackId };
       let result;
       try {
         // No `poTokens` here — the anonymous ladder stays token-free, on
@@ -526,6 +528,7 @@ async function handleRequest(request: RpcRequest) {
             poTokens: botguardPoTokenProvider,
             preload: openParams.preload,
             playlistId: openParams.playlistId,
+            audioTrackId: openParams.audioTrackId,
           });
         } catch (retryError) {
           // Loud and distinct from `resolveAgeRestricted`'s own "declined"

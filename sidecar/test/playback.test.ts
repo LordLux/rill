@@ -248,6 +248,8 @@ function stubSource(transport: PlaybackSource['transport'], height: number): Pla
     posterUrl: null,
     qualityDegraded: height < 720,
     transport,
+    audioTracks: [],
+    audioTrackId: null,
     variants: [stubVariant(height)],
   };
 }
@@ -615,6 +617,87 @@ describe('the ladder as openPlayback wires it', () => {
     // Hard invariant 2: even a client that carries no cipher today goes through
     // `sign`, not a bare cast, so a day it starts carrying one is not silent.
     expect(source.variants[0]!.videoUrl).toContain('manifest.googlevideo.com');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audio tracks — Task 39, `architecture.md` F65, `protocol.md` §3.5
+// ---------------------------------------------------------------------------
+
+describe('audio tracks, through the ladder', () => {
+  beforeEach(() => {
+    resetPlayerCache();
+    forgetPlayerResponse();
+  });
+
+  const noYtDlp = { ytDlpPath: 'yt-dlp-does-not-exist' };
+  /** Hand-built and sanitised, shaped like the measured VISIONOS response (F65). */
+  const tracksBody = (): unknown =>
+    JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'data', 'player-audio-tracks.json'), 'utf8'));
+  const xtagsOf = (url: string | null | undefined): string | null => (url ? new URL(url).searchParams.get('xtags') : null);
+
+  test('the original plays by default, though an AI dub has the higher bitrate', async () => {
+    // MUTATION: rank by bitrate alone in `rankAudio` (drop `trackRank`) and this fails: the Hindi
+    // AI dub's itag 251 (148535) outranks the original's (142468), which is todo 84's report.
+    const session = fakeSession({ VISIONOS: tracksBody() });
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+
+    expect(source.audioTrackId).toBe('en-US.4');
+    // Every variant carries the same audio, and it is the original's, not its DRC twin.
+    const audioUrls = new Set(source.variants.map((v) => v.audioUrl));
+    expect(audioUrls.size).toBe(1);
+    expect(xtagsOf(source.variants[0]!.audioUrl)).toBe('acont=original:lang=en-US');
+    expect(new URL(source.variants[0]!.audioUrl!).searchParams.get('itag')).toBe('251');
+    expect(source.audioTracks.map((t) => t.id)).toEqual(['en-US.4', 'de-DE.10', 'hi.10', 'es.3']);
+    expect(source.audioTracks[0]!.displayName).toBe('English (US)');
+  });
+
+  test('a chosen track is a preload carrying that track, with no second /player call', async () => {
+    const session = fakeSession({ VISIONOS: tracksBody() });
+    await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ' });
+    const chosen = await openPlayback(
+      { session, ...noYtDlp },
+      { videoId: 'aqz-KE-bpKQ', preload: true, audioTrackId: 'hi.10' },
+    );
+
+    expect(chosen.audioTrackId).toBe('hi.10');
+    expect(chosen.variants.every((v) => xtagsOf(v.audioUrl) === 'acont=dubbed-auto:lang=hi')).toBe(true);
+    // The list does not move with the choice: the menu reads the same either way.
+    expect(chosen.audioTracks.map((t) => t.id)).toEqual(['en-US.4', 'de-DE.10', 'hi.10', 'es.3']);
+    // Signed on demand from the cached response: one /player call for both answers.
+    expect(session.calls).toEqual(['VISIONOS']);
+  });
+
+  test('a track the video does not have is ignored, and audioTrackId says what plays', async () => {
+    const session = fakeSession({ VISIONOS: tracksBody() });
+    const source = await openPlayback({ session, ...noYtDlp }, { videoId: 'aqz-KE-bpKQ', audioTrackId: 'zz.10' });
+    expect(source.audioTrackId).toBe('en-US.4');
+    expect(xtagsOf(source.variants[0]!.audioUrl)).toBe('acont=original:lang=en-US');
+  });
+
+  test('a single-track video and the itag 18 floor answer no list and no id', async () => {
+    const single = await openPlayback(
+      { session: fakeSession({ VISIONOS: rawPlayerBody({ client: 'VISIONOS' }) }), ...noYtDlp },
+      { videoId: 'aqz-KE-bpKQ' },
+    );
+    expect(single.audioTracks).toEqual([]);
+    expect(single.audioTrackId).toBeNull();
+
+    resetPlayerCache();
+    forgetPlayerResponse();
+    const floor = await openPlayback(
+      {
+        session: fakeSession({
+          VISIONOS: rawPlayerBody({ client: 'VISIONOS', sabrOnly: true }),
+          ANDROID: rawPlayerBody({ client: 'ANDROID', withN: false, sabrOnly: true }),
+        }),
+        ...noYtDlp,
+      },
+      { videoId: 'aqz-KE-bpKQ', audioTrackId: 'hi.10' },
+    );
+    expect(floor.variants[0]!.height).toBe(360);
+    expect(floor.audioTracks).toEqual([]);
+    expect(floor.audioTrackId).toBeNull();
   });
 });
 
@@ -1078,6 +1161,9 @@ const SOURCE_SHAPE = {
   posterUrl: 'string?',
   qualityDegraded: 'boolean',
   transport: 'string',
+  // Task 39: `[]` and null on every tier that carries no tracks — still present, never undefined.
+  audioTracks: 'array',
+  audioTrackId: 'string?',
   variants: 'array',
 } as const;
 

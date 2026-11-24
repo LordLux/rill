@@ -57,6 +57,8 @@ function sourceWith(fexp: string): PlaybackSource {
   return {
     sessionId: 's1',
     durationMs: 1000,
+    audioTracks: [],
+    audioTrackId: null,
     startTimestamp: null,
     storyboardTemplate: null,
     posterUrl: null,

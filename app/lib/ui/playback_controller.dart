@@ -92,6 +92,9 @@ class PlaybackState {
     this.isSwitchingTrack = false,
     this.isRestoringVideo = false,
     this.audioMissing = false,
+    this.switchingAudioTrackId,
+    this.isSwitchingAudio = false,
+    this.qualityAfterAudioSwitch,
     this.hold,
     this.error,
     this.errorCode,
@@ -152,6 +155,27 @@ class PlaybackState {
   /// The video is playing in silence: its audio stream did not load, and mpv does not call
   /// that a failure. The player says so and offers [PlaybackController.retryAudio].
   final bool audioMissing;
+
+  /// The audio track being switched to (Task 39), from the pick until it plays or the switch is
+  /// given up. The menu ticks it at once and shows it busy.
+  final String? switchingAudioTrackId;
+
+  /// The track switch itself is under way (Task 39): the video is stopped on its frame, the
+  /// player's spinner shows, and playback resumes, if it was playing, once the new track is in.
+  /// Unlike a quality switch nothing plays on meanwhile: hearing the old language carry on after
+  /// picking another reads as the pick not taking. False while a pick only waits its turn.
+  final bool isSwitchingAudio;
+
+  /// A quality picked while an audio track switch is under way (Task 39): that switch is about to
+  /// replace the ladder, so the pick is switched to from the new one once it lands. The quality
+  /// menu ticks it meanwhile, as busy.
+  final PlaybackVariant? qualityAfterAudioSwitch;
+
+  /// The audio tracks the menu lists, original first. Empty when there is nothing to choose.
+  List<AudioTrackOption> get audioTracks => source?.audioTracks ?? const [];
+
+  /// The track the menu ticks: the one being switched to, else the one playing.
+  String? get audioTrackId => switchingAudioTrackId ?? source?.audioTrackId;
 
   /// Where the video is while the engine cannot say — see [PlaybackHold].
   ///
@@ -246,6 +270,9 @@ class PlaybackState {
     bool? isSwitchingTrack,
     bool? isRestoringVideo,
     bool? audioMissing,
+    Object? switchingAudioTrackId = _unchanged,
+    bool? isSwitchingAudio,
+    Object? qualityAfterAudioSwitch = _unchanged,
     Object? hold = _unchanged,
     Object? error = _unchanged,
     Object? errorCode = _unchanged,
@@ -267,6 +294,13 @@ class PlaybackState {
       isSwitchingTrack: isSwitchingTrack ?? this.isSwitchingTrack,
       isRestoringVideo: isRestoringVideo ?? this.isRestoringVideo,
       audioMissing: audioMissing ?? this.audioMissing,
+      switchingAudioTrackId: identical(switchingAudioTrackId, _unchanged)
+          ? this.switchingAudioTrackId
+          : switchingAudioTrackId as String?,
+      isSwitchingAudio: isSwitchingAudio ?? this.isSwitchingAudio,
+      qualityAfterAudioSwitch: identical(qualityAfterAudioSwitch, _unchanged)
+          ? this.qualityAfterAudioSwitch
+          : qualityAfterAudioSwitch as PlaybackVariant?,
       // Sentinel, not `??` — hard invariant 10. This field's whole job is to be
       // *cleared* when the switch finishes, and `??` cannot clear anything.
       hold: identical(hold, _unchanged) ? this.hold : hold as PlaybackHold?,
@@ -319,6 +353,32 @@ class PlaybackController extends Notifier<PlaybackState> {
   PlaybackEngine get _engine => ref.read(playbackEngineProvider);
 
   int _generation = 0;
+
+  /// Bumped by [open] alone. [_generation] also moves on a quality switch, which must not end an
+  /// audio track switch: the two are serialised instead (see [chooseAudioTrack]).
+  int _opens = 0;
+
+  /// The audio track the viewer chose, and for which video (Task 39). Sent on every
+  /// `playback.open` for that video and dropped by an open of another, like [_resumeAt].
+  ({String videoId, String trackId})? _audioChoice;
+
+  /// The track chosen for the video on screen, for the session snapshot. Null when the viewer
+  /// has chosen none, which is the original.
+  String? get chosenAudioTrackId => _audioChoice?.videoId == state.item?.id ? _audioChoice?.trackId : null;
+
+  /// Bumped by every pick, so the latest one wins.
+  int _audioSwitch = 0;
+
+  /// The pick being switched to is still waiting its turn (a quality switch or a held clock is
+  /// under way), so another pick may still replace it.
+  bool _audioPickWaiting = false;
+
+  /// Whether playback resumes when the track switch ends: what was playing when it began, then
+  /// whatever play or pause was pressed while it ran.
+  bool _playAfterAudioSwitch = false;
+
+  /// The choice from before the pending pick, put back if it is given up.
+  ({String videoId, String trackId})? _choiceBeforeSwitch;
 
   /// Bumped by every audio-only toggle, so a restore that is still waiting for
   /// a picture can tell it has been superseded. Separate from [_generation],
@@ -483,6 +543,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// of going to 0:00 of 0:00 for as long as the engine takes. A first load has no clock to keep.
   Future<void> open(VideoItem item, {bool wantPlaying = true, bool keepClock = false}) async {
     final generation = ++_generation;
+    _opens++;
     _heldAtEnd = false;
     _stallWatchdogTimer?.cancel();
     _stallWatchdogTimer = null;
@@ -499,6 +560,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     // something else during an undo) returns at its generation check without
     // consuming it, and the *next* video seeks to that position.
     if (_resumeAt?.videoId != item.id) _resumeAt = null;
+    // The audio track chosen belongs to its video too, and only to it (Task 39).
+    if (_audioChoice?.videoId != item.id) _audioChoice = null;
 
     // The final report reads the position here, before anything below can reset it.
     _endSession(reportState: 'paused');
@@ -535,6 +598,9 @@ class PlaybackController extends Notifier<PlaybackState> {
       // the new media's state. The artwork then sits over a video whose
       // audio-only switch is off, which is what it looked like from outside.
       isRestoringVideo: false,
+      switchingAudioTrackId: null,
+      isSwitchingAudio: false,
+      qualityAfterAudioSwitch: null,
       hold: clock,
       error: null,
       errorCode: null,
@@ -552,10 +618,17 @@ class PlaybackController extends Notifier<PlaybackState> {
       final response = await RpcClient.instance.call('playback.open', {
         'videoId': item.id,
         'playlistId': ?playlistId,
+        // The track chosen for this video, so a reopen (a dropped read, the "no sound" retry, a
+        // restored session) comes back with it (Task 39). The sidecar ignores one it no longer has.
+        'audioTrackId': ?_audioChoice?.trackId,
       });
       if (generation != _generation || _disposed) return;
 
       final source = PlaybackSource.fromJson(response as Map<String, dynamic>);
+      // **The choice is what plays, not what was asked for** (Task 39). The sidecar ignores a track
+      // it no longer has, and a lower tier (the itag 18 floor) has none to honour: kept, the choice
+      // would sit in the session snapshot and ride every later reopen while the menu ticked another.
+      if (_audioChoice != null && _audioChoice!.trackId != source.audioTrackId) _audioChoice = null;
       // "The client starts at its preferred variant" (§3.5). Until this task
       // that sentence had no implementation and every video opened `variants[0]`.
       final variant = variantFor(source.variants, _preferredHeight);
@@ -766,9 +839,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   ///
   /// Called with the id the queue is about to move to, *before* it moves: the open is what consumes both.
   /// One-shot, and dropped by any open of a different video, like [resumeAt].
-  void restoreNext({required String videoId, Duration position = Duration.zero}) {
+  void restoreNext({required String videoId, Duration position = Duration.zero, String? audioTrackId}) {
     _openPausedFor = videoId;
     _resumeAt = position > Duration.zero ? (videoId: videoId, position: position) : null;
+    _audioChoice = audioTrackId == null ? null : (videoId: videoId, trackId: audioTrackId);
   }
 
   /// The quality the last session was on, for the next open to pick the rung for.
@@ -978,6 +1052,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.isUnplayable) return Future<void>.value();
     if (_heldAtEnd && !_engine.playing) return _replayHeld();
     if (state.isLoading) return setPlaying(!state.wantPlaying);
+    if (state.isSwitchingAudio) return setPlaying(!_playAfterAudioSwitch);
     // Against what the viewer sees, not a toggle the switch could run into.
     if (state.isSwitchingTrack) return setPlaying(!_engine.playing);
     return _engine.playOrPause();
@@ -1019,6 +1094,11 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.isUnplayable) return Future<void>.value();
     if (value && _heldAtEnd) return _replayHeld();
     if (state.isLoading) return _wantWhileLoading(value);
+    // A track switch holds the video stopped, and a press is the state it ends in.
+    if (state.isSwitchingAudio) {
+      _playAfterAudioSwitch = value;
+      return Future<void>.value();
+    }
     // A switch in place ends by restarting playback, and a press made meanwhile has to be the
     // state it ends in: noted here, applied when it ends (see [_switchInPlace]).
     if (state.isSwitchingTrack) _playIntentDuringSwitch = value;
@@ -1108,6 +1188,13 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// 4.1 s. It is what holds the black cover over the surface.
   Future<void> switchQuality(PlaybackVariant variant, {bool force = false, bool hideCover = false, bool reopen = false}) async {
     if (!force && state.variant == variant) return;
+    // An audio track switch is under way and its new ladder is not here yet: the height is kept,
+    // and [chooseAudioTrack] switches to it from the new ladder when it lands.
+    if (!force && state.switchingAudioTrackId != null) {
+      _preferredHeight = variant.height;
+      state = state.copyWith(preferredHeight: variant.height, qualityAfterAudioSwitch: variant);
+      return;
+    }
     // In place when the engine can: no cover, no reopen. [force] and [reopen] are the callers
     // that want the media opened again (a stuck restore, the fallback below).
     if (!force && !reopen && !state.isLoading && !state.isSwitchingQuality && state.hold == null) {
@@ -1272,6 +1359,140 @@ class PlaybackController extends Notifier<PlaybackState> {
       _queuedPick = null;
       if (!_disposed && generation == _generation) state = state.copyWith(isSwitchingTrack: false);
     }
+  }
+
+  /// Play the video with another of its audio tracks (Task 39, `protocol.md` §3.5).
+  ///
+  /// **`playback.open` with `preload: true` and the track**: a whole new source whose variants
+  /// carry it, signed on demand from the `/player` response the sidecar already holds, and no
+  /// second session (a preload opens none), so the watch is not counted twice and the reports keep
+  /// going to this one. Then the media changes the way a quality switch does: the engine's second
+  /// player opens the same video with the new audio, aims it past the clock and swaps there
+  /// ([PlaybackEngine.switchAudio]); where it cannot, the media is reopened at the position, with
+  /// the play state, the captions and the volume as they were. The clock never goes back.
+  ///
+  /// **The video stops while it switches** ([PlaybackState.isSwitchingAudio]): the frame holds, the
+  /// spinner shows, and it plays again once the new track is in, if it was playing.
+  ///
+  /// Only once the new audio is in does [PlaybackState.source] become the new one, so every
+  /// later quality switch, recovery reopen and audio-only toggle stays on the chosen track.
+  ///
+  /// **A pick made while the player is busy waits its turn** (a quality switch, or the clock held
+  /// after a restore or a reopen): the menu ticks it, as busy, at once, a later pick replaces it,
+  /// and picking the playing track again cancels it. Once its switch has started, another pick is
+  /// ignored (two swaps in flight would drop each other's standby). A quality picked during a track
+  /// switch is kept, ticked, and switched to from the new ladder afterwards.
+  Future<void> chooseAudioTrack(String trackId) async {
+    final item = state.item;
+    final source = state.source;
+    if (item == null || source == null || state.isLoading || state.error != null) return;
+    if (!source.audioTracks.any((track) => track.id == trackId)) return;
+    final pending = state.switchingAudioTrackId;
+    if (pending != null && !_audioPickWaiting) return;
+    if (trackId == (pending ?? source.audioTrackId)) return;
+
+    final token = ++_audioSwitch;
+    final previousChoice = pending != null ? _choiceBeforeSwitch : _audioChoice;
+    _choiceBeforeSwitch = previousChoice;
+    if (trackId == source.audioTrackId) {
+      // Back to the track that plays, while another pick waited: that pick is called off.
+      _audioPickWaiting = false;
+      _audioChoice = previousChoice;
+      await _finishAudioSwitch();
+      return;
+    }
+    final opens = _opens;
+    _audioChoice = (videoId: item.id, trackId: trackId);
+    state = state.copyWith(switchingAudioTrackId: trackId);
+    bool stillWanted() => !_disposed && token == _audioSwitch && opens == _opens && state.item?.id == item.id;
+
+    try {
+      // Its turn: a reopen, a quality switch or a seek back holding the clock would race the swap.
+      // A Dart field read, not the engine's (invariant 9), and capped like the hold itself.
+      _audioPickWaiting = true;
+      final giveUpAt = DateTime.now().add(const Duration(seconds: 30));
+      while (state.isChangingQuality || state.hold != null || _inPlaceBusy) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (!stillWanted()) return;
+        if (DateTime.now().isAfter(giveUpAt)) {
+          stderr.writeln('rill: audio track $trackId waited 30 s for the player and was given up');
+          _audioChoice = previousChoice;
+          return;
+        }
+      }
+      _audioPickWaiting = false;
+      final playing = state.source;
+      if (playing == null) return;
+      final started = DateTime.now();
+
+      // **Stopped while it switches**, with the spinner up: the paused swap is then a flip at the
+      // exact position (the second player aims at a clock that stands still), and the reopen
+      // fallback opens paused. [_finishAudioSwitch] plays again if it was playing.
+      _playAfterAudioSwitch = _engine.playing;
+      state = state.copyWith(isSwitchingAudio: true);
+      if (_playAfterAudioSwitch) await _engine.pause();
+      if (!stillWanted()) return;
+
+      final response = await RpcClient.instance.call('playback.open', {
+        'videoId': item.id,
+        'preload': true,
+        'audioTrackId': trackId,
+      });
+      if (!stillWanted()) return;
+      final fresh = PlaybackSource.fromJson(response as Map<String, dynamic>);
+      if (fresh.audioTrackId != trackId) {
+        // The sidecar no longer has it (`audioTrackId` is always the truth): keep what plays.
+        stderr.writeln('rill: audio track $trackId is no longer offered; keeping ${playing.audioTrackId}');
+        _audioChoice = previousChoice;
+        return;
+      }
+      // This watch's session, not the preload's, which is not reportable (§3.6).
+      final next = fresh.copyWith(sessionId: playing.sessionId);
+      final current = state.variant;
+      final variant = next.variants.where((v) => current != null && v.height == current.height && v.fps == current.fps).firstOrNull ??
+          variantFor(next.variants, _preferredHeight);
+      if (variant == null) {
+        _audioChoice = previousChoice;
+        return;
+      }
+
+      final result = await _engine.switchAudio(variant);
+      if (!stillWanted()) return;
+      if (result == VideoSwitch.done) {
+        state = state.copyWith(source: next, variant: variant, audioMissing: _engine.audioMissing);
+        stderr.writeln('rill: audio track -> $trackId by the second player in ${DateTime.now().difference(started).inMilliseconds} ms');
+      } else {
+        // The fallback: the media reopened where the clock is, as a refused quality switch is.
+        stderr.writeln('rill: audio track -> $trackId: second player ${result.name}, reopening at the position');
+        state = state.copyWith(source: next);
+        await switchQuality(variant, force: true);
+      }
+    } on Object catch (e) {
+      if (!stillWanted()) return;
+      stderr.writeln('rill: audio track $trackId failed: $e');
+      _audioChoice = previousChoice;
+    } finally {
+      if (token == _audioSwitch) _audioPickWaiting = false;
+      if (!_disposed && token == _audioSwitch && opens == _opens) await _finishAudioSwitch();
+    }
+  }
+
+  /// The end of a track switch, landed or not: the menu and the spinner stop showing it, the video
+  /// plays again if it was playing, and a quality picked meanwhile is switched to from the ladder
+  /// that plays now. Only that pick: the rung the switch
+  /// itself kept (the same height and fps) is not second-guessed by [variantFor], which would move
+  /// a viewer on a 1080p30 rung to the 1080p60 one ranked above it.
+  Future<void> _finishAudioSwitch() async {
+    final picked = state.qualityAfterAudioSwitch;
+    final wasSwitching = state.isSwitchingAudio;
+    state = state.copyWith(switchingAudioTrackId: null, isSwitchingAudio: false, qualityAfterAudioSwitch: null);
+    if (wasSwitching && _playAfterAudioSwitch && !_engine.playing) await _engine.play();
+    _playAfterAudioSwitch = false;
+    final now = state.variant;
+    if (picked == null || now == null || (picked.height == now.height && picked.fps == now.fps)) return;
+    final wanted = state.variants.where((v) => v.height == picked.height && v.fps == picked.fps).firstOrNull ??
+        variantFor(state.variants, picked.height);
+    if (wanted != null && wanted != now) unawaited(switchQuality(wanted));
   }
 
   /// Turn the video track off or on for audio-only, without reopening.

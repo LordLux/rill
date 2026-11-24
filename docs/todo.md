@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 118.** A new item takes it, and the same edit bumps this line.
+**Next number: 119.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -564,46 +564,28 @@ chip.
 **Done when:** the chips YouTube returns for a query show above the results, and
 choosing one reloads through its token.
 
-### 84. Videos with AI dubs can play in the wrong language
+### 84. Audio track language preferences (waits for item 69)
 
-Reported 2026-10-01. Some videos open with a dubbed audio track instead of the
-original. Example: `MLgrNktS67c` (Xisumavoid, English only) played in another
-language in rill, and correctly on youtube.com. It carries dozens of audio
-tracks, most of them YouTube's automatic AI dubs.
+Reported 2026-10-01 as "videos with AI dubs play in the wrong language" (`MLgrNktS67c` opened in
+a dub). **Points 1 and 2 landed with Task 39** (`architecture.md` F65, `protocol.md` §3.5): the
+original track plays by default on every tier that carries tracks, read from `xtags`
+`acont=original`, and the player's settings menu has an *Audio track* page that switches track
+through the second player, the choice sticking for the video. What is left is the preference:
 
-**The cause is visible in the code.** `rankAudio` (`playback/resolve.ts`) picks
-the audio by DRC, then stereo before surround, then **bitrate**. It knows nothing
-about languages, and the parser keeps no track information at all
-(`parser/player.ts` maps `isDrc` and nothing like it), so with dozens of
-same-itag tracks whichever has the highest bitrate wins. Each adaptive audio
-format describes its track: an `audioTrack` object (display name, id, an
-is-default flag) and track tags in the URL (`xtags`: original, dubbed or
-auto-dubbed, and the language). Which of these the `VISIONOS` response actually
-carries is unmeasured. Check the other ladder tiers (yt-dlp, the itag 18 floor)
-too.
+- **A switch to "play a dubbed track in my language when there is one"**, off by default, and
+  **an ordered list of preferred languages**, on the settings page (item 69). The ranking is
+  `trackRank` in `sidecar/src/playback/audio-tracks.ts`; a preference would be a parameter of
+  `playback.open` (beside `audioTrackId`) that a track whose `lang` matches wins over the original,
+  so it holds across videos where `audioTrackId` is one video's choice.
+- **youtube.com keeps its own version at `youtube.com/account_playback`.** Measure whether the
+  signed-in account's setting can be read; otherwise keep it local. The resolve path is anonymous
+  (CLAUDE.md, "Browse and resolve are different clients"), so an account setting would be read on
+  the browse session and handed over, never by resolving signed in.
 
-**Wanted, in order:**
+**Done when:** with a preferred language set, a video with a dub in it opens in that dub, and one
+without opens in the original; with the switch off, every video opens in its original.
 
-1. **Original audio by default.** Parse the track fields into `PlayerFormat`,
-   and rank the original (or the track YouTube marks as the default) first.
-   This alone fixes the report.
-2. **An "Audio track" entry in the player's settings menu,** as youtube.com has,
-   to switch track for the current video. Signing every track's URL up front is
-   wasteful with dozens of them, so list the tracks and sign the chosen one on
-   demand. That is a new protocol method or a `PlaybackSource` field, measured
-   and specified first.
-3. **Later, with the settings page (item 69):** a switch to "play a dubbed track
-   in my language when there is one" (off by default), and an ordered list of
-   preferred languages. youtube.com keeps its version of these at
-   `youtube.com/account_playback`. Measure whether the account's own setting can
-   be read for the signed-in user; otherwise keep it local.
-
-**Done when:** `MLgrNktS67c` and a few other multi-track videos play their
-original audio on every tier. A test with a fixture holding several tracks shows
-the original ranked first even when a dub has a higher bitrate. Mutation: rank by
-bitrate alone, and the test fails.
-
-(Added 2026-10-01 as item 83; that edit was lost when Task 32 rewrote this file, and the number went to its follow-ups, so this is 84.)
+(Added 2026-10-01 as item 83; that edit was lost when Task 32 rewrote this file, and the number went to its follow-ups, so this is 84. Narrowed to point 3 by Task 39, 2026-11-22.)
 
 ### 105. The previous video's last frame stays on the player when another video replaces it
 
@@ -1731,6 +1713,59 @@ check the same path from F6 (the miniplayer reached by F6) and from the session 
 **Done when:** a test in the style of `test/focus_traversal_test.dart` opens the watch page from a
 focused miniplayer with and without a queue and finds focus on the player, and
 `RILL_FOCUS_PROBE=watch` still reads clean.
+
+---
+
+### 118. A channel's custom seek bar: its colour and playhead image
+
+**Measured 2026-11-23, nothing integrated.** For a limited time, YouTube gives a channel's long-form
+videos a coloured seek bar and an image instead of the scrubber dot. Examples: YOASOBI's pink bar with
+a sakura (`qwYhKlY4Tx0`), and Mrs. GREEN APPLE's green bar with an apple (`zq9B35oai2w`). Live streams
+and Shorts are excluded. Where it is, from the web player's own code:
+
+```
+/next → playerOverlays.playerOverlayRenderer.decoratedPlayerBarRenderer.decoratedPlayerBarRenderer
+  progressColor: 4294790836          // uint32 ARGB; the web player keeps only the low 24 bits → #FD4EB4
+  playhead.decoratedPlayheadRenderer.{playheadImage, playheadFastForwardImage, playheadRewindImage}
+    .thumbnails[0].url               // gstatic /youtube/img/promos/<sha>_96x96.png, 96 px only
+```
+
+It is not in `/player`. The same object always carries the "In this video" timeline button, so its
+presence means nothing. Only these two fields mark a campaign. In both samples the three image
+URLs were identical.
+
+**How the web player draws it:**
+- The played part becomes the solid colour, replacing the red gradient.
+- The image, drawn at 24 px, replaces the scrubber dot.
+- The image fades out while the seek pill ("+10 seconds") shows, and the pill takes the colour.
+
+**Why a live request from here returns nothing.** Each campaign is time-boxed per channel:
+- Mrs. GREEN APPLE ran 2026-09-29 to 10-28 (YouTube JP blog).
+- YOASOBI's was still on 11-10 17:13 UTC and gone by 11-16.
+
+It also looks **region-gated by IP**. In the Wayback captures (all signed out), hits came from the
+US, Canada, Taiwan and Azerbaijan. Every capture from the EU or the Nordics missed, and one US capture
+missed too. So an Italian connection likely never gets it, and a test against live responses will
+almost always show nothing.
+
+**To do:**
+- Sidecar: two nullable fields on `VideoDetail`, read in the watch `/next` parse:
+  - an RGB colour (alpha dropped, as the web player does);
+  - the playhead image URL.
+  Update the contract docs together (`contract-docs.test.ts`).
+- Fixtures can only come from archived captures. One made that way cannot be recaptured, so declare it
+  `CARRIED` in `src/fixtures.ts` with that reason, and keep the raw HTML out of the tree.
+- App: `ScrubberBar` paints the played part in the colour and draws the image in place of its
+  thumb.
+  - The image is decorative (`excludeFromSemantics`). It changes nothing the scrubber announces.
+  - The thumb stays visible exactly when it does today.
+  - The colour still needs enough contrast against the unplayed track; fall back to the default
+    otherwise.
+
+**Done when:** a parser test over an archived sample reads both fields, and a capture without a
+campaign reads both as `null`. The watch page also has to draw them, with a preview in
+`scrubber_bar.dart`, checked in the running app with a hard-coded sample. A live one is not
+reachable from here.
 
 ---
 

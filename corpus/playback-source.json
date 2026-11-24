@@ -1,0 +1,60 @@
+{
+  "sessionId": "SESSION_ID",
+  "durationMs": 634000,
+  "startTimestamp": null,
+  "storyboardTemplate": null,
+  "posterUrl": null,
+  "qualityDegraded": false,
+  "transport": "plain",
+  "audioTracks": [
+    {
+      "id": "track_001",
+      "displayName": "Sanitised Track 1",
+      "isOriginal": true,
+      "isDubbed": false,
+      "isAutoDubbed": false
+    },
+    {
+      "id": "track_002",
+      "displayName": "Sanitised Track 2",
+      "isOriginal": false,
+      "isDubbed": false,
+      "isAutoDubbed": true
+    },
+    {
+      "id": "track_003",
+      "displayName": "Sanitised Track 3",
+      "isOriginal": false,
+      "isDubbed": false,
+      "isAutoDubbed": true
+    },
+    {
+      "id": "track_004",
+      "displayName": "Sanitised Track 4",
+      "isOriginal": false,
+      "isDubbed": true,
+      "isAutoDubbed": false
+    }
+  ],
+  "audioTrackId": "track_001",
+  "variants": [
+    {
+      "videoUrl": "https://fake.url/video1",
+      "audioUrl": "https://fake.url/audio1",
+      "itag": null,
+      "height": 1080,
+      "fps": 30,
+      "videoCodec": "vp9",
+      "audioCodec": "opus"
+    },
+    {
+      "videoUrl": "https://fake.url/video2",
+      "audioUrl": "https://fake.url/audio1",
+      "itag": null,
+      "height": 720,
+      "fps": 30,
+      "videoCodec": "vp9",
+      "audioCodec": "opus"
+    }
+  ]
+}

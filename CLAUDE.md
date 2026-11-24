@@ -210,6 +210,18 @@ interface Chip {
   selected: boolean;
   scope: 'feed' | 'shelf';          // chipCloudChipRenderer vs ChipsShelfView
 }
+
+// --- Audio tracks (Task 39) ---
+// Not a FeedItem: PlaybackSource carries `audioTracks: AudioTrack[]` and `audioTrackId`
+// (protocol.md §3.5). The original plays by default, read from xtags, never from a name.
+
+interface AudioTrack {
+  id: string;                       // YouTube's own, opaque; what playback.open's audioTrackId names
+  displayName: string;              // YouTube's, minus its own "original" wording (the app badges it)
+  isOriginal: boolean;              // xtags acont=original
+  isDubbed: boolean;                // acont=dubbed — the creator's own dub
+  isAutoDubbed: boolean;            // acont=dubbed-auto — YouTube's AI dub
+}
 ```
 
 Rules:

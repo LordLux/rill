@@ -102,7 +102,7 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // `WL` is Watch Later's fixed, public playlist id (the save dialog's row) — a
   // constant every account shares, so it identifies nobody. Every other id is
   // replaced.
-  id: /^((vid|mix|list|chan|item|cmt|post)_\d{3,}|WL)$/,
+  id: /^((vid|mix|list|chan|item|cmt|post|track)_\d{3,}|WL)$/,
   channelId: /^chan_\d{3,}$/,
 
   // Indexed so a mapper that gives every item the same value cannot pass.
@@ -198,6 +198,19 @@ const SANITISED_SHAPE: Record<string, RegExp> = {
   // pinned to a tag shape rather than exempted, because "en" passing and an
   // arbitrary string passing are different properties.
   languageCode: /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$/,
+
+  // PlaybackSource (Task 39's `playback-source.json`). The session and the stream URLs are
+  // placeholders; the codecs and the transport are the sidecar's own vocabulary. A track's id is
+  // replaced like any other id (`track_NNN` above), and its name too: language names identify
+  // nobody, but the corpus is a shape reference.
+  sessionId: /^SESSION_ID$/,
+  transport: /^(plain|hls|dash|sabr-dash|ytdlp)$/,
+  videoUrl: /^https:\/\/fake\.url\/video\d+$/,
+  audioUrl: /^https:\/\/fake\.url\/audio\d+$/,
+  videoCodec: /^[a-z0-9.]+$/,
+  audioCodec: /^[a-z0-9.]+$/,
+  displayName: /^Sanitised Track \d+$/,
+  audioTrackId: /^track_\d{3,}$/,
 };
 
 /** Shapes that must never occur in the corpus, whatever field they sit in. */

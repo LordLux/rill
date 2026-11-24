@@ -462,6 +462,29 @@ class SwappingEngine implements PlaybackEngine {
     return _active.switchVideo(variant);
   }
 
+  /// Another audio track (Task 39): the second player, and nothing in between. The in-place switch
+  /// cannot help (it adds a video to the open audio), so a swap that cannot be made answers
+  /// [VideoSwitch.refused] and the caller reopens at the position, as a refused quality switch
+  /// does. Nothing else differs from a quality switch: the standby opens the variant (its audio as
+  /// the file, its video added, F60), is aimed past the clock and swapped in there, with the
+  /// captions, the volume and the play state carried over.
+  @override
+  Future<VideoSwitch> switchAudio(PlaybackVariant variant) async {
+    if (variant.audioUrl == null || !_wantsSecondPlayer()) return VideoSwitch.unsupported;
+    try {
+      await _swapTo(variant);
+      _failures = 0;
+      return VideoSwitch.done;
+    } on _SwapAbandoned catch (abandoned) {
+      _say('second player (audio track): ${abandoned.why}; reopening');
+    } on Object catch (error) {
+      _failures++;
+      _say('second player (audio track) failed ($error, $_failures in a row); reopening');
+    }
+    await _dropStandby();
+    return VideoSwitch.refused;
+  }
+
   bool _wantsSecondPlayer() =>
       enabled && !_disposed && _failures < tuning.maxFailures && _mountedSurfaces > 0 && _active.videoEnabled;
 

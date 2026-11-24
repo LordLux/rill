@@ -12,6 +12,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widget_previews.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 
@@ -74,7 +75,10 @@ const Duration settingsMenuFade = Duration(milliseconds: 120);
 ///
 /// The sleep timer's three pages (Task 38) are under the root: [sleepTimer] one level down, and its
 /// *Custom…* and *When it ends* pages under that.
-enum SettingsPage { root, moreOptions, quality, captions, captionStyle, forceStyle, sleepTimer, sleepTimerCustom, sleepTimerAction }
+///
+/// [audioTrack] (Task 39) is under the root, one level down, and is reachable only when the video
+/// has more than one audio track.
+enum SettingsPage { root, moreOptions, quality, captions, captionStyle, forceStyle, sleepTimer, sleepTimerCustom, sleepTimerAction, audioTrack }
 
 @immutable
 class PlayerMenuState {
@@ -140,7 +144,7 @@ class PlayerMenuController extends Notifier<PlayerMenuState> {
   /// level — see [SettingsPage].
   bool back() {
     final up = switch (state.page) {
-      SettingsPage.moreOptions || SettingsPage.sleepTimer => SettingsPage.root,
+      SettingsPage.moreOptions || SettingsPage.sleepTimer || SettingsPage.audioTrack => SettingsPage.root,
       SettingsPage.sleepTimerCustom || SettingsPage.sleepTimerAction => SettingsPage.sleepTimer,
       _ => null,
     };
@@ -351,7 +355,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
   }
 
   static int _depthOf(SettingsPage page) => switch (page) {
-    SettingsPage.moreOptions || SettingsPage.captionStyle || SettingsPage.sleepTimer => 1,
+    SettingsPage.moreOptions || SettingsPage.captionStyle || SettingsPage.sleepTimer || SettingsPage.audioTrack => 1,
     SettingsPage.sleepTimerCustom || SettingsPage.sleepTimerAction => 2,
     _ => 0,
   };
@@ -384,6 +388,7 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
         SettingsPage.sleepTimer => const _SleepTimerPage(),
         SettingsPage.sleepTimerCustom => const _SleepCustomPage(),
         SettingsPage.sleepTimerAction => const _SleepActionPage(),
+        SettingsPage.audioTrack => const _AudioTrackPage(),
       },
     );
 
@@ -487,8 +492,6 @@ class _PlayerSettingsMenuState extends ConsumerState<PlayerSettingsMenu> {
 /// engine has no rate control to drive it and wiring one is a
 /// `data/playback/engine.dart` change rather than a menu change.
 const List<({IconData icon, String label})> _rootPlaceholders = [
-  (icon: Icons.multitrack_audio, label: 'Audio track'),
-  (icon: Icons.subtitles_outlined, label: 'Subtitle track / CC'),
   (icon: Icons.slow_motion_video, label: 'Playback speed'),
 ];
 
@@ -560,6 +563,7 @@ class _RootPage extends ConsumerWidget {
           },
         ),
         const _SleepTimerRow(),
+        const _AudioTrackRootRow(),
         for (final row in _rootPlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );
@@ -830,7 +834,10 @@ class _QualityPage extends ConsumerWidget {
     final playback = ref.watch(playbackProvider);
     final engine = ref.watch(playbackEngineProvider);
     final variants = distinctQualities(playback.variants);
-    final current = playback.variant;
+    // A quality picked during an audio track switch is ticked at once too, and shown busy: it is
+    // switched to once the track has landed (Task 39).
+    final picked = playback.qualityAfterAudioSwitch;
+    final current = picked ?? playback.variant;
 
     return _MenuBody(
       // **No back arrow: there is nothing above this.** Quality has its own bar
@@ -842,7 +849,7 @@ class _QualityPage extends ConsumerWidget {
         stream: engine.heightStream,
         initialData: engine.height,
         builder: (context, snapshot) {
-          final actual = snapshot.data ?? current?.height;
+          final actual = snapshot.data ?? playback.variant?.height;
           return _MenuHeader(
             title: 'Quality',
             // Height only, no fps: it is mpv's number, and mpv reports a height.
@@ -880,7 +887,7 @@ class _QualityPage extends ConsumerWidget {
             // entry at all.
             selected: current != null && variant.height == current.height && variant.fps == current.fps,
             // The tick moves to the picked row at once, before that quality has loaded.
-            loading: playback.isChangingQuality,
+            loading: playback.isChangingQuality || picked != null,
             onTap: () => onPicked(variant),
           ),
         // **Last, and deliberately dead** (task §3): automatic stepping needs a
@@ -1840,6 +1847,8 @@ class _StyleSlider extends StatelessWidget {
 // --- The sleep timer (Task 38, `architecture.md` §2.18) ---
 
 const Key playerSleepTimerRowKey = ValueKey('player-sleep-timer-row');
+const Key playerAudioTrackRowKey = ValueKey('player-audio-track-row');
+const Key playerAudioTrackMenuKey = ValueKey('player-audio-track-menu');
 const Key playerSleepTimerMenuKey = ValueKey('player-sleep-timer-menu');
 const Key playerSleepCustomRowKey = ValueKey('player-sleep-custom-row');
 const Key playerSleepActionRowKey = ValueKey('player-sleep-action-row');
@@ -2249,3 +2258,181 @@ class _SleepStepper extends StatelessWidget {
     );
   }
 }
+
+/// *Audio track* on the root page (Task 39): only when the video has more than one, reading the
+/// track that plays (or is being switched to).
+class _AudioTrackRootRow extends ConsumerWidget {
+  const _AudioTrackRootRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final tracks = ref.watch(playbackProvider.select((p) => p.audioTracks));
+    final currentId = ref.watch(playbackProvider.select((p) => p.audioTrackId));
+    if (tracks.length < 2) return const SizedBox.shrink();
+    final current = tracks.where((track) => track.id == currentId).firstOrNull;
+    return _MenuRow(
+      key: playerAudioTrackRowKey,
+      icon: Icons.multitrack_audio,
+      label: 'Audio track',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (current != null)
+            Text(current.displayName, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          const SizedBox(width: 4),
+          const Icon(Icons.chevron_right, size: 18),
+        ],
+      ),
+      onTap: () => ref.read(playerMenuProvider.notifier).go(SettingsPage.audioTrack),
+    );
+  }
+}
+
+/// The video's audio tracks, the original first, the one playing ticked (Task 39).
+///
+/// The rows use YouTube's names, without the word "original" (the sidecar removes YouTube's own
+/// wording for it, `protocol.md` §3.5), and the markers become badges: *Original*, and *AI dub* for
+/// YouTube's automatic dubs. A dub the creator uploaded is a plain row. Picking one switches the
+/// audio where the video is, through the second player, with the video stopped and the spinner up
+/// until the new track is in.
+class _AudioTrackPage extends ConsumerWidget {
+  const _AudioTrackPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playback = ref.watch(playbackProvider);
+    final controller = ref.read(playbackProvider.notifier);
+    final menu = ref.read(playerMenuProvider.notifier);
+    final tracks = playback.audioTracks;
+    final currentId = playback.audioTrackId;
+    final current = tracks.where((track) => track.id == currentId).firstOrNull;
+
+    return _MenuBody(
+      key: playerAudioTrackMenuKey,
+      header: _MenuHeader(title: 'Audio track', onBack: menu.back, value: current?.displayName),
+      children: [
+        // The video changed under an open page and has one track: nothing to choose.
+        if (tracks.length < 2)
+          const _MenuRow(icon: Icons.multitrack_audio, label: 'Only one for this video', onTap: null)
+        else
+          for (final track in tracks)
+            AudioTrackOptionRow(
+              key: ValueKey('player-audio-track-${track.id}'),
+              track: track,
+              selected: track.id == currentId,
+              switching: track.id == playback.switchingAudioTrackId,
+              // Always enabled: a disabled control cannot hold focus (Task 32), and the row just
+              // pressed is the one the reopen fallback makes busy. A press while the player is busy
+              // is ticked and waits its turn; one after the switch has started is ignored.
+              onTap: () => unawaited(controller.chooseAudioTrack(track.id)),
+            ),
+      ],
+    );
+  }
+}
+
+/// One audio track: a tick, YouTube's name, and a badge for the original or an AI dub.
+///
+/// **One spoken name per row** (CLAUDE.md, Accessibility): the badge is drawn, and said once as
+/// part of the label — "Hindi, AI dub" — with `selected` for the tick, the way [_CaptionRow] does.
+class AudioTrackOptionRow extends StatelessWidget {
+  const AudioTrackOptionRow({super.key, required this.track, required this.selected, required this.onTap, this.switching = false});
+
+  final AudioTrackOption track;
+  final bool selected;
+
+  /// The pick is being switched to: the tick is already here, quieter until the track is in (the
+  /// spinner is the player's own, over the stopped video).
+  final bool switching;
+  final VoidCallback? onTap;
+
+  /// The badge, or null for a plain row (a creator's own dub, a track with no marker).
+  String? get badge => track.isOriginal ? 'Original' : (track.isAutoDubbed ? 'AI dub' : null);
+
+  /// What a screen reader says: the name, then the badge in words ("AI" kept in capitals, so it is
+  /// spelled out rather than read as a word).
+  String get spokenLabel => switch (badge) {
+        null => track.displayName,
+        'Original' => '${track.displayName}, original',
+        final other => '${track.displayName}, $other',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final badge = this.badge;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check,
+            size: 16,
+            // Transparent rather than absent, so the ticked row is the one that does not move.
+            color: selected ? (switching ? scheme.primary.withValues(alpha: 0.5) : scheme.primary) : Colors.transparent,
+          ),
+          const SizedBox(width: 8),
+          // Expanded, so the badge sits at the row's right edge and the badges line up in a column.
+          Expanded(
+            child: Text(
+              track.displayName,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: onTap == null && !selected ? scheme.onSurfaceVariant : scheme.onSurface),
+            ),
+          ),
+          // The same chip a caption track's sub-name wears: part of what tells two rows apart.
+          if (badge != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(4)),
+              child: Text(badge, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+            ),
+          ],
+        ],
+      ),
+    );
+    return MergeSemantics(
+      child: Semantics(
+        selected: selected,
+        button: true,
+        enabled: onTap != null,
+        label: spokenLabel,
+        // The drawn name and badge are excluded, so the label above is said once; the `InkWell`
+        // stays outside the exclusion, so the row keeps its tap action and its focus.
+        child: onTap == null ? ExcludeSemantics(child: row) : InkWell(onTap: onTap, child: ExcludeSemantics(child: row)),
+      ),
+    );
+  }
+}
+
+@Preview(name: 'Audio track rows')
+Widget audioTrackRowsPreview() => MaterialApp(
+      home: Material(
+        child: SizedBox(
+          width: 260,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AudioTrackOptionRow(
+                track: const AudioTrackOption(id: 'en-US.4', displayName: 'English (US)', isOriginal: true),
+                selected: false,
+                onTap: () {},
+              ),
+              AudioTrackOptionRow(
+                track: const AudioTrackOption(id: 'hi.10', displayName: 'Hindi', isAutoDubbed: true),
+                selected: false,
+                onTap: () {},
+              ),
+              AudioTrackOptionRow(
+                track: const AudioTrackOption(id: 'es.3', displayName: 'Spanish', isDubbed: true),
+                selected: true,
+                switching: true,
+                onTap: () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );

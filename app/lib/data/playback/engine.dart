@@ -227,6 +227,14 @@ abstract class PlaybackEngine {
   /// old quality playing and is reported, never thrown, so the caller can reopen.
   Future<VideoSwitch> switchVideo(PlaybackVariant variant);
 
+  /// Change to [variant] when its **audio** is not the open media's: another audio track of the
+  /// same video (Task 39). Never in place, because the audio is the file mpv opened and every
+  /// video is added to it (F60). [SwappingEngine] does it with its second player, exactly as it
+  /// does a quality switch; anything else answers [VideoSwitch.unsupported], and so does a muxed
+  /// variant, and the caller reopens at the position. Like [switchVideo], a failure is reported,
+  /// never thrown, and leaves the old audio playing.
+  Future<VideoSwitch> switchAudio(PlaybackVariant variant);
+
   Future<void> dispose();
 }
 
@@ -1095,6 +1103,10 @@ class MediaKitEngine implements SwapSlot {
     await _removeVideos(keep: id);
     return VideoSwitch.done;
   }
+
+  /// One player cannot change the file it plays without reopening it: [SwappingEngine] does this.
+  @override
+  Future<VideoSwitch> switchAudio(PlaybackVariant variant) async => VideoSwitch.unsupported;
 
   /// What the app last asked for, which [open] honours rather than overriding.
   ///

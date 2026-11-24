@@ -108,7 +108,7 @@ Future<void> boot({bool setting = false}) async {
 Future<void> settle([int millis = 200]) => Future<void>.delayed(Duration(milliseconds: millis));
 
 /// A stored session: three videos, the second playing, 95 s in.
-void leaveSession({List<String> ids = const ['aaa', 'bbb', 'ccc'], DateTime? savedAt, SnapshotPage page = const SnapshotPage(SnapshotPageKind.watch), SnapshotMix? mix}) {
+void leaveSession({List<String> ids = const ['aaa', 'bbb', 'ccc'], DateTime? savedAt, SnapshotPage page = const SnapshotPage(SnapshotPageKind.watch), SnapshotMix? mix, String? audioTrackId}) {
   store.queue = SnapshotQueue(
     videos: [for (final id in ids) SnapshotVideo(id: id, title: 'Video $id', channelName: 'Channel', thumbnailUrl: 'https://i.ytimg.com/vi/$id/hq.jpg')],
     currentIndex: 1,
@@ -120,6 +120,7 @@ void leaveSession({List<String> ids = const ['aaa', 'bbb', 'ccc'], DateTime? sav
     savedAtMs: (savedAt ?? DateTime.now()).millisecondsSinceEpoch,
     volume: 40,
     preferredHeight: 720,
+    audioTrackId: audioTrackId,
   ).encode();
 }
 
@@ -157,6 +158,17 @@ void main() {
       expect(engine.volumes, contains(40));
       expect(container.read(playbackProvider.notifier).preferredHeight, 720);
       expect(pages, [const SnapshotPage(SnapshotPageKind.watch)]);
+    });
+
+    test('the audio track chosen comes back with its video (Task 39)', () async {
+      await boot(setting: true);
+      leaveSession(ids: const ['aaa', 'tracks1', 'ccc'], audioTrackId: 'hi.10');
+
+      await start();
+
+      expect(engine.opened.single.audioUrl, endsWith('/audio/hi.10'), reason: 'playback.open asked for the track');
+      expect(container.read(playbackProvider).source?.audioTrackId, 'hi.10');
+      expect(container.read(playbackProvider.notifier).chosenAudioTrackId, 'hi.10', reason: 'and the next snapshot keeps it');
     });
 
     test('with the setting off and no update is a fresh start, and what was kept is removed', () async {

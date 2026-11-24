@@ -8,6 +8,9 @@ import { parseComments } from './parser/comments.ts';
 import { parseFeed } from './parser/feed.ts';
 import { parsePlaylistPage } from './parser/playlist.ts';
 import { parseVideoDetail } from './parser/video.ts';
+import { parsePlayer } from './parser/player.ts';
+import { chooseAudio } from './playback/audio-tracks.ts';
+import { rankAudio } from './playback/resolve.ts';
 import type {
   ArtistPanel,
   Chip,
@@ -17,6 +20,8 @@ import type {
   PostItem,
   Shelf,
   PlaylistResult,
+  PlaybackSource,
+  SignedUrl,
   VideoDetail,
   VideoItem,
 } from './types.ts';
@@ -431,8 +436,50 @@ async function main() {
 
   await exportPlaylistGet(files);
   await exportViewerState();
+  await exportPlaybackSource();
 
   audit();
+}
+
+/**
+ * A `PlaybackSource` with several audio tracks (Task 39), so the app's model is checked against
+ * `audioTracks` and `audioTrackId` as the sidecar ships them.
+ *
+ * **From the committed, hand-built fixture, through the real code**: `parsePlayer` reads the
+ * track fields and `xtags`, `rankAudio` and `chooseAudio` pick and list. A raw `/player` capture
+ * never reaches the corpus (or the repository) — the commit hook refuses one. The URLs, the
+ * session and the track ids and names are placeholders: none identifies anyone, but the corpus is
+ * a shape reference and a real stream URL is not one to keep.
+ */
+async function exportPlaybackSource(): Promise<void> {
+  const raw = JSON.parse(await readFile(join(ROOT, 'sidecar/test/data/player-audio-tracks.json'), 'utf8'));
+  const response = parsePlayer(raw);
+  const choice = chooseAudio(rankAudio(response.formats), null);
+  if (choice === null || choice.tracks.length < 2) throw new Error('player-audio-tracks.json lists no tracks');
+
+  const placeholder = new Map(choice.tracks.map((track, index) => [track.id, `track_${String(index + 1).padStart(3, '0')}`]));
+  const source: PlaybackSource = {
+    sessionId: 'SESSION_ID',
+    durationMs: response.durationSeconds === null ? null : response.durationSeconds * 1000,
+    startTimestamp: null,
+    storyboardTemplate: null,
+    posterUrl: null,
+    qualityDegraded: false,
+    transport: 'plain',
+    audioTracks: choice.tracks.map((track, index) => ({ ...track, id: placeholder.get(track.id)!, displayName: `Sanitised Track ${index + 1}` })),
+    audioTrackId: choice.audioTrackId === null ? null : placeholder.get(choice.audioTrackId)!,
+    variants: [1080, 720].map((height, index) => ({
+      videoUrl: `https://fake.url/video${index + 1}` as SignedUrl,
+      audioUrl: 'https://fake.url/audio1' as SignedUrl,
+      itag: null,
+      height,
+      fps: 30,
+      videoCodec: 'vp9',
+      audioCodec: choice.format.codecs ?? 'opus',
+    })),
+  };
+  await writeFile(join(CORPUS, 'playback-source.json'), JSON.stringify(source, null, 2), 'utf8');
+  log.info('exported sanitised playback-source.json');
 }
 
 /**
