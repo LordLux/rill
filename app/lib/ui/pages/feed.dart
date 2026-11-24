@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../page_wrapper.dart';
 import '../debug_player.dart';
 import '../feed_controller.dart';
-import '../widgets/accent_debug_button.dart';
 import '../widgets/feed_view.dart';
 
 class FeedPage extends StatelessWidget {
@@ -21,7 +20,6 @@ class FeedPage extends StatelessWidget {
         ),
       ),
       actions: [
-        const AccentDebugButton(),
         IconButton(
           icon: const Icon(Icons.bug_report),
           tooltip: 'Debug Player',

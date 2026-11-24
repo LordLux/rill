@@ -227,6 +227,23 @@ void main() {
       expect(container.read(playerMenuProvider).page, SettingsPage.moreOptions);
     });
 
+    testWidgets('More options holds only placeholders: its app-wide rows moved to the settings page', (tester) async {
+      container.read(playerMenuProvider.notifier).open();
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(playerSettingsMoreRowKey));
+      await tester.pumpAndSettle();
+
+      // Task 40: "Keep caption style" is Settings › Captions, "About & Licenses" is
+      // Settings › About. Neither may come back here as a second copy.
+      expect(find.text('Keep caption style'), findsNothing);
+      expect(find.text('About & Licenses'), findsNothing);
+      expect(find.byType(Switch), findsNothing, reason: 'a setting with a value of its own is back in the player menu');
+      for (final label in morePlaceholders) {
+        expect(find.text(label), findsOneWidget);
+      }
+    });
+
     testWidgets('morphs into More options and back, header sticky', (tester) async {
       container.read(playerMenuProvider.notifier).open();
       await tester.pumpWidget(host());

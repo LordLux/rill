@@ -1,6 +1,6 @@
 /// The yt-dlp surfaces — docs/todo.md 49. What a person sees: the avatar dot,
-/// the always-present yt-dlp row and its page, and the Updates page's info
-/// row. The controller's behaviour is asserted in `ytdlp_controller_test.dart`;
+/// the always-present yt-dlp row in the account menu, and the settings page's About
+/// section it opens, with yt-dlp's card and status row. The controller's behaviour is asserted in `ytdlp_controller_test.dart`;
 /// nothing here touches the network or the real filesystem.
 ///
 /// Severity (`YtDlpRowSeverity`) was revised 2026-09-28 after live testing:
@@ -9,7 +9,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/update/update_config.dart';
 import 'package:rill/domain/update/update_state.dart';
@@ -18,6 +17,8 @@ import 'package:rill/ui/auth_controller.dart';
 import 'package:rill/ui/update_controller.dart';
 import 'package:rill/ui/widgets/account_button.dart';
 import 'package:rill/ui/ytdlp_controller.dart';
+
+import 'settings_harness.dart';
 
 class _FixedAuth extends AuthController {
   _FixedAuth(this.initial);
@@ -73,14 +74,14 @@ Future<FixedYtDlp> pump(
   addTearDown(tester.view.reset);
   await tester.pumpWidget(const SizedBox());
   await tester.pumpWidget(
-    ProviderScope(
+    settingsTestApp(
       overrides: [
         authProvider.overrideWith(() => _FixedAuth(auth)),
         ytDlpControllerProvider.overrideWith(() => controller),
         updateControllerProvider.overrideWith(() => _IdleUpdate()),
         updateConfigProvider.overrideWithValue(UpdateConfig.resolve(releaseMode: false, version: '')),
       ],
-      child: MaterialApp(home: Scaffold(body: Center(child: child))),
+      home: Scaffold(body: Center(child: child)),
     ),
   );
   await tester.pump();
@@ -137,7 +138,7 @@ void main() {
     expect(find.text('Sign in'), findsOneWidget, reason: 'still the first action');
   });
 
-  testWidgets('the yt-dlp page explains it and offers both actions when undecided', (tester) async {
+  testWidgets('the row opens About, whose yt-dlp card explains it and offers both actions when undecided', (tester) async {
     await pump(tester, missingNoChoice);
     await openMenu(tester);
     await tester.tap(find.text('yt-dlp not installed'));
@@ -182,7 +183,7 @@ void main() {
     expect(find.text('yt-dlp is not installed'), findsOneWidget);
   });
 
-  testWidgets('a download finishing while the page is open shows an install-complete card', (tester) async {
+  testWidgets('a download finishing while About is open shows an install-complete card', (tester) async {
     final controller = await pump(tester, missingNoChoice);
     await openMenu(tester);
     await tester.tap(find.text('yt-dlp not installed'));
@@ -228,18 +229,18 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Try again'), findsOneWidget);
   });
 
-  testWidgets('the Updates page shows On PATH with no Download action', (tester) async {
+  testWidgets('About shows On PATH with no Download action', (tester) async {
     await pump(tester, onPath);
     await openMenu(tester);
     await tester.tap(find.text('Check for updates'));
     await tester.pumpAndSettle();
 
-    expect(find.text('yt-dlp'), findsOneWidget);
+    expect(find.text('Status'), findsOneWidget);
     expect(find.text('On PATH'), findsOneWidget);
     expect(find.text('Download'), findsNothing);
   });
 
-  testWidgets('the Updates page shows the installed version with no Download action', (tester) async {
+  testWidgets('About shows the installed version with no Download action', (tester) async {
     await pump(tester, appManaged);
     await openMenu(tester);
     await tester.tap(find.text('Check for updates'));
@@ -249,7 +250,7 @@ void main() {
     expect(find.text('Download'), findsNothing);
   });
 
-  testWidgets('the Updates page offers Download when missing, and it calls the controller', (tester) async {
+  testWidgets('About offers Download when missing, and it calls the controller', (tester) async {
     final controller = await pump(tester, missingDeclined);
     await openMenu(tester);
     await tester.tap(find.text('Check for updates'));

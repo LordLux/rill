@@ -1,33 +1,50 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../domain/feed_item.dart';
 
-/// Whether members-only videos appear in feeds at all.
+/// Whether members-only videos appear at all — the settings page's "Members-only videos"
+/// switch (Feeds › In every list).
 ///
-/// A provider rather than a bare `const`, even though nothing writes to it yet:
-/// the settings page that will own this is a later task, and the difference
-/// between "a const someone has to find and replace" and "a provider with a
-/// setter already wired to every surface" is the whole of that later task.
-/// Every surface already watches it, so turning it off becomes a one-line
-/// change in a settings screen rather than a refactor of the feed.
+/// **On by default** — showing them is what YouTube does, and a member who paid for the
+/// content should not have to go and find a switch to see it.
 ///
-/// Defaults to **true** — showing them is what YouTube does, and a member who
-/// paid for the content should not have to go and find a switch to see it.
-///
-/// Not persisted yet. When it is, this is the notifier that gains a
-/// `SharedPreferences` read in `build`, the same way `accentProvider` does.
+/// It applies wherever tiles are listed: every `FeedView` (home, subscriptions, search),
+/// the home page's rows, and the watch page's related list. Like the promoted switch it
+/// needs no request: the sidecar ships the flag and the app filters, so flipping it takes
+/// effect at once.
 class MembersOnlyVisible extends Notifier<bool> {
+  MembersOnlyVisible({this.initial = true});
+
+  final bool initial;
+
   @override
-  bool build() => true;
+  bool build() => initial;
 
   // ignore: avoid_positional_boolean_parameters
-  void set(bool value) => state = value;
+  Future<void> set(bool shown) async {
+    if (state == shown) return;
+    state = shown;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(membersOnlyVisibleKey, shown);
+    } catch (_) {
+      // A preference that did not stick still applied for this run.
+    }
+  }
 
-  void toggle() => state = !state;
+  Future<void> toggle() => set(!state);
 }
 
-final membersOnlyVisibleProvider =
-    NotifierProvider<MembersOnlyVisible, bool>(MembersOnlyVisible.new);
+const String membersOnlyVisibleKey = 'members_only_visible';
+
+final membersOnlyVisibleProvider = NotifierProvider<MembersOnlyVisible, bool>(MembersOnlyVisible.new);
+
+/// The stored value, for seeding [membersOnlyVisibleProvider] before `runApp`.
+Future<bool> readMembersOnlyVisible() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool(membersOnlyVisibleKey) ?? true;
+}
 
 /// Whether a feed item is members-only content.
 ///

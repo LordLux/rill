@@ -304,6 +304,10 @@ const List<Color?> captionPalette = [
   Color(0xFF9C27B0),
 ];
 
+/// What each [captionPalette] entry is called, in the same order — for a screen reader,
+/// which cannot see a swatch.
+const List<String> captionPaletteNames = ['Default', 'White', 'Black', 'Yellow', 'Green', 'Blue', 'Red', 'Purple'];
+
 const Color captionWhite = Color(0xFFFFFFFF);
 const Color captionBlack = Color(0xFF000000);
 

@@ -13,7 +13,7 @@ import 'package:rill/ui/feed_controller.dart';
 import 'package:rill/ui/promoted_preference.dart';
 import 'package:rill/ui/shelf_visibility.dart';
 import 'package:rill/ui/widgets/feed_view.dart';
-import 'package:rill/ui/widgets/home_feed_settings.dart';
+import 'package:rill/ui/settings/sections/feeds_section.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 VideoItem _video(String id, {bool promoted = false}) => VideoItem(
@@ -140,7 +140,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: Scaffold(body: HomeFeedSettingsPanel())),
+          child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Builder(builder: feedsSection.builder)))),
         ),
       );
       expect(tester.widget<Switch>(find.byKey(promotedSwitchKey)).value, isFalse);

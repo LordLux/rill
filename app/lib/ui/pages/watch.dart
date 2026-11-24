@@ -15,6 +15,7 @@ import '../../domain/feed_item.dart' hide Chip;
 import '../../domain/video_detail.dart';
 import '../../theme/tokens.dart';
 import '../open_video.dart';
+import '../members_only_preference.dart';
 import '../promoted_preference.dart';
 import '../page_wrapper.dart';
 import '../player_shell.dart' show currentRouteProvider, watchRouteName;
@@ -426,9 +427,10 @@ class _WatchPageState extends ConsumerState<WatchPage> {
     if (detail == null) return const [];
 
     final showPromoted = ref.watch(promotedVisibleProvider);
+    final showMembersOnly = ref.watch(membersOnlyVisibleProvider);
     final items = [
       for (final related in [...detail.related, ..._extraRelated])
-        if (showPromoted || !isPromotedItem(related)) related,
+        if ((showPromoted || !isPromotedItem(related)) && (showMembersOnly || !isMembersOnlyItem(related))) related,
     ];
     final continuation = _relatedContinuation ?? detail.relatedContinuation;
 

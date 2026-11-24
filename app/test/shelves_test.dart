@@ -20,7 +20,7 @@ import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/members_only_preference.dart';
 import 'package:rill/ui/shelf_visibility.dart';
 import 'package:rill/ui/widgets/feed_view.dart';
-import 'package:rill/ui/widgets/home_feed_settings.dart';
+import 'package:rill/ui/settings/sections/feeds_section.dart';
 import 'package:rill/ui/widgets/shelf_row.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -373,12 +373,12 @@ void main() {
     });
   });
 
-  group('the settings page', () {
+  group('the settings page (Feeds)', () {
     setUp(() => SharedPreferences.setMockInitialValues({}));
 
     testWidgets('one switch per category, set to the defaults', (tester) async {
       await tester.pumpWidget(
-        const ProviderScope(child: MaterialApp(home: Scaffold(body: HomeFeedSettingsPanel()))),
+        ProviderScope(child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Builder(builder: feedsSection.builder))))),
       );
       for (final category in ShelfCategory.values) {
         final tile = tester.widget<Switch>(find.byKey(ValueKey('shelf-switch-${category.name}')));
@@ -398,7 +398,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: Scaffold(body: HomeFeedSettingsPanel())),
+          child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Builder(builder: feedsSection.builder)))),
         ),
       );
       await tester.tap(find.byKey(const ValueKey('shelf-switch-shorts')));
@@ -414,7 +414,7 @@ void main() {
     testWidgets('each switch is one labelled node, its state read once', (tester) async {
       final handle = tester.ensureSemantics();
       await tester.pumpWidget(
-        const ProviderScope(child: MaterialApp(home: Scaffold(body: HomeFeedSettingsPanel()))),
+        ProviderScope(child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Builder(builder: feedsSection.builder))))),
       );
       expect(find.bySemanticsLabel(RegExp('^Shorts')), findsOneWidget);
       handle.dispose();

@@ -564,7 +564,7 @@ chip.
 **Done when:** the chips YouTube returns for a query show above the results, and
 choosing one reloads through its token.
 
-### 84. Audio track language preferences (waits for item 69)
+### 84. Audio track language preferences
 
 Reported 2026-10-01 as "videos with AI dubs play in the wrong language" (`MLgrNktS67c` opened in
 a dub). **Points 1 and 2 landed with Task 39** (`architecture.md` F65, `protocol.md` §3.5): the
@@ -573,7 +573,9 @@ original track plays by default on every tier that carries tracks, read from `xt
 through the second player, the choice sticking for the video. What is left is the preference:
 
 - **A switch to "play a dubbed track in my language when there is one"**, off by default, and
-  **an ordered list of preferred languages**, on the settings page (item 69). The ranking is
+  **an ordered list of preferred languages**, on the settings page. **This now has a home (Task 40):**
+  a section of its own, `app/lib/ui/settings/sections/audio_languages_section.dart`, registered in
+  `settings_sections.dart` at order 50, between Captions and About. The ranking is
   `trackRank` in `sidecar/src/playback/audio-tracks.ts`; a preference would be a parameter of
   `playback.open` (beside `audioTrackId`) that a track whose `lang` matches wins over the original,
   so it holds across videos where `audioTrackId` is one video's choice.
@@ -779,16 +781,6 @@ something on a machine that has never run `bun run capture`.
 Until then, CLAUDE.md's Commands block should say that `bun test`'s parser half
 needs `bun run capture` first.
 
-### 16. Persist the members-only preference
-
-`app/lib/ui/members_only_preference.dart` — every feed surface already reads
-`membersOnlyVisibleProvider`, its own comment says *"Not persisted yet"*, and
-nothing calls `.set()` / `.toggle()`. There is no settings UI to reach it from.
-
-**Blocked on:** an app settings screen. Listed here rather than nowhere, because
-the whole point of this file is that work deferred for good reasons and recorded
-nowhere is how Task 04 §1 disappeared for two months.
-
 ### 17. Two small UI gaps
 
 - `app/lib/ui/player/settings_menu.dart:749` — `//TODO add fps when it is not 30`
@@ -955,20 +947,6 @@ The progress and controls bar on a video immediately disappears without fading w
 
 **Done when:** the controls bar uses a smooth fade transition when disappearing and reappearing around dialogs, and correctly restores its previous visibility state after the dialog is closed.
 
-### 69. App settings page
-
-There is no settings screen. The account menu's **Settings** entry is a
-placeholder (`account_button.dart`, `onTap: () {}`), item 16 is blocked on it,
-and the accent colour is still a debug control (`accent_debug_button.dart`).
-Build the page, and move into it what is app-wide rather than per-video, starting
-with the player's settings menu (`settings_menu.dart`): decide entry by entry
-what stays with the video (quality, speed, this video's captions) and what moves
-(defaults, caption style, audio-only defaults, updates). Persist with
-`SharedPreferences`, like the existing preferences.
-
-**Done when:** the account menu opens the page, item 16 is unblocked, the accent
-picker lives there, and nothing is set in two places.
-
 ### 70. Miniplayer redesign
 
 **Depends on items 12 and 13** (caption legibility at small sizes; caption drag
@@ -1025,7 +1003,7 @@ Switch account.
    Measure it, then send it on every request while it is on.
 5. **Location.** InnerTube's `gl` (region) changes what the feed shows. Offer it
    if the sidecar's requests honour `gl`, measured.
-6. **Settings** is item 69, **Switch account** item 75, **Display language**
+6. **Settings** opens the settings page (Task 40). **Switch account** is item 75, **Display language**
    item 82. **Help** and **Send feedback**: point them somewhere real (the
    repository's issues page) or remove them.
 
@@ -1075,7 +1053,8 @@ the running app.
 vinyl record. The whole vinyl UI was built and tested as a spike in
 `scratch/vinyl_spike`, **which is gitignored** (`scratch/` in `.gitignore`), so it
 exists only on the author's machine. Bring the code into `app/lib` with tests,
-rather than depending on the spike, and make it a setting (item 69).
+rather than depending on the spike, and make it a setting on the settings page (a section in
+`app/lib/ui/settings/sections/`).
 
 **Done when:** the option exists, the vinyl code is in the repo with tests, and
 nothing references `scratch/`.
@@ -1853,7 +1832,7 @@ dropped and this item deleted.
 ### 80. SponsorBlock
 
 Skip sponsor segments using the community SponsorBlock database. A third-party
-service, so: **off by default and opt-in** (item 69). Use its privacy-preserving
+service, so: **off by default and opt-in** (a switch on the settings page). Use its privacy-preserving
 lookup, which takes a hash prefix of the video id so the server never learns
 exactly which video is playing. Skips go through the engine's seek, with a short
 "Skipped sponsor" notice and an undo.
