@@ -2191,7 +2191,7 @@ the feed it reads is §2.13's.
   check**: it is the allowed prefix, `https://github.com/LordLux/rill/releases/download/`
   by default and `http://127.0.0.1:PORT/…` only under the override. Every build
   logs which configuration it uses, an overridden one also logs a loud line and
-  shows `TEST FEED` on Settings › About, and no key material is printed.
+  shows `TEST FEED` on the Updates panel, and no key material is printed.
   `release/dev-feed.ts` is the other end of those overrides: a local feed
   signed with a fixed dev key (its public half is in the script), serving a
   padded stand-in installer slowly enough to watch, and able to offer a
@@ -2216,23 +2216,23 @@ the feed it reads is §2.13's.
   resets only when a whole cycle succeeds** (up to date, or downloaded and
   verified). Resetting it on a successful *check* would fetch a release whose
   installer never verifies again every half hour, 50 MB each time.
-- **Where it shows: Settings › About, with a status row in the account menu** (moved
-  2026-11-24 by Task 40, §2.19; until then the whole page lived in the account menu,
-  because there was no settings page). The account menu keeps one row that says
-  what the updater is doing — `Check for updates`, `Checking for updates…`,
-  `Update 0.3.0 available`, `Restart to update` — and opens About; idle, it also
-  starts a check, whose progress shows under About's header. About leads with one
-  card for what the updater has to say — the update on offer, in the accent
-  container, with up to five notes, a link to the full release notes, and
-  `Restart to update` / `Later`; a download in progress; a failure, in the error
-  container, with `Try again`; or that all is well — then the running version, the
-  last check, and the switch; the header's button checks again. A ready update puts
-  a dot on the avatar; `Later` removes it for that version. Nothing is modal and
-  nothing covers the player, so an update never interrupts playback. **Signed out,
-  the avatar opens the menu too** (decided 2026-09-27): a short root page that says
-  why nobody is signed in, with **Sign in** as its first action, then Settings and
-  the update row. Before that it opened the login flow directly, which left a
-  signed-out user with automatic updates and nothing else.
+- **Where it shows: the account menu's Updates page, and Settings › About** — one widget
+  (`ui/settings/update_panel.dart`, `UpdatePanel`) on one provider, drawn in both (§2.19;
+  until Task 40 the menu was its only home, because there was no settings page). The menu's
+  `Check for updates` row spins while it checks and then opens the Updates page in the same
+  overlay. The panel leads with one card for what the updater has to say — the update on
+  offer, in the accent container, with up to five notes, a link to the full release notes,
+  and `Restart to update` / `Later`; a download in progress; a failure, in the error
+  container, with `Try again`; or that all is well — then the running version, the last
+  check, and the switch; the header's button checks again (it stays enabled while a check
+  runs and ignores the press, so keyboard focus is never dropped). The menu's page is
+  300 px where the menu is 260, so the card's two buttons fit on one line. A ready update
+  puts a dot on the avatar; `Later` removes it for that version, and in the menu goes back
+  to the root page. Nothing is modal and nothing covers the player, so an update never
+  interrupts playback. **Signed out, the avatar opens the menu too** (decided 2026-09-27):
+  a short root page that says why nobody is signed in, with **Sign in** as its first
+  action, then Settings and the update row. Before that it opened the login flow
+  directly, which left a signed-out user with automatic updates and nothing else.
 - **Install only on the user's click.** The app starts the installer as
   `Rill-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
   /CLOSEAPPLICATIONS /RELAUNCH=1 /LOG="…\install-<version>.log"` and closes its
@@ -2338,8 +2338,8 @@ the feed it reads is §2.13's.
   nothing to parse out of a URL. `YtDlpDownloader.fetchVerifiedHash` costs
   under a kilobyte both ways and downloads no binary; the 18 MB fetch only
   happens on an actual mismatch. `yt-dlp --version` is still run, once, right
-  after a fresh download installs — its output is what Settings › About
-  displays, and this app has no other way to learn it (the
+  after a fresh download installs — its output is what the Updates page and
+  Settings › About display, and this app has no other way to learn it (the
   release lists no version anywhere accessible without downloading the file).
 - **A stale or wrong app-managed file self-heals the same way a missing one
   does.** `needsMaintenance` (whether to schedule the weekly check at all) is
@@ -2636,9 +2636,11 @@ is the same provider drawn in two places, never a second copy of the value.
 - **The page** (`ui/settings/settings_page.dart`) is a named route (`settings`) in the content navigator, like the
   playlist page: `PageWrapper` draws the title bar, the window buttons and the rail over it, and Back returns to the
   page it was opened over. It is opened from the account menu's *Settings* row, signed in or out, and from the
-  menu's update and yt-dlp status rows, which open it at About. **A sidebar of sections, one section shown at a
+  menu's yt-dlp row, which opens it at About. **A sidebar of sections, one section shown at a
   time** (the layout chosen over one long page, tabs, and a hub of tiles: about twenty controls today, two more
-  sections coming). Switching section is not navigation: Back and Escape leave Settings, and the section shown is
+  sections coming), drawn as **one centred panel** at most 1000 px wide, so a wide window is not half empty —
+  still a page and not a dialog, because a dialog's barrier would cover the window buttons in the top bar.
+  Switching section is not navigation: Back and Escape leave Settings, and the section shown is
   kept for the run.
 - **A section is one file and one line.** `sections/<name>_section.dart` exports a `SettingsSection` (id, title,
   icon, order, builder), and `settings_sections.dart` is the only list of them; the sidebar and the content are
@@ -2646,13 +2648,15 @@ is the same provider drawn in two places, never a second copy of the value.
   (`todo.md` 84), About 90.
 - **What moved, with its stored key unchanged** so nobody lost a value: the accent (`accent_seed_argb`, from a
   temporary debug button, now deleted), "Reopen where I left off" (`restore_session`), the home rows
-  (`shelf_visible_*`) and promoted videos (`promoted_visible`) from the account menu, the update switch
-  (`update_auto`) and yt-dlp from the account menu's Updates and yt-dlp pages, "Keep caption style"
+  (`shelf_visible_*`) and promoted videos (`promoted_visible`) from the account menu, yt-dlp's card from
+  the account menu's yt-dlp page (its row there now opens About), "Keep caption style"
   (`keep_caption_style`, now "Remember caption style") and *About & Licenses* from the player's *More options*.
   **New:** members-only videos (`members_only_visible`, on by default), which now filters every list — the feeds,
   the home rows and the related videos — as promoted videos already did.
-- **Caption style is the one setting shown twice, and it is one provider.** The player's Style page and Settings ›
-  Captions both write `captionsProvider`'s style; the player's is there to judge a style over a picture. The style
+- **Two things are shown twice, each on one provider.** The updater (`UpdatePanel`, with `update_auto`) is on
+  Settings › About and on the account menu's own Updates page, where it always was. And caption style: the
+  player's Style page and Settings › Captions both write `captionsProvider`'s style; the player's is there to
+  judge a style over a picture. The style
   is remembered across videos only while "Remember caption style" is on (off, a style lasts until the next video),
   so the settings page's editor works only while it is on: a default the next video throws away is not a default.
   Turning it on saves the style showing then.

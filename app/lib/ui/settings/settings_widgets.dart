@@ -31,7 +31,8 @@ class SettingsCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainer,
+        // One step above the settings panel it sits on (`surfaceContainerLow`).
+        color: scheme.surfaceContainerHigh,
         borderRadius: const BorderRadius.all(Radius.circular(16)),
       ),
       child: Column(

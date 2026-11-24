@@ -1,6 +1,6 @@
 /// The yt-dlp surfaces — docs/todo.md 49. What a person sees: the avatar dot,
-/// the always-present yt-dlp row in the account menu, and the settings page's About
-/// section it opens, with yt-dlp's card and status row. The controller's behaviour is asserted in `ytdlp_controller_test.dart`;
+/// the always-present yt-dlp row in the account menu and the settings page's About
+/// section it opens, with yt-dlp's card, and the menu's Updates page's info row. The controller's behaviour is asserted in `ytdlp_controller_test.dart`;
 /// nothing here touches the network or the real filesystem.
 ///
 /// Severity (`YtDlpRowSeverity`) was revised 2026-09-28 after live testing:
@@ -229,18 +229,18 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Try again'), findsOneWidget);
   });
 
-  testWidgets('About shows On PATH with no Download action', (tester) async {
+  testWidgets('the Updates page shows On PATH with no Download action', (tester) async {
     await pump(tester, onPath);
     await openMenu(tester);
     await tester.tap(find.text('Check for updates'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Status'), findsOneWidget);
+    expect(find.text('yt-dlp'), findsOneWidget);
     expect(find.text('On PATH'), findsOneWidget);
     expect(find.text('Download'), findsNothing);
   });
 
-  testWidgets('About shows the installed version with no Download action', (tester) async {
+  testWidgets('the Updates page shows the installed version with no Download action', (tester) async {
     await pump(tester, appManaged);
     await openMenu(tester);
     await tester.tap(find.text('Check for updates'));
@@ -250,7 +250,7 @@ void main() {
     expect(find.text('Download'), findsNothing);
   });
 
-  testWidgets('About offers Download when missing, and it calls the controller', (tester) async {
+  testWidgets('the Updates page offers Download when missing, and it calls the controller', (tester) async {
     final controller = await pump(tester, missingDeclined);
     await openMenu(tester);
     await tester.tap(find.text('Check for updates'));

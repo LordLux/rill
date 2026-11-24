@@ -29,7 +29,7 @@ import 'package:rill/ui/page_wrapper.dart';
 import 'package:rill/ui/playback_controller.dart';
 import 'package:rill/ui/promoted_preference.dart';
 import 'package:rill/ui/session_restore.dart';
-import 'package:rill/ui/settings/sections/about_section.dart';
+import 'package:rill/ui/settings/update_panel.dart';
 import 'package:rill/ui/settings/sections/captions_section.dart';
 import 'package:rill/ui/settings/sections/feeds_section.dart';
 import 'package:rill/ui/settings/sections/general_section.dart';
@@ -127,12 +127,12 @@ void _bigWindow(WidgetTester tester) {
 }
 
 /// The home page with the real top bar, so the account menu is the real one.
-Future<void> pumpHome(WidgetTester tester, {AuthState auth = signedIn}) async {
+Future<void> pumpHome(WidgetTester tester, {AuthState auth = signedIn, bool updateReady = false}) async {
   _bigWindow(tester);
   await tester.pumpWidget(const SizedBox());
   await tester.pumpWidget(
     settingsTestApp(
-      overrides: _overrides(auth: auth),
+      overrides: _overrides(auth: auth, updateReady: updateReady),
       home: const PageWrapper(title: Text('Rill'), body: SizedBox(key: ValueKey('home-body'))),
     ),
   );
@@ -324,6 +324,26 @@ void main() {
       expect(container.read(updateControllerProvider).autoUpdate, isFalse);
       expect((await SharedPreferences.getInstance()).getBool('update_auto'), isFalse);
     });
+  });
+
+  testWidgets("the account menu's Updates page and Settings › About are one switch, not two", (tester) async {
+    await pumpHome(tester, updateReady: true);
+    await openAccountMenu(tester);
+    await tester.tap(find.text('Restart to update'));
+    await tester.pumpAndSettle();
+    expect(find.text('Updates'), findsOneWidget, reason: "the menu's own Updates page");
+    await tester.tap(find.byKey(autoUpdateSwitchKey));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await openAccountMenu(tester);
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(settingsSectionTabKey('about')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byKey(autoUpdateSwitchKey)).value, isFalse, reason: 'About shows its own copy');
+    expect((await SharedPreferences.getInstance()).getBool('update_auto'), isFalse);
   });
 
   group('a value set on the page survives a restart', () {

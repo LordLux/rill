@@ -9,7 +9,8 @@ import '../../domain/ytdlp/ytdlp_state.dart';
 import '../auth_controller.dart';
 import '../focus_ring.dart';
 import '../pages/login_page.dart';
-import '../settings/sections/about_section.dart' show aboutSettingsSectionId, updatePercent;
+import '../settings/sections/about_section.dart' show aboutSettingsSectionId;
+import '../settings/update_panel.dart';
 import '../settings/settings_page.dart';
 import '../update_controller.dart';
 import '../ytdlp_controller.dart';
@@ -213,7 +214,7 @@ class _AccountButtonState extends ConsumerState<AccountButton> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Which page the overlay is currently showing.
-enum _AccountMenuPage { root, appearance, language, restrictedMode, location }
+enum _AccountMenuPage { root, appearance, language, restrictedMode, location, updates }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account menu overlay — no ModalBarrier, pointer events pass through
@@ -265,9 +266,10 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
   static const double _travel = 0.25;
   static const Duration _morph = Duration(milliseconds: 180);
 
-  /// Every page is the menu's one width; the wide Updates page moved to the settings page.
-  static double _widthOf(_AccountMenuPage p) => 260;
-  static const double _widestPage = 260;
+  /// The Updates page's card needs its two buttons side by side; everything
+  /// else fits the menu's usual width. [AnimatedSize] morphs between the two.
+  static double _widthOf(_AccountMenuPage p) => p == _AccountMenuPage.updates ? 300 : 260;
+  static const double _widestPage = 300;
 
   /// Root is depth 0; every subpage is depth 1.
   static int _depthOf(_AccountMenuPage p) => p == _AccountMenuPage.root ? 0 : 1;
@@ -410,6 +412,7 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
     _AccountMenuPage.root when !widget.auth.isSignedIn => _SignedOutRootPage(
       auth: widget.auth,
       onSignIn: widget.onSignIn,
+      onGo: _go,
       onOpenSettings: widget.onOpenSettings,
     ),
     _AccountMenuPage.root => _AccountRootPage(
@@ -449,6 +452,24 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
         _AccountMenuItem(icon: Icons.check, label: 'Worldwide', onTap: () {}),
       ],
     ),
+    // The same panel as Settings › About, on the same providers (architecture.md §2.14, §2.19).
+    _AccountMenuPage.updates => _AccountMenuBody(
+      header: Consumer(
+        builder: (context, ref, _) => _AccountMenuPageHeader(
+          title: 'Updates',
+          onBack: _back,
+          trailing: const UpdateRefreshButton(),
+          padding: const EdgeInsets.fromLTRB(8, 12, 0, 12),
+          loading: ref.watch(updateControllerProvider.select(updateChecking)),
+        ),
+      ),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: UpdatePanel(compact: true, showYtDlp: true, onLaterDone: _back),
+        ),
+      ],
+    ),
   };
 }
 
@@ -459,10 +480,11 @@ class _AccountMenuOverlayState extends State<_AccountMenuOverlay> {
 /// The root page when nobody is signed in: why, a way to sign in, and the
 /// rows that matter without an account — updates, for one (architecture.md §2.14).
 class _SignedOutRootPage extends StatelessWidget {
-  const _SignedOutRootPage({required this.auth, required this.onSignIn, required this.onOpenSettings});
+  const _SignedOutRootPage({required this.auth, required this.onSignIn, required this.onGo, required this.onOpenSettings});
 
   final AuthState auth;
   final VoidCallback onSignIn;
+  final void Function(_AccountMenuPage) onGo;
   final void Function(String? section) onOpenSettings;
 
   @override
@@ -509,7 +531,7 @@ class _SignedOutRootPage extends StatelessWidget {
       children: [
         // The settings page needs no account, so it is here too.
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () => onOpenSettings(null)),
-        _UpdateMenuItem(onOpen: () => onOpenSettings(aboutSettingsSectionId)),
+        _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
         _YtDlpMenuItem(onOpen: () => onOpenSettings(aboutSettingsSectionId)),
         const SizedBox(height: 4),
       ],
@@ -625,8 +647,9 @@ class _AccountRootPage extends StatelessWidget {
         // ── Settings ───────────────────────────────────────────────────────
         const _AccountMenuDivider(),
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () => onOpenSettings(null)),
-        // Status rows: what they report lives on Settings › About, and they open it there.
-        _UpdateMenuItem(onOpen: () => onOpenSettings(aboutSettingsSectionId)),
+        // Updates opens its page here, the same panel as Settings › About; yt-dlp's card
+        // lives only on About.
+        _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
         _YtDlpMenuItem(onOpen: () => onOpenSettings(aboutSettingsSectionId)),
         // ── Help ───────────────────────────────────────────────────────────
         const _AccountMenuDivider(),
@@ -692,10 +715,18 @@ class _AccountMenuBody extends StatelessWidget {
 
 /// The back-button header for subpages, with a divider underneath.
 class _AccountMenuPageHeader extends StatelessWidget {
-  const _AccountMenuPageHeader({required this.title, this.onBack});
+  const _AccountMenuPageHeader({required this.title, this.onBack, this.trailing, this.padding, this.loading = false});
 
   final String title;
   final VoidCallback? onBack;
+  final EdgeInsetsGeometry? padding;
+
+  /// Draws an indeterminate bar over the divider, so the separator itself
+  /// reads as the thing loading. Overlaid, not stacked: it moves nothing.
+  final bool loading;
+
+  /// An action at the right end of the header, outside the back tap target.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -703,7 +734,7 @@ class _AccountMenuPageHeader extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     Widget row = Padding(
-      padding: EdgeInsets.fromLTRB(onBack != null ? 8 : 16, 12, 16, 12),
+      padding: padding ?? EdgeInsets.fromLTRB(onBack != null ? 8 : 16, 12, 16, 12),
       child: Row(
         children: [
           if (onBack != null) ...[
@@ -726,11 +757,40 @@ class _AccountMenuPageHeader extends StatelessWidget {
     );
 
     if (onBack != null) row = InkWell(onTap: onBack, child: row);
+    if (trailing != null) {
+      row = Row(
+        children: [
+          Expanded(child: row),
+          Flexible(
+            flex: 2,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Padding(padding: const EdgeInsets.only(right: 8), child: trailing!),
+            ),
+          ),
+        ],
+      );
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [row, Divider(height: 1, color: scheme.outlineVariant)],
+      children: [
+        row,
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Divider(height: 1, color: scheme.outlineVariant),
+            if (loading)
+              const Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: LinearProgressIndicator(key: ValueKey('update-header-progress'), minHeight: 2),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -852,9 +912,9 @@ Future<void> openLoginFlow(BuildContext context, WidgetRef ref) => _signIn(conte
 // Updates (architecture.md §2.14)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The root page's update row. Idle, it starts a check and opens Settings › About,
-/// where the result lands; while a check or download runs it says so; with an
-/// update on offer it is highlighted and opens About directly.
+/// The root page's update row. Idle, it checks and then opens the Updates page with
+/// the result; while a check or download runs it says so; with an update on offer it
+/// is highlighted and opens the page directly.
 class _UpdateMenuItem extends ConsumerWidget {
   const _UpdateMenuItem({required this.onOpen});
 
@@ -873,9 +933,9 @@ class _UpdateMenuItem extends ConsumerWidget {
       ),
     );
 
-    void checkThenOpen() {
-      unawaited(ref.read(updateControllerProvider.notifier).checkNow());
-      onOpen();
+    Future<void> checkThenOpen() async {
+      await ref.read(updateControllerProvider.notifier).checkNow();
+      if (context.mounted) onOpen();
     }
 
     return switch (state.phase) {

@@ -99,62 +99,76 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final currentId = ref.watch(settingsSectionProvider);
     final current = settingsSections.firstWhere((s) => s.id == currentId, orElse: () => settingsSections.first);
     final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
 
     return PageWrapper(
       title: const Text('Settings'),
-      body: FocusSurface(
-        ordered: true,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(1),
-              child: FocusTraversalGroup(
-                policy: ReadingOrderTraversalPolicy(),
-                child: _SectionSidebar(current: current.id, onPick: _show),
-              ),
-            ),
-            Expanded(
-              child: FocusTraversalOrder(
-                order: const NumericFocusOrder(2),
-                child: FocusTraversalGroup(
-                  policy: ReadingOrderTraversalPolicy(),
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: SingleChildScrollView(
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 680),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: Semantics(
-                                  header: true,
-                                  child: Text(current.title, style: textTheme.headlineSmall),
+      // **One centred panel**, the sidebar and the section on one raised surface, so a wide
+      // window does not leave the page empty on one side. Still a page, not a dialog: no
+      // barrier, so the window buttons in the top bar keep working (architecture.md §2.19).
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _panelMaxWidth),
+            child: Material(
+              color: scheme.surfaceContainerLow,
+              borderRadius: const BorderRadius.all(Radius.circular(20)),
+              clipBehavior: Clip.antiAlias,
+              child: FocusSurface(
+                ordered: true,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(1),
+                      child: FocusTraversalGroup(
+                        policy: ReadingOrderTraversalPolicy(),
+                        child: _SectionSidebar(current: current.id, onPick: _show),
+                      ),
+                    ),
+                    VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant.withValues(alpha: 0.5)),
+                    Expanded(
+                      child: FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: FocusTraversalGroup(
+                          policy: ReadingOrderTraversalPolicy(),
+                          child: SingleChildScrollView(
+                            controller: _scroll,
+                            padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 16),
+                                  child: Semantics(
+                                    header: true,
+                                    child: Text(current.title, style: textTheme.headlineSmall),
+                                  ),
                                 ),
-                              ),
-                              // Keyed so a section's state never carries over to the next.
-                              KeyedSubtree(key: ValueKey(current.id), child: Builder(builder: current.builder)),
-                            ],
+                                // Keyed so a section's state never carries over to the next.
+                                KeyedSubtree(key: ValueKey(current.id), child: Builder(builder: current.builder)),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
+
+/// How wide the panel may grow: a sidebar and a comfortable column of settings, and no
+/// wider on an ultrawide window.
+const double _panelMaxWidth = 1000;
 
 class _SectionSidebar extends StatelessWidget {
   const _SectionSidebar({required this.current, required this.onPick});
@@ -169,7 +183,7 @@ class _SectionSidebar extends StatelessWidget {
       child: Material(
         type: MaterialType.transparency,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 16, 8, 16),
+          padding: const EdgeInsets.fromLTRB(10, 16, 10, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
