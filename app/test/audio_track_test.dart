@@ -1,6 +1,7 @@
 /// Choosing an audio track (Task 39, `protocol.md` §3.5), against a real fake-sidecar process and
 /// a [FakeEngine].
 ///
+/// The video stops while the track switches, with the spinner up, and plays again once it is in.
 /// A pick is `playback.open {preload: true, audioTrackId}`, so the watch keeps its one session;
 /// the engine's second player carries it ([PlaybackEngine.switchAudio]) and a reopen at the
 /// position is the fallback. The choice then sticks for the video: a quality switch, the
@@ -169,6 +170,40 @@ void main() {
     // Once it has landed, the next pick goes through.
     await controller.chooseAudioTrack('es.3');
     expect(playback.source?.audioTrackId, 'es.3');
+  });
+
+  test('the video stops while the track switches, with the spinner up, and plays again once it is in', () async {
+    await watching();
+    engine.audioSwitchResult = VideoSwitch.done;
+    final held = Completer<void>();
+    engine.audioSwitchGate = held.future;
+    final switching = controller.chooseAudioTrack('hi.10');
+    await settle();
+
+    // MUTATION: drop the pause in `chooseAudioTrack` and this fails: the old track plays on.
+    expect(playback.isSwitchingAudio, isTrue, reason: 'what raises the player spinner');
+    expect(engine.playing, isFalse, reason: 'the old language does not carry on after the pick');
+
+    held.complete();
+    await switching;
+    expect(playback.isSwitchingAudio, isFalse);
+    expect(engine.playing, isTrue, reason: 'it was playing, so it plays again');
+    expect(playback.source?.audioTrackId, 'hi.10');
+  });
+
+  test('a pause pressed while the track switches is the state it ends in', () async {
+    await watching();
+    engine.audioSwitchResult = VideoSwitch.done;
+    final held = Completer<void>();
+    engine.audioSwitchGate = held.future;
+    final switching = controller.chooseAudioTrack('hi.10');
+    await settle();
+
+    await controller.togglePlayPause();
+    held.complete();
+    await switching;
+    expect(engine.playing, isFalse);
+    expect(playback.source?.audioTrackId, 'hi.10');
   });
 
   test('a track switch keeps the rung the viewer is on, not the one ranked first at its height', () async {

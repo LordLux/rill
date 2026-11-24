@@ -2294,7 +2294,8 @@ class _AudioTrackRootRow extends ConsumerWidget {
 /// The rows use YouTube's names, without the word "original" (the sidecar removes YouTube's own
 /// wording for it, `protocol.md` §3.5), and the markers become badges: *Original*, and *AI dub* for
 /// YouTube's automatic dubs. A dub the creator uploaded is a plain row. Picking one switches the
-/// audio where the video is, through the second player, and the old track plays until then.
+/// audio where the video is, through the second player, with the video stopped and the spinner up
+/// until the new track is in.
 class _AudioTrackPage extends ConsumerWidget {
   const _AudioTrackPage();
 
@@ -2341,8 +2342,8 @@ class AudioTrackOptionRow extends StatelessWidget {
   final AudioTrackOption track;
   final bool selected;
 
-  /// The pick is being switched to: the tick is already here, and the row pulses no spinner (the
-  /// old track keeps playing, as a quality switch in place does), only a quieter tick.
+  /// The pick is being switched to: the tick is already here, quieter until the track is in (the
+  /// spinner is the player's own, over the stopped video).
   final bool switching;
   final VoidCallback? onTap;
 
@@ -2372,7 +2373,8 @@ class AudioTrackOptionRow extends StatelessWidget {
             color: selected ? (switching ? scheme.primary.withValues(alpha: 0.5) : scheme.primary) : Colors.transparent,
           ),
           const SizedBox(width: 8),
-          Flexible(
+          // Expanded, so the badge sits at the row's right edge and the badges line up in a column.
+          Expanded(
             child: Text(
               track.displayName,
               overflow: TextOverflow.ellipsis,

@@ -93,6 +93,7 @@ class PlaybackState {
     this.isRestoringVideo = false,
     this.audioMissing = false,
     this.switchingAudioTrackId,
+    this.isSwitchingAudio = false,
     this.qualityAfterAudioSwitch,
     this.hold,
     this.error,
@@ -156,8 +157,14 @@ class PlaybackState {
   final bool audioMissing;
 
   /// The audio track being switched to (Task 39), from the pick until it plays or the switch is
-  /// given up. The menu ticks it at once and shows it busy; the old track keeps playing meanwhile.
+  /// given up. The menu ticks it at once and shows it busy.
   final String? switchingAudioTrackId;
+
+  /// The track switch itself is under way (Task 39): the video is stopped on its frame, the
+  /// player's spinner shows, and playback resumes, if it was playing, once the new track is in.
+  /// Unlike a quality switch nothing plays on meanwhile: hearing the old language carry on after
+  /// picking another reads as the pick not taking. False while a pick only waits its turn.
+  final bool isSwitchingAudio;
 
   /// A quality picked while an audio track switch is under way (Task 39): that switch is about to
   /// replace the ladder, so the pick is switched to from the new one once it lands. The quality
@@ -264,6 +271,7 @@ class PlaybackState {
     bool? isRestoringVideo,
     bool? audioMissing,
     Object? switchingAudioTrackId = _unchanged,
+    bool? isSwitchingAudio,
     Object? qualityAfterAudioSwitch = _unchanged,
     Object? hold = _unchanged,
     Object? error = _unchanged,
@@ -289,6 +297,7 @@ class PlaybackState {
       switchingAudioTrackId: identical(switchingAudioTrackId, _unchanged)
           ? this.switchingAudioTrackId
           : switchingAudioTrackId as String?,
+      isSwitchingAudio: isSwitchingAudio ?? this.isSwitchingAudio,
       qualityAfterAudioSwitch: identical(qualityAfterAudioSwitch, _unchanged)
           ? this.qualityAfterAudioSwitch
           : qualityAfterAudioSwitch as PlaybackVariant?,
@@ -363,6 +372,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// The pick being switched to is still waiting its turn (a quality switch or a held clock is
   /// under way), so another pick may still replace it.
   bool _audioPickWaiting = false;
+
+  /// Whether playback resumes when the track switch ends: what was playing when it began, then
+  /// whatever play or pause was pressed while it ran.
+  bool _playAfterAudioSwitch = false;
 
   /// The choice from before the pending pick, put back if it is given up.
   ({String videoId, String trackId})? _choiceBeforeSwitch;
@@ -586,6 +599,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // audio-only switch is off, which is what it looked like from outside.
       isRestoringVideo: false,
       switchingAudioTrackId: null,
+      isSwitchingAudio: false,
       qualityAfterAudioSwitch: null,
       hold: clock,
       error: null,
@@ -1038,6 +1052,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.isUnplayable) return Future<void>.value();
     if (_heldAtEnd && !_engine.playing) return _replayHeld();
     if (state.isLoading) return setPlaying(!state.wantPlaying);
+    if (state.isSwitchingAudio) return setPlaying(!_playAfterAudioSwitch);
     // Against what the viewer sees, not a toggle the switch could run into.
     if (state.isSwitchingTrack) return setPlaying(!_engine.playing);
     return _engine.playOrPause();
@@ -1079,6 +1094,11 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.isUnplayable) return Future<void>.value();
     if (value && _heldAtEnd) return _replayHeld();
     if (state.isLoading) return _wantWhileLoading(value);
+    // A track switch holds the video stopped, and a press is the state it ends in.
+    if (state.isSwitchingAudio) {
+      _playAfterAudioSwitch = value;
+      return Future<void>.value();
+    }
     // A switch in place ends by restarting playback, and a press made meanwhile has to be the
     // state it ends in: noted here, applied when it ends (see [_switchInPlace]).
     if (state.isSwitchingTrack) _playIntentDuringSwitch = value;
@@ -1351,7 +1371,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// ([PlaybackEngine.switchAudio]); where it cannot, the media is reopened at the position, with
   /// the play state, the captions and the volume as they were. The clock never goes back.
   ///
-  /// Only once the new audio is playing does [PlaybackState.source] become the new one, so every
+  /// **The video stops while it switches** ([PlaybackState.isSwitchingAudio]): the frame holds, the
+  /// spinner shows, and it plays again once the new track is in, if it was playing.
+  ///
+  /// Only once the new audio is in does [PlaybackState.source] become the new one, so every
   /// later quality switch, recovery reopen and audio-only toggle stays on the chosen track.
   ///
   /// **A pick made while the player is busy waits its turn** (a quality switch, or the clock held
@@ -1375,7 +1398,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       // Back to the track that plays, while another pick waited: that pick is called off.
       _audioPickWaiting = false;
       _audioChoice = previousChoice;
-      _finishAudioSwitch();
+      await _finishAudioSwitch();
       return;
     }
     final opens = _opens;
@@ -1401,6 +1424,14 @@ class PlaybackController extends Notifier<PlaybackState> {
       final playing = state.source;
       if (playing == null) return;
       final started = DateTime.now();
+
+      // **Stopped while it switches**, with the spinner up: the paused swap is then a flip at the
+      // exact position (the second player aims at a clock that stands still), and the reopen
+      // fallback opens paused. [_finishAudioSwitch] plays again if it was playing.
+      _playAfterAudioSwitch = _engine.playing;
+      state = state.copyWith(isSwitchingAudio: true);
+      if (_playAfterAudioSwitch) await _engine.pause();
+      if (!stillWanted()) return;
 
       final response = await RpcClient.instance.call('playback.open', {
         'videoId': item.id,
@@ -1442,17 +1473,21 @@ class PlaybackController extends Notifier<PlaybackState> {
       _audioChoice = previousChoice;
     } finally {
       if (token == _audioSwitch) _audioPickWaiting = false;
-      if (!_disposed && token == _audioSwitch && opens == _opens) _finishAudioSwitch();
+      if (!_disposed && token == _audioSwitch && opens == _opens) await _finishAudioSwitch();
     }
   }
 
-  /// The end of a track switch, landed or not: the menu stops showing it, and a quality picked
-  /// meanwhile is switched to from the ladder that plays now. Only that pick: the rung the switch
+  /// The end of a track switch, landed or not: the menu and the spinner stop showing it, the video
+  /// plays again if it was playing, and a quality picked meanwhile is switched to from the ladder
+  /// that plays now. Only that pick: the rung the switch
   /// itself kept (the same height and fps) is not second-guessed by [variantFor], which would move
   /// a viewer on a 1080p30 rung to the 1080p60 one ranked above it.
-  void _finishAudioSwitch() {
+  Future<void> _finishAudioSwitch() async {
     final picked = state.qualityAfterAudioSwitch;
-    state = state.copyWith(switchingAudioTrackId: null, qualityAfterAudioSwitch: null);
+    final wasSwitching = state.isSwitchingAudio;
+    state = state.copyWith(switchingAudioTrackId: null, isSwitchingAudio: false, qualityAfterAudioSwitch: null);
+    if (wasSwitching && _playAfterAudioSwitch && !_engine.playing) await _engine.play();
+    _playAfterAudioSwitch = false;
     final now = state.variant;
     if (picked == null || now == null || (picked.height == now.height && picked.fps == now.fps)) return;
     final wanted = state.variants.where((v) => v.height == picked.height && v.fps == picked.fps).firstOrNull ??

@@ -2426,8 +2426,12 @@ nothing inside one mpv avoids that. So a switch is made in a second player and s
   for the session. `RILL_SECOND_PLAYER=0` turns it off.
 - **Another audio track rides the same swap (Task 39, F65).** The audio is the file and every video is added to it (F60),
   so a new audio cannot be switched in place. `SwappingEngine.switchAudio` goes straight to the second player: the standby
-  opens the same video with the new audio (an ordinary open, nothing in F60 changes), is aimed past the clock and swapped
-  in, with the captions, the volume and the play state carried over as for a quality switch. There is no in-place step,
+  opens the same video with the new audio (an ordinary open, nothing in F60 changes) and is swapped in, with the captions,
+  the volume and the play state carried over as for a quality switch. **Unlike a quality switch the video is stopped
+  first** (`PlaybackState.isSwitchingAudio`, which raises the player's spinner) and plays again once the new track is in:
+  the old language playing on after another was picked reads as the pick not taking (the user's call, 2026-11-24). The
+  clock then stands still, so the swap is the paused one, a flip at the exact position, and a play or pause pressed
+  meanwhile is the state it ends in. There is no in-place step,
   so anything that stops the swap (audio-only, no surface, a standby that would not open) answers `refused` or
   `unsupported` and `PlaybackController.chooseAudioTrack` reopens at the position. The new source comes from
   `playback.open {preload: true, audioTrackId}`, so no second session is opened; it replaces the old one only once the
