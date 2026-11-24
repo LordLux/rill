@@ -66,12 +66,17 @@ and reopening Rill does. The message comes from `MediaKitEngine`'s open
 (`app/lib/data/playback/engine.dart`, the `player.stream.error` race that throws
 `StateError('mpv could not open the stream: …')`).
 
-**Not known yet:** which half the restart fixes. Reopening Rill replaces both the sidecar (a new
+**Was not known (answered below):** which half the restart fixes. Reopening Rill replaces both the sidecar (a new
 session, a new visitor id, an empty resolution cache) and both mpv players, so either could hold
 the bad state: a URL the sidecar keeps handing back (does *Try again* re-resolve, or reuse a cached
 answer?), or something stuck in the player.
 
-**An idea to test, not a fix:** on this error, restart the sidecar (`RpcClient.restart()`, which
+**Evidence, 2026-11-24, from the user:** with the error on screen, killing only the sidecar
+process by hand (the app supervised it back) was enough: the video then played, with Rill and its
+players left running. So the bad state is in the sidecar, not in mpv. *What* in it is still not
+known (the resolution session, its visitor id, a cached answer for the video).
+
+**An idea to test, now backed by that, not yet a fix:** on this error, restart the sidecar (`RpcClient.restart()`, which
 `RpcClient.onRestarted` already follows by restoring the cookie) and open the video once more. If
 that clears it, the sidecar's state is the cause and the next step is finding *what* in it; if it
 does not, look at the player instead. Before trying it, capture one case: the log around the
