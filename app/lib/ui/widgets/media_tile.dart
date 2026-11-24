@@ -1312,8 +1312,8 @@ List<TileMenuItem> menuForTile(BuildContext context, WidgetRef ref, FeedItem ite
 
 /// The tile's 3-dot button and the menu it opens.
 ///
-/// A `MenuAnchor` rather than a `PopupMenuButton`, the way `SubscribeButton` and
-/// `AccentDebugButton` do it: the menu is an overlay entry, not a pushed route,
+/// A `MenuAnchor` rather than a `PopupMenuButton`, the way `SubscribeButton` does
+/// it: the menu is an overlay entry, not a pushed route,
 /// so nothing that watches the navigator (`RouteTracker`, `player_shell.dart`)
 /// sees it. The button keeps exactly the look and hit target the disabled one
 /// always had; an empty [items] draws that disabled button and nothing else.

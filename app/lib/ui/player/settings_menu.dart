@@ -581,29 +581,8 @@ class _MoreOptionsPage extends ConsumerWidget {
         onBack: () => ref.read(playerMenuProvider.notifier).back(),
       ),
       children: [
-        _MenuRow(
-          icon: Icons.format_paint_outlined,
-          label: 'Keep caption style',
-          trailing: Switch(
-            value: ref.watch(keepCaptionStyleProvider),
-            onChanged: (value) => ref.read(keepCaptionStyleProvider.notifier).toggle(),
-          ),
-          onTap: () {
-            ref.read(keepCaptionStyleProvider.notifier).toggle();
-          },
-        ),
-        _MenuRow(
-          icon: Icons.info_outline,
-          label: 'About & Licenses',
-          onTap: () {
-            ref.read(playerMenuProvider.notifier).close();
-            showAboutDialog(
-              context: context,
-              applicationName: 'NativeYouTube',
-              applicationLegalese: 'Includes LGPL-2.1 libraries. See THIRD_PARTY_LICENSES for full compliance details.',
-            );
-          },
-        ),
+        // "Keep caption style" and "About & Licenses" were here; both are app-wide and live on
+        // the settings page now (Captions, About). What is left is placeholders.
         for (final row in _morePlaceholders) _MenuRow(icon: row.icon, label: row.label, onTap: () {}),
       ],
     );
@@ -1538,7 +1517,7 @@ class CaptionStylePage extends ConsumerWidget {
         _StyleSection(label: 'Font'),
         _StyleChoices<String?>(
           value: style.fontFamily,
-          options: _fontOptions,
+          options: captionFontOptions,
           onPicked: (family) => apply(style.copyWith(fontFamily: family)),
         ),
         _StyleSlider(
@@ -1628,7 +1607,7 @@ class CaptionStylePage extends ConsumerWidget {
         _StyleSection(label: 'Character edge'),
         _StyleChoices<CaptionEdgeStyle?>(
           value: style.edgeStyle,
-          options: _edgeOptions,
+          options: captionEdgeOptions,
           onPicked: (edge) => apply(style.copyWith(edgeStyle: edge)),
         ),
 
@@ -1647,8 +1626,9 @@ class CaptionStylePage extends ConsumerWidget {
   }
 }
 
-/// `null` is "the track decides", which is a real choice and the first one.
-const List<({String label, String? value})> _fontOptions = [
+/// `null` is "the track decides", which is a real choice and the first one. Shared with the
+/// settings page's caption section, which offers the same choices.
+const List<({String label, String? value})> captionFontOptions = [
   (label: 'Default', value: null),
   (label: 'Arial', value: 'Arial'),
   (label: 'Georgia', value: 'Georgia'),
@@ -1657,7 +1637,7 @@ const List<({String label, String? value})> _fontOptions = [
 ];
 
 /// Three, not five. See the class doc for the two that ASS cannot tell apart.
-const List<({String label, CaptionEdgeStyle? value})> _edgeOptions = [
+const List<({String label, CaptionEdgeStyle? value})> captionEdgeOptions = [
   (label: 'Default', value: null),
   (label: 'None', value: CaptionEdgeStyle.none),
   (label: 'Drop shadow', value: CaptionEdgeStyle.dropShadow),

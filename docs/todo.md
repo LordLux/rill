@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 119.** A new item takes it, and the same edit bumps this line.
+**Next number: 120.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -56,6 +56,37 @@ and it is a guess until a real occurrence says otherwise.
 ---
 
 ## Soon
+
+### 119. "This video would not open": mpv refuses the stream until Rill is restarted
+
+Reported 2026-11-24 (during Task 40): the watch page shows *"This video would not open."* with
+*"Bad state: mpv could not open the stream: Failed to open https://…googlevideo.com/videoplayback?…"*
+(an `itag=247` video URL, not yet expired by its own `expire=`). *Try again* does not fix it; closing
+and reopening Rill does. The message comes from `MediaKitEngine`'s open
+(`app/lib/data/playback/engine.dart`, the `player.stream.error` race that throws
+`StateError('mpv could not open the stream: …')`).
+
+**Was not known (answered below):** which half the restart fixes. Reopening Rill replaces both the sidecar (a new
+session, a new visitor id, an empty resolution cache) and both mpv players, so either could hold
+the bad state: a URL the sidecar keeps handing back (does *Try again* re-resolve, or reuse a cached
+answer?), or something stuck in the player.
+
+**Evidence, 2026-11-24, from the user:** with the error on screen, killing only the sidecar
+process by hand (the app supervised it back) was enough: the video then played, with Rill and its
+players left running. So the bad state is in the sidecar, not in mpv. *What* in it is still not
+known (the resolution session, its visitor id, a cached answer for the video).
+
+**An idea to test, now backed by that, not yet a fix:** on this error, restart the sidecar (`RpcClient.restart()`, which
+`RpcClient.onRestarted` already follows by restoring the cookie) and open the video once more. If
+that clears it, the sidecar's state is the cause and the next step is finding *what* in it; if it
+does not, look at the player instead. Before trying it, capture one case: the log around the
+failure, whether the same URL comes back on *Try again*, and what the stream answers when fetched
+directly. Mind item 96: a restarted sidecar forgets open playback sessions.
+
+**Also:** the slate prints the whole signed stream URL, client IP included. It should say what
+failed without it, the URL going to the log only.
+
+**Done when** the cause is known, and the error clears without restarting Rill.
 
 ### 112. `VideoDetail.isMembersOnly` reads the whole `/next` body and only `metadataBadgeRenderer`
 
@@ -564,7 +595,7 @@ chip.
 **Done when:** the chips YouTube returns for a query show above the results, and
 choosing one reloads through its token.
 
-### 84. Audio track language preferences (waits for item 69)
+### 84. Audio track language preferences
 
 Reported 2026-10-01 as "videos with AI dubs play in the wrong language" (`MLgrNktS67c` opened in
 a dub). **Points 1 and 2 landed with Task 39** (`architecture.md` F65, `protocol.md` §3.5): the
@@ -573,7 +604,9 @@ original track plays by default on every tier that carries tracks, read from `xt
 through the second player, the choice sticking for the video. What is left is the preference:
 
 - **A switch to "play a dubbed track in my language when there is one"**, off by default, and
-  **an ordered list of preferred languages**, on the settings page (item 69). The ranking is
+  **an ordered list of preferred languages**, on the settings page. **This now has a home (Task 40):**
+  a section of its own, `app/lib/ui/settings/sections/audio_languages_section.dart`, registered in
+  `settings_sections.dart` at order 50, between Captions and About. The ranking is
   `trackRank` in `sidecar/src/playback/audio-tracks.ts`; a preference would be a parameter of
   `playback.open` (beside `audioTrackId`) that a track whose `lang` matches wins over the original,
   so it holds across videos where `audioTrackId` is one video's choice.
@@ -779,16 +812,6 @@ something on a machine that has never run `bun run capture`.
 Until then, CLAUDE.md's Commands block should say that `bun test`'s parser half
 needs `bun run capture` first.
 
-### 16. Persist the members-only preference
-
-`app/lib/ui/members_only_preference.dart` — every feed surface already reads
-`membersOnlyVisibleProvider`, its own comment says *"Not persisted yet"*, and
-nothing calls `.set()` / `.toggle()`. There is no settings UI to reach it from.
-
-**Blocked on:** an app settings screen. Listed here rather than nowhere, because
-the whole point of this file is that work deferred for good reasons and recorded
-nowhere is how Task 04 §1 disappeared for two months.
-
 ### 17. Two small UI gaps
 
 - `app/lib/ui/player/settings_menu.dart:749` — `//TODO add fps when it is not 30`
@@ -955,20 +978,6 @@ The progress and controls bar on a video immediately disappears without fading w
 
 **Done when:** the controls bar uses a smooth fade transition when disappearing and reappearing around dialogs, and correctly restores its previous visibility state after the dialog is closed.
 
-### 69. App settings page
-
-There is no settings screen. The account menu's **Settings** entry is a
-placeholder (`account_button.dart`, `onTap: () {}`), item 16 is blocked on it,
-and the accent colour is still a debug control (`accent_debug_button.dart`).
-Build the page, and move into it what is app-wide rather than per-video, starting
-with the player's settings menu (`settings_menu.dart`): decide entry by entry
-what stays with the video (quality, speed, this video's captions) and what moves
-(defaults, caption style, audio-only defaults, updates). Persist with
-`SharedPreferences`, like the existing preferences.
-
-**Done when:** the account menu opens the page, item 16 is unblocked, the accent
-picker lives there, and nothing is set in two places.
-
 ### 70. Miniplayer redesign
 
 **Depends on items 12 and 13** (caption legibility at small sizes; caption drag
@@ -1025,7 +1034,7 @@ Switch account.
    Measure it, then send it on every request while it is on.
 5. **Location.** InnerTube's `gl` (region) changes what the feed shows. Offer it
    if the sidecar's requests honour `gl`, measured.
-6. **Settings** is item 69, **Switch account** item 75, **Display language**
+6. **Settings** opens the settings page (Task 40). **Switch account** is item 75, **Display language**
    item 82. **Help** and **Send feedback**: point them somewhere real (the
    repository's issues page) or remove them.
 
@@ -1075,7 +1084,8 @@ the running app.
 vinyl record. The whole vinyl UI was built and tested as a spike in
 `scratch/vinyl_spike`, **which is gitignored** (`scratch/` in `.gitignore`), so it
 exists only on the author's machine. Bring the code into `app/lib` with tests,
-rather than depending on the spike, and make it a setting (item 69).
+rather than depending on the spike, and make it a setting on the settings page (a section in
+`app/lib/ui/settings/sections/`).
 
 **Done when:** the option exists, the vinyl code is in the repo with tests, and
 nothing references `scratch/`.
@@ -1853,7 +1863,7 @@ dropped and this item deleted.
 ### 80. SponsorBlock
 
 Skip sponsor segments using the community SponsorBlock database. A third-party
-service, so: **off by default and opt-in** (item 69). Use its privacy-preserving
+service, so: **off by default and opt-in** (a switch on the settings page). Use its privacy-preserving
 lookup, which takes a hash prefix of the video id so the server never learns
 exactly which video is playing. Skips go through the engine's seek, with a short
 "Skipped sponsor" notice and an undo.

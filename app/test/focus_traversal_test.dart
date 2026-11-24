@@ -250,10 +250,10 @@ void main() {
       await tester.pump();
 
       expect(
-        await tabThrough(tester, 11),
+        await tabThrough(tester, 12),
         [
           'Toggle menu', // title bar (the back arrow is excluded on Home)
-          'home', 'subscriptions', 'playlists', 'history', // rail
+          'home', 'subscriptions', 'playlists', 'history', 'settings', // rail, Settings pinned last
           'field', 'Search', // search: the field, then its button
           'Log in', // top-bar actions: notifications is disabled, so the account button
           'page-first', 'page-second', // page content
@@ -275,9 +275,9 @@ void main() {
       await tester.pump();
 
       expect(
-        await tabThrough(tester, 19),
+        await tabThrough(tester, 20),
         [
-          'Toggle menu', 'home', 'subscriptions', 'playlists', 'history', 'field', 'Search', 'Log in',
+          'Toggle menu', 'home', 'subscriptions', 'playlists', 'history', 'settings', 'field', 'Search', 'Log in',
           'All', 'Music', // the filter chips
           // Each tile is a group: the tile, then its 3-dot menu — not every
           // button in a row of the grid, which is what one flat reading order did.
@@ -367,10 +367,10 @@ void main() {
       await pumpPage(tester);
 
       expect(
-        await tabThrough(tester, 15),
+        await tabThrough(tester, 16),
         [
           'Toggle menu',
-          'home', 'subscriptions', 'playlists', 'history',
+          'home', 'subscriptions', 'playlists', 'history', 'settings',
           'field', 'Search',
           'Log in',
           // Save and Shuffle are stubs: disabled, so not stops.
@@ -401,7 +401,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
 
-      expect((await tabThrough(tester, 10)).sublist(7), ['Log in', 'Show more', 'Play all']);
+      expect((await tabThrough(tester, 11)).sublist(8), ['Log in', 'Show more', 'Play all']);
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);

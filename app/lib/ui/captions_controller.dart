@@ -40,16 +40,27 @@ class KeepCaptionStyleNotifier extends Notifier<bool> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     if (_touched) return;
-    state = prefs.getBool('keep_caption_style') ?? false;
+    state = prefs.getBool(keepCaptionStyleKey) ?? false;
   }
 
-  Future<void> toggle() async {
+  Future<void> toggle() => set(!state);
+
+  /// The settings page's "Remember caption style" switch (Captions). Stored under the key
+  /// the player menu's old "Keep caption style" row used, so nobody loses the choice.
+  // ignore: avoid_positional_boolean_parameters
+  Future<void> set(bool keep) async {
     _touched = true;
-    state = !state;
+    if (state == keep) return;
+    state = keep;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('keep_caption_style', state);
+    await prefs.setBool(keepCaptionStyleKey, keep);
+    // Turned on: what is showing now is what is kept, without waiting for the next change.
+    if (keep) await prefs.setString(captionStyleKey, jsonEncode(ref.read(captionsProvider).style.toJson()));
   }
 }
+
+const String keepCaptionStyleKey = 'keep_caption_style';
+const String captionStyleKey = 'caption_style_json';
 
 @immutable
 class CaptionsState {
@@ -253,8 +264,8 @@ class CaptionsController extends Notifier<CaptionsState> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('keep_caption_style') == true) {
-      final jsonStr = prefs.getString('caption_style_json');
+    if (prefs.getBool(keepCaptionStyleKey) == true) {
+      final jsonStr = prefs.getString(captionStyleKey);
       if (jsonStr != null) {
         try {
           final json = jsonDecode(jsonStr);
@@ -493,7 +504,7 @@ class CaptionsController extends Notifier<CaptionsState> {
     
     if (ref.read(keepCaptionStyleProvider)) {
       SharedPreferences.getInstance().then((prefs) {
-        prefs.setString('caption_style_json', jsonEncode(style.toJson()));
+        prefs.setString(captionStyleKey, jsonEncode(style.toJson()));
       });
     }
 
@@ -522,7 +533,7 @@ class CaptionsController extends Notifier<CaptionsState> {
     
     if (ref.read(keepCaptionStyleProvider)) {
       SharedPreferences.getInstance().then((prefs) {
-        prefs.setString('caption_style_json', jsonEncode(preferredStyle.toJson()));
+        prefs.setString(captionStyleKey, jsonEncode(preferredStyle.toJson()));
       });
     }
 

@@ -9,6 +9,7 @@ import '../../domain/feed_item.dart';
 import '../../domain/shelf.dart';
 import '../../theme/screen_values.dart';
 import '../focus_surface.dart';
+import '../members_only_preference.dart';
 import '../open_video.dart';
 import '../promoted_preference.dart';
 import 'feed_grid_metrics.dart';
@@ -49,11 +50,14 @@ class ShelfRow extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final title = shelf.title ?? shelfFallbackTitle(shelf.category);
     final showPromoted = ref.watch(promotedVisibleProvider);
+    final showMembersOnly = ref.watch(membersOnlyVisibleProvider);
     final entries = [
       for (final entry in shelf.items)
-        if (showPromoted || entry is! ShelfTile || !isPromotedItem(entry.item)) entry,
+        if (entry is! ShelfTile ||
+            ((showPromoted || !isPromotedItem(entry.item)) && (showMembersOnly || !isMembersOnlyItem(entry.item))))
+          entry,
     ];
-    // A row whose every tile was a promoted one has nothing left to show.
+    // A row whose every tile was hidden has nothing left to show.
     if (entries.isEmpty) return const SizedBox.shrink();
     final kind = _GeometryKind.of(shelf);
 

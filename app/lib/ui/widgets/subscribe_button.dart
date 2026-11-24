@@ -39,7 +39,7 @@ enum SubscriptionNotificationLevel {
 ///
 /// Subscribed: a muted `scheme.surfaceContainerHighest` pill whose icon
 /// mirrors the current [SubscriptionNotificationLevel], opening a dropdown
-/// (`MenuAnchor`, matching `accent_debug_button.dart`'s pattern) with the
+/// (a `MenuAnchor`) with the
 /// three notification levels plus Unsubscribe.
 ///
 /// [onSubscribe] is the one hook wired to something real anywhere in the

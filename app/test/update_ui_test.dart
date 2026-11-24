@@ -1,23 +1,25 @@
 /// The updater's surfaces — architecture.md §2.14. What a person sees: the
-/// avatar dot, the account-menu row while a check runs, the panel it opens, and
-/// the required-update banner. The controller's behaviour is asserted in
+/// avatar dot, the account-menu row while a check runs, the panel it opens (the same
+/// `UpdatePanel` Settings › About shows), and the required-update banner. The controller's behaviour is asserted in
 /// `update_controller_test.dart`; nothing here touches the network.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rill/data/update/update_config.dart';
 import 'package:rill/domain/update/app_version.dart';
 import 'package:rill/domain/update/update_manifest.dart';
 import 'package:rill/domain/update/update_state.dart';
 import 'package:rill/ui/auth_controller.dart';
+import 'package:rill/ui/settings/settings_page.dart' show SettingsDialog, resetSettingsDialogForTest;
+import 'package:rill/ui/settings/update_panel.dart';
 import 'package:rill/ui/update_controller.dart';
 import 'package:rill/ui/widgets/account_button.dart';
 import 'package:rill/ui/widgets/update_banner.dart';
+
+import 'settings_harness.dart';
 
 class _FixedAuth extends AuthController {
   _FixedAuth(this.initial);
@@ -92,13 +94,13 @@ Future<FixedUpdate> pump(
   // A fresh scope each time: a rebuilt ProviderScope keeps its first overrides.
   await tester.pumpWidget(const SizedBox());
   await tester.pumpWidget(
-    ProviderScope(
+    settingsTestApp(
       overrides: [
         authProvider.overrideWith(() => _FixedAuth(auth)),
         updateControllerProvider.overrideWith(() => controller),
         updateConfigProvider.overrideWithValue(config(overridden: overridden)),
       ],
-      child: MaterialApp(home: Scaffold(body: Center(child: child))),
+      home: Scaffold(body: Center(child: child)),
     ),
   );
   await tester.pump();
@@ -117,6 +119,8 @@ UpdateState ready({String? dismissed, UpdateManifest? offer}) => UpdateState(
 );
 
 void main() {
+  setUp(resetSettingsDialogForTest);
+
   testWidgets('a ready update puts a dot on the avatar and a highlighted row in the menu', (tester) async {
     await pump(tester, ready());
     expect(find.byKey(const ValueKey('update-dot')), findsOneWidget);
@@ -178,6 +182,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Rill is up to date'), findsOneWidget);
     expect(find.text('Updates'), findsOneWidget, reason: 'the panel is a page of the same menu');
+    expect(find.byType(SettingsDialog), findsNothing, reason: 'nothing to act on, so it stays in the menu');
+    // The menu's page is the card, the version and the last check; nothing to set there.
+    expect(find.text('Version'), findsOneWidget);
+    expect(find.text('Last checked'), findsOneWidget);
+    expect(find.byKey(autoUpdateSwitchKey), findsNothing, reason: 'the switch is on Settings › About only');
+    expect(find.text('yt-dlp'), findsNothing, reason: "yt-dlp is About's own card");
+  });
+
+  testWidgets('a check that finds an update opens Settings › About, where it is acted on', (tester) async {
+    final controller = await pump(tester, const UpdateState(phase: UpdatePhase.idle(), currentVersion: current));
+    controller.result = ready().phase;
+    await openMenu(tester);
+    await tester.tap(find.text('Check for updates'));
+    await tester.pump();
+    controller.finish.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsDialog), findsOneWidget);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+    expect(find.text('Sign out'), findsNothing, reason: 'the menu closed');
   });
 
   testWidgets('a failed manual check opens the panel with the reason and a Try again', (tester) async {
@@ -193,22 +216,14 @@ void main() {
     expect(find.text('Try again'), findsOneWidget);
   });
 
-  testWidgets('the panel has a switch for reopening where the viewer left off, off until it is turned on', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    await pump(tester, ready());
+  testWidgets('About has the automatic-update switch, and not the reopen switch, which is Settings › General', (tester) async {
+    final controller = await pump(tester, ready());
     await openMenu(tester);
     await tester.tap(find.text('Restart to update'));
     await tester.pumpAndSettle();
-
-    final switchFinder = find.byKey(const ValueKey('restore-session-switch'));
-    expect(find.text('Reopen where I left off'), findsOneWidget);
-    expect(tester.widget<Switch>(switchFinder).value, isFalse);
-
-    await tester.tap(switchFinder);
-    await tester.pumpAndSettle();
-
-    expect(tester.widget<Switch>(switchFinder).value, isTrue);
-    expect((await SharedPreferences.getInstance()).getBool('restore_session'), isTrue);
+    expect(tester.widget<Switch>(find.byKey(autoUpdateSwitchKey)).value, controller.state.autoUpdate);
+    expect(find.text('Reopen where I left off'), findsNothing);
+    expect(find.text('Home page rows'), findsNothing);
   });
 
   testWidgets('a test build says so on the panel', (tester) async {
@@ -230,14 +245,16 @@ void main() {
     expect(find.text('Later'), findsNothing);
   });
 
-  testWidgets('Later dismisses the update and goes back to the root menu', (tester) async {
+  testWidgets('Later, on About, dismisses the update; the dot goes and the dialog stays', (tester) async {
     await pump(tester, ready());
     await openMenu(tester);
     await tester.tap(find.text('Restart to update'));
     await tester.pumpAndSettle();
+    expect(find.byType(SettingsDialog), findsOneWidget, reason: 'an update on offer opens About');
     await tester.tap(find.widgetWithText(TextButton, 'Later'));
     await tester.pumpAndSettle();
-    expect(find.text('Sign out'), findsOneWidget, reason: 'back on the root page');
+    expect(find.widgetWithText(TextButton, 'Later'), findsNothing);
+    expect(find.byType(SettingsDialog), findsOneWidget);
     expect(find.byKey(const ValueKey('update-dot')), findsNothing);
   });
 
@@ -249,7 +266,7 @@ void main() {
     final cardHeight = tester.getSize(find.byKey(const ValueKey('update-card'))).height;
     expect(find.byKey(const ValueKey('update-header-progress')), findsNothing);
 
-    await tester.tap(find.byTooltip('Check for updates'));
+    await tester.tap(find.widgetWithText(TextButton, 'Check for updates'));
     await tester.pump();
     // Mid-check: the bar is on the divider, the card still shows the update
     // at the same height, and the header button is still there.
@@ -257,7 +274,7 @@ void main() {
     expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
     expect(find.text('Checking for updates…'), findsNothing);
     expect(tester.getSize(find.byKey(const ValueKey('update-card'))).height, cardHeight);
-    expect(find.byTooltip('Check for updates'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Check for updates'), findsOneWidget);
 
     controller.result = ready().phase;
     controller.finish.complete();
