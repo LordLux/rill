@@ -56,6 +56,11 @@ class _FixedAuth extends AuthController {
 class _IdleUpdate extends UpdateController {
   @override
   UpdateState build() => const UpdateState(phase: UpdatePhase.idle());
+
+  /// A manual check that finds nothing, with no network.
+  @override
+  Future<void> checkNow({UpdateCheckOrigin origin = UpdateCheckOrigin.manual}) async =>
+      state = state.copyWith(phase: const UpdatePhase.upToDate());
 }
 
 /// An update ready to install, so About shows Restart to update and Later.
@@ -389,11 +394,13 @@ void main() {
   });
 
   testWidgets("the account menu's Updates page and Settings › About are one switch, not two", (tester) async {
-    await pumpHome(tester, updateReady: true);
+    await pumpHome(tester);
     await openAccountMenu(tester);
-    await tester.tap(find.text('Restart to update'));
+    // A check that finds nothing stays in the menu, on its own Updates page.
+    await tester.tap(find.text('Check for updates'));
     await tester.pumpAndSettle();
-    expect(find.text('Updates'), findsOneWidget, reason: "the menu's own Updates page");
+    expect(find.byType(SettingsDialog), findsNothing);
+    expect(find.text('Rill is up to date'), findsOneWidget, reason: "the menu's own Updates page");
     await tester.tap(find.byKey(autoUpdateSwitchKey));
     await tester.pumpAndSettle();
 

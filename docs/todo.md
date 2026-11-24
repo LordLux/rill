@@ -12,7 +12,7 @@ item leaves it when the work lands.
 **Numbers are permanent.** Other files cite items by number, so a finished item
 is deleted and its number is not reused; gaps are expected.
 
-**Next number: 119.** A new item takes it, and the same edit bumps this line.
+**Next number: 120.** A new item takes it, and the same edit bumps this line.
 The highest number still in the file is not a substitute — once that item is
 finished and deleted, it would hand the same number out twice.
 
@@ -56,6 +56,32 @@ and it is a guess until a real occurrence says otherwise.
 ---
 
 ## Soon
+
+### 119. "This video would not open": mpv refuses the stream until Rill is restarted
+
+Reported 2026-11-24 (during Task 40): the watch page shows *"This video would not open."* with
+*"Bad state: mpv could not open the stream: Failed to open https://…googlevideo.com/videoplayback?…"*
+(an `itag=247` video URL, not yet expired by its own `expire=`). *Try again* does not fix it; closing
+and reopening Rill does. The message comes from `MediaKitEngine`'s open
+(`app/lib/data/playback/engine.dart`, the `player.stream.error` race that throws
+`StateError('mpv could not open the stream: …')`).
+
+**Not known yet:** which half the restart fixes. Reopening Rill replaces both the sidecar (a new
+session, a new visitor id, an empty resolution cache) and both mpv players, so either could hold
+the bad state: a URL the sidecar keeps handing back (does *Try again* re-resolve, or reuse a cached
+answer?), or something stuck in the player.
+
+**An idea to test, not a fix:** on this error, restart the sidecar (`RpcClient.restart()`, which
+`RpcClient.onRestarted` already follows by restoring the cookie) and open the video once more. If
+that clears it, the sidecar's state is the cause and the next step is finding *what* in it; if it
+does not, look at the player instead. Before trying it, capture one case: the log around the
+failure, whether the same URL comes back on *Try again*, and what the stream answers when fetched
+directly. Mind item 96: a restarted sidecar forgets open playback sessions.
+
+**Also:** the slate prints the whole signed stream URL, client IP included. It should say what
+failed without it, the URL going to the log only.
+
+**Done when** the cause is known, and the error clears without restarting Rill.
 
 ### 112. `VideoDetail.isMembersOnly` reads the whole `/next` body and only `metadataBadgeRenderer`
 

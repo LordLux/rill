@@ -531,7 +531,10 @@ class _SignedOutRootPage extends StatelessWidget {
       children: [
         // The settings page needs no account, so it is here too.
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () => onOpenSettings(null)),
-        _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
+        _UpdateMenuItem(
+          onOpen: () => onGo(_AccountMenuPage.updates),
+          onOpenUpdate: () => onOpenSettings(aboutSettingsSectionId),
+        ),
         _YtDlpMenuItem(onOpen: () => onOpenSettings(aboutSettingsSectionId)),
         const SizedBox(height: 4),
       ],
@@ -649,7 +652,10 @@ class _AccountRootPage extends StatelessWidget {
         _AccountMenuItem(icon: Icons.settings, label: 'Settings', onTap: () => onOpenSettings(null)),
         // Updates opens its page here, the same panel as Settings › About; yt-dlp's card
         // lives only on About.
-        _UpdateMenuItem(onOpen: () => onGo(_AccountMenuPage.updates)),
+        _UpdateMenuItem(
+          onOpen: () => onGo(_AccountMenuPage.updates),
+          onOpenUpdate: () => onOpenSettings(aboutSettingsSectionId),
+        ),
         _YtDlpMenuItem(onOpen: () => onOpenSettings(aboutSettingsSectionId)),
         // ── Help ───────────────────────────────────────────────────────────
         const _AccountMenuDivider(),
@@ -912,13 +918,19 @@ Future<void> openLoginFlow(BuildContext context, WidgetRef ref) => _signIn(conte
 // Updates (architecture.md §2.14)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The root page's update row. Idle, it checks and then opens the Updates page with
-/// the result; while a check or download runs it says so; with an update on offer it
-/// is highlighted and opens the page directly.
+/// The root page's update row. Idle, it checks, and then: an update found opens the
+/// settings dialog at About, where it can be downloaded and installed; nothing found
+/// (or a failure) is shown here, on the menu's own Updates page. While a check runs
+/// it says so; with an update on offer, downloading or ready, it is highlighted and
+/// opens About directly.
 class _UpdateMenuItem extends ConsumerWidget {
-  const _UpdateMenuItem({required this.onOpen});
+  const _UpdateMenuItem({required this.onOpen, required this.onOpenUpdate});
 
+  /// The menu's Updates page: for a result with nothing to act on.
   final VoidCallback onOpen;
+
+  /// Settings › About: for an update to download or install.
+  final VoidCallback onOpenUpdate;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -935,7 +947,9 @@ class _UpdateMenuItem extends ConsumerWidget {
 
     Future<void> checkThenOpen() async {
       await ref.read(updateControllerProvider.notifier).checkNow();
-      if (context.mounted) onOpen();
+      if (!context.mounted) return;
+      final phase = ref.read(updateControllerProvider).phase;
+      (phase is UpdateAvailable || phase is UpdateDownloading || phase is UpdateReady) ? onOpenUpdate() : onOpen();
     }
 
     return switch (state.phase) {
@@ -948,19 +962,19 @@ class _UpdateMenuItem extends ConsumerWidget {
       UpdateDownloading(:final received, :final total) => _AccountMenuItem(
         icon: Icons.downloading,
         label: 'Downloading update · ${_percent(received, total)}%',
-        onTap: onOpen,
+        onTap: onOpenUpdate,
       ),
       UpdateReady() => _AccountMenuItem(
         icon: Icons.restart_alt,
         label: 'Restart to update',
         color: scheme.primary,
-        onTap: onOpen,
+        onTap: onOpenUpdate,
       ),
       UpdateAvailable(:final manifest) => _AccountMenuItem(
         icon: Icons.system_update_alt,
         label: 'Update ${manifest.version} available',
         color: scheme.primary,
-        onTap: onOpen,
+        onTap: onOpenUpdate,
       ),
       UpdateInstalling() => _AccountMenuItem(
         icon: Icons.restart_alt,

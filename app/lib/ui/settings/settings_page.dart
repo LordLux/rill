@@ -261,10 +261,13 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                             ),
                           ),
                           if (onClose != null)
-                            IconButton(
-                              key: settingsCloseKey,
-                              onPressed: onClose,
-                              icon: const Icon(Icons.close, semanticLabel: 'Close settings'),
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: IconButton(
+                                key: settingsCloseKey,
+                                onPressed: onClose,
+                                icon: const Icon(Icons.close, semanticLabel: 'Close settings'),
+                              ),
                             ),
                         ],
                       ),

@@ -2219,16 +2219,18 @@ the feed it reads is §2.13's.
 - **Where it shows: the account menu's Updates page, and Settings › About** — one widget
   (`ui/settings/update_panel.dart`, `UpdatePanel`) on one provider, drawn in both (§2.19;
   until Task 40 the menu was its only home, because there was no settings page). The menu's
-  `Check for updates` row spins while it checks and then opens the Updates page in the same
-  overlay. The panel leads with one card for what the updater has to say — the update on
+  `Check for updates` row spins while it checks, then **routes by the answer**: nothing to act
+  on (up to date, or a failure) opens the Updates page in the same overlay; an update found
+  opens the settings dialog at About, where it is downloaded and installed. With an update
+  already on offer, downloading or ready, the row opens About directly. The panel leads with one card for what the updater has to say — the update on
   offer, in the accent container, with up to five notes, a link to the full release notes,
   and `Restart to update` / `Later`; a download in progress; a failure, in the error
   container, with `Try again`; or that all is well — then the running version, the last
   check, and the switch; the header's button checks again (it stays enabled while a check
   runs and ignores the press, so keyboard focus is never dropped). The menu's page is
   300 px where the menu is 260, so the card's two buttons fit on one line. A ready update
-  puts a dot on the avatar; `Later` removes it for that version, and in the menu goes back
-  to the root page. Nothing is modal and nothing covers the player, so an update never
+  puts a dot on the avatar; `Later` removes it for that version (in the menu's page it goes
+  back to the root page; on About the dialog stays). Nothing is modal and nothing covers the player, so an update never
   interrupts playback. **Signed out, the avatar opens the menu too** (decided 2026-09-27):
   a short root page that says why nobody is signed in, with **Sign in** as its first
   action, then Settings and the update row. Before that it opened the login flow

@@ -13,6 +13,7 @@ import 'package:rill/domain/update/app_version.dart';
 import 'package:rill/domain/update/update_manifest.dart';
 import 'package:rill/domain/update/update_state.dart';
 import 'package:rill/ui/auth_controller.dart';
+import 'package:rill/ui/settings/settings_page.dart' show SettingsDialog, resetSettingsDialogForTest;
 import 'package:rill/ui/settings/update_panel.dart';
 import 'package:rill/ui/update_controller.dart';
 import 'package:rill/ui/widgets/account_button.dart';
@@ -118,6 +119,8 @@ UpdateState ready({String? dismissed, UpdateManifest? offer}) => UpdateState(
 );
 
 void main() {
+  setUp(resetSettingsDialogForTest);
+
   testWidgets('a ready update puts a dot on the avatar and a highlighted row in the menu', (tester) async {
     await pump(tester, ready());
     expect(find.byKey(const ValueKey('update-dot')), findsOneWidget);
@@ -179,6 +182,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Rill is up to date'), findsOneWidget);
     expect(find.text('Updates'), findsOneWidget, reason: 'the panel is a page of the same menu');
+    expect(find.byType(SettingsDialog), findsNothing, reason: 'nothing to act on, so it stays in the menu');
+  });
+
+  testWidgets('a check that finds an update opens Settings › About, where it is acted on', (tester) async {
+    final controller = await pump(tester, const UpdateState(phase: UpdatePhase.idle(), currentVersion: current));
+    controller.result = ready().phase;
+    await openMenu(tester);
+    await tester.tap(find.text('Check for updates'));
+    await tester.pump();
+    controller.finish.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsDialog), findsOneWidget);
+    expect(find.text('Rill 0.3.0 is ready!'), findsOneWidget);
+    expect(find.text('Sign out'), findsNothing, reason: 'the menu closed');
   });
 
   testWidgets('a failed manual check opens the panel with the reason and a Try again', (tester) async {
@@ -223,14 +240,16 @@ void main() {
     expect(find.text('Later'), findsNothing);
   });
 
-  testWidgets('Later dismisses the update and goes back to the root menu', (tester) async {
+  testWidgets('Later, on About, dismisses the update; the dot goes and the dialog stays', (tester) async {
     await pump(tester, ready());
     await openMenu(tester);
     await tester.tap(find.text('Restart to update'));
     await tester.pumpAndSettle();
+    expect(find.byType(SettingsDialog), findsOneWidget, reason: 'an update on offer opens About');
     await tester.tap(find.widgetWithText(TextButton, 'Later'));
     await tester.pumpAndSettle();
-    expect(find.text('Sign out'), findsOneWidget, reason: 'back on the root page');
+    expect(find.widgetWithText(TextButton, 'Later'), findsNothing);
+    expect(find.byType(SettingsDialog), findsOneWidget);
     expect(find.byKey(const ValueKey('update-dot')), findsNothing);
   });
 
