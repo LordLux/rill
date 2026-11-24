@@ -113,12 +113,10 @@ class _CaptionsSection extends ConsumerWidget {
                 child: SettingsStepper(
                   label: 'caption size',
                   valueText: sizeText,
-                  onDecrease: keep && size > _minSize
-                      ? () => apply(style.copyWith(fontSizePercent: _sized(size - _sizeStep)))
-                      : null,
-                  onIncrease: keep && size < _maxSize
-                      ? () => apply(style.copyWith(fontSizePercent: _sized(size + _sizeStep)))
-                      : null,
+                  atMin: size <= _minSize,
+                  atMax: size >= _maxSize,
+                  onDecrease: keep ? () => apply(style.copyWith(fontSizePercent: _sized(size - _sizeStep))) : null,
+                  onIncrease: keep ? () => apply(style.copyWith(fontSizePercent: _sized(size + _sizeStep))) : null,
                 ),
               ),
             ),
@@ -242,9 +240,9 @@ class _CaptionsSection extends ConsumerWidget {
               icon: Icons.restart_alt,
               label: 'Reset caption style',
               detail: "Back to each video's own style, and the caption back where it was.",
-              onTap: keep && !(style.isDefault && captions.offset.isZero)
-                  ? () => unawaited(controller.resetStyle())
-                  : null,
+              // Enabled whenever the editor is, even with nothing to reset: a row that
+              // disabled itself on the press would drop keyboard focus. A no-op then.
+              onTap: keep ? () => unawaited(controller.resetStyle()) : null,
             ),
           ],
         ),

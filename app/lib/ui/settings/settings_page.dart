@@ -68,14 +68,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   /// Escape leaves the page — only while it is the page on top and focus is on it (or
-  /// nowhere): a menu or dialog over it closes first, and takes the key itself.
+  /// nowhere): a menu or dialog over it closes first, and takes the key itself. **Never from
+  /// a text field**: the top bar's search box is inside this route, and there Escape closes
+  /// its suggestions or releases the field (`KeyboardNavigation._escapeIsOurs` agrees).
   bool _onKey(KeyEvent event) {
     if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.escape) return false;
     if (!mounted) return false;
     final route = ModalRoute.of(context);
     if (route == null || !route.isCurrent) return false;
     final focusContext = FocusManager.instance.primaryFocus?.context;
-    if (focusContext != null && focusContext.mounted && ModalRoute.of(focusContext) != route) return false;
+    if (focusContext != null && focusContext.mounted) {
+      if (ModalRoute.of(focusContext) != route) return false;
+      if (focusContext.widget is EditableText || focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
+        return false;
+      }
+    }
     rootNavigatorKey.currentState?.maybePop();
     return true;
   }

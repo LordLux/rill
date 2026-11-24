@@ -14,7 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// and this app does not borrow it.
 const Color kDefaultAccent = Color(0xFF7C4DFF);
 
-/// The swatches offered by the temporary debug control.
+/// The swatches offered by Settings › General › Appearance.
 ///
 /// These are *seeds*, not values that reach a widget: every one of them is run
 /// through `ColorScheme.fromSeed`, so a very light or very saturated pick still

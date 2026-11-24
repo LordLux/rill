@@ -311,24 +311,35 @@ class SettingsStepper extends StatelessWidget {
     required this.valueText,
     required this.onDecrease,
     required this.onIncrease,
+    this.atMin = false,
+    this.atMax = false,
   });
 
   final String label;
   final String valueText;
 
-  /// Null at the end of the range, or when the stepper is greyed out.
+  /// Null greys out the whole stepper.
   final VoidCallback? onDecrease;
   final VoidCallback? onIncrease;
+
+  /// At an end of the range: that button is drawn dim and ignores the press, but **stays
+  /// enabled**, because a disabled control drops keyboard focus (CLAUDE.md, Task 32) and
+  /// reaching 50% with the keyboard would throw focus off the page.
+  final bool atMin;
+  final bool atMax;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final enabled = onDecrease != null || onIncrease != null;
+    Color? dim(bool end) => end ? scheme.onSurface.withValues(alpha: 0.38) : null;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
           visualDensity: VisualDensity.compact,
-          onPressed: onDecrease,
+          color: dim(atMin),
+          onPressed: enabled ? () => atMin ? null : onDecrease?.call() : null,
           icon: Icon(Icons.remove, size: 18, semanticLabel: 'Decrease $label, now $valueText'),
         ),
         SizedBox(
@@ -342,7 +353,8 @@ class SettingsStepper extends StatelessWidget {
         ),
         IconButton(
           visualDensity: VisualDensity.compact,
-          onPressed: onIncrease,
+          color: dim(atMax),
+          onPressed: enabled ? () => atMax ? null : onIncrease?.call() : null,
           icon: Icon(Icons.add, size: 18, semanticLabel: 'Increase $label, now $valueText'),
         ),
       ],

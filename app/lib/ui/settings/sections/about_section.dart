@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../data/update/update_config.dart';
 import '../../../domain/update/update_state.dart';
 import '../../../domain/ytdlp/ytdlp_state.dart';
+import '../../focus_ring.dart';
 import '../../update_controller.dart';
 import '../../ytdlp_controller.dart';
 import '../settings_section.dart';
@@ -63,6 +64,25 @@ class _UpdatesCardState extends ConsumerState<_UpdatesCard> {
   /// (architecture.md §2.14).
   UpdatePhase? _settled;
 
+  /// The card's main button. "Later" removes itself, so a keyboard press of it hands focus
+  /// here rather than dropping it (CLAUDE.md, Task 32: focus is never left on nothing).
+  final FocusNode _primary = FocusNode(debugLabel: 'update card primary');
+
+  @override
+  void dispose() {
+    _primary.dispose();
+    super.dispose();
+  }
+
+  Future<void> _later() async {
+    final hadFocus = KeyboardNavigation.active && (FocusManager.instance.primaryFocus?.context?.mounted ?? false);
+    await ref.read(updateControllerProvider.notifier).dismiss();
+    if (!mounted || !hadFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _primary.context != null) _primary.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final live = ref.watch(updateControllerProvider);
@@ -112,8 +132,9 @@ class _UpdatesCardState extends ConsumerState<_UpdatesCard> {
         _UpdateCard(
           state: state,
           enabled: config.enabled,
+          primaryFocus: _primary,
           // "Later" hides the offer until the next version; the page stays where it is.
-          onLater: () => unawaited(controller.dismiss()),
+          onLater: () => unawaited(_later()),
         ),
         const SizedBox(height: 12),
         _UpdateInfoRow(label: 'Version', value: state.currentVersion?.toString() ?? 'Development build'),
@@ -226,11 +247,12 @@ class _UpdateRefreshButton extends ConsumerWidget {
 /// The card at the top of the Updates page. Accent-coloured when there is an
 /// update to act on, error-coloured for a failure, neutral otherwise.
 class _UpdateCard extends ConsumerWidget {
-  const _UpdateCard({required this.state, required this.enabled, required this.onLater});
+  const _UpdateCard({required this.state, required this.enabled, required this.onLater, this.primaryFocus});
 
   final UpdateState state;
   final bool enabled;
   final VoidCallback onLater;
+  final FocusNode? primaryFocus;
 
   static const _maxNotes = 5;
 
@@ -279,11 +301,11 @@ class _UpdateCard extends ConsumerWidget {
         ? null
         : switch (phase) {
             UpdateReady() => _UpdateActions(
-              primary: FilledButton(onPressed: controller.install, child: const Text('Restart to update')),
+              primary: FilledButton(focusNode: primaryFocus, onPressed: controller.install, child: const Text('Restart to update')),
               later: canLater ? onLater : null,
             ),
             UpdateAvailable() => _UpdateActions(
-              primary: FilledButton(onPressed: controller.download, child: const Text('Download')),
+              primary: FilledButton(focusNode: primaryFocus, onPressed: controller.download, child: const Text('Download')),
               later: canLater ? onLater : null,
             ),
             UpdateError() => Align(
@@ -567,7 +589,10 @@ class _YtDlpInfoRow extends ConsumerWidget {
       children: [
         Expanded(child: Text('Status', style: style?.copyWith(color: scheme.onSurfaceVariant))),
         Flexible(
-          child: Row(
+          // Right-aligned like the Version and Last checked values above it.
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Flexible(child: Text(value, style: style, overflow: TextOverflow.ellipsis)),
@@ -583,6 +608,7 @@ class _YtDlpInfoRow extends ConsumerWidget {
                 ),
               ],
             ],
+          ),
           ),
         ),
       ],

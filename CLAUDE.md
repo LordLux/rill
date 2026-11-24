@@ -945,7 +945,6 @@ the answer.
   reports its top: an observer's `previousRoute` is wrong for a route removed
   from the middle, and would float the miniplayer and light the wrong rail entry.
 - **An app-wide setting lives on the settings page, registered as a section; never a second copy elsewhere.**
-  `app/lib/ui/settings/settings_sections.dart` is the one list (`architecture.md` §2.19).
 
 ## Accessibility
 

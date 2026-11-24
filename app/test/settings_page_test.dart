@@ -15,12 +15,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rill/data/update/update_config.dart';
 import 'package:rill/domain/feed_item.dart';
 import 'package:rill/domain/shelf.dart';
+import 'package:rill/domain/update/app_version.dart';
+import 'package:rill/domain/update/update_manifest.dart';
 import 'package:rill/domain/update/update_state.dart';
 import 'package:rill/domain/ytdlp/ytdlp_state.dart';
 import 'package:rill/theme/accent.dart';
 import 'package:rill/ui/auth_controller.dart';
 import 'package:rill/ui/captions_controller.dart';
 import 'package:rill/ui/feed_controller.dart';
+import 'package:rill/ui/focus_ring.dart';
 import 'package:rill/ui/members_only_preference.dart';
 import 'package:rill/ui/page_wrapper.dart';
 import 'package:rill/ui/playback_controller.dart';
@@ -55,6 +58,27 @@ class _IdleUpdate extends UpdateController {
   UpdateState build() => const UpdateState(phase: UpdatePhase.idle());
 }
 
+/// An update ready to install, so About shows Restart to update and Later.
+class _ReadyUpdate extends UpdateController {
+  @override
+  UpdateState build() => UpdateState(
+        currentVersion: const AppVersion(major: 0, minor: 2, patch: 2),
+        phase: UpdatePhase.ready(
+          installerPath: 'Rill-Setup-x64.exe',
+          manifest: UpdateManifest(
+            schema: 1,
+            version: const AppVersion(major: 0, minor: 3, patch: 0),
+            tag: 'v0.3.0',
+            notes: const [],
+            windowsX64: UpdateAsset(name: 'Rill-Setup-x64.exe', url: Uri.parse('https://example.invalid/x.exe'), sha256: '0' * 64, size: 10),
+          ),
+        ),
+      );
+
+  @override
+  Future<void> dismiss() async => state = state.copyWith(dismissedVersion: '0.3.0');
+}
+
 class _OnPathYtDlp extends YtDlpController {
   @override
   YtDlpState build() => const YtDlpState(phase: YtDlpPhase.idle(), location: YtDlpLocation.onPath, onPathPath: 'yt-dlp');
@@ -87,9 +111,9 @@ VideoItem _video(String id, {bool members = false}) => VideoItem(
       canAddToQueue: false,
     );
 
-List<Override> _overrides({AuthState auth = signedIn}) => [
+List<Override> _overrides({AuthState auth = signedIn, bool updateReady = false}) => [
       authProvider.overrideWith(() => _FixedAuth(auth)),
-      updateControllerProvider.overrideWith(_IdleUpdate.new),
+      if (updateReady) updateControllerProvider.overrideWith(_ReadyUpdate.new) else updateControllerProvider.overrideWith(_IdleUpdate.new),
       updateConfigProvider.overrideWithValue(UpdateConfig.resolve(releaseMode: false, version: '0.2.2')),
       ytDlpControllerProvider.overrideWith(_OnPathYtDlp.new),
       playbackEngineProvider.overrideWithValue(FakeEngine()),
@@ -116,10 +140,10 @@ Future<void> pumpHome(WidgetTester tester, {AuthState auth = signedIn}) async {
 }
 
 /// The settings page alone, at [section].
-Future<ProviderContainer> pumpSettings(WidgetTester tester, {String section = 'general'}) async {
+Future<ProviderContainer> pumpSettings(WidgetTester tester, {String section = 'general', bool updateReady = false}) async {
   _bigWindow(tester);
   await tester.pumpWidget(const SizedBox());
-  await tester.pumpWidget(settingsTestApp(overrides: _overrides(), home: const SettingsPage()));
+  await tester.pumpWidget(settingsTestApp(overrides: _overrides(updateReady: updateReady), home: const SettingsPage()));
   await tester.pump();
   final container = ProviderScope.containerOf(tester.element(find.byType(SettingsPage)));
   if (section != 'general') {
@@ -200,6 +224,20 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.byType(SettingsPage), findsNothing);
+    });
+
+    testWidgets("Escape in the top bar's search box does not leave it", (tester) async {
+      await pumpHome(tester);
+      await openAccountMenu(tester);
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(EditableText));
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<EditableText>(), isNotNull);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsPage), findsOneWidget, reason: 'Escape belongs to the field');
     });
 
     testWidgets('signed out, the menu has Settings too', (tester) async {
@@ -407,6 +445,63 @@ void main() {
         restoreSessionSwitchKey.value,
         for (final preset in kAccentPresets) 'Accent colour: ${preset.name}',
       ]);
+    });
+
+    group('a control pressed from the keyboard keeps focus', () {
+      setUp(KeyboardNavigation.install);
+
+      Future<FocusNode> focusOn(WidgetTester tester, Finder finder) async {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab); // keyboard navigation on
+        await tester.pump();
+        Focus.of(tester.element(finder)).requestFocus();
+        await tester.pump();
+        return FocusManager.instance.primaryFocus!;
+      }
+
+      testWidgets('the size stepper at the end of its range', (tester) async {
+        final container = await pumpSettings(tester, section: 'captions');
+        await tester.tap(find.byKey(keepCaptionStyleSwitchKey));
+        await tester.pumpAndSettle();
+        final node = await focusOn(
+          tester,
+          find.byWidgetPredicate((w) => w is Icon && (w.semanticLabel ?? '').startsWith('Decrease caption size')),
+        );
+        for (var i = 0; i < 8; i++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pumpAndSettle();
+        }
+        expect(container.read(captionsProvider).style.fontSizePercent, 50);
+        expect(FocusManager.instance.primaryFocus, same(node), reason: 'focus left the stepper at 50%');
+      });
+
+      testWidgets('Reset caption style, with nothing left to reset', (tester) async {
+        await pumpSettings(tester, section: 'captions');
+        await tester.tap(find.byKey(keepCaptionStyleSwitchKey));
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel('Font: Georgia'));
+        await tester.pumpAndSettle();
+        final node = await focusOn(tester, find.text('Reset caption style'));
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(FocusManager.instance.primaryFocus, same(node));
+      });
+
+      testWidgets("Later, which removes itself, hands focus to the card's main button", (tester) async {
+        await pumpSettings(tester, section: 'about', updateReady: true);
+        await focusOn(tester, find.text('Later'));
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(find.widgetWithText(TextButton, 'Later'), findsNothing);
+        final focused = FocusManager.instance.primaryFocus?.context;
+        expect(focused, isNotNull);
+        expect(
+          focused!.findAncestorWidgetOfExactType<FilledButton>(),
+          isNotNull,
+          reason: 'focus went to ${focused.widget}, not Restart to update',
+        );
+      });
     });
 
     testWidgets('on Feeds: the rows top to bottom, then every list', (tester) async {
