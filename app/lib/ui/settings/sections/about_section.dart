@@ -46,24 +46,18 @@ class _UpdatesCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final checking = ref.watch(updateControllerProvider.select(updateChecking));
-    final textTheme = Theme.of(context).textTheme;
     return SettingsCard(
+      title: 'Updates',
+      trailing: const UpdateRefreshButton(),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Semantics(
-                header: true,
-                child: Text('Updates', style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-              ),
-            ),
-            const UpdateRefreshButton(),
-          ],
-        ),
+        // The bar runs along the card's top edge while a check runs; it moves nothing.
         SizedBox(
-          height: 8,
+          height: 6,
           child: checking
-              ? const Center(child: LinearProgressIndicator(key: ValueKey('update-header-progress'), minHeight: 2))
+              ? const Align(
+                  alignment: Alignment.topCenter,
+                  child: LinearProgressIndicator(key: ValueKey('update-header-progress'), minHeight: 2),
+                )
               : null,
         ),
         const UpdatePanel(),

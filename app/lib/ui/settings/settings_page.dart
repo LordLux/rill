@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silky_scroll/silky_scroll.dart';
 
 import '../focus_ring.dart';
 import '../focus_surface.dart';
@@ -250,7 +251,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(28, 16, 12, 8),
+                      padding: const EdgeInsets.fromLTRB(28, 20, 12, 8),
                       child: Row(
                         children: [
                           Expanded(
@@ -269,7 +270,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                       ),
                     ),
                     Expanded(
-                      child: SingleChildScrollView(
+                      // Smooth wheel scrolling, as everywhere else in the app; a `Silky…` view also
+                      // keeps the wheel from reaching the page under the dialog (§2.8).
+                      child: SilkySingleChildScrollView(
                         controller: _scroll,
                         padding: const EdgeInsets.fromLTRB(28, 4, 28, 28),
                         // Keyed so a section's state never carries over to the next.
@@ -300,7 +303,7 @@ class _SectionSidebar extends StatelessWidget {
       child: Material(
         type: MaterialType.transparency,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 16, 10, 16),
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

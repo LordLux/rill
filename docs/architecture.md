@@ -2626,22 +2626,28 @@ end actions, and the menu pages are in `settings_menu.dart`.
   - The countdown is announced once, not every second.
   - Not yet checked: Narrator itself on these pages (`todo.md` 114).
 
-### 2.19 The settings page (decided 2026-11-24, Task 40, was `todo.md` 69 and 16)
+### 2.19 Settings (decided 2026-11-24, Task 40, was `todo.md` 69 and 16)
 
 **One rule decides where a setting lives:** what belongs to the video playing now stays with the video, in the
 player's menu (quality, this video's captions and audio track, audio only, the sleep timer); what is app-wide lives on
 the settings page, and **only** there. A setting has one provider and one stored value; the one place it may show twice
 is the same provider drawn in two places, never a second copy of the value.
 
-- **The page** (`ui/settings/settings_page.dart`) is a named route (`settings`) in the content navigator, like the
-  playlist page: `PageWrapper` draws the title bar, the window buttons and the rail over it, and Back returns to the
-  page it was opened over. It is opened from the account menu's *Settings* row, signed in or out, and from the
-  menu's yt-dlp row, which opens it at About. **A sidebar of sections, one section shown at a
-  time** (the layout chosen over one long page, tabs, and a hub of tiles: about twenty controls today, two more
-  sections coming), drawn as **one centred panel** at most 1000 px wide, so a wide window is not half empty —
-  still a page and not a dialog, because a dialog's barrier would cover the window buttons in the top bar.
-  Switching section is not navigation: Back and Escape leave Settings, and the section shown is
-  kept for the run.
+- **A dialog over whatever page is open** (`ui/settings/settings_page.dart`), chosen over a page (a page left a
+  wide window half empty, and a centred panel on the page was tried first). It is opened from the rail's
+  *Settings* tile, pinned to the rail's bottom, from the account menu's *Settings* row, signed in or out, and from
+  the menu's yt-dlp row, which opens it at About. **Not a route, and its scrim starts below the top bar**: a
+  `showDialog` barrier covers the whole navigator, and every page draws its own top bar — the window buttons
+  included — inside it, so a modal route would leave minimize, maximize and close dead (the login page did that
+  once). It is an `OverlayEntry`, as the account menu is: the scrim covers the page and the rail, focus is held in
+  the dialog's own scope, and the X, Escape or a click on the scrim close it, giving focus back to what had it.
+  Escape from the top bar's search box, which stays live, belongs to the field. Over the watch page the player's
+  keyboard shortcuts stand down while it is open (`settingsDialogOpen`), so arrows and Space work its controls.
+  **A sidebar of sections, one shown at a time** (chosen over one long page, tabs, and a hub of tiles: about
+  twenty controls today, two more sections coming), at most 1000×760 and a fixed size, so switching section does
+  not resize it; the section scrolls inside. Switching section is not navigation, and the section shown is kept
+  for the run. A group's title and description sit **above** its card: inside it, they read as a setting with no
+  switch.
 - **A section is one file and one line.** `sections/<name>_section.dart` exports a `SettingsSection` (id, title,
   icon, order, builder), and `settings_sections.dart` is the only list of them; the sidebar and the content are
   built from it. Order is spaced by ten: General 10, Feeds 20, Captions 30, Zoom 40 (Task 41), Audio languages 50
@@ -2660,7 +2666,7 @@ is the same provider drawn in two places, never a second copy of the value.
   is remembered across videos only while "Remember caption style" is on (off, a style lasts until the next video),
   so the settings page's editor works only while it is on: a default the next video throws away is not a default.
   Turning it on saves the style showing then.
-- **No overlays on the page.** It scrolls and its sections swap, so a Material `Slider`, `Tooltip`, `MenuAnchor` or
+- **No overlays inside it.** It scrolls and its sections swap, so a Material `Slider`, `Tooltip`, `MenuAnchor` or
   dropdown would graft a semantics node under an anchor that goes away (F51). Choices are chips, colours are
   swatches, a number is a stepper, and nothing has a tooltip; every control names itself and its state once.
 - **Placeholders stay placeholders.** The account menu's Appearance (theme), Display language, Restricted Mode and

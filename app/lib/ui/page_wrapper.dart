@@ -12,6 +12,7 @@ import 'player_shell.dart'
     show currentRouteProvider, homeRouteName, rootNavigatorKey, sectionRouteProvider, transientRouteOpenProvider;
 import 'widgets/topbar.dart';
 import 'widgets/update_banner.dart';
+import 'settings/settings_page.dart' show openSettingsPage;
 
 const String drawerPrefsKey = 'left_drawer_open';
 
@@ -306,7 +307,11 @@ class _PageWrapperState extends ConsumerState<PageWrapper> with SingleTickerProv
             width: isDrawerOpen ? ScreenValues.openRailWidth : ScreenValues.closedRailWidth,
             child: Material(
               type: MaterialType.transparency,
-              child: SilkyListView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: SilkyListView(
                 children: [
                   _DrawerItem(
                     key: const ValueKey('home'),
@@ -351,6 +356,20 @@ class _PageWrapperState extends ConsumerState<PageWrapper> with SingleTickerProv
                     isOpen: isDrawerOpen,
                     onTap: () {},
                   ),
+                ],
+                    ),
+                  ),
+                  // Pinned to the bottom of the rail, below the list however long it grows. Opens
+                  // the settings dialog over this page (architecture.md §2.19); never "selected",
+                  // because Settings is not a page the rail moves to.
+                  _DrawerItem(
+                    key: const ValueKey('settings'),
+                    icon: Icons.settings_outlined,
+                    label: 'Settings',
+                    isOpen: isDrawerOpen,
+                    onTap: () => openSettingsPage(ref),
+                  ),
+                  const SizedBox(height: 8),
                 ],
               ),
             ),

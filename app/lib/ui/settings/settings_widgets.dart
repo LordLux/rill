@@ -12,14 +12,18 @@ import '../../theme/app_theme.dart';
 /// its anchor that is orphaned when the anchor goes (CLAUDE.md, "Accessibility"). Choices
 /// are chips, numbers are steppers, and nothing has a tooltip.
 
-/// A titled group of rows: the account menu's panel look, at page width.
+/// A group of rows on a card, with its title and description **above the card, outside it**:
+/// inside, a bold line over a grey one read as one more setting without a switch.
 class SettingsCard extends StatelessWidget {
-  const SettingsCard({super.key, this.title, this.detail, required this.children});
+  const SettingsCard({super.key, this.title, this.detail, this.trailing, required this.children});
 
   final String? title;
 
   /// A line under the title, saying what the whole group is for.
   final String? detail;
+
+  /// An action at the right of the title (About's "Check for updates").
+  final Widget? trailing;
 
   final List<Widget> children;
 
@@ -27,29 +31,56 @@ class SettingsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      decoration: BoxDecoration(
-        // One step above the settings panel it sits on (`surfaceContainerLow`).
-        color: scheme.surfaceContainerHigh,
-        borderRadius: const BorderRadius.all(Radius.circular(16)),
-      ),
+    final hasHeading = title != null || detail != null || trailing != null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (title != null)
-            Semantics(
-              header: true,
-              child: Text(title!, style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+          if (hasHeading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (title != null)
+                          Semantics(
+                            header: true,
+                            child: Text(
+                              title!,
+                              style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: scheme.onSurface),
+                            ),
+                          ),
+                        if (detail != null) ...[
+                          const SizedBox(height: 2),
+                          Text(detail!, style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  ?trailing,
+                ],
+              ),
             ),
-          if (detail != null) ...[
-            const SizedBox(height: 2),
-            Text(detail!, style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-          ],
-          if (title != null || detail != null) const SizedBox(height: 8),
-          ...children,
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            decoration: BoxDecoration(
+              // One step above the settings panel it sits on (`surfaceContainerLow`).
+              color: scheme.surfaceContainerHigh,
+              borderRadius: const BorderRadius.all(Radius.circular(16)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: children,
+            ),
+          ),
         ],
       ),
     );

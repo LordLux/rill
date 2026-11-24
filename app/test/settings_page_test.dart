@@ -170,6 +170,15 @@ Future<ProviderContainer> pumpSettings(WidgetTester tester, {String section = 'g
   return container;
 }
 
+/// The account menu's Settings row, found inside the menu's own focus scope: the rail has a
+/// Settings tile too, which opens the same dialog, so a looser finder would prove nothing.
+Future<void> tapMenuSettings(WidgetTester tester) => tester.tap(
+      find.descendant(
+        of: find.byWidgetPredicate((w) => w is FocusScope && w.focusNode?.debugLabel == 'account menu'),
+        matching: find.text('Settings'),
+      ),
+    );
+
 Future<void> openAccountMenu(WidgetTester tester, {String tooltip = 'Ada Lovelace'}) async {
   await tester.tap(find.byTooltip(tooltip));
   await tester.pumpAndSettle();
@@ -215,7 +224,7 @@ void main() {
     testWidgets('the account menu opens it over the page, the top bar stays live, and the close button closes it', (tester) async {
       await pumpHome(tester);
       await openAccountMenu(tester);
-      await tester.tap(find.text('Settings'));
+      await tapMenuSettings(tester);
       await tester.pumpAndSettle();
 
       expect(find.byType(SettingsDialog), findsOneWidget);
@@ -228,7 +237,7 @@ void main() {
       expect(homeTaps, 0, reason: 'a click on the scrim reached the page');
       expect(find.byType(SettingsDialog), findsNothing, reason: 'and the scrim closed the dialog');
       await openAccountMenu(tester);
-      await tester.tap(find.text('Settings'));
+      await tapMenuSettings(tester);
       await tester.pumpAndSettle();
       expect(find.byTooltip('Toggle menu').hitTestable(), findsOneWidget);
       for (final section in settingsSections) {
@@ -242,10 +251,23 @@ void main() {
       expect(homeTaps, 1, reason: 'closed, the page takes clicks again');
     });
 
+    testWidgets("the rail's Settings tile, at its bottom, opens it too", (tester) async {
+      await pumpHome(tester);
+      final tile = find.byKey(const ValueKey('settings'));
+      expect(tile, findsOneWidget);
+      final history = find.byKey(const ValueKey('history'));
+      // Pinned to the bottom: far below the last entry of the list above it.
+      expect(tester.getTopLeft(tile).dy, greaterThan(tester.getBottomLeft(history).dy + 300));
+      expect(tester.getBottomLeft(tile).dy, greaterThan(1100 - 80));
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsDialog), findsOneWidget);
+    });
+
     testWidgets('a click on the scrim closes it', (tester) async {
       await pumpHome(tester);
       await openAccountMenu(tester);
-      await tester.tap(find.text('Settings'));
+      await tapMenuSettings(tester);
       await tester.pumpAndSettle();
       await tester.tapAt(const Offset(20, 600)); // over the rail, outside the dialog
       await tester.pumpAndSettle();
@@ -255,7 +277,7 @@ void main() {
     testWidgets('Escape closes it, and focus goes back to the account button', (tester) async {
       await pumpHome(tester);
       await openAccountMenu(tester);
-      await tester.tap(find.text('Settings'));
+      await tapMenuSettings(tester);
       await tester.pumpAndSettle();
       Focus.of(tester.element(find.text('Feeds'))).requestFocus();
       await tester.pump();
@@ -269,7 +291,7 @@ void main() {
     testWidgets("Escape in the top bar's search box does not leave it", (tester) async {
       await pumpHome(tester);
       await openAccountMenu(tester);
-      await tester.tap(find.text('Settings'));
+      await tapMenuSettings(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.byType(EditableText));
       await tester.pump();
@@ -284,7 +306,7 @@ void main() {
       await pumpHome(tester, auth: const AuthState(status: AuthStatus.anonymous));
       await openAccountMenu(tester, tooltip: 'Log in');
       expect(find.text('Home page rows'), findsNothing, reason: 'moved to Settings › Feeds');
-      await tester.tap(find.text('Settings'));
+      await tapMenuSettings(tester);
       await tester.pumpAndSettle();
       expect(find.byType(SettingsDialog), findsOneWidget);
     });
@@ -378,7 +400,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await openAccountMenu(tester);
-    await tester.tap(find.text('Settings'));
+    await tapMenuSettings(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(settingsSectionTabKey('about')));
     await tester.pumpAndSettle();
