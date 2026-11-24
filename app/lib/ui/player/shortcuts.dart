@@ -15,6 +15,7 @@ import '../focus_surface.dart';
 import '../player_shell.dart';
 import 'settings_menu.dart';
 import 'view_mode.dart';
+import '../settings/settings_page.dart' show settingsDialogOpen;
 
 enum PlayerAction {
   playPause,
@@ -316,6 +317,10 @@ class _PlayerShortcutsState extends ConsumerState<PlayerShortcuts> {
     if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.f6) return _toggleMiniPlayerFocus();
 
     if (textEntryHasFocus()) return false;
+
+    // The settings dialog sits over the page, the watch page included: its keys are its own
+    // (Escape closes it, arrows and Space work its controls), never the video's under it.
+    if (settingsDialogOpen) return false;
 
     // While the sleep timer's countdown is up, Escape is its Cancel (`SleepCountdownBanner`) and
     // nothing else: not a fullscreen exit or a menu close as well.

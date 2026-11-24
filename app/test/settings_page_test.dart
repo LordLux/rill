@@ -126,6 +126,21 @@ void _bigWindow(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
+/// Counts clicks that reach the page, so a test can tell the scrim took them.
+int homeTaps = 0;
+
+class _HomeBody extends StatelessWidget {
+  const _HomeBody();
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        key: const ValueKey('home-body'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => homeTaps++,
+        child: const SizedBox.expand(),
+      );
+}
+
 /// The home page with the real top bar, so the account menu is the real one.
 Future<void> pumpHome(WidgetTester tester, {AuthState auth = signedIn, bool updateReady = false}) async {
   _bigWindow(tester);
@@ -133,19 +148,21 @@ Future<void> pumpHome(WidgetTester tester, {AuthState auth = signedIn, bool upda
   await tester.pumpWidget(
     settingsTestApp(
       overrides: _overrides(auth: auth, updateReady: updateReady),
-      home: const PageWrapper(title: Text('Rill'), body: SizedBox(key: ValueKey('home-body'))),
+      home: const PageWrapper(title: Text('Rill'), body: _HomeBody()),
     ),
   );
   await tester.pump();
 }
 
-/// The settings page alone, at [section].
+/// The dialog's contents alone, at [section].
 Future<ProviderContainer> pumpSettings(WidgetTester tester, {String section = 'general', bool updateReady = false}) async {
   _bigWindow(tester);
   await tester.pumpWidget(const SizedBox());
-  await tester.pumpWidget(settingsTestApp(overrides: _overrides(updateReady: updateReady), home: const SettingsPage()));
+  await tester.pumpWidget(
+    settingsTestApp(overrides: _overrides(updateReady: updateReady), home: Scaffold(body: SettingsPanel(onClose: () {}))),
+  );
   await tester.pump();
-  final container = ProviderScope.containerOf(tester.element(find.byType(SettingsPage)));
+  final container = ProviderScope.containerOf(tester.element(find.byType(SettingsPanel)));
   if (section != 'general') {
     await tester.tap(find.byKey(settingsSectionTabKey(section)));
     await tester.pumpAndSettle();
@@ -189,31 +206,53 @@ Future<List<String>> tabWalk(WidgetTester tester, int count) async {
 }
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    resetSettingsDialogForTest();
+  });
 
   group('opening and leaving', () {
-    testWidgets('the account menu opens it, and the back arrow returns to the page it was opened over', (tester) async {
+    testWidgets('the account menu opens it over the page, the top bar stays live, and the close button closes it', (tester) async {
       await pumpHome(tester);
       await openAccountMenu(tester);
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(SettingsPage), findsOneWidget);
+      expect(find.byType(SettingsDialog), findsOneWidget);
       expect(find.text('Sign out'), findsNothing, reason: 'the menu closed');
-      // The top bar and its window controls are still there, over the page (the login
-      // page once hid them).
-      expect(find.byTooltip('Toggle menu'), findsOneWidget);
+      // The page under the scrim takes no clicks; the top bar, window buttons and all, does
+      // (the login page once hid them).
+      homeTaps = 0;
+      await tester.tapAt(const Offset(1300, 900)); // beside the dialog, over the page
+      await tester.pumpAndSettle();
+      expect(homeTaps, 0, reason: 'a click on the scrim reached the page');
+      expect(find.byType(SettingsDialog), findsNothing, reason: 'and the scrim closed the dialog');
+      await openAccountMenu(tester);
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Toggle menu').hitTestable(), findsOneWidget);
       for (final section in settingsSections) {
         expect(find.byKey(settingsSectionTabKey(section.id)), findsOneWidget);
       }
 
-      await tester.tap(find.byTooltip('Back'));
+      await tester.tap(find.byKey(settingsCloseKey));
       await tester.pumpAndSettle();
-      expect(find.byType(SettingsPage), findsNothing);
-      expect(find.byKey(const ValueKey('home-body')), findsOneWidget);
+      expect(find.byType(SettingsDialog), findsNothing);
+      await tester.tapAt(const Offset(1300, 900));
+      expect(homeTaps, 1, reason: 'closed, the page takes clicks again');
     });
 
-    testWidgets('Escape leaves it', (tester) async {
+    testWidgets('a click on the scrim closes it', (tester) async {
+      await pumpHome(tester);
+      await openAccountMenu(tester);
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(20, 600)); // over the rail, outside the dialog
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsDialog), findsNothing);
+    });
+
+    testWidgets('Escape closes it, and focus goes back to the account button', (tester) async {
       await pumpHome(tester);
       await openAccountMenu(tester);
       await tester.tap(find.text('Settings'));
@@ -223,7 +262,8 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(find.byType(SettingsPage), findsNothing);
+      expect(find.byType(SettingsDialog), findsNothing);
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'account button');
     });
 
     testWidgets("Escape in the top bar's search box does not leave it", (tester) async {
@@ -237,7 +277,7 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(find.byType(SettingsPage), findsOneWidget, reason: 'Escape belongs to the field');
+      expect(find.byType(SettingsDialog), findsOneWidget, reason: 'Escape belongs to the field');
     });
 
     testWidgets('signed out, the menu has Settings too', (tester) async {
@@ -246,7 +286,7 @@ void main() {
       expect(find.text('Home page rows'), findsNothing, reason: 'moved to Settings › Feeds');
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
-      expect(find.byType(SettingsPage), findsOneWidget);
+      expect(find.byType(SettingsDialog), findsOneWidget);
     });
 
     testWidgets('the sidebar shows one section at a time', (tester) async {
@@ -457,11 +497,12 @@ void main() {
       await tester.pump();
       expect(focusedName(), 'General');
 
-      final walk = await tabWalk(tester, 10);
+      final walk = await tabWalk(tester, 11);
       expect(walk, [
         'Feeds',
         'Captions',
         'About',
+        settingsCloseKey.value,
         restoreSessionSwitchKey.value,
         for (final preset in kAccentPresets) 'Accent colour: ${preset.name}',
       ]);
@@ -529,8 +570,9 @@ void main() {
       Focus.of(tester.element(find.text('About').first)).requestFocus();
       await tester.pump();
 
-      final walk = await tabWalk(tester, 6);
+      final walk = await tabWalk(tester, 7);
       expect(walk, [
+        settingsCloseKey.value,
         for (final category in [ShelfCategory.members, ShelfCategory.shorts, ShelfCategory.posts, ShelfCategory.other])
           shelfSwitchKey(category).value,
         membersOnlySwitchKey.value,
